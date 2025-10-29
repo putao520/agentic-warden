@@ -1,0 +1,113 @@
+[package]
+name = "agentic-warden"
+description = "Universal AI agent manager with shared-memory task tracking, process management, and multi-agent orchestration."
+license = "MIT"
+repository = "https://github.com/putao520/agentic-warden"
+readme = "README.md"
+keywords = ["ai", "agents", "cli", "supervisor", "automation", "shared-memory", "claude", "codex", "gemini"]
+categories = ["command-line-utilities", "development-tools", "ai-tools"]
+version = "0.3.0"
+edition = "2024"
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+shared_hashmap = "0.1.2"
+shared_memory = "0.12"
+thiserror = "1.0"
+uuid = { version = "1", features = ["v4"] }
+raw_sync = "0.1.5"
+
+# Google OAuth and Drive support
+reqwest = { version = "0.11", features = ["json", "multipart"] }
+url = "2.4"
+base64 = "0.21"
+sha2 = "0.10"
+md5 = "0.7"
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
+urlencoding = "2.1"
+
+# CLI UI and graphics
+ratatui = "0.24"
+crossterm = "0.27"
+plotters = "0.3"
+plotters-bitmap = "0.3"
+color-eyre = "0.6"
+
+# Configuration and directories
+dirs = "5.0"
+toml = "0.8"
+
+# Interactive UI
+dialoguer = "0.11"
+console = "0.15"
+indicatif = "0.17"
+
+# File system operations
+walkdir = "2.4"
+tar = "0.4"
+flate2 = "1.0"
+
+# Browser integration
+open = "5.0"
+
+# Temporary files
+tempfile = "3.0"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+psutil = "3.2"
+
+[target.'cfg(windows)'.dependencies]
+sysinfo = "0.32"
+windows = { version = "0.54", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Console",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Threading",
+    "Win32_System_WindowsProgramming",
+    "Win32_System_JobObjects",
+    "Win32_System_Diagnostics_ToolHelp"
+] }
+
+[dev-dependencies]
+tempfile = "3.0"
+
+[features]
+default = []
+testing = []
+
+[[test]]
+name = "process_tree_integration"
+path = "tests/process_tree_integration_test.rs"
+
+[[test]]
+name = "wait_mode_integration"
+path = "tests/wait_mode_integration_test.rs"
+required-features = ["testing"]
+
+[[test]]
+name = "windows_process_tree"
+path = "tests/windows_process_tree_test.rs"
+
+[[test]]
+name = "unix_process_tree"
+path = "tests/unix_process_tree_test.rs"
+
+[[test]]
+name = "macos_process_tree"
+path = "tests/macos_process_tree_test.rs"
+
+[[test]]
+name = "cross_platform_root_process"
+path = "tests/cross_platform_root_process_test.rs"
+
+[[test]]
+name = "boundary_cases"
+path = "tests/boundary_cases_test.rs"
+
+[[test]]
+name = "concurrency_safety"
+path = "tests/concurrency_safety_test.rs"

@@ -1,0 +1,56 @@
+# Rust
+/target/
+**/*.rlib
+**/*.rmeta
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Local configuration (keep templates)
+auth.json
+sync.json
+*.state
+
+# Backup files
+*.backup
+*_old.*
+
+# Temporary files
+*.tmp
+*.temp
+
+# Test output
+/tests/output/
+/tests/temp/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Debug
+debug/
+target/debug/
+target/release/
+
+# Rust Analyzer
+/rust-analyzer/
+
+# Local build artifacts
+*.pdb
+*.exe
+*.dll
+*.so
+*.dylib
