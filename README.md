@@ -7,340 +7,270 @@
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)]()
 
-**🤖 通用AI Agent管理器**
+**🤖 Universal AI Agent Manager**
 
-支持 Claude、Codex、Gemini 等多种AI Agent的统一调用接口，提供进程管理、配置同步和批量任务执行功能
+Unified interface for Claude, Codex, Gemini and more with batch execution, process management, and cloud sync capabilities.
 
 </div>
 
-## ✨ 特性
+## ✨ Features
 
-- 🎯 **统一Agent接口** - 一套语法调用多个AI Agent
-- 🚀 **批量任务执行** - 同时向多个Agent发送相同任务
-- 📊 **进程树管理** - 跨平台进程监控和任务追踪
-- ☁️ **配置云同步** - Google Drive集成的配置备份同步
-- 🔒 **OAuth 2.0认证** - 安全的云端访问
-- 📦 **跨平台压缩** - TAR.GZ、ZIP、7Z格式支持
-- 🧹 **任务监控** - 自动清理和状态管理
+- 🎯 **Unified Agent Interface** - Single syntax to command multiple AI agents
+- 🚀 **Batch Execution** - Send tasks to multiple agents simultaneously
+- 📊 **Process Tree Management** - Cross-platform process monitoring and task tracking
+- ☁️ **Cloud Configuration Sync** - Google Drive integrated backup and sync
+- 🔒 **OAuth 2.0 Authentication** - Secure cloud access
+- 📦 **Cross-platform Compression** - TAR.GZ, ZIP, 7Z format support
+- 🧹 **Task Monitoring** - Automatic cleanup and status management
 
-## 🚀 快速开始
+## 🚀 Quick Start
 
-### 安装
+### Installation
 
 ```bash
-# 克隆仓库
-git clone https://github.com/your-username/codex-warden.git
-cd codex-warden
+# Clone the repository
+git clone https://github.com/putao520/agentic-warden.git
+cd agentic-warden
 
-# 构建项目
+# Build the project
 cargo build --release
 
-# 添加到PATH (可选)
+# Add to PATH (optional)
 export PATH=$PATH:$(pwd)/target/release
 ```
 
-### 基本用法
+### Basic Usage
 
-#### 单个Agent调用
+#### Single Agent Commands
 
 ```bash
-# 使用Claude写代码
-agentic-warden claude "写一个Rust快速排序算法"
+# Use Claude to write code
+agentic-warden claude "write a Rust quicksort algorithm"
 
-# 使用Codex生成代码
-agentic-warden codex "生成Python数据可视化脚本"
+# Use Codex to generate code
+agentic-warden codex "generate Python data visualization script"
 
-# 使用Gemini解释概念
-agentic-warden gemini "解释什么是微服务架构"
+# Use Gemini to explain concepts
+agentic-warden gemini "explain microservices architecture"
 ```
 
-#### 批量Agent调用
+#### Batch Agent Commands
 
 ```bash
-# 向所有Agent发送任务
+# Send task to all agents
 agentic-warden all "review this code and suggest improvements"
 
-# 向指定Agent组合发送任务
-agentic-warden "claude|gemini" "比较这两种编程方法的优缺点"
-agentic-warden "codex|claude" "为这个项目编写文档"
+# Send task to specific agent combinations
+agentic-warden "claude|gemini" "compare these two programming approaches"
+agentic-warden "codex|claude" "write documentation for this project"
 ```
 
-#### 配置同步
+#### Task Management
 
 ```bash
-# 推送配置到云端
-agentic-warden push
-
-# 从云端拉取配置
-agentic-warden pull
-
-# 查看同步状态
-agentic-warden status
-```
-
-#### 任务管理
-
-```bash
-# 监控任务执行状态
+# Monitor task execution status
 agentic-warden wait
 
-# 进入CLI管理界面
+# Launch CLI management interface
 agentic-warden
 ```
 
-## 📖 详细文档
+## 📖 Supported AI Agents
 
-### 支持的AI CLI
+| AI Assistant | Command | Description |
+|--------------|---------|-------------|
+| **Claude** | `claude` | Anthropic Claude coding assistant |
+| **Codex** | `codex` | OpenAI Codex code generation tool |
+| **Gemini** | `gemini` | Google Gemini AI assistant |
 
-| AI助手 | 命令 | 描述 | 固化参数 |
-|--------|------|------|----------|
-| **Claude** | `claude` | Anthropic Claude代码助手 | `-p --dangerously-skip-permissions` |
-| **Codex** | `codex` | OpenAI Codex代码生成工具 | `exec --dangerously-bypass-approvals-and-sandbox` |
-| **Gemini** | `gemini` | Google Gemini AI助手 | `--approval-mode yolo` |
-
-### CLI选择器语法
+### Agent Selector Syntax
 
 ```bash
-# 单个CLI
-codex-warden claude "task description"
+# Single agent
+agentic-warden claude "task description"
 
-# 全部CLI
-codex-warden all "task description"
+# All agents
+agentic-warden all "task description"
 
-# 组合CLI (需要引号)
-codex-warden "claude|gemini" "task description"
-codex-warden "claude|codex|gemini" "task description"
+# Agent combinations (requires quotes)
+agentic-warden "claude|gemini" "task description"
+agentic-warden "claude|codex|gemini" "task description"
 ```
 
-### 配置文件
+## 📋 Command Reference
 
-#### 认证配置 (`~/.agentic-warden/auth.json`)
-
-```json
-{
-  "client_id": "your-google-client-id.apps.googleusercontent.com",
-  "client_secret": "your-google-client-secret",
-  "access_token": "ya29.a0AaHxxxxxxxxxxx",
-  "refresh_token": "ya29.c0Ab-xxxxxxxxxxx",
-  "expires_at": "2024-12-31T23:59:59Z"
-}
-```
-
-#### 同步配置 (`~/.agentic-warden/sync.json`)
-
-```json
-{
-  "config": {
-    "directories": ["~/.claude", "~/.codex", "~/.gemini"],
-    "auto_sync_enabled": false,
-    "sync_interval_minutes": 60
-  },
-  "state": {
-    "directories": {
-      "~/.claude": {
-        "hash": "d41d8cd98f00b204e9800998ecf8427e",
-        "last_sync": "2024-01-01T12:00:00Z"
-      }
-    },
-    "last_sync": "2024-01-01T12:00:00Z"
-  }
-}
-```
-
-## 🛠️ 开发
-
-### 环境要求
-
-- Rust 1.70+
-- 支持的平台：Windows、Linux、macOS
-
-### 开发设置
-
-```bash
-# 克隆仓库
-git clone https://github.com/your-username/codex-warden.git
-cd codex-warden
-
-# 安装依赖
-cargo build
-
-# 运行测试
-cargo test
-
-# 代码格式化
-cargo fmt
-
-# 代码检查
-cargo clippy
-
-# 生成文档
-cargo doc --open
-```
-
-### 项目结构
-
-```
-src/
-├── main.rs              # 主程序入口
-├── cli_type.rs          # CLI类型解析和多CLI支持
-├── supervisor.rs        # CLI进程管理和任务执行
-├── registry.rs          # 共享内存任务注册表
-├── process_tree.rs      # 跨平台进程树检测
-├── wait_mode.rs         # 任务监控和清理
-├── sync/                # 配置同步模块
-│   ├── mod.rs
-│   ├── sync_config_manager.rs
-│   ├── google_drive_client.rs
-│   ├── directory_hasher.rs
-│   ├── config_packer.rs
-│   └── compressor.rs
-├── platform/            # 平台特定代码
-│   ├── mod.rs
-│   ├── windows.rs
-│   └── unix.rs
-└── [其他支持模块...]
-```
-
-## 📋 命令参考
-
-### Agent任务执行
+### Agent Task Execution
 
 ```bash
 agentic-warden <AGENT_SELECTOR> "<TASK_DESCRIPTION>"
 ```
 
-**参数说明**:
-- `AGENT_SELECTOR`: Agent选择器 (`claude`, `codex`, `gemini`, `all`, `"agent1|agent2"`)
-- `TASK_DESCRIPTION`: 任务描述文本
+**Parameters**:
+- `AGENT_SELECTOR`: Agent selector (`claude`, `codex`, `gemini`, `all`, `"agent1|agent2"`)
+- `TASK_DESCRIPTION`: Task description text
 
-**示例**:
+**Examples**:
 ```bash
-agentic-warden claude "实现一个二叉搜索树"
+agentic-warden claude "implement a binary search tree"
 agentic-warden all "review this rust code"
 agentic-warden "claude|gemini" "explain quantum computing"
 ```
 
-### 配置同步
+### Configuration Sync Commands
 
 ```bash
-# 推送配置到Google Drive
+# Push configuration to cloud storage
 agentic-warden push [directory...]
 
-# 从Google Drive拉取配置
+# Pull configuration from cloud storage
 agentic-warden pull [directory...]
 
-# 查看同步状态
+# View sync status
 agentic-warden status
 
-# 重置同步状态
+# Reset sync state
 agentic-warden reset
 
-# 列出可同步的目录
+# List syncable directories
 agentic-warden list
 ```
 
-### 任务管理
+### Task Management Commands
 
 ```bash
-# 等待任务完成并显示状态
+# Wait for tasks to complete and show status
 agentic-warden wait
 
-# 启动CLI管理界面(无参数)
+# Launch CLI management interface (no arguments)
 agentic-warden
 ```
 
-## 🔧 配置
+## 🔧 Configuration
 
-### 环境变量
+### Environment Variables
 
 ```bash
-# 自定义Agent路径
+# Custom agent paths
 export CLAUDE_BIN="/path/to/claude"
 export CODEX_BIN="/path/to/codex"
 export GEMINI_BIN="/path/to/gemini"
 
-# 配置目录
+# Configuration directory
 export AGENTIC_WARDEN_CONFIG_DIR="/custom/config/dir"
 ```
 
-### Google Drive设置
+### Setting up AI Agents
 
-1. 在Google Cloud Console创建OAuth 2.0客户端ID
-2. 将客户端信息添加到 `~/.agentic-warden/auth.json`
-3. 运行 `agentic-warden status` 验证连接
+Before using `agentic-warden`, make sure you have the following AI CLI tools installed and accessible:
 
-## 🐛 故障排除
+1. **Claude CLI**: Install from Anthropic or ensure `claude` is in your PATH
+2. **Codex CLI**: Install from OpenAI or ensure `codex` is in your PATH  
+3. **Gemini CLI**: Install from Google or ensure `gemini` is in your PATH
 
-### 常见问题
+### Cloud Sync Setup (Optional)
 
-**Q: CLI未找到错误**
+For configuration synchronization:
+
+1. Create OAuth 2.0 credentials in Google Cloud Console
+2. Run `agentic-warden status` to initiate authentication flow
+3. Follow the browser authentication process
+
+## 🛠️ Development
+
+### Requirements
+
+- Rust 1.70+
+- Supported platforms: Windows, Linux, macOS
+
+### Development Setup
+
+```bash
+# Clone repository
+git clone https://github.com/putao520/agentic-warden.git
+cd agentic-warden
+
+# Install dependencies
+cargo build
+
+# Run tests
+cargo test
+
+# Code formatting
+cargo fmt
+
+# Code linting
+cargo clippy
+
+# Generate documentation
+cargo doc --open
+```
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+**Q: Agent CLI not found error**
 ```bash
 Error: 'claude' not found in PATH
 ```
-A: 设置环境变量或确保CLI在PATH中：
+A: Set environment variables or ensure CLI is in PATH:
 ```bash
 export CLAUDE_BIN="/path/to/claude"
 ```
 
-**Q: Google Drive认证失败**
+**Q: Cloud authentication failed**
 ```bash
 Error: Invalid credentials
 ```
-A: 检查 `auth.json` 文件或重新生成OAuth令牌
+A: Re-authenticate with `agentic-warden status` or check your OAuth setup
 
-**Q: 共享内存错误**
+**Q: Shared memory errors**
 ```bash
 Error: Failed to connect to shared memory
 ```
-A: 重启系统或清理共享内存段
+A: Restart your system or clear shared memory segments
 
-### 日志文件
-
-任务日志保存在系统临时目录：
-- Windows: `%TEMP%\<pid>.log`
-- Linux/macOS: `/tmp/<pid>.log`
-
-### 调试模式
+### Debug Mode
 
 ```bash
-# 启用调试日志
+# Enable debug logging
 RUST_LOG=debug agentic-warden claude "test task"
 ```
 
-## 🤝 贡献
+## 🤝 Contributing
 
-欢迎贡献！请查看 [CONTRIBUTING.md](CONTRIBUTING.md) 了解详细信息。
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
-### 贡献流程
+### Contribution Process
 
-1. Fork 项目
-2. 创建功能分支 (`git checkout -b feature/amazing-feature`)
-3. 提交更改 (`git commit -m 'Add amazing feature'`)
-4. 推送到分支 (`git push origin feature/amazing-feature`)
-5. 创建 Pull Request
+1. Fork the project
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-## 📄 许可证
+## 📄 License
 
-本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 致谢
+## 🙏 Acknowledgments
 
-- [Claude](https://claude.ai) - AI代码助手
-- [OpenAI Codex](https://openai.com/) - 代码生成AI
-- [Google Gemini](https://gemini.google.com/) - 多模态AI助手
-- Rust社区 - 提供优秀的系统编程语言和生态系统
+- [Claude](https://claude.ai) - AI coding assistant
+- [OpenAI Codex](https://openai.com/) - Code generation AI
+- [Google Gemini](https://gemini.google.com/) - Multimodal AI assistant
+- Rust community - Excellent systems programming language and ecosystem
 
-## 📞 联系方式
+## 📞 Contact
 
-- 项目主页: [https://github.com/your-username/agentic-warden](https://github.com/your-username/agentic-warden)
-- 问题反馈: [Issues](https://github.com/your-username/agentic-warden/issues)
-- 功能请求: [Feature Requests](https://github.com/your-username/agentic-warden/discussions)
+- Project homepage: [https://github.com/putao520/agentic-warden](https://github.com/putao520/agentic-warden)
+- Bug reports: [Issues](https://github.com/putao520/agentic-warden/issues)
+- Feature requests: [Discussions](https://github.com/putao520/agentic-warden/discussions)
 
 ---
 
 <div align="center">
 
-**⭐ 如果这个项目对你有帮助，请给它一个星标！**
+**⭐ If this project helps you, please give it a star!**
 
 Made with ❤️ by the agentic-warden team
 
