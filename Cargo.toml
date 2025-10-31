@@ -25,8 +25,18 @@ url = "2.4"
 base64 = "0.21"
 sha2 = "0.10"
 md5 = "0.7"
-tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "signal"] }
 urlencoding = "2.1"
+
+# Google Official APIs
+yup-oauth2 = "8.3"
+mime_guess = "2.0"
+
+# Additional dependencies for official Google APIs
+anyhow = "1.0"
+tracing = "0.1"
+parking_lot = "0.12"
+futures = "0.3"
 
 # CLI UI and graphics
 ratatui = "0.24"
@@ -38,6 +48,7 @@ color-eyre = "0.6"
 # Configuration and directories
 dirs = "5.0"
 toml = "0.8"
+which = "6.0"
 
 # Interactive UI
 dialoguer = "0.11"
@@ -51,6 +62,12 @@ flate2 = "1.0"
 
 # Browser integration
 open = "5.0"
+
+# HTTP server for OAuth callbacks
+axum = "0.7"
+axum-server = "0.6"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["trace"] }
 
 # Temporary files
 tempfile = "3.0"
@@ -74,40 +91,39 @@ windows = { version = "0.54", features = [
 
 [dev-dependencies]
 tempfile = "3.0"
+walkdir = "2.4"
+# Additional dependencies for integration testing
+dialoguer = "0.11"
+console = "0.15"
+indicatif = "0.17"
+# For safety and cleanup mechanisms
+uuid = { version = "1", features = ["v4"] }
 
 [features]
 default = []
 testing = []
 
-[[test]]
-name = "process_tree_integration"
-path = "tests/process_tree_integration_test.rs"
+# Core Tests (essential functionality)
 
 [[test]]
-name = "wait_mode_integration"
-path = "tests/wait_mode_integration_test.rs"
+name = "test_safety"
+path = "tests/test_safety.rs"
 required-features = ["testing"]
 
+# Unit Tests
 [[test]]
-name = "windows_process_tree"
-path = "tests/windows_process_tree_test.rs"
+name = "unit_tests"
+path = "tests/unit/mod.rs"
+required-features = ["testing"]
 
+# Integration Tests
 [[test]]
-name = "unix_process_tree"
-path = "tests/unix_process_tree_test.rs"
+name = "integration_tests"
+path = "tests/integration/mod.rs"
+required-features = ["testing"]
 
+# End-to-End Tests
 [[test]]
-name = "macos_process_tree"
-path = "tests/macos_process_tree_test.rs"
-
-[[test]]
-name = "cross_platform_root_process"
-path = "tests/cross_platform_root_process_test.rs"
-
-[[test]]
-name = "boundary_cases"
-path = "tests/boundary_cases_test.rs"
-
-[[test]]
-name = "concurrency_safety"
-path = "tests/concurrency_safety_test.rs"
+name = "e2e_tests"
+path = "tests/e2e/mod.rs"
+required-features = ["testing"]

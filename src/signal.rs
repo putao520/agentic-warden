@@ -15,7 +15,7 @@ impl Drop for SignalGuard {
 pub fn install(child_pid: u32) -> io::Result<SignalGuard> {
     CHILD_PID.store(child_pid, Ordering::SeqCst);
 
-    // 使用更安全的信号处理方法
+    // Use safer signal handling methods
     #[cfg(unix)]
     {
         setup_unix_signal_handlers()?;
@@ -36,8 +36,8 @@ fn setup_unix_signal_handlers() -> io::Result<()> {
     static INIT: Once = Once::new();
 
     INIT.call_once(|| {
-        // 使用更安全的信号处理方式
-        // 注意：这里我们使用更安全的RAII模式
+        // Use safer signal handling approach
+        // Note: We use safer RAII pattern here
         unsafe {
             setup_signal_handlers_safe();
         }
@@ -47,33 +47,33 @@ fn setup_unix_signal_handlers() -> io::Result<()> {
 }
 
 #[cfg(unix)]
-/// 安全的信号处理设置函数
-/// 封装了unsafe代码，确保所有安全检查都在函数内部完成
+/// Safe signal handling setup function
+/// Encapsulates unsafe code to ensure all safety checks are completed within the function
 unsafe fn setup_signal_handlers_safe() {
     extern "C" fn handler(signum: libc::c_int) {
         handle_unix_signal(signum);
     }
 
-    // 使用更安全的sigaction而不是signal
+    // Use safer sigaction instead of signal
     unsafe {
         let mut sigint_action: libc::sigaction = std::mem::zeroed();
         let mut sigterm_action: libc::sigaction = std::mem::zeroed();
 
-        // 设置SA_RESTART标志，避免被中断的系统调用
+        // Set SA_RESTART flag to avoid interrupted system calls
         sigint_action.sa_flags = libc::SA_RESTART;
         sigterm_action.sa_flags = libc::SA_RESTART;
 
-        // 设置信号处理器
+        // Set signal handler
         sigint_action.sa_sigaction = handler as usize;
         sigterm_action.sa_sigaction = handler as usize;
 
-        // 清空信号掩码
+        // Clear signal mask
         let mut empty_set: libc::sigset_t = std::mem::zeroed();
         libc::sigemptyset(&mut empty_set as *mut libc::sigset_t);
         sigint_action.sa_mask = empty_set;
         sigterm_action.sa_mask = empty_set;
 
-        // 应用信号处理器
+        // Apply signal handlers
         libc::sigaction(libc::SIGINT, &sigint_action, std::ptr::null_mut());
         libc::sigaction(libc::SIGTERM, &sigterm_action, std::ptr::null_mut());
     }
@@ -112,8 +112,8 @@ fn setup_windows_signal_handler() -> io::Result<()> {
         }
     }
 
-    // Windows API的限制，这部分unsafe是必要的
-    // 但我们已经将其封装在安全的函数接口后面
+    // Windows API limitations, this unsafe part is necessary
+    // But we have encapsulated it behind a safe function interface
     unsafe {
         let _ = SetConsoleCtrlHandler(Some(handler), true);
     }

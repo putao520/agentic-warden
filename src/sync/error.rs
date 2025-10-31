@@ -14,6 +14,9 @@ pub enum SyncError {
     #[error("Sync configuration error: {0}")]
     SyncConfigError(String),
 
+    #[error("Config error: {0}")]
+    ConfigError(String),
+
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 
@@ -39,11 +42,16 @@ pub enum SyncError {
     #[error("No changes detected")]
     NoChangesDetected,
 
+    #[allow(dead_code)]
     #[error("Upload failed: {0}")]
     UploadFailed(String),
 
+    #[allow(dead_code)]
     #[error("Download failed: {0}")]
     DownloadFailed(String),
+
+    #[error("General error: {0}")]
+    GeneralError(#[from] anyhow::Error),
 }
 
 pub type SyncResult<T> = Result<T, SyncError>;

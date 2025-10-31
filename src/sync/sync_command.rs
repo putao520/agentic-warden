@@ -259,47 +259,250 @@ impl SyncCommand {
     }
 
     pub async fn execute_status(&self) -> SyncResult<i32> {
+        use crate::process_tree::get_process_name;
+        use crate::registry::TaskRegistry;
+        use std::collections::HashMap;
+        use std::time::Duration;
+        use tokio::time::interval;
+
         let term = Term::stdout();
 
-        term.write_line("📊 Configuration Sync Status")?;
-        term.write_line("=".repeat(50).as_str())?;
-        term.write_line("")?;
+        // Clear screen for real-time display
+        term.clear_screen()?;
 
-        // Get last sync time
-        match self.manager.get_last_sync_time() {
-            Ok(last_sync) => {
-                term.write_line(&format!(
-                    "Last sync: {}",
-                    last_sync.format("%Y-%m-%d %H:%M:%S UTC")
-                ))?;
+        // Connect to task registry
+        let _registry = match TaskRegistry::connect() {
+            Ok(reg) => reg,
+            Err(e) => {
+                term.write_line("❌ Failed to connect to task registry")?;
+                term.write_line(&format!("Error: {}", e))?;
+                term.write_line("")?;
+                term.write_line("💡 Make sure agentic-warden is running to see task status")?;
+                term.write_line("")?;
+                term.write_line("Press Ctrl+C to exit")?;
+                return Ok(1);
             }
-            Err(_) => {
-                term.write_line("Last sync: Never")?;
+        };
+
+        term.write_line("🎯 Real-time Task Monitor (Press Ctrl+C to exit)")?;
+        term.write_line("=".repeat(60).as_str())?;
+        term.write_line("")?;
+
+        // Set up real-time updates every 2 seconds
+        let mut update_interval = interval(Duration::from_secs(2));
+        let mut last_task_count = 0;
+
+        loop {
+            // Clear from cursor down for next update
+            term.clear_to_end_of_screen()?;
+
+            // Move cursor back to line 4 for display (after header)
+            print!("\x1b[4;0H");
+            use std::io::{self, Write};
+            io::stdout().flush().unwrap();
+
+            // Use global task discovery to see tasks from all agentic-warden instances
+            match TaskRegistry::get_all_global_tasks() {
+                Ok(entries) => {
+                    // Check if task count changed
+                    let current_count = entries.len();
+                    let count_changed = current_count != last_task_count;
+                    last_task_count = current_count;
+
+                    if entries.is_empty() {
+                        term.write_line("📋 No active tasks found")?;
+                        term.write_line("")?;
+                        term.write_line("💡 Start a task with:")?;
+                        term.write_line("   agentic-warden claude \"your task description\"")?;
+                        term.write_line("   agentic-warden all \"review this code\"")?;
+                        term.write_line("")?;
+                        term.write_line("🔄 Next update: 2s")?;
+                    } else {
+                        term.write_line(&format!("📊 Total Active Tasks: {}", current_count))?;
+                        if count_changed {
+                            term.write_line("🆕 Task list updated!")?;
+                        }
+                        term.write_line("")?;
+
+                        // Group tasks by root parent process
+                        let mut grouped_tasks: HashMap<u32, Vec<_>> = HashMap::new();
+                        let mut process_names: HashMap<u32, String> = HashMap::new();
+
+                        for entry in &entries {
+                            let root_pid = entry.task.root_parent_pid.unwrap_or(entry.task_id);
+                            grouped_tasks
+                                .entry(root_pid)
+                                .or_default()
+                                .push(entry.clone());
+
+                            // Get process name for root parent with AI CLI type detection
+                            process_names.entry(root_pid).or_insert_with(|| {
+                                if let Some(mut process_name) = get_process_name(root_pid) {
+                                    // Check if this is a Node.js process running an AI CLI
+                                    if process_name.to_lowercase().contains("node")
+                                        && let Some(ai_type) =
+                                            crate::process_tree::detect_npm_ai_cli_type(
+                                                &process_name,
+                                            )
+                                    {
+                                        process_name = format!("{} ({})", process_name, ai_type);
+                                    }
+                                    process_name
+                                } else {
+                                    format!("Process-{}", root_pid)
+                                }
+                            });
+                        }
+
+                        // Display tasks by root parent process
+                        for (root_pid, tasks) in grouped_tasks {
+                            let process_name = process_names
+                                .get(&root_pid)
+                                .cloned()
+                                .unwrap_or_else(|| format!("Process-{}", root_pid));
+                            term.write_line(&format!(
+                                "🖥️  {} (PID: {}) - {} tasks",
+                                process_name,
+                                root_pid,
+                                tasks.len()
+                            ))?;
+                            term.write_line("-".repeat(50).as_str())?;
+
+                            for task in tasks {
+                                let status_icon = match task.task.status {
+                                    crate::task_record::TaskStatus::Running => "🟢",
+                                    crate::task_record::TaskStatus::CompletedButUnread => "✅",
+                                };
+
+                                term.write_line(&format!(
+                                    "  {} Task PID: {} | Started: {}",
+                                    status_icon,
+                                    task.task_id,
+                                    task.task.started_at.format("%H:%M:%S")
+                                ))?;
+
+                                // Show log file location (shortened)
+                                let log_path = &task.task.log_path;
+                                if log_path.len() > 60 {
+                                    let short_path =
+                                        format!("...{}", &log_path[log_path.len() - 57..]);
+                                    term.write_line(&format!("     📁 Log: {}", short_path))?;
+                                } else {
+                                    term.write_line(&format!("     📁 Log: {}", log_path))?;
+                                }
+
+                                // Show additional info for running tasks
+                                if matches!(
+                                    task.task.status,
+                                    crate::task_record::TaskStatus::Running
+                                ) {
+                                    if let Some(manager_pid) = task.task.manager_pid {
+                                        term.write_line(&format!(
+                                            "     👨‍💼 Manager PID: {}",
+                                            manager_pid
+                                        ))?;
+                                    }
+
+                                    // Show running duration
+                                    let duration = chrono::Utc::now() - task.task.started_at;
+                                    let total_minutes = duration.num_seconds() / 60;
+                                    if total_minutes < 60 {
+                                        term.write_line(&format!(
+                                            "     ⏱️  Running for {}m",
+                                            total_minutes
+                                        ))?;
+                                    } else {
+                                        term.write_line(&format!(
+                                            "     ⏱️  Running for {}h {}m",
+                                            (total_minutes / 60),
+                                            total_minutes % 60
+                                        ))?;
+                                    }
+
+                                    // Show process tree depth if available
+                                    if task.task.process_tree_depth > 0 {
+                                        term.write_line(&format!(
+                                            "     🌳 Tree Depth: {}",
+                                            task.task.process_tree_depth
+                                        ))?;
+                                    }
+                                }
+
+                                // Show completion info for completed tasks
+                                if matches!(
+                                    task.task.status,
+                                    crate::task_record::TaskStatus::CompletedButUnread
+                                ) {
+                                    if let Some(completed_at) = task.task.completed_at {
+                                        term.write_line(&format!(
+                                            "     ✅ Completed: {}",
+                                            completed_at.format("%H:%M:%S")
+                                        ))?;
+                                    }
+                                    if let Some(exit_code) = task.task.exit_code {
+                                        let status =
+                                            if exit_code == 0 { "Success" } else { "Failed" };
+                                        term.write_line(&format!(
+                                            "     🎯 Status: {} (exit code: {})",
+                                            status, exit_code
+                                        ))?;
+                                    }
+                                }
+
+                                term.write_line("")?;
+                            }
+                        }
+
+                        // Show summary
+                        let running_count = entries
+                            .iter()
+                            .filter(|e| {
+                                matches!(e.task.status, crate::task_record::TaskStatus::Running)
+                            })
+                            .count();
+
+                        let completed_count = entries
+                            .iter()
+                            .filter(|e| {
+                                matches!(
+                                    e.task.status,
+                                    crate::task_record::TaskStatus::CompletedButUnread
+                                )
+                            })
+                            .count();
+
+                        term.write_line("📈 Summary:")?;
+                        term.write_line(&format!("   🟢 Running: {}", running_count))?;
+                        term.write_line(&format!("   ✅ Completed: {}", completed_count))?;
+                        term.write_line(&format!(
+                            "   ❌ Other: {}",
+                            entries.len() - running_count - completed_count
+                        ))?;
+                        term.write_line("")?;
+                        term.write_line("💡 Use 'agentic-warden wait' to monitor task completion")?;
+                    }
+
+                    term.write_line("")?;
+                    term.write_line("🔄 Next update: 2s | Press Ctrl+C to exit")?;
+                }
+                Err(e) => {
+                    term.write_line("❌ Failed to retrieve task status")?;
+                    term.write_line(&format!("Error: {}", e))?;
+                    term.write_line("")?;
+                    term.write_line("🔄 Retrying in 2s...")?;
+                }
             }
-        }
-        term.write_line("")?;
 
-        // Get sync status for all directories
-        let sync_status = self.manager.get_sync_status()?;
-
-        if sync_status.is_empty() {
-            term.write_line("No synchronized directories found.")?;
-            return Ok(0);
-        }
-
-        term.write_line("Synchronized directories:")?;
-        term.write_line("")?;
-
-        for (dir_name, hash) in sync_status {
-            term.write_line(&format!("📁 {}", dir_name))?;
-            term.write_line(&format!("   Hash: {}", hash.hash))?;
-            term.write_line(&format!("   Files: {}", hash.file_count))?;
-            term.write_line(&format!("   Size: {} bytes", hash.total_size))?;
-            term.write_line(&format!(
-                "   Last checked: {}",
-                hash.timestamp.format("%Y-%m-%d %H:%M:%S UTC")
-            ))?;
-            term.write_line("")?;
+            // Wait for next update interval
+            tokio::select! {
+                _ = update_interval.tick() => {
+                    // Continue loop for next update
+                }
+                _ = tokio::signal::ctrl_c() => {
+                    term.write_line("\n\n👋 Exiting task monitor...")?;
+                    break;
+                }
+            }
         }
 
         Ok(0)
@@ -359,14 +562,15 @@ impl SyncCommand {
             if path.exists() {
                 if let Ok(metadata) = std::fs::metadata(path)
                     && let Ok(modified) = metadata.modified()
-                        && let Ok(unix_time) = modified.duration_since(std::time::UNIX_EPOCH) {
-                            term.write_line(&format!(
-                                "   Last modified: {}",
-                                chrono::DateTime::from_timestamp(unix_time.as_secs() as i64, 0)
-                                    .unwrap_or_default()
-                                    .format("%Y-%m-%d %H:%M:%S")
-                            ))?;
-                        }
+                    && let Ok(unix_time) = modified.duration_since(std::time::UNIX_EPOCH)
+                {
+                    term.write_line(&format!(
+                        "   Last modified: {}",
+                        chrono::DateTime::from_timestamp(unix_time.as_secs() as i64, 0)
+                            .unwrap_or_default()
+                            .format("%Y-%m-%d %H:%M:%S")
+                    ))?;
+                }
                 term.write_line("   Status: ✅ Exists")?;
             } else {
                 term.write_line("   Status: ❌ Not found")?;
@@ -390,9 +594,15 @@ pub async fn handle_sync_command(
         "status" => sync_cmd.execute_status().await,
         "reset" => sync_cmd.execute_reset(),
         "list" => sync_cmd.execute_list_directories(),
+
         _ => {
             eprintln!("Unknown sync command: {}", command);
-            eprintln!("Available commands: push, pull, status, reset, list");
+            eprintln!("Available commands:");
+            eprintln!("  push      - Push configuration to Google Drive");
+            eprintln!("  pull      - Pull configuration from Google Drive");
+            eprintln!("  status    - Show real-time task status");
+            eprintln!("  reset     - Reset sync state");
+            eprintln!("  list      - List monitored directories");
             Ok(1)
         }
     }

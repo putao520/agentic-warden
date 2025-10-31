@@ -1,354 +1,598 @@
-# AGENTIC WARDEN - 技术规范文档 v0.3.0
+# Agentic-Warden 需求规格说明
 
-## 项目概述
+## 核心设计原则
 
-**项目名称**: agentic-warden  
-**项目类型**: Rust CLI 工具 (AI Agent 管理器)  
-**版本**: v0.3.0  
-**许可证**: MIT  
+### 1. OAuth认证设计
+- **UI流程驱动**：所有OAuth认证必须通过UI流程自动完成，不提供命令行接口
+- **自动触发**：认证仅在需要时自动触发（如sync时发现未认证）
+- **智能检测**：自动检测环境（桌面/服务器/无头）并选择最佳认证方式
+- **并发处理**：同时监听本地回调和处理用户手动输入
+- **简洁响应**：OAuth回调返回简单的HTTP成功响应，不需要复杂页面
 
-## 核心功能
+### 2. 配置管理
+- **统一配置格式**：使用sync.json格式，包含config和state两部分
+- **自动认证集成**：ConfigSyncManager集成SmartOAuth，按需自动认证
+- **不显示认证状态命令**：认证状态仅作为内部信息，不提供单独的查询命令
 
-### 1. 多AI Agent统一管理系统
+### 3. 进程树管理
+- **核心功能**：进程树管理是核心功能，不存在开关，必须启用
+- **根进程优化**：在Windows下优化根父进程查找，避免都定位到explorer.exe
+- **AI CLI识别**：精确识别NPM AI CLI类型，支持跨平台
+- **共享内存隔离**：按启动CLI的父进程根进程计算隔离
 
-agentic-warden 是一个统一的AI Agent管理器，支持：
-- **Claude CLI** - Anthropic的Claude代码助手
-- **Codex CLI** - OpenAI的Codex代码生成工具  
-- **Gemini CLI** - Google的Gemini AI助手
+### 4. 全局任务扫描
+- **优化扫描范围**：实例ID范围1-100，减少扫描次数
+- **过滤空实例**：只显示有任务的实例，空实例不显示
+- **跨实例访问**：通过ConnectedRegistry安全访问其他实例
 
-### 2. 统一任务提示词接口
+## 实现的功能模块
 
-采用简化的任务提示词模式，用户无需了解各Agent的具体参数：
+### 1. SmartOAuth认证系统 ✅
+- 并发监听本地回调端口(8080)和用户手动输入
+- 智能环境检测(桌面/服务器/无头)
+- 自动选择最佳认证方式
+- 简单HTTP响应处理
+- Token持久化到 ~/.agentic-warden/auth.json
 
+### 2. ConfigSyncManager ✅
+- 集成SmartOAuthAuthenticator
+- 按需自动触发认证
+- 不提供单独的认证状态查询
+
+### 3. 进程树管理 ✅
+- 移除PROCESS_TREE_FEATURE_ENV环境变量
+- 核心功能必须启用
+- 优化根父进程查找
+- NPM AI CLI类型精确识别
+
+### 4. 全局任务扫描 ✅
+- 扫描范围1-100
+- 过滤空实例
+- 跨实例任务聚合
+
+### 5. Status命令
+- **仅显示实时任务状态**：不同内存共享区域的任务列表分组显示
+- **父进程分组**：按父进程进程名和PID分组
+- **实时刷新**：任务新增和结束都要UI显示
+- **提示词缩写**：长提示词支持...缩写
+- **不显示PUSH/PULL进度**：这些在执行对应任务时自己显示
+
+## 明确禁止的功能
+
+### ❌ 禁止的OAuth命令
+- `agentic-warden oauth`
+- `agentic-warden oauth-status`
+- `agentic-warden auth`
+- `agentic-warden reauth`
+
+### ❌ 禁止的功能
+- 单独的认证状态查询命令
+- 手动触发的认证命令
+- 命令行OAuth流程
+- 认证进度显示（除了简单的日志）
+
+## 技术要求
+
+### 1. 代码质量
+- 使用 `#[deny(unused_imports)]` 等严格lint规则
+- 异步函数使用 `?` 运算符
+- 完整的错误处理和日志记录
+- 单元测试和集成测试
+
+### 2. 架构设计
+- OAuth完全集成在需要认证的功能中
+- 不暴露认证细节给最终用户
+- 自动化的用户体验
+
+## 第三方 API Provider 支持
+
+### 1. 设计目标
+- **统一配置管理**：通过 `~/.agentic-warden/provider.json` 集中管理第三方 API 提供商
+- **环境变量注入**：为每个 AI CLI 自动注入对应的环境变量
+- **多提供商支持**：支持 OpenRouter, LiteLLM, Cloudflare AI Gateway 等第三方服务
+- **CLI 集成**：通过 `-p/--provider` 参数指定使用的提供商
+
+### 2. CLI 命令格式
 ```bash
-# 单个Agent调用
-agentic-warden claude "写一段Rust代码"
-agentic-warden codex "解释这个算法"
-agentic-warden gemini "review this code"
+# 使用默认 provider (official)
+agentic-warden codex "prompt"
 
-# 批量Agent调用
-agentic-warden all "review this rust code"
-agentic-warden "claude|gemini" "explain this algorithm"
-agentic-warden "codex|claude|gemini" "write documentation"
+# 使用指定 provider
+agentic-warden codex -p openrouter "prompt"
+agentic-warden claude --provider litellm "prompt"
+agentic-warden gemini -p cloudflare "prompt"
+
+# Provider 管理命令
+agentic-warden provider list                    # 列出所有 provider
+agentic-warden provider add <name>              # 交互式添加 provider
+agentic-warden provider edit <name>             # 编辑 provider 配置
+agentic-warden provider remove <name>           # 删除 provider
+agentic-warden provider show <name>             # 显示配置(隐藏密钥)
+agentic-warden provider test <name>             # 测试连接
+agentic-warden provider set-default <name>      # 设置默认 provider
 ```
 
-### 3. 进程树管理和任务追踪
-
-- **共享内存任务注册表**: 4MiB共享内存空间，实时任务状态追踪
-- **跨平台进程树管理**: Windows、Linux、macOS全平台支持
-- **任务日志系统**: 每个任务独立日志文件，完整输出记录
-- **等待模式**: `codex-warden wait` 监控和清理完成的任务
-
-### 4. 配置同步系统
-
-- **Google Drive集成**: 配置文件云端备份和同步
-- **OAuth 2.0认证**: 安全的Google API访问
-- **跨平台压缩**: TAR.GZ、ZIP、7Z格式支持
-- **增量同步**: MD5哈希变化检测，仅同步变更文件
-
-## 技术架构
-
-### 模块结构
-
-```
-src/
-├── main.rs                    # 主程序入口和CLI路由
-├── cli_type.rs               # CLI类型解析和多CLI支持
-├── supervisor.rs             # CLI进程管理和任务执行
-├── registry.rs               # 共享内存任务注册表
-├── process_tree.rs           # 跨平台进程树检测
-├── wait_mode.rs              # 任务监控和清理
-├── sync/                     # 配置同步模块
-│   ├── sync_config_manager.rs
-│   ├── google_drive_client.rs
-│   ├── directory_hasher.rs
-│   ├── config_packer.rs
-│   └── compressor.rs
-├── platform/                 # 平台特定代码
-│   ├── windows.rs
-│   └── unix.rs
-└── [支持模块...]
-```
-
-### 核心数据结构
-
-#### CLI选择器
-```rust
-pub struct CliSelector {
-    pub types: Vec<CliType>,
-}
-
-impl CliSelector {
-    pub fn all() -> Self;                    // 所有3个AI
-    pub fn from_single(cli_type: CliType) -> Self;  // 单个AI
-    pub fn from_multiple(types: Vec<CliType>) -> Self;  // 多个AI组合
-}
-```
-
-#### 任务记录
-```rust
-pub struct TaskRecord {
-    pub started_at: DateTime<Utc>,
-    pub log_id: String,
-    pub log_path: String,
-    pub manager_pid: Option<u32>,
-    pub status: TaskStatus,
-    pub process_chain: Vec<u32>,
-    // ... 其他字段
-}
-```
-
-#### 配置同步
-```rust
-pub struct SyncConfig {
-    pub config: SyncConfigConfig,
-    pub state: SyncConfigState,
-}
-
-pub struct SyncConfigConfig {
-    pub directories: Vec<String>,
-    pub auto_sync_enabled: bool,
-    pub sync_interval_minutes: u32,
-}
-```
-
-## CLI命令格式
-
-### Agent任务执行
-
-#### 语法格式
-```bash
-agentic-warden <AGENT_SELECTOR> "<TASK_DESCRIPTION>"
-```
-
-#### Agent选择器
-- **单个Agent**: `claude`, `codex`, `gemini`
-- **全部Agent**: `all`
-- **组合Agent**: `"agent1|agent2|agent3"` (需要引号)
-
-#### 示例
-```bash
-# 单个Agent任务
-agentic-warden claude "写一个快速排序算法的Rust实现"
-agentic-warden codex "生成Python数据可视化代码"
-agentic-warden gemini "解释机器学习中的梯度下降"
-
-# 批量Agent任务
-agentic-warden all "review this code and suggest improvements"
-agentic-warden "claude|gemini" "compare these two approaches"
-agentic-warden "codex|claude" "write comprehensive documentation"
-```
-
-### 配置同步命令
-
-```bash
-# 推送配置到云端
-agentic-warden push [directory...]
-
-# 从云端拉取配置
-agentic-warden pull [directory...]
-
-# 查看同步状态
-agentic-warden status
-
-# 重置同步状态
-agentic-warden reset
-
-# 列出可同步目录
-agentic-warden list
-```
-
-### 任务管理命令
-
-```bash
-# 等待模式 - 监控任务完成
-agentic-warden wait
-
-# CLI管理界面(无参数时)
-agentic-warden
-```
-
-## 固化的Agent参数
-
-为确保一致性和安全性，各AI Agent使用固定的完整权限参数：
-
-### Claude CLI
-```bash
-claude -p --dangerously-skip-permissions "<prompt>"
-```
-- `-p`: 非交互式打印模式
-- `--dangerously-skip-permissions`: 跳过权限检查，完整文件访问
-
-### Codex CLI  
-```bash
-codex exec --dangerously-bypass-approvals-and-sandbox "<prompt>"
-```
-- `exec`: 非交互式执行模式
-- `--dangerously-bypass-approvals-and-sandbox`: 绕过审批和沙箱，完整系统访问
-
-### Gemini CLI
-```bash
-gemini --approval-mode yolo "<prompt>"
-```
-- `--approval-mode yolo`: 自动批准所有操作，完整工具访问
-
-## 配置文件
-
-### 认证配置 (`~/.agentic-warden/auth.json`)
+### 3. provider.json 配置结构
 ```json
 {
-  "client_id": "your-google-client-id.apps.googleusercontent.com",
-  "client_secret": "your-google-client-secret",
-  "access_token": "ya29.a0AaHxxxxxxxxxxx",
-  "refresh_token": "ya29.c0Ab-xxxxxxxxxxx",
-  "expires_at": "2024-12-31T23:59:59Z"
-}
-```
-
-### 同步配置 (`~/.agentic-warden/sync.json`)
-```json
-{
-  "config": {
-    "directories": ["~/.claude", "~/.codex", "~/.gemini"],
-    "auto_sync_enabled": false,
-    "sync_interval_minutes": 60
-  },
-  "state": {
-    "directories": {
-      "~/.claude": {
-        "hash": "d41d8cd98f00b204e9800998ecf8427e",
-        "last_sync": "2024-01-01T12:00:00Z"
+  "$schema": "https://agentic-warden.dev/schema/provider.json",
+  "providers": {
+    "openrouter": {
+      "description": "OpenRouter 统一 LLM 网关",
+      "compatible_with": ["codex", "claude"],
+      "env": {
+        "OPENAI_API_KEY": "sk-or-v1-xxx",
+        "OPENAI_BASE_URL": "https://openrouter.ai/api/v1"
       }
     },
-    "last_sync": "2024-01-01T12:00:00Z"
-  }
+    "litellm": {
+      "description": "LiteLLM 本地代理",
+      "compatible_with": ["codex", "claude", "gemini"],
+      "env": {
+        "ANTHROPIC_API_KEY": "sk-ant-xxx",
+        "ANTHROPIC_BASE_URL": "http://localhost:4000",
+        "OPENAI_API_KEY": "sk-xxx",
+        "OPENAI_BASE_URL": "http://localhost:4000"
+      }
+    },
+    "official": {
+      "description": "官方 API (默认)",
+      "compatible_with": ["codex", "claude", "gemini"],
+      "env": {}
+    }
+  },
+  "default_provider": "official"
 }
 ```
 
-## 性能要求
+### 4. 环境变量映射规则
 
-### 响应时间
-- **CLI启动时间**: < 2秒
-- **任务注册延迟**: < 100ms  
-- **配置检测时间**: < 5秒 (大型配置目录)
-- **云端同步延迟**: < 30秒 (标准网络)
+| AI CLI | 支持的环境变量 | 第三方 API 支持 |
+|--------|---------------|----------------|
+| **codex** | `OPENAI_API_KEY`, `OPENAI_BASE_URL` | ✅ 完全支持 |
+| **claude** | `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` | ✅ 完全支持 |
+| **gemini** | `GOOGLE_API_KEY`, `https_proxy` | ⚠️ 通过代理支持 |
 
-### 资源使用
-- **共享内存大小**: 4 MiB (codex-task命名空间)
-- **最大并发任务**: 50个
-- **内存占用**: < 50MB (正常运行)
-- **日志文件大小**: 动态，基于进程输出
+### 5. 实现要求
 
-### 可扩展性
-- **支持的Agent工具**: 可扩展至新的AI Agent工具
-- **配置目录**: 支持任意数量的配置目录
-- **用户账户**: 支持多用户配置文件
-- **平台支持**: Windows、Linux、macOS
+#### 5.1 文件结构
+```
+src/
+├── provider/
+│   ├── mod.rs              # 模块导出
+│   ├── config.rs           # ProviderConfig 数据结构
+│   ├── manager.rs          # ProviderManager (加载/保存/验证)
+│   ├── env_injector.rs     # 环境变量注入器
+│   └── commands.rs         # provider 子命令实现
+```
 
-## 安全要求
+#### 5.2 核心功能
+- **ProviderManager**: 负责加载、保存、验证 provider.json
+- **EnvInjector**: 在启动 AI CLI 前注入环境变量到子进程
+- **兼容性验证**: 检查 provider 是否支持指定的 AI 类型
+- **交互式配置**: 通过 dialoguer 提供友好的配置界面
 
-### 数据保护
-- **凭证加密**: OAuth客户端密钥和访问令牌加密存储
-- **文件权限**: 配置文件权限设置为600 (用户读写)
-- **传输安全**: 所有云端通信使用HTTPS
-- **数据隔离**: 认证数据与配置数据分离存储
+#### 5.3 安全性
+- provider.json 文件权限设为 `0600` (仅用户可读写)
+- 显示配置时隐藏 API 密钥(仅显示前4位和后4位)
+- 使用 `Command::env()` 注入环境变量到子进程,不污染父进程
 
-### 访问控制
-- **最小权限原则**: 只请求必要的OAuth权限范围
-- **用户确认**: 重要操作需要用户确认
-- **数据清理**: 提供完整的凭证删除功能
-- **透明处理**: 明确告知用户数据使用范围
+#### 5.4 错误处理
+- Provider 不存在时提示用户添加
+- Provider 不兼容时列出可用的 provider
+- 配置文件损坏时提供修复建议
 
-## 错误处理
+### 6. 用户体验
 
-### 错误类型
+#### 6.1 首次使用流程
+```bash
+$ agentic-warden codex -p openrouter "hello"
+❌ Error: Provider 'openrouter' not found
+
+💡 Tip: Add a new provider with:
+   agentic-warden provider add openrouter
+```
+
+#### 6.2 添加 provider
+```bash
+$ agentic-warden provider add openrouter
+📝 Adding new provider: openrouter
+
+Description: OpenRouter unified gateway
+Compatible with (comma-separated): codex,claude
+
+Environment variables:
+  OPENAI_API_KEY: sk-or-***
+  OPENAI_BASE_URL: https://openrouter.ai/api/v1
+
+✅ Provider 'openrouter' added successfully!
+```
+
+#### 6.3 使用 provider
+```bash
+$ agentic-warden codex -p litellm "优化代码"
+🔌 Using provider: litellm
+🚀 Launching codex...
+[正常输出]
+```
+
+### 7. 默认配置
+首次运行时自动在 `~/.agentic-warden/provider.json` 创建:
+```json
+{
+  "providers": {
+    "official": {
+      "description": "Official API endpoints",
+      "compatible_with": ["codex", "claude", "gemini"],
+      "env": {}
+    }
+  },
+  "default_provider": "official"
+}
+```
+
+## 统一 TUI (Terminal User Interface) 设计
+
+### 1. 设计原则
+- **所有交互使用 TUI**：统一使用 ratatui + crossterm 框架，不使用零散的 dialoguer 交互
+- **命令行优先**：AI CLI 启动命令保持命令行模式（直接输出结果）
+- **TUI 用于管理和监控**：Provider 管理、任务状态、进度显示等使用 TUI
+- **自动触发认证**：push/pull 等需要认证的功能自动检测并触发 OAuth 流程
+
+### 2. TUI 命令清单
+
+#### 2.1 Dashboard 主界面
+```bash
+agentic-warden  # 无参数时显示 Dashboard
+```
+
+**显示内容**：
+- 🤖 AI CLI 状态：安装情况、版本、默认 Provider
+- 📊 任务概要：当前运行的任务（简化版，最多显示 5 个）
+- 🔐 授权状态：Google Drive 认证状态、Token 过期时间、Provider 数量
+
+**交互**：
+- `P` - 进入 Provider 管理
+- `S` - 进入任务状态详情
+- `I` - 安装/更新 AI CLI
+- `Q` - 退出
+
+**界面示例**：
+```
+┌────────────────────────────────────────────────────────────────┐
+│ Agentic-Warden Dashboard                            v0.3.0     │
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│ 🤖 AI CLI Status                                               │
+│ ┌────────────────────────────────────────────────────────────┐ │
+│ │ ✅ codex      v1.2.3    [Installed]    Provider: openrouter│ │
+│ │ ✅ claude     v2.0.1    [Installed]    Provider: official  │ │
+│ │ ❌ gemini     -         [Not installed]                    │ │
+│ └────────────────────────────────────────────────────────────┘ │
+│                                                                │
+│ 📊 Running Tasks                                    (2 active) │
+│ ┌────────────────────────────────────────────────────────────┐ │
+│ │ • codex (PID: 12345)  "Writing a function..."   [2m 30s]  │ │
+│ │ • claude (PID: 12346) "Code review..."          [45s]     │ │
+│ └────────────────────────────────────────────────────────────┘ │
+│                                                                │
+│ 🔐 Authorization Status                                        │
+│ ┌────────────────────────────────────────────────────────────┐ │
+│ │ Google Drive:  ✅ Authenticated (expires in 25 days)       │ │
+│ │ Last Sync:     2025-10-30 15:30:00                        │ │
+│ │ Providers:     3 configured (1 default)                   │ │
+│ └────────────────────────────────────────────────────────────┘ │
+│                                                                │
+│ [P] Providers  [S] Status  [I] Install  [Q] Quit              │
+└────────────────────────────────────────────────────────────────┘
+```
+
+#### 2.2 Provider 管理 TUI
+```bash
+agentic-warden provider  # 直接进入 Provider 管理 TUI（不需要子命令）
+```
+
+**显示内容**：
+- 所有 Provider 列表
+- 每个 Provider 的描述、兼容性
+
+**交互**：
+- `↑↓` - 选择 Provider
+- `A` - 添加新 Provider
+- `E` - 编辑选中的 Provider
+- `D` - 删除选中的 Provider
+- `Enter` - 设置为默认 Provider
+- `ESC` - 返回 Dashboard
+
+**界面示例**：
+```
+┌────────────────────────────────────────────────────────────────┐
+│ Provider Management                                            │
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│  > official (default)     [Official API]                       │
+│    openrouter            [OpenRouter Gateway]                  │
+│    litellm               [LiteLLM Proxy]                       │
+│                                                                │
+│                                                                │
+│ [A] Add  [D] Delete  [E] Edit  [Enter] Set Default  [ESC] Back│
+└────────────────────────────────────────────────────────────────┘
+```
+
+**编辑界面**：
+```
+┌────────────────────────────────────────────────────────────────┐
+│ Edit Provider: openrouter                                      │
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│  Description:  OpenRouter Gateway                              │
+│                                                                │
+│  Compatible with:  [x] codex  [x] claude  [ ] gemini          │
+│                                                                │
+│  Environment Variables for codex:                              │
+│    > OPENAI_API_KEY     = sk-or-***                           │
+│      OPENAI_BASE_URL    = https://openrouter.ai/api/v1        │
+│                                                                │
+│  Environment Variables for claude:                             │
+│      ANTHROPIC_API_KEY  = (not set)                            │
+│      ANTHROPIC_BASE_URL = (not set)                            │
+│                                                                │
+│ [↑↓] Navigate  [Enter] Edit  [Space] Toggle  [Ctrl+S] Save    │
+└────────────────────────────────────────────────────────────────┘
+```
+
+**环境变量映射规则**：
+- **codex** → `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_ORG_ID`
+- **claude** → `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`
+- **gemini** → `GOOGLE_API_KEY`, `https_proxy`
+
+根据用户勾选的兼容 AI 类型，动态显示对应的环境变量分组。
+
+#### 2.3 任务状态 TUI
+```bash
+agentic-warden status  # 进入任务状态 TUI
+```
+
+**显示内容**：
+- 所有运行中的任务（详细版）
+- 按父进程分组
+- 实时刷新（每 2 秒）
+
+**交互**：
+- `↑↓` - 选择任务
+- `K` - 终止选中的任务
+- `R` - 手动刷新
+- `ESC/Q` - 返回 Dashboard
+
+**界面示例**：
+```
+┌────────────────────────────────────────────────────────────────┐
+│ Running Tasks                          [Auto-refresh: 2s]      │
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│  Parent: codex (PID: 12345)  [openrouter]                     │
+│    └─ Task: Writing a function...                   [Running] │
+│       Started: 2 min ago                                       │
+│                                                                │
+│  Parent: claude (PID: 12346)  [official]                      │
+│    └─ Task: Code review...                          [Running] │
+│       Started: 30 sec ago                                      │
+│                                                                │
+│                                                                │
+│ [R] Refresh  [K] Kill Task  [Q] Quit                           │
+└────────────────────────────────────────────────────────────────┘
+```
+
+#### 2.4 Push/Pull 进度 TUI
+```bash
+agentic-warden push [dirs...]  # 自动显示进度 TUI
+agentic-warden pull            # 自动显示进度 TUI
+```
+
+**自动认证流程**：
+1. 检查 Google Drive 认证状态
+2. 如果未认证，显示认证对话框
+3. 用户同意后，启动 OAuth 流程（TUI 显示）
+4. 认证成功后，自动继续执行 push/pull
+5. 显示进度 TUI
+
+**未认证对话框**：
+```
+┌────────────────────────────────────────────────────────────────┐
+│ Google Drive Authentication Required                           │
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│  ⚠️  You need to authenticate with Google Drive to use        │
+│      push/pull features.                                       │
+│                                                                │
+│  This will:                                                    │
+│    • Store credentials in ~/.agentic-warden/auth.json         │
+│    • Allow backup/sync of your configuration files            │
+│    • Open your browser for Google authentication              │
+│                                                                │
+│                                                                │
+│  Authenticate now?                                             │
+│                                                                │
+│  [Y] Yes, authenticate  [N] No, cancel                         │
+└────────────────────────────────────────────────────────────────┘
+```
+
+**OAuth 进行中**：
+```
+┌────────────────────────────────────────────────────────────────┐
+│ Google Drive Authentication                                    │
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│  🌐 Browser should have opened automatically                   │
+│                                                                │
+│  Authorization URL:                                            │
+│  https://accounts.google.com/o/oauth2/auth?...                │
+│                                                                │
+│  📝 Waiting for authorization...                               │
+│                                                                │
+│  • You can click the URL above if browser didn't open         │
+│  • Or manually enter the authorization code below             │
+│                                                                │
+│  Authorization Code (optional): ___________________________    │
+│                                                                │
+│  [ESC] Cancel                                                  │
+└────────────────────────────────────────────────────────────────┘
+```
+
+**Push 进度**：
+```
+┌────────────────────────────────────────────────────────────────┐
+│ Pushing to Google Drive                                        │
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│  Step 1/3: Compressing files                                  │
+│  [████████████████████████] 100%                              │
+│  ✅ Created archive: config-backup-20251030.tar.gz (2.3 MB)   │
+│                                                                │
+│  Step 2/3: Uploading to Google Drive                          │
+│  [████████░░░░░░░░░░░░░░░░] 45%                               │
+│  Uploaded: 1.0 MB / 2.3 MB                                    │
+│  Speed: 500 KB/s   ETA: 3s                                    │
+│                                                                │
+│  Step 3/3: Verifying...                                       │
+│  [░░░░░░░░░░░░░░░░░░░░░░░░] 0%                                │
+│                                                                │
+│ [ESC] Cancel                                                   │
+└────────────────────────────────────────────────────────────────┘
+```
+
+### 3. 非 TUI 命令（保持命令行模式）
+
+以下命令直接输出结果到终端，不进入 TUI：
+
+```bash
+# AI CLI 启动（单个）
+agentic-warden codex "写一个函数"
+agentic-warden codex -p openrouter "写一个函数"
+agentic-warden claude --provider litellm "优化代码"
+agentic-warden gemini "分析数据"
+
+# AI CLI 启动（多个，使用 | 连接）
+agentic-warden codex|claude "同时问两个 AI"
+agentic-warden codex|claude -p openrouter "使用同一 provider"
+agentic-warden codex|claude|gemini "问三个 AI"
+
+# AI CLI 启动（全部）
+agentic-warden all "问所有已安装的 AI"
+agentic-warden all -p litellm "全部使用 litellm"
+```
+
+**-p 参数规则**：
+- 适用于所有 AI CLI 启动命令
+- 使用 `Command::env()` 注入环境变量到子进程
+- 不污染父进程环境
+
+### 4. TUI 实现要求
+
+#### 4.1 技术栈
+- **框架**: ratatui (0.24+)
+- **事件处理**: crossterm (0.27+)
+- **已有依赖**: 项目已包含这些依赖，无需添加
+
+#### 4.2 文件结构
+```
+src/
+├── tui/
+│   ├── mod.rs                  # TUI 框架入口
+│   ├── app.rs                  # 主应用状态管理
+│   ├── screens/
+│   │   ├── mod.rs
+│   │   ├── dashboard.rs        # Dashboard 主界面
+│   │   ├── provider.rs         # Provider 列表
+│   │   ├── provider_edit.rs    # Provider 编辑
+│   │   ├── status.rs           # 任务状态
+│   │   ├── push.rs             # Push 进度
+│   │   ├── pull.rs             # Pull 进度
+│   │   └── oauth.rs            # OAuth 认证界面
+│   ├── widgets/
+│   │   ├── mod.rs
+│   │   ├── input.rs            # 输入框组件
+│   │   ├── progress.rs         # 进度条组件
+│   │   ├── list.rs             # 列表选择组件
+│   │   └── dialog.rs           # 对话框组件
+│   └── event.rs                # 事件处理
+```
+
+#### 4.3 核心功能
+- **屏幕导航**: 使用 `ESC` 返回上一级，`Q` 退出
+- **键盘交互**: 上下键选择，Enter 确认，Space 切换
+- **自动刷新**: Dashboard 和 Status 每 2 秒自动刷新
+- **进度显示**: Push/Pull 实时显示压缩、上传、下载进度
+- **OAuth 集成**: 整合现有的 SmartOAuth 流程到 TUI 界面
+
+#### 4.4 环境变量映射
+在 Provider 编辑界面，根据用户勾选的 AI 类型动态显示环境变量：
+
 ```rust
-pub enum ProcessError {
-    Io(#[from] io::Error),
-    Registry(#[from] RegistryError),
-    ProcessTree(#[from] ProcessTreeError),
-    CliNotFound(String),
+// src/provider/env_mapping.rs
+pub fn get_env_vars_for_ai_type(ai_type: AiType) -> Vec<EnvVarMapping> {
+    match ai_type {
+        AiType::Codex => vec![
+            EnvVarMapping { key: "OPENAI_API_KEY", required: true },
+            EnvVarMapping { key: "OPENAI_BASE_URL", required: false },
+            EnvVarMapping { key: "OPENAI_ORG_ID", required: false },
+        ],
+        AiType::Claude => vec![
+            EnvVarMapping { key: "ANTHROPIC_API_KEY", required: true },
+            EnvVarMapping { key: "ANTHROPIC_BASE_URL", required: false },
+        ],
+        AiType::Gemini => vec![
+            EnvVarMapping { key: "GOOGLE_API_KEY", required: true },
+            EnvVarMapping { key: "https_proxy", required: false },
+        ],
+    }
 }
 ```
 
-### 错误处理原则
-- **敏感信息保护**: 错误日志中不包含敏感信息
-- **优雅降级**: 网络错误时提供离线模式
-- **重试机制**: 网络操作支持自动重试
-- **用户友好**: 提供清晰的错误信息和解决建议
+### 5. 自动认证流程
 
-## 开发工具链
+**触发时机**：
+- 用户执行 `push` 或 `pull` 命令
+- 检测到未认证或 token 过期
 
-### 核心依赖
-```toml
-[dependencies]
-# 异步运行时
-tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
+**流程**：
+1. 显示认证对话框（TUI）
+2. 用户选择 Yes → 启动 OAuth 流程
+3. OAuth 界面（TUI）显示 URL 和等待状态
+4. 整合 SmartOAuth 的并发回调/手动输入
+5. 认证成功 → 显示成功消息（2 秒）
+6. **自动继续执行原始命令**（push/pull）
+7. 显示进度 TUI
 
-# 序列化和配置
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-chrono = { version = "0.4", features = ["serde"] }
+**用户拒绝或失败**：
+- 显示错误消息
+- 退出程序
 
-# 共享内存和进程管理
-shared_memory = "0.12"
-shared_hashmap = "0.1.2"
+### 6. 迁移计划
 
-# 平台特定依赖
-[target.'cfg(unix)'.dependencies]
-psutil = "3.2"
-libc = "0.2"
+**需要替换 dialoguer 的地方**：
+1. `src/provider/commands.rs` - Provider 添加/编辑交互 → Provider TUI
+2. `src/sync/config_sync_manager.rs` - Google Drive 授权确认 → 认证对话框 TUI
+3. `src/sync/smart_oauth.rs` - 手动输入授权码 → OAuth TUI
+4. `src/cli_manager.rs` - 选择 AI CLI → 移除（保持命令行）
 
-[target.'cfg(windows)'.dependencies]
-sysinfo = "0.32"
-windows = { version = "0.54", features = [...] }
+## 待实现需求
 
-# 云端集成
-reqwest = { version = "0.11", features = ["json", "multipart"] }
-```
+1. **统一 TUI 系统**
+   - 实现 Dashboard 主界面
+   - 实现 Provider 管理 TUI（列表 + 编辑）
+   - 实现 Status TUI（实时任务监控）
+   - 实现 Push/Pull 进度 TUI
+   - 实现 OAuth TUI（整合 SmartOAuth）
+   - 实现自动认证流程
+   - 创建可复用 TUI 组件（input, progress, list, dialog）
 
-### 开发标准
-- **Rust Edition**: 2024
-- **构建系统**: Cargo
-- **测试框架**: 内置cargo test
-- **代码格式**: cargo fmt
-- **代码检查**: cargo clippy (deny warnings)
-- **文档生成**: cargo doc
+2. **Provider 功能完善**
+   - 支持环境变量按 AI 类型分组显示
+   - 支持 `-p` 参数用于所有 AI CLI 命令
+   - 支持多 AI 启动语法（`codex|claude|gemini`）
+   - 支持 `all` 启动所有 AI
 
-## 版本历史
-
-### v0.3.0 (当前版本)
-- ✅ 新增多CLI统一接口支持
-- ✅ 简化任务提示词调用方式
-- ✅ 删除传统透传模式
-- ✅ 改进用户体验和错误处理
-
-### v0.2.1
-- ✅ 完整的配置同步系统
-- ✅ OAuth 2.0认证
-- ✅ 跨平台压缩抽象层
-- ✅ 修复编译警告
-
-### v0.2.0
-- ✅ 进程树管理系统
-- ✅ 共享内存任务注册表
-- ✅ 等待模式
-- ✅ 跨平台支持
-
-## 未来规划
-
-### v0.4.0 (计划中)
-- 配置热重载功能
-- 性能监控和指标收集
-- 高级CLI管理界面
-- 插件系统支持
-
-### v1.0.0 (长期目标)
-- 团队协作功能
-- 企业级安全特性
-- 更多AI CLI工具集成
-- 分布式配置同步
-
----
-
-**总结**: agentic-warden v0.3.0 是一个功能完整、架构清晰的AI Agent管理工具，提供统一的多Agent调用接口、强大的进程管理能力和可靠的配置同步功能。项目采用现代Rust实践，具备优秀的性能、安全性和可维护性。
+3. **删除所有未经授权的OAuth命令**
+4. **保持认证完全自动化和集成化**
+5. **确保status命令只显示任务状态**

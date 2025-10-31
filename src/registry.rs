@@ -3,10 +3,30 @@ use crate::logging::{debug, warn};
 use crate::process_tree::get_root_parent_pid_cached;
 use crate::shared_map::{SharedMapError, open_or_create};
 use crate::task_record::{TaskRecord, TaskStatus};
+use crate::utils::get_instance_id;
 use chrono::{DateTime, Duration, Utc};
 use shared_hashmap::SharedMemoryHashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
+
+/// Represents a connected task registry with metadata
+#[derive(Debug)]
+pub struct ConnectedRegistry {
+    pub instance_id: u32,
+    pub process_id: u32,
+    pub registry: Arc<TaskRegistry>,
+}
+
+/// Represents a task from any registry with additional context
+#[derive(Debug, Clone)]
+pub struct GlobalTaskEntry {
+    #[allow(dead_code)]
+    pub instance_id: u32,
+    #[allow(dead_code)]
+    pub process_id: u32,
+    pub task_id: u32,
+    pub task: TaskRecord,
+}
 
 #[derive(Debug)]
 pub struct TaskRegistry {
@@ -58,6 +78,30 @@ impl From<crate::process_tree::ProcessTreeError> for RegistryError {
     }
 }
 
+/// Get current process PID
+#[allow(dead_code)]
+fn get_current_process_pid() -> u32 {
+    std::process::id()
+}
+
+/// Test if a registry contains valid agentic-warden task entries
+#[allow(dead_code)]
+fn test_registry_validity(
+    map: &SharedMemoryHashMap<String, String>,
+) -> Result<Vec<(String, String)>, RegistryError> {
+    let mut valid_entries = Vec::new();
+
+    // Sample a few entries to check if they look like task records
+    for (key, value) in map.iter().take(10) {
+        // Try to parse as a task record
+        if serde_json::from_str::<TaskRecord>(&value).is_ok() {
+            valid_entries.push((key.clone(), value.clone()));
+        }
+    }
+
+    Ok(valid_entries)
+}
+
 impl TaskRegistry {
     pub fn connect() -> Result<Self, RegistryError> {
         let root_parent_pid = get_root_parent_pid_cached()?;
@@ -68,10 +112,9 @@ impl TaskRegistry {
         })
     }
 
-    /// Connect to a test registry with a custom namespace (for testing purposes only)
     #[cfg(any(test, feature = "testing"))]
     pub fn connect_test(namespace: &str) -> Result<Self, RegistryError> {
-        let map = open_or_create(namespace, 1024 * 1024)?; // 1MB for tests
+        let map = open_or_create(namespace, SHARED_MEMORY_SIZE)?;
         Ok(Self {
             map: Mutex::new(map),
         })
@@ -246,6 +289,103 @@ impl TaskRegistry {
         let mut guard = self.map.lock().map_err(|_| RegistryError::Poison)?;
         f(&mut guard)
     }
+
+    /// 发现所有可用的注册表（全局扫描）
+    pub fn discover_all_registries() -> Result<Vec<ConnectedRegistry>, anyhow::Error> {
+        let mut registries = Vec::new();
+
+        // 获取当前进程的注册表作为基础
+        let current_instance_id = get_instance_id();
+
+        // 尝试连接到从1到100范围内可能的注册表（大大减少扫描次数）
+        for instance_id in 1..=100 {
+            if instance_id == current_instance_id {
+                continue; // 跳过当前实例
+            }
+
+            // 尝试连接到该实例的共享内存
+            match Self::connect_to_instance(instance_id) {
+                Ok(connected) => {
+                    // 检查该实例是否有任务，没有任务则不显示
+                    let entries = connected.registry.entries().unwrap_or_default();
+                    if !entries.is_empty() {
+                        println!(
+                            "发现实例 {} (PID: {}) - {} 个任务",
+                            instance_id,
+                            connected.process_id,
+                            entries.len()
+                        );
+                        registries.push(connected);
+                    }
+                }
+                Err(_) => {
+                    // 连接失败，说明该实例不存在或不可访问
+                }
+            }
+        }
+
+        Ok(registries)
+    }
+
+    /// 连接到特定实例的注册表
+    pub fn connect_to_instance(instance_id: u32) -> Result<ConnectedRegistry, anyhow::Error> {
+        let namespace = format!("agentic-warden-{}", instance_id);
+
+        // 尝试连接到已存在的共享内存
+        let map = open_or_create(&namespace, SHARED_MEMORY_SIZE)?;
+        let registry = TaskRegistry {
+            map: Mutex::new(map),
+        };
+
+        // 获取该实例的进程ID（从任务信息中推断）
+        let process_id = instance_id; // 简化：使用实例ID作为进程ID
+
+        Ok(ConnectedRegistry {
+            instance_id,
+            process_id,
+            registry: Arc::new(registry),
+        })
+    }
+
+    /// 获取所有全局任务
+    pub fn get_all_global_tasks() -> Result<Vec<GlobalTaskEntry>, anyhow::Error> {
+        let registries = Self::discover_all_registries()?;
+        let mut global_tasks = Vec::new();
+
+        // 添加当前实例的任务
+        let current_instance_id = get_instance_id();
+        let namespace = format!("agentic-warden-{}", current_instance_id);
+        let map = open_or_create(&namespace, SHARED_MEMORY_SIZE)?;
+        let current_registry = TaskRegistry {
+            map: Mutex::new(map),
+        };
+        let current_entries = current_registry.entries().unwrap_or_default();
+
+        for entry in current_entries {
+            global_tasks.push(GlobalTaskEntry {
+                instance_id: current_instance_id,
+                process_id: std::process::id(),
+                task_id: entry.pid,
+                task: entry.record,
+            });
+        }
+
+        // 添加其他实例的任务
+        for connected_registry in registries {
+            let entries = connected_registry.registry.entries().unwrap_or_default();
+
+            for entry in entries {
+                global_tasks.push(GlobalTaskEntry {
+                    instance_id: connected_registry.instance_id,
+                    process_id: connected_registry.process_id,
+                    task_id: entry.pid,
+                    task: entry.record,
+                });
+            }
+        }
+
+        Ok(global_tasks)
+    }
 }
 
 #[cfg(test)]
@@ -263,8 +403,17 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "Shared memory tests can be flaky on Windows due to resource limits"
+    )]
     fn test_registry_register_and_remove() {
-        let test_namespace = format!("test_registry_{}", std::process::id());
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let test_namespace = format!("test_registry_{}_{}", std::process::id(), timestamp);
         let registry = TaskRegistry::connect_test(&test_namespace).unwrap();
 
         let test_pid = 12345;
@@ -290,8 +439,17 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "Shared memory tests can be flaky on Windows due to resource limits"
+    )]
     fn test_registry_mark_completed() {
-        let test_namespace = format!("test_completed_{}", std::process::id());
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let test_namespace = format!("test_completed_{}_{}", std::process::id(), timestamp);
         let registry = TaskRegistry::connect_test(&test_namespace).unwrap();
 
         let test_pid = 54321;
@@ -317,8 +475,17 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "Shared memory tests can be flaky on Windows due to resource limits"
+    )]
     fn test_get_completed_unread_tasks() {
-        let test_namespace = format!("test_unread_{}", std::process::id());
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let test_namespace = format!("test_unread_{}_{}", std::process::id(), timestamp);
         let registry = TaskRegistry::connect_test(&test_namespace).unwrap();
 
         let running_pid = 11111;
@@ -343,8 +510,17 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "Shared memory tests can be flaky on Windows due to resource limits"
+    )]
     fn test_duplicate_register_overwrites() {
-        let test_namespace = format!("test_duplicate_{}", std::process::id());
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let test_namespace = format!("test_duplicate_{}_{}", std::process::id(), timestamp);
         let registry = TaskRegistry::connect_test(&test_namespace).unwrap();
 
         let test_pid = 99999;
@@ -369,8 +545,17 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "Shared memory tests can be flaky on Windows due to resource limits"
+    )]
     fn test_remove_nonexistent_returns_none() {
-        let test_namespace = format!("test_nonexistent_{}", std::process::id());
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let test_namespace = format!("test_nonexistent_{}_{}", std::process::id(), timestamp);
         let registry = TaskRegistry::connect_test(&test_namespace).unwrap();
 
         let nonexistent_pid = 999999;

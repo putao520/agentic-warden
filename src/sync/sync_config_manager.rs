@@ -5,14 +5,14 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-/// 统一的同步数据结构，包含配置和状态信息
+/// Unified sync data structure containing configuration and status information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncData {
     pub config: SyncConfig,
     pub state: SyncState,
 }
 
-/// 配置信息
+/// Configuration information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncConfig {
     pub directories: Vec<String>,
@@ -20,7 +20,7 @@ pub struct SyncConfig {
     pub sync_interval_minutes: u64,
 }
 
-/// 状态信息
+/// Status information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncState {
     pub directories: HashMap<String, DirectoryHash>,
@@ -76,6 +76,32 @@ impl SyncConfigManager {
         })
     }
 
+    /// Create a SyncConfigManager with a custom path for testing
+    ///
+    /// This method is primarily used in tests to create isolated configuration managers
+    /// that don't interfere with the user's actual configuration files.
+    /// It allows tests to use temporary configuration files instead of the real
+    /// `~/.agentic-warden/sync.json` file.
+    ///
+    /// # Arguments
+    /// * `path` - Path to the sync configuration file
+    ///
+    /// # Examples
+    /// ```
+    /// use agentic_warden::sync::SyncConfigManager;
+    /// use std::path::Path;
+    ///
+    /// // In tests, use a temporary path
+    /// let temp_path = Path::new("/tmp/test_sync.json");
+    /// let manager = SyncConfigManager::with_path(temp_path);
+    /// ```
+    #[allow(dead_code)] // This method is used in tests
+    pub fn with_path<P: AsRef<Path>>(path: P) -> Self {
+        Self {
+            sync_path: path.as_ref().to_string_lossy().to_string(),
+        }
+    }
+
     #[allow(dead_code)]
     pub fn load_config(&self) -> SyncResult<SyncConfig> {
         if !Path::new(&self.sync_path).exists() {
@@ -105,7 +131,7 @@ impl SyncConfigManager {
         Ok(())
     }
 
-    /// 加载统一的同步数据
+    /// Load unified sync data
     pub fn load_sync_data(&self) -> SyncResult<SyncData> {
         if !Path::new(&self.sync_path).exists() {
             let default_data = SyncData {
@@ -125,7 +151,7 @@ impl SyncConfigManager {
         Ok(data)
     }
 
-    /// 保存统一的同步数据
+    /// Save unified sync data
     pub fn save_sync_data(&self, data: &SyncData) -> SyncResult<()> {
         let content = serde_json::to_string_pretty(data).map_err(|e| {
             SyncError::SyncConfigError(format!("Failed to serialize sync data: {}", e))
@@ -162,6 +188,7 @@ impl SyncConfigManager {
         Ok(state.directories.get(directory_name).cloned())
     }
 
+    #[allow(dead_code)]
     pub fn get_all_directory_hashes(&self) -> SyncResult<HashMap<String, DirectoryHash>> {
         let state = self.load_state()?;
         Ok(state.directories)
@@ -181,6 +208,7 @@ impl SyncConfigManager {
         self.save_state(&state)
     }
 
+    #[allow(dead_code)]
     pub fn get_last_sync(&self) -> SyncResult<chrono::DateTime<chrono::Utc>> {
         let state = self.load_state()?;
         Ok(state.last_sync)

@@ -81,6 +81,27 @@ impl CliType {
             }
         }
     }
+
+    /// 构建交互模式启动参数（不包含提示词）
+    pub fn build_interactive_args(&self) -> Vec<String> {
+        match self {
+            CliType::Claude => {
+                vec![
+                    "-p".to_string(),
+                    "--dangerously-skip-permissions".to_string(),
+                ]
+            }
+            CliType::Codex => {
+                vec![
+                    "exec".to_string(),
+                    "--dangerously-bypass-approvals-and-sandbox".to_string(),
+                ]
+            }
+            CliType::Gemini => {
+                vec!["--approval-mode".to_string(), "yolo".to_string()]
+            }
+        }
+    }
 }
 
 pub fn parse_cli_type(arg: &str) -> Option<CliType> {

@@ -1,0 +1,10 @@
+      println!("💡 To test actual API connectivity, try:");
+        println!(
+            "   agentic-warden {} -p {} \"hello\"",
+            provider.compatible_with.first().unwrap_or(&AiType::Claude),
+            name
+        );
+
+        Ok(())
+    }
+}

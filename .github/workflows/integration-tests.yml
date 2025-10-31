@@ -1,0 +1,537 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [ master, develop ]
+  pull_request:
+    branches: [ master, develop ]
+  schedule:
+    # Run integration tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Type of integration tests to run'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+        - all
+        - oauth
+        - drive
+        - sync
+        - safety
+      dry_run:
+        description: 'Run in dry-run mode (no real API calls)'
+        required: false
+        default: false
+        type: boolean
+      cleanup_level:
+        description: 'Cleanup level after tests'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+        - none
+        - partial
+        - full
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  RUST_LOG: info
+
+jobs:
+  # Integration Test Configuration and Setup
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      should-run-integration: ${{ steps.check.outputs.should-run }}
+      test-type: ${{ steps.config.outputs.test-type }}
+      dry-run: ${{ steps.config.outputs.dry-run }}
+      cleanup-level: ${{ steps.config.outputs.cleanup-level }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Check if integration tests should run
+      id: check
+      run: |
+        if [[ "${{ github.event_name }}" == "schedule" ]]; then
+          echo "should-run=true" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          echo "should-run=true" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.ref }}" == "refs/heads/master" ]]; then
+          echo "should-run=true" >> $GITHUB_OUTPUT
+        else
+          # For PRs, check if they touch integration test related files
+          if git diff --name-only origin/${{ github.base_ref }} HEAD | grep -E "(integration|oauth|drive|sync|test)"; then
+            echo "should-run=true" >> $GITHUB_OUTPUT
+          else
+            echo "should-run=false" >> $GITHUB_OUTPUT
+          fi
+        fi
+
+    - name: Configure test parameters
+      id: config
+      run: |
+        TEST_TYPE="${{ github.event.inputs.test_type || 'all' }}"
+        DRY_RUN="${{ github.event.inputs.dry_run || 'false' }}"
+        CLEANUP_LEVEL="${{ github.event.inputs.cleanup_level || 'full' }}"
+
+        echo "test-type=$TEST_TYPE" >> $GITHUB_OUTPUT
+        echo "dry-run=$DRY_RUN" >> $GITHUB_OUTPUT
+        echo "cleanup-level=$CLEANUP_LEVEL" >> $GITHUB_OUTPUT
+
+        echo "Test configuration:"
+        echo "  Test Type: $TEST_TYPE"
+        echo "  Dry Run: $DRY_RUN"
+        echo "  Cleanup Level: $CLEANUP_LEVEL"
+
+  # Safety and Configuration Tests
+  safety-tests:
+    runs-on: ubuntu-latest
+    needs: setup
+    if: needs.setup.outputs.should-run-integration == 'true'
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y pkg-config libssl-dev
+
+    - name: Run safety configuration tests
+      run: |
+        export AGENTIC_WARDEN_RUN_INTEGRATION_TESTS=true
+        export AGENTIC_WARDEN_TEST_NAMESPACE_PREFIX="ci_${{ github.run_number }}_${{ github.sha }}_"
+        export AGENTIC_WARDEN_TEST_LOG_LEVEL=info
+        export AGENTIC_WARDEN_TEST_VERBOSE=true
+
+        echo "Running safety configuration tests..."
+        cargo test --test integration_config -- --nocapture
+        cargo test --test test_safety -- --nocapture
+
+    - name: Generate safety report
+      run: |
+        echo "Safety tests completed successfully"
+
+  # Mock Integration Tests (always run)
+  mock-integration-tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    needs: setup
+    if: always() && needs.setup.outputs.should-run-integration == 'true'
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Install system dependencies (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y pkg-config libssl-dev
+
+    - name: Run mock integration tests
+      run: |
+        echo "Running mock integration tests on ${{ matrix.os }}..."
+
+        # Run existing mock tests
+        cargo test --test oauth_mock_test -- --nocapture
+        cargo test --test sync_isolated_test -- --nocapture
+        cargo test --test auth_sync_e2e_test -- --nocapture
+
+    - name: Upload mock test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: mock-test-results-${{ matrix.os }}
+        path: |
+          target/nextest/
+          target/ci/
+        retention-days: 7
+
+  # Real OAuth Integration Tests
+  oauth-integration-tests:
+    runs-on: ubuntu-latest
+    needs: [setup, safety-tests]
+    if: |
+      always() &&
+      needs.setup.outputs.should-run-integration == 'true' &&
+      (needs.setup.outputs.test-type == 'all' || needs.setup.outputs.test-type == 'oauth') &&
+      needs.safety-tests.result == 'success'
+    environment: integration-testing
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y pkg-config libssl-dev
+
+    - name: Setup test environment
+      run: |
+        export AGENTIC_WARDEN_RUN_INTEGRATION_TESTS=true
+        export AGENTIC_WARDEN_TEST_NAMESPACE_PREFIX="ci_oauth_${{ github.run_number }}_${{ github.sha }}_"
+        export AGENTIC_WARDEN_TEST_LOG_LEVEL=debug
+        export AGENTIC_WARDEN_TEST_VERBOSE=true
+        export AGENTIC_WARDEN_TEST_DRY_RUN=${{ needs.setup.outputs.dry-run }}
+
+        echo "OAuth test environment configured"
+        echo "Dry run: $AGENTIC_WARDEN_TEST_DRY_RUN"
+
+    - name: Run OAuth configuration verification
+      run: |
+        export AGENTIC_WARDEN_RUN_INTEGRATION_TESTS=true
+        cargo test --test oauth_integration_test test_oauth_configuration_verification -- --nocapture
+
+    - name: Run OAuth URL generation tests
+      if: needs.setup.outputs.dry-run == 'true'
+      run: |
+        export AGENTIC_WARDEN_RUN_INTEGRATION_TESTS=true
+        export AGENTIC_WARDEN_TEST_DRY_RUN=true
+        export AGENTIC_WARDEN_TEST_CLIENT_ID=${{ secrets.AGENTIC_WARDEN_TEST_CLIENT_ID }}
+        export AGENTIC_WARDEN_TEST_CLIENT_SECRET=${{ secrets.AGENTIC_WARDEN_TEST_CLIENT_SECRET }}
+
+        cargo test --test oauth_integration_test test_real_oauth_authorization_url_generation -- --ignored --nocapture
+
+    - name: Run OAuth flow simulation tests
+      run: |
+        export AGENTIC_WARDEN_RUN_INTEGRATION_TESTS=true
+        export AGENTIC_WARDEN_TEST_DRY_RUN=${{ needs.setup.outputs.dry-run }}
+
+        if [[ "$AGENTIC_WARDEN_TEST_DRY_RUN" == "true" ]]; then
+          echo "Running OAuth flow simulation in dry-run mode"
+          export AGENTIC_WARDEN_TEST_CLIENT_ID=dummy_client_id
+          export AGENTIC_WARDEN_TEST_CLIENT_SECRET=dummy_client_secret
+        else
+          echo "Running OAuth flow simulation with real credentials"
+          export AGENTIC_WARDEN_TEST_CLIENT_ID=${{ secrets.AGENTIC_WARDEN_TEST_CLIENT_ID }}
+          export AGENTIC_WARDEN_TEST_CLIENT_SECRET=${{ secrets.AGENTIC_WARDEN_TEST_CLIENT_SECRET }}
+        fi
+
+        cargo test --test oauth_integration_test test_real_oauth_complete_flow_simulation -- --ignored --nocapture
+
+    - name: Upload OAuth test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: oauth-test-results
+        path: |
+          target/ci/
+          target/nextest/
+        retention-days: 7
+
+  # Real Google Drive API Integration Tests
+  drive-integration-tests:
+    runs-on: ubuntu-latest
+    needs: [setup, safety-tests, oauth-integration-tests]
+    if: |
+      always() &&
+      needs.setup.outputs.should-run-integration == 'true' &&
+      (needs.setup.outputs.test-type == 'all' || needs.setup.outputs.test-type == 'drive') &&
+      needs.safety-tests.result == 'success' &&
+      (needs.oauth-integration-tests.result == 'success' || needs.setup.outputs.dry-run == 'true')
+    environment: integration-testing
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y pkg-config libssl-dev
+
+    - name: Setup Google Drive test environment
+      run: |
+        export AGENTIC_WARDEN_RUN_INTEGRATION_TESTS=true
+        export AGENTIC_WARDEN_TEST_NAMESPACE_PREFIX="ci_drive_${{ github.run_number }}_${{ github.sha }}_"
+        export AGENTIC_WARDEN_TEST_LOG_LEVEL=debug
+        export AGENTIC_WARDEN_TEST_VERBOSE=true
+        export AGENTIC_WARDEN_TEST_DRY_RUN=${{ needs.setup.outputs.dry-run }}
+        export AGENTIC_WARDEN_TEST_RATE_LIMIT_DELAY_MS=2000
+
+        echo "Google Drive test environment configured"
+        echo "Dry run: $AGENTIC_WARDEN_TEST_DRY_RUN"
+
+    - name: Run Drive configuration verification
+      run: |
+        export AGENTIC_WARDEN_RUN_INTEGRATION_TESTS=true
+        cargo test --test google_drive_integration_test test_drive_configuration_verification -- --nocapture
+
+    - name: Run Google Drive folder tests
+      if: needs.setup.outputs.dry-run == 'true'
+      run: |
+        export AGENTIC_WARDEN_RUN_INTEGRATION_TESTS=true
+        export AGENTIC_WARDEN_TEST_DRY_RUN=true
+        export AGENTIC_WARDEN_TEST_CLIENT_ID=dummy_client_id
+        export AGENTIC_WARDEN_TEST_CLIENT_SECRET=dummy_client_secret
+
+        # These will be skipped in dry-run mode but test the flow
+        cargo test --test google_drive_integration_test test_real_drive_folder_creation -- --ignored --nocapture
+
+    - name: Run Google Drive file operation tests (dry-run)
+      if: needs.setup.outputs.dry-run == 'true'
+      run: |
+        export AGENTIC_WARDEN_RUN_INTEGRATION_TESTS=true
+        export AGENTIC_WARDEN_TEST_DRY_RUN=true
+        export AGENTIC_WARDEN_TEST_CLIENT_ID=dummy_client_id
+        export AGENTIC_WARDEN_TEST_CLIENT_SECRET=dummy_client_secret
+
+        # Test file operations in dry-run mode
+        cargo test --test google_drive_integration_test test_real_drive_file_upload -- --ignored --nocapture
+        cargo test --test google_drive_integration_test test_real_drive_file_download -- --ignored --nocapture
+        cargo test --test google_drive_integration_test test_real_drive_file_listing -- --ignored --nocapture
+
+    - name: Run Google Drive error handling tests
+      run: |
+        export AGENTIC_WARDEN_RUN_INTEGRATION_TESTS=true
+        export AGENTIC_WARDEN_TEST_DRY_RUN=${{ needs.setup.outputs.dry-run }}
+
+        if [[ "$AGENTIC_WARDEN_TEST_DRY_RUN" == "true" ]]; then
+          export AGENTIC_WARDEN_TEST_CLIENT_ID=dummy_client_id
+          export AGENTIC_WARDEN_TEST_CLIENT_SECRET=dummy_client_secret
+        else
+          export AGENTIC_WARDEN_TEST_CLIENT_ID=${{ secrets.AGENTIC_WARDEN_TEST_CLIENT_ID }}
+          export AGENTIC_WARDEN_TEST_CLIENT_SECRET=${{ secrets.AGENTIC_WARDEN_TEST_CLIENT_SECRET }}
+        fi
+
+        cargo test --test google_drive_integration_test test_real_drive_error_handling -- --ignored --nocapture
+
+    - name: Upload Drive test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: drive-test-results
+        path: |
+          target/ci/
+          target/nextest/
+        retention-days: 7
+
+  # End-to-End Sync Workflow Tests
+  sync-integration-tests:
+    runs-on: ubuntu-latest
+    needs: [setup, safety-tests, drive-integration-tests]
+    if: |
+      always() &&
+      needs.setup.outputs.should-run-integration == 'true' &&
+      (needs.setup.outputs.test-type == 'all' || needs.setup.outputs.test-type == 'sync') &&
+      needs.safety-tests.result == 'success' &&
+      (needs.drive-integration-tests.result == 'success' || needs.setup.outputs.dry-run == 'true')
+    environment: integration-testing
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y pkg-config libssl-dev
+
+    - name: Setup sync workflow test environment
+      run: |
+        export AGENTIC_WARDEN_RUN_INTEGRATION_TESTS=true
+        export AGENTIC_WARDEN_TEST_NAMESPACE_PREFIX="ci_sync_${{ github.run_number }}_${{ github.sha }}_"
+        export AGENTIC_WARDEN_TEST_LOG_LEVEL=debug
+        export AGENTIC_WARDEN_TEST_VERBOSE=true
+        export AGENTIC_WARDEN_TEST_DRY_RUN=${{ needs.setup.outputs.dry-run }}
+        export AGENTIC_WARDEN_TEST_RATE_LIMIT_DELAY_MS=3000
+        export AGENTIC_WARDEN_TEST_MAX_FILE_SIZE=5242880  # 5MB
+
+        echo "Sync workflow test environment configured"
+        echo "Dry run: $AGENTIC_WARDEN_TEST_DRY_RUN"
+
+    - name: Run sync configuration verification
+      run: |
+        export AGENTIC_WARDEN_RUN_INTEGRATION_TESTS=true
+        cargo test --test sync_workflow_integration_test test_sync_workflow_configuration_verification -- --nocapture
+
+    - name: Run sync workflow tests (dry-run)
+      if: needs.setup.outputs.dry-run == 'true'
+      run: |
+        export AGENTIC_WARDEN_RUN_INTEGRATION_TESTS=true
+        export AGENTIC_WARDEN_TEST_DRY_RUN=true
+        export AGENTIC_WARDEN_TEST_CLIENT_ID=dummy_client_id
+        export AGENTIC_WARDEN_TEST_CLIENT_SECRET=dummy_client_secret
+
+        # Test sync workflows in dry-run mode
+        cargo test --test sync_workflow_integration_test test_end_to_end_sync_workflow -- --ignored --nocapture
+        cargo test --test sync_workflow_integration_test test_incremental_sync_workflow -- --ignored --nocapture
+
+    - name: Run sync compression tests
+      run: |
+        export AGENTIC_WARDEN_RUN_INTEGRATION_TESTS=true
+        export AGENTIC_WARDEN_TEST_DRY_RUN=${{ needs.setup.outputs.dry-run }}
+
+        if [[ "$AGENTIC_WARDEN_TEST_DRY_RUN" == "true" ]]; then
+          export AGENTIC_WARDEN_TEST_CLIENT_ID=dummy_client_id
+          export AGENTIC_WARDEN_TEST_CLIENT_SECRET=dummy_client_secret
+        else
+          export AGENTIC_WARDEN_TEST_CLIENT_ID=${{ secrets.AGENTIC_WARDEN_TEST_CLIENT_ID }}
+          export AGENTIC_WARDEN_TEST_CLIENT_SECRET=${{ secrets.AGENTIC_WARDEN_TEST_CLIENT_SECRET }}
+        fi
+
+        cargo test --test sync_workflow_integration_test test_sync_compression_types -- --ignored --nocapture
+
+    - name: Run sync error recovery tests
+      run: |
+        export AGENTIC_WARDEN_RUN_INTEGRATION_TESTS=true
+        export AGENTIC_WARDEN_TEST_DRY_RUN=${{ needs.setup.outputs.dry-run }}
+
+        if [[ "$AGENTIC_WARDEN_TEST_DRY_RUN" == "true" ]]; then
+          export AGENTIC_WARDEN_TEST_CLIENT_ID=dummy_client_id
+          export AGENTIC_WARDEN_TEST_CLIENT_SECRET=dummy_client_secret
+        else
+          export AGENTIC_WARDEN_TEST_CLIENT_ID=${{ secrets.AGENTIC_WARDEN_TEST_CLIENT_ID }}
+          export AGENTIC_WARDEN_TEST_CLIENT_SECRET=${{ secrets.AGENTIC_WARDEN_TEST_CLIENT_SECRET }}
+        fi
+
+        cargo test --test sync_workflow_integration_test test_sync_error_recovery -- --ignored --nocapture
+
+    - name: Upload sync test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: sync-test-results
+        path: |
+          target/ci/
+          target/nextest/
+        retention-days: 7
+
+  # Integration Test Results Summary
+  integration-summary:
+    runs-on: ubuntu-latest
+    needs: [setup, safety-tests, mock-integration-tests, oauth-integration-tests, drive-integration-tests, sync-integration-tests]
+    if: always() && needs.setup.outputs.should-run-integration == 'true'
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download all test results
+      uses: actions/download-artifact@v3
+      if: always()
+      with:
+        path: test-results
+
+    - name: Generate integration test summary
+      run: |
+        echo "# Integration Test Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## Test Configuration" >> $GITHUB_STEP_SUMMARY
+        echo "- Test Type: ${{ needs.setup.outputs.test-type }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Dry Run: ${{ needs.setup.outputs.dry-run }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Cleanup Level: ${{ needs.setup.outputs.cleanup-level }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Run Number: ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Commit: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+        echo "| Test Suite | Result |" >> $GITHUB_STEP_SUMMARY
+        echo "|------------|--------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Safety Tests | ${{ needs.safety-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Mock Integration Tests | ${{ needs.mock-integration-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| OAuth Integration Tests | ${{ needs.oauth-integration-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Drive Integration Tests | ${{ needs.drive-integration-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Sync Integration Tests | ${{ needs.sync-integration-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        # Check if all tests passed
+        if [[ "${{ needs.safety-tests.result }}" == "success" &&
+              "${{ needs.mock-integration-tests.result }}" == "success" &&
+              ("${{ needs.oauth-integration-tests.result }}" == "success" || "${{ needs.setup.outputs.dry-run }}" == "true") &&
+              ("${{ needs.drive-integration-tests.result }}" == "success" || "${{ needs.setup.outputs.dry-run }}" == "true") &&
+              ("${{ needs.sync-integration-tests.result }}" == "success" || "${{ needs.setup.outputs.dry-run }}" == "true") ]]; then
+          echo "## ✅ Integration Tests Passed" >> $GITHUB_STEP_SUMMARY
+          echo "All integration tests completed successfully!" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "## ❌ Integration Tests Failed" >> $GITHUB_STEP_SUMMARY
+          echo "Some integration tests failed. Check the individual job results for details." >> $GITHUB_STEP_SUMMARY
+        fi
+
+    - name: Cleanup test artifacts
+      if: needs.setup.outputs.cleanup-level == 'full'
+      run: |
+        echo "Cleaning up test artifacts..."
+        rm -rf test-results || true
+        echo "Cleanup completed"
+
+  # Notification (optional)
+  notify:
+    runs-on: ubuntu-latest
+    needs: [setup, integration-summary]
+    if: always() && needs.setup.outputs.should-run-integration == 'true' && failure()
+    steps:
+    - name: Notify on failure
+      run: |
+        echo "Integration tests failed for run ${{ github.run_number }}"
+        echo "Repository: ${{ github.repository }}"
+        echo "Commit: ${{ github.sha }}"
+        echo "Check the workflow results for details"

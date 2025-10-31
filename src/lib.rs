@@ -14,9 +14,12 @@ pub mod signal;
 pub mod supervisor;
 pub mod sync;
 pub mod task_record;
+pub mod utils;
 pub mod wait_mode;
 
 pub mod cli_manager;
+pub mod provider;
+pub mod tui;
 
 // Re-export commonly used types for convenience
 pub use process_tree::{ProcessTreeError, ProcessTreeInfo, get_process_tree};

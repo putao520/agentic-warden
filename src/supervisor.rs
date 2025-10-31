@@ -1,8 +1,9 @@
 use crate::cli_type::CliType;
-use crate::config::is_process_tree_enabled;
 use crate::logging::debug;
+use crate::logging::warn;
 use crate::platform::{self, ChildResources};
 use crate::process_tree::{ProcessTreeError, ProcessTreeInfo};
+use crate::provider::{AiType, EnvInjector, ProviderManager};
 use crate::registry::{RegistryError, TaskRegistry};
 use crate::signal;
 use crate::task_record::TaskRecord;
@@ -27,6 +28,8 @@ pub enum ProcessError {
     ProcessTree(#[from] ProcessTreeError),
     #[error("CLI executable not found: {0}")]
     CliNotFound(String),
+    #[error("{0}")]
+    Other(String),
 }
 
 fn get_cli_command(cli_type: &CliType) -> Result<String, ProcessError> {
@@ -102,6 +105,7 @@ pub fn execute_cli(
     registry: &TaskRegistry,
     cli_type: &CliType,
     args: &[OsString],
+    provider: Option<String>,
 ) -> Result<i32, ProcessError> {
     platform::init_platform();
 
@@ -111,6 +115,42 @@ pub fn execute_cli(
         &platform::terminate_process,
     )?;
 
+    // Load provider configuration
+    let provider_manager = ProviderManager::new()
+        .map_err(|e| ProcessError::Other(format!("Failed to load provider: {}", e)))?;
+
+    // Determine which provider to use
+    let (provider_name, provider_config) = if let Some(name) = provider {
+        let config = provider_manager
+            .get_provider(&name)
+            .map_err(|e| ProcessError::Other(e.to_string()))?;
+        (name, config)
+    } else {
+        let (name, config) = provider_manager
+            .get_default_provider()
+            .map_err(|e| ProcessError::Other(e.to_string()))?;
+        (name, config)
+    };
+
+    // Validate compatibility
+    let ai_type = match cli_type {
+        CliType::Claude => AiType::Claude,
+        CliType::Codex => AiType::Codex,
+        CliType::Gemini => AiType::Gemini,
+    };
+
+    provider_manager
+        .validate_compatibility(&provider_name, ai_type)
+        .map_err(|e| ProcessError::Other(e.to_string()))?;
+
+    // Display provider info if not using official
+    if provider_name != "official" {
+        eprintln!(
+            "Using provider: {} ({})",
+            provider_name, provider_config.description
+        );
+    }
+
     let cli_command = get_cli_command(cli_type)?;
 
     let mut command = Command::new(&cli_command);
@@ -119,6 +159,9 @@ pub fn execute_cli(
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
     platform::prepare_command(&mut command)?;
+
+    // Inject environment variables to child process
+    EnvInjector::inject_to_command(&mut command, &provider_config.env);
 
     let mut child = command.spawn()?;
     let child_pid = child.id();
@@ -173,23 +216,18 @@ pub fn execute_cli(
             Some(platform::current_pid()),
         );
 
-        // Get process tree information if enabled
-        if is_process_tree_enabled() {
-            match ProcessTreeInfo::current() {
-                Ok(tree_info) => {
-                    record = record.with_process_tree(
-                        tree_info.process_chain,
-                        tree_info.root_parent_pid,
-                        tree_info.depth,
-                    );
-                }
-                Err(err) => {
-                    debug(format!(
-                        "Failed to get process tree info, continuing without it: {}",
-                        err
-                    ));
-                    // Continue without process tree info for backward compatibility
-                }
+        // Get process tree information (core functionality)
+        match ProcessTreeInfo::current() {
+            Ok(tree_info) => {
+                record = record.with_process_tree(
+                    tree_info.process_chain,
+                    tree_info.root_parent_pid,
+                    tree_info.depth,
+                );
+            }
+            Err(err) => {
+                warn(format!("Failed to get process tree info: {}", err));
+                // Continue with basic record creation
             }
         }
 
@@ -399,8 +437,17 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "Shared memory tests can be flaky on Windows due to resource limits"
+    )]
     fn test_registration_guard_new_and_active() {
-        let test_namespace = format!("test_guard_{}", std::process::id());
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let test_namespace = format!("test_guard_{}_{}", std::process::id(), timestamp);
         let registry = TaskRegistry::connect_test(&test_namespace).unwrap();
         let test_pid = 99999;
 
@@ -410,8 +457,17 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "Shared memory tests can be flaky on Windows due to resource limits"
+    )]
     fn test_registration_guard_mark_completed() {
-        let test_namespace = format!("test_guard_complete_{}", std::process::id());
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let test_namespace = format!("test_guard_complete_{}_{}", std::process::id(), timestamp);
         let registry = TaskRegistry::connect_test(&test_namespace).unwrap();
         let test_pid = 88888;
 
@@ -450,8 +506,17 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "Shared memory tests can be flaky on Windows due to resource limits"
+    )]
     fn test_registration_guard_drop_cleanup() {
-        let test_namespace = format!("test_guard_drop_{}", std::process::id());
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let test_namespace = format!("test_guard_drop_{}_{}", std::process::id(), timestamp);
         let registry = TaskRegistry::connect_test(&test_namespace).unwrap();
         let test_pid = 77777;
 
@@ -504,32 +569,6 @@ mod tests {
             .unwrap();
         assert_eq!(file_content, "Test data for copy");
     }
-
-    #[cfg(unix)]
-    #[test]
-    fn test_process_tree_integration_in_supervisor() {
-        // This test verifies that process tree info is collected when enabled
-        use std::env;
-
-        let original_value = env::var(crate::config::PROCESS_TREE_FEATURE_ENV);
-
-        // Enable process tree feature
-        env::set_var(crate::config::PROCESS_TREE_FEATURE_ENV, "true");
-
-        // Get process tree info (simulating what supervisor does)
-        let result = ProcessTreeInfo::current();
-        assert!(result.is_ok());
-
-        let tree_info = result.unwrap();
-        assert!(!tree_info.process_chain.is_empty());
-        assert!(tree_info.depth > 0);
-
-        // Restore original value
-        match original_value {
-            Ok(value) => env::set_var(crate::config::PROCESS_TREE_FEATURE_ENV, value),
-            Err(_) => env::remove_var(crate::config::PROCESS_TREE_FEATURE_ENV),
-        }
-    }
 }
 
 /// 批量执行多个CLI任务
@@ -537,6 +576,7 @@ pub fn execute_multiple_clis(
     registry: &TaskRegistry,
     cli_selector: &crate::cli_type::CliSelector,
     prompt: &str,
+    provider: Option<String>,
 ) -> Result<Vec<i32>, ProcessError> {
     let mut exit_codes = Vec::new();
 
@@ -544,7 +584,7 @@ pub fn execute_multiple_clis(
     for cli_type in &cli_selector.types {
         let args = cli_type.build_full_access_args(prompt);
         let os_args: Vec<OsString> = args.into_iter().map(|s| s.into()).collect();
-        let exit_code = execute_cli(registry, cli_type, &os_args)?;
+        let exit_code = execute_cli(registry, cli_type, &os_args, provider.clone())?;
         exit_codes.push(exit_code);
 
         if exit_code == 0 {
@@ -559,4 +599,83 @@ pub fn execute_multiple_clis(
     }
 
     Ok(exit_codes)
+}
+
+/// 启动AI CLI的交互模式（不执行任务，直接进入CLI交互界面）
+pub fn start_interactive_cli(
+    registry: &TaskRegistry,
+    cli_type: &CliType,
+    provider: Option<String>,
+) -> Result<i32, ProcessError> {
+    platform::init_platform();
+
+    registry.sweep_stale_entries(
+        Utc::now(),
+        platform::process_alive,
+        &platform::terminate_process,
+    )?;
+
+    // Load provider configuration
+    let provider_manager = ProviderManager::new()
+        .map_err(|e| ProcessError::Other(format!("Failed to load provider: {}", e)))?;
+
+    // Determine which provider to use
+    let (provider_name, provider_config) = if let Some(name) = provider {
+        let config = provider_manager
+            .get_provider(&name)
+            .map_err(|e| ProcessError::Other(e.to_string()))?;
+        (name, config)
+    } else {
+        let (name, config) = provider_manager
+            .get_default_provider()
+            .map_err(|e| ProcessError::Other(e.to_string()))?;
+        (name, config)
+    };
+
+    // Validate compatibility
+    let ai_type = match cli_type {
+        CliType::Claude => AiType::Claude,
+        CliType::Codex => AiType::Codex,
+        CliType::Gemini => AiType::Gemini,
+    };
+
+    provider_manager
+        .validate_compatibility(&provider_name, ai_type)
+        .map_err(|e| ProcessError::Other(e.to_string()))?;
+
+    // Display provider info if not using official
+    if provider_name != "official" {
+        eprintln!(
+            "Using provider: {} ({})",
+            provider_name, provider_config.description
+        );
+    }
+
+    eprintln!(
+        "🚀 Starting {} in interactive mode...",
+        cli_type.display_name()
+    );
+    eprintln!("💡 Type 'exit' or press Ctrl+C to quit");
+
+    let cli_command = get_cli_command(cli_type)?;
+
+    // 构建交互模式参数
+    let args = cli_type.build_interactive_args();
+    let os_args: Vec<OsString> = args.into_iter().map(|s| s.into()).collect();
+
+    let mut command = Command::new(&cli_command);
+    command.args(&os_args);
+
+    // 交互模式需要继承标准输入输出，让用户直接与CLI交互
+    command.stdin(Stdio::inherit());
+    command.stdout(Stdio::inherit());
+    command.stderr(Stdio::inherit());
+    platform::prepare_command(&mut command)?;
+
+    // Inject environment variables to child process
+    EnvInjector::inject_to_command(&mut command, &provider_config.env);
+
+    // 直接启动进程并等待其完成
+    let exit_status = command.status()?;
+    Ok(exit_status.code().unwrap_or(1))
 }

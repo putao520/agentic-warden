@@ -1,8 +1,7 @@
 use crate::config::{
     LEGACY_WAIT_INTERVAL_ENV, MAX_WAIT_DURATION, WAIT_INTERVAL_DEFAULT, WAIT_INTERVAL_ENV,
-    is_process_tree_enabled,
 };
-use crate::logging::{debug, warn};
+use crate::logging::warn;
 use crate::platform;
 use crate::process_tree::{ProcessTreeError, ProcessTreeInfo};
 use crate::registry::{CleanupReason, RegistryEntry, RegistryError, TaskRegistry};
@@ -30,20 +29,13 @@ pub fn run() -> Result<(), WaitError> {
     let mut processed_pids: HashSet<u32> = HashSet::new();
     let mut report = TaskReport::new();
 
-    // Get current process root parent for task filtering (if enabled)
-    let current_root_parent = if is_process_tree_enabled() {
-        match ProcessTreeInfo::current() {
-            Ok(tree_info) => tree_info.root_parent_pid,
-            Err(err) => {
-                debug(format!(
-                    "Failed to get process tree info, waiting for all tasks: {}",
-                    err
-                ));
-                None
-            }
+    // Get current process root parent for task filtering (core functionality)
+    let current_root_parent = match ProcessTreeInfo::current() {
+        Ok(tree_info) => tree_info.root_parent_pid,
+        Err(err) => {
+            warn(format!("Failed to get process tree info: {}", err));
+            None
         }
-    } else {
-        None // Process tree feature disabled, wait for all tasks
     };
 
     loop {
