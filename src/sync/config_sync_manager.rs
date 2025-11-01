@@ -5,6 +5,7 @@ use super::google_drive_service::GoogleDriveService;
 use super::oauth_client::OAuthClient;
 use super::smart_oauth::SmartOAuthAuthenticator;
 use super::sync_config_manager::SyncConfigManager;
+use crate::config::{AUTH_DIRECTORY, AUTH_FILE_NAME};
 use chrono::{Duration, Utc};
 use dialoguer::Confirm;
 use serde::{Deserialize, Serialize};
@@ -14,9 +15,6 @@ use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use tokio::task::spawn_blocking;
 use tracing::{error, info, warn};
-
-const AUTH_FILE_NAME: &str = "auth.json";
-const AUTH_DIRECTORY: &str = ".agentic-warden";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct StoredAuthState {
@@ -458,7 +456,7 @@ impl ConfigSyncManager {
             println!("2. Create a project or select existing one");
             println!("3. Enable Google Drive API");
             println!("4. Create OAuth 2.0 Client ID credentials");
-            println!("5. Add http://localhost:8080/callback to authorized redirect URIs");
+            println!("5. Add urn:ietf:wg:oauth:2.0:oob to authorized redirect URIs");
             println!();
             println!("We'll store these credentials securely in ~/.agentic-warden/auth.json");
             println!();

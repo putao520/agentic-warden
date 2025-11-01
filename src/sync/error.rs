@@ -52,6 +52,9 @@ pub enum SyncError {
 
     #[error("General error: {0}")]
     GeneralError(#[from] anyhow::Error),
+
+    #[error("Feature not implemented")]
+    NotImplemented,
 }
 
 pub type SyncResult<T> = Result<T, SyncError>;

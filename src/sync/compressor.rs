@@ -115,8 +115,8 @@ impl TarGzCompressor {
 impl Compressor for TarGzCompressor {
     fn compress_directory(
         &self,
-        source_dir: &Path,
-        output_file: &Path,
+        _source_dir: &Path,
+        _output_file: &Path,
     ) -> SyncResult<CompressionResult> {
         // Implementation would go here
         Err(SyncError::NotImplemented)
@@ -124,8 +124,8 @@ impl Compressor for TarGzCompressor {
 
     fn extract_archive(
         &self,
-        archive_file: &Path,
-        target_dir: &Path,
+        _archive_file: &Path,
+        _target_dir: &Path,
     ) -> SyncResult<ExtractionResult> {
         // Implementation would go here
         Err(SyncError::NotImplemented)
@@ -153,8 +153,8 @@ impl ZipCompressor {
 impl Compressor for ZipCompressor {
     fn compress_directory(
         &self,
-        source_dir: &Path,
-        output_file: &Path,
+        _source_dir: &Path,
+        _output_file: &Path,
     ) -> SyncResult<CompressionResult> {
         // Implementation would go here
         Err(SyncError::NotImplemented)
@@ -162,8 +162,8 @@ impl Compressor for ZipCompressor {
 
     fn extract_archive(
         &self,
-        archive_file: &Path,
-        target_dir: &Path,
+        _archive_file: &Path,
+        _target_dir: &Path,
     ) -> SyncResult<ExtractionResult> {
         // Implementation would go here
         Err(SyncError::NotImplemented)
@@ -191,8 +191,8 @@ impl SevenZipCompressor {
 impl Compressor for SevenZipCompressor {
     fn compress_directory(
         &self,
-        source_dir: &Path,
-        output_file: &Path,
+        _source_dir: &Path,
+        _output_file: &Path,
     ) -> SyncResult<CompressionResult> {
         // Implementation would go here
         Err(SyncError::NotImplemented)
@@ -200,8 +200,8 @@ impl Compressor for SevenZipCompressor {
 
     fn extract_archive(
         &self,
-        archive_file: &Path,
-        target_dir: &Path,
+        _archive_file: &Path,
+        _target_dir: &Path,
     ) -> SyncResult<ExtractionResult> {
         // Implementation would go here
         Err(SyncError::NotImplemented)
@@ -220,7 +220,6 @@ impl Compressor for SevenZipCompressor {
 #[allow(dead_code)]
 pub mod utils {
     use super::*;
-    use std::time::Instant;
 
     /// Get directory size recursively
     pub fn get_directory_size(dir: &Path) -> SyncResult<u64> {

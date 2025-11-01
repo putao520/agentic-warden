@@ -154,7 +154,7 @@ impl Screen for ProviderScreen {
                     .provider_manager
                     .get_default_provider()
                     .map(|(name, _)| name.clone())
-                    .unwrap_or_else(|_| "official".to_string());
+                    .unwrap_or_else(|| "official".to_string());
 
                 self.list_widget
                     .render(frame, chunks[1], |name, is_selected| {

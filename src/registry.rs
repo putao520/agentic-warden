@@ -403,10 +403,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        windows,
-        ignore = "Shared memory tests can be flaky on Windows due to resource limits"
-    )]
     fn test_registry_register_and_remove() {
         use std::time::{SystemTime, UNIX_EPOCH};
         let timestamp = SystemTime::now()
@@ -439,10 +435,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        windows,
-        ignore = "Shared memory tests can be flaky on Windows due to resource limits"
-    )]
     fn test_registry_mark_completed() {
         use std::time::{SystemTime, UNIX_EPOCH};
         let timestamp = SystemTime::now()
@@ -475,10 +467,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        windows,
-        ignore = "Shared memory tests can be flaky on Windows due to resource limits"
-    )]
     fn test_get_completed_unread_tasks() {
         use std::time::{SystemTime, UNIX_EPOCH};
         let timestamp = SystemTime::now()
@@ -510,10 +498,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        windows,
-        ignore = "Shared memory tests can be flaky on Windows due to resource limits"
-    )]
     fn test_duplicate_register_overwrites() {
         use std::time::{SystemTime, UNIX_EPOCH};
         let timestamp = SystemTime::now()
@@ -545,10 +529,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        windows,
-        ignore = "Shared memory tests can be flaky on Windows due to resource limits"
-    )]
     fn test_remove_nonexistent_returns_none() {
         use std::time::{SystemTime, UNIX_EPOCH};
         let timestamp = SystemTime::now()

@@ -1,0 +1,345 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/putao520/agentic-warden/main/schema/providers.json",
+  "title": "Agentic Warden Providers Configuration",
+  "description": "Configuration schema for AI CLI providers in Agentic Warden",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "format": "uri",
+      "description": "JSON Schema reference"
+    },
+    "providers": {
+      "type": "object",
+      "patternProperties": {
+        "^[a-zA-Z][a-zA-Z0-9_-]*$": {
+          "$ref": "#/$defs/Provider"
+        }
+      },
+      "description": "Map of provider configurations keyed by provider ID"
+    },
+    "default_provider": {
+      "type": "string",
+      "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+      "description": "Default provider ID to use when none is specified"
+    },
+    "user_tokens": {
+      "type": "object",
+      "patternProperties": {
+        "^[a-zA-Z][a-zA-Z0-9_-]*$": {
+          "$ref": "#/$defs/RegionalTokens"
+        }
+      },
+      "description": "User stored tokens for each provider (regional)"
+    }
+  },
+  "required": ["providers", "default_provider"],
+  "additionalProperties": false,
+  "$defs": {
+    "Provider": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Display name of the provider"
+        },
+        "description": {
+          "type": "string",
+          "description": "Description of what this provider offers"
+        },
+        "icon": {
+          "type": "string",
+          "description": "Emoji or icon representing the provider"
+        },
+        "official": {
+          "type": "boolean",
+          "description": "Whether this is an official provider",
+          "default": false
+        },
+        "protected": {
+          "type": "boolean",
+          "description": "Whether this provider is protected from deletion",
+          "default": false
+        },
+        "custom": {
+          "type": "boolean",
+          "description": "Whether this is a user-created custom provider",
+          "default": false
+        },
+        "support_modes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SupportMode"
+          },
+          "description": "Supported modes for this provider",
+          "default": []
+        },
+        "compatible_with": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["codex", "claude", "gemini"]
+          },
+          "description": "AI types this provider is compatible with",
+          "minItems": 1
+        },
+        "validation_endpoint": {
+          "type": "string",
+          "format": "uri",
+          "description": "Endpoint to validate API credentials"
+        },
+        "category": {
+          "type": "string",
+          "description": "Category of the provider (e.g., Official, Gateway, Local Proxy)"
+        },
+        "website": {
+          "type": "string",
+          "format": "uri",
+          "description": "Provider website URL"
+        },
+        "regions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Supported regions",
+          "default": []
+        },
+        "env": {
+          "type": "object",
+          "patternProperties": {
+            "^[A-Z][A-Z0-9_]*$": {
+              "type": "string",
+              "description": "Environment variable value"
+            }
+          },
+          "description": "Environment variables to inject",
+          "default": {}
+        }
+      },
+      "required": ["name", "description", "compatible_with", "env"],
+      "additionalProperties": false
+    },
+    "SupportMode": {
+      "type": "object",
+      "properties": {
+        "mode_type": {
+          "type": "string",
+          "enum": ["claude_code_native", "openai_compatible", "gemini_native"],
+          "description": "Type of support mode"
+        },
+        "name": {
+          "type": "string",
+          "description": "Display name for this mode"
+        },
+        "description": {
+          "type": "string",
+          "description": "Description of this mode"
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255,
+          "description": "Priority for recommendations (higher = more recommended)",
+          "default": 100
+        },
+        "config": {
+          "$ref": "#/$defs/ModeConfig",
+          "description": "Configuration for this mode"
+        }
+      },
+      "required": ["mode_type", "name", "description", "priority", "config"],
+      "additionalProperties": false
+    },
+    "ModeConfig": {
+      "type": "object",
+      "properties": {
+        "regional_urls": {
+          "type": "object",
+          "patternProperties": {
+            "^(mainland_china|international)$": {
+              "$ref": "#/$defs/RegionalConfig"
+            }
+          },
+          "description": "Regional URL configurations"
+        },
+        "models": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Model"
+          },
+          "description": "Available models for this mode"
+        },
+        "additional_env": {
+          "type": "object",
+          "patternProperties": {
+            "^[A-Z][A-Z0-9_]*$": {
+              "type": "string"
+            }
+          },
+          "description": "Additional environment variables"
+        },
+        "rate_limit": {
+          "$ref": "#/$defs/RateLimit",
+          "description": "Rate limiting information"
+        }
+      },
+      "required": ["regional_urls"],
+      "additionalProperties": false
+    },
+    "RegionalConfig": {
+      "type": "object",
+      "properties": {
+        "base_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Base URL for this region"
+        },
+        "auth_env_var": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "description": "Authentication environment variable name"
+        },
+        "recommended_model": {
+          "type": "string",
+          "description": "Recommended model for this region"
+        },
+        "features": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Region-specific features"
+        }
+      },
+      "required": ["base_url", "auth_env_var"],
+      "additionalProperties": false
+    },
+    "Model": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Model identifier"
+        },
+        "name": {
+          "type": "string",
+          "description": "Display name of the model"
+        },
+        "description": {
+          "type": "string",
+          "description": "Model description"
+        },
+        "context_length": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum context length in tokens"
+        },
+        "pricing": {
+          "$ref": "#/$defs/ModelPricing",
+          "description": "Pricing information"
+        }
+      },
+      "required": ["id", "name"],
+      "additionalProperties": false
+    },
+    "ModelPricing": {
+      "type": "object",
+      "properties": {
+        "input_price_per_1k": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Input token price per 1K tokens"
+        },
+        "output_price_per_1k": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Output token price per 1K tokens"
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$",
+          "description": "Currency code (e.g., USD, EUR)"
+        }
+      },
+      "additionalProperties": false
+    },
+    "RateLimit": {
+      "type": "object",
+      "properties": {
+        "requests_per_minute": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Requests per minute limit"
+        },
+        "tokens_per_minute": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Tokens per minute limit"
+        },
+        "requests_per_day": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Requests per day limit"
+        }
+      },
+      "additionalProperties": false
+    },
+    "RegionalTokens": {
+      "type": "object",
+      "properties": {
+        "mainland_china": {
+          "type": "string",
+          "description": "Token for mainland China region"
+        },
+        "international": {
+          "type": "string",
+          "description": "Token for international region"
+        },
+        "last_updated": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when tokens were last updated"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "examples": [
+    {
+      "$schema": "https://raw.githubusercontent.com/putao520/agentic-warden/main/schema/providers.json",
+      "providers": {
+        "official": {
+          "name": "Official API",
+          "description": "Official API endpoints",
+          "icon": "🏢",
+          "official": true,
+          "protected": true,
+          "custom": false,
+          "compatible_with": ["codex", "claude", "gemini"],
+          "env": {}
+        },
+        "openrouter": {
+          "name": "OpenRouter",
+          "description": "OpenRouter unified AI gateway",
+          "icon": "🚀",
+          "official": false,
+          "protected": false,
+          "custom": false,
+          "compatible_with": ["codex", "claude"],
+          "validation_endpoint": "https://openrouter.ai/api/v1/models",
+          "category": "Gateway",
+          "website": "https://openrouter.ai",
+          "regions": ["International"],
+          "env": {
+            "OPENAI_API_KEY": "sk-or-v1-your-key",
+            "OPENAI_BASE_URL": "https://openrouter.ai/api/v1"
+          }
+        }
+      },
+      "default_provider": "official",
+      "user_tokens": {}
+    }
+  ]
+}

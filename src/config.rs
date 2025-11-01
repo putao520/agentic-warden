@@ -11,6 +11,10 @@ pub const LEGACY_WAIT_INTERVAL_ENV: &str = "CODEX_WORKER_WAIT_INTERVAL_SEC";
 pub const DEBUG_ENV: &str = "AGENTIC_WARDEN_DEBUG";
 pub const LEGACY_DEBUG_ENV: &str = "CODEX_WORKER_DEBUG";
 
+// Common constants used across modules
+pub const AUTH_DIRECTORY: &str = ".agentic-warden";
+pub const AUTH_FILE_NAME: &str = "auth.json";
+
 pub const MAX_RECORD_AGE: Duration = Duration::from_secs(12 * 60 * 60);
 pub const WAIT_INTERVAL_DEFAULT: Duration = Duration::from_secs(30);
 pub const MAX_WAIT_DURATION: Duration = Duration::from_secs(24 * 60 * 60);

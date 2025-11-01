@@ -105,7 +105,7 @@ pub fn run() -> Result<(), WaitError> {
 
 /// Check if a task should be processed based on root parent PID
 pub fn should_process_task(record: &TaskRecord, current_root_parent: Option<u32>) -> bool {
-    // If we don't have root parent info, process all tasks (backward compatibility)
+    // If we don't have root parent info, process all tasks
     let task_root_parent = match record.root_parent_pid {
         Some(pid) => pid,
         None => return true, // Process tasks without root parent info

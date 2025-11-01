@@ -128,7 +128,7 @@ pub fn execute_cli(
     } else {
         let (name, config) = provider_manager
             .get_default_provider()
-            .map_err(|e| ProcessError::Other(e.to_string()))?;
+            .ok_or_else(|| ProcessError::Other("No default provider configured".to_string()))?;
         (name, config)
     };
 
@@ -144,7 +144,7 @@ pub fn execute_cli(
         .map_err(|e| ProcessError::Other(e.to_string()))?;
 
     // Display provider info if not using official
-    if provider_name != "official" {
+    if provider_name != *"official" {
         eprintln!(
             "Using provider: {} ({})",
             provider_name, provider_config.description
@@ -437,10 +437,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        windows,
-        ignore = "Shared memory tests can be flaky on Windows due to resource limits"
-    )]
     fn test_registration_guard_new_and_active() {
         use std::time::{SystemTime, UNIX_EPOCH};
         let timestamp = SystemTime::now()
@@ -457,10 +453,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        windows,
-        ignore = "Shared memory tests can be flaky on Windows due to resource limits"
-    )]
     fn test_registration_guard_mark_completed() {
         use std::time::{SystemTime, UNIX_EPOCH};
         let timestamp = SystemTime::now()
@@ -506,10 +498,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        windows,
-        ignore = "Shared memory tests can be flaky on Windows due to resource limits"
-    )]
     fn test_registration_guard_drop_cleanup() {
         use std::time::{SystemTime, UNIX_EPOCH};
         let timestamp = SystemTime::now()
@@ -628,7 +616,7 @@ pub fn start_interactive_cli(
     } else {
         let (name, config) = provider_manager
             .get_default_provider()
-            .map_err(|e| ProcessError::Other(e.to_string()))?;
+            .ok_or_else(|| ProcessError::Other("No default provider configured".to_string()))?;
         (name, config)
     };
 
@@ -644,7 +632,7 @@ pub fn start_interactive_cli(
         .map_err(|e| ProcessError::Other(e.to_string()))?;
 
     // Display provider info if not using official
-    if provider_name != "official" {
+    if provider_name != *"official" {
         eprintln!(
             "Using provider: {} ({})",
             provider_name, provider_config.description

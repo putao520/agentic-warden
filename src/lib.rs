@@ -27,3 +27,4 @@ pub use registry::{RegistryEntry, RegistryError, TaskRegistry};
 pub use supervisor::ProcessError;
 pub use task_record::{TaskRecord, TaskStatus};
 pub use wait_mode::WaitError;
+pub use cli_manager::{CliManager, CliTool, InstallType};

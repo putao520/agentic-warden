@@ -9,7 +9,7 @@
 //! - Compatibility validation
 
 use agentic_warden::provider::{
-    config::{AiType, Provider, ProviderConfig},
+    config::{AiType, Provider, ProvidersConfig, Region, SupportMode, ModeType, ModeConfig, RegionalConfig},
     env_injector::EnvInjector,
     env_mapping::get_env_vars_for_ai_type,
     manager::ProviderManager,
@@ -43,9 +43,71 @@ fn create_test_provider(ai_type: AiType, api_key: &str) -> Provider {
         }
     }
 
+    // Create appropriate support mode based on AI type
+    let support_mode = match ai_type {
+        AiType::Claude => SupportMode {
+            mode_type: ModeType::ClaudeCodeNative,
+            name: "Claude Code Test Mode".to_string(),
+            description: "Test mode for Claude".to_string(),
+            priority: 50,
+            config: ModeConfig {
+                regional_urls: {
+                    let mut urls = HashMap::new();
+                    urls.insert(
+                        Region::International,
+                        RegionalConfig {
+                            base_url: "https://api.test.com".to_string(),
+                            auth_env_var: "ANTHROPIC_API_KEY".to_string(),
+                            recommended_model: Some("test-model".to_string()),
+                            features: None,
+                        },
+                    );
+                    urls
+                },
+                models: None,
+                additional_env: None,
+                rate_limit: None,
+            },
+        },
+        AiType::Codex | AiType::Gemini => SupportMode {
+            mode_type: ModeType::OpenAICompatible,
+            name: "OpenAI Compatible Test Mode".to_string(),
+            description: "Test mode for OpenAI compatible APIs".to_string(),
+            priority: 50,
+            config: ModeConfig {
+                regional_urls: {
+                    let mut urls = HashMap::new();
+                    urls.insert(
+                        Region::International,
+                        RegionalConfig {
+                            base_url: "https://api.test.com/v1".to_string(),
+                            auth_env_var: "OPENAI_API_KEY".to_string(),
+                            recommended_model: Some("test-model".to_string()),
+                            features: None,
+                        },
+                    );
+                    urls
+                },
+                models: None,
+                additional_env: None,
+                rate_limit: None,
+            },
+        },
+    };
+
     Provider {
+        name: format!("Test Provider for {}", ai_type),
         description: format!("Test provider for {}", ai_type),
+        icon: Some("🧪".to_string()),
+        official: false,
+        protected: false,
+        custom: true,
+        support_modes: vec![support_mode],
         compatible_with: vec![ai_type],
+        validation_endpoint: Some("https://api.test.com/validate".to_string()),
+        category: Some("Test".to_string()),
+        website: Some("https://test.com".to_string()),
+        regions: vec!["International".to_string()],
         env,
     }
 }
@@ -60,9 +122,74 @@ fn create_multi_ai_provider() -> Provider {
     );
     env.insert("GOOGLE_API_KEY".to_string(), "AIza-test123".to_string());
 
+    // Create support modes for all AI types
+    let mut support_modes = Vec::new();
+
+    // Claude Code Native mode
+    support_modes.push(SupportMode {
+        mode_type: ModeType::ClaudeCodeNative,
+        name: "Claude Code Test Mode".to_string(),
+        description: "Test mode for Claude".to_string(),
+        priority: 80,
+        config: ModeConfig {
+            regional_urls: {
+                let mut urls = HashMap::new();
+                urls.insert(
+                    Region::International,
+                    RegionalConfig {
+                        base_url: "https://api.test.com".to_string(),
+                        auth_env_var: "ANTHROPIC_API_KEY".to_string(),
+                        recommended_model: Some("test-claude-model".to_string()),
+                        features: None,
+                    },
+                );
+                urls
+            },
+            models: None,
+            additional_env: None,
+            rate_limit: None,
+        },
+    });
+
+    // OpenAI Compatible mode
+    support_modes.push(SupportMode {
+        mode_type: ModeType::OpenAICompatible,
+        name: "OpenAI Compatible Test Mode".to_string(),
+        description: "Test mode for OpenAI compatible APIs".to_string(),
+        priority: 70,
+        config: ModeConfig {
+            regional_urls: {
+                let mut urls = HashMap::new();
+                urls.insert(
+                    Region::International,
+                    RegionalConfig {
+                        base_url: "https://api.test.com/v1".to_string(),
+                        auth_env_var: "OPENAI_API_KEY".to_string(),
+                        recommended_model: Some("test-openai-model".to_string()),
+                        features: None,
+                    },
+                );
+                urls
+            },
+            models: None,
+            additional_env: None,
+            rate_limit: None,
+        },
+    });
+
     Provider {
+        name: "Multi-AI Test Provider".to_string(),
         description: "Multi-AI provider supporting all AI types".to_string(),
+        icon: Some("🎯".to_string()),
+        official: false,
+        protected: false,
+        custom: true,
+        support_modes,
         compatible_with: vec![AiType::Codex, AiType::Claude, AiType::Gemini],
+        validation_endpoint: Some("https://api.test.com/validate".to_string()),
+        category: Some("Test".to_string()),
+        website: Some("https://test.com".to_string()),
+        regions: vec!["International".to_string()],
         env,
     }
 }
@@ -75,7 +202,7 @@ fn create_test_manager(temp_dir: &TempDir) -> ProviderManager {
     fs::create_dir_all(temp_dir.path()).expect("Failed to create temp dir");
 
     // Create default config and save it
-    let config = ProviderConfig::default();
+    let config = ProvidersConfig::create_default().expect("Failed to create default config");
     let json = serde_json::to_string_pretty(&config).expect("Failed to serialize config");
     fs::write(&config_path, json).expect("Failed to write config");
 
@@ -89,17 +216,11 @@ fn create_test_manager(temp_dir: &TempDir) -> ProviderManager {
 
 #[test]
 fn test_provider_config_default_creation() {
-    let config = ProviderConfig::default();
+    let config = ProvidersConfig::create_default().expect("Failed to create default config");
 
     assert_eq!(config.default_provider, "official");
-    assert!(config.providers.contains_key("official"));
+    assert_eq!(config.providers.len(), 0);
     assert!(config.schema.is_some());
-
-    let official = &config.providers["official"];
-    assert_eq!(official.compatible_with.len(), 3);
-    assert!(official.compatible_with.contains(&AiType::Codex));
-    assert!(official.compatible_with.contains(&AiType::Claude));
-    assert!(official.compatible_with.contains(&AiType::Gemini));
 }
 
 #[test]
@@ -170,9 +291,8 @@ fn test_list_providers_empty() {
 
     let providers = manager.list_providers();
 
-    // Should only have default "official" provider
-    assert_eq!(providers.len(), 1);
-    assert_eq!(providers[0].0, "official");
+    // Should have no providers in default empty config
+    assert_eq!(providers.len(), 0);
 }
 
 #[test]
@@ -202,11 +322,10 @@ fn test_list_providers_multiple() {
 
     let providers = manager.list_providers();
 
-    // Should have 3 custom + 1 default = 4 total
-    assert_eq!(providers.len(), 4);
+    // Should have 3 custom + 0 default = 3 total
+    assert_eq!(providers.len(), 3);
 
     let names: Vec<&&String> = providers.iter().map(|(name, _)| name).collect();
-    assert!(names.contains(&&&"official".to_string()));
     assert!(names.contains(&&&"provider1".to_string()));
     assert!(names.contains(&&&"provider2".to_string()));
     assert!(names.contains(&&&"provider3".to_string()));
@@ -461,8 +580,43 @@ fn test_provider_save_and_load() {
     {
         let mut manager = create_test_manager(&temp_dir);
         let provider = Provider {
+            name: "Test Provider".to_string(),
             description: "Test".to_string(),
+            icon: Some("🧪".to_string()),
+            official: false,
+            protected: false,
+            custom: true,
+            support_modes: vec![
+                SupportMode {
+                    mode_type: ModeType::OpenAICompatible,
+                    name: "Test Mode".to_string(),
+                    description: "Test mode".to_string(),
+                    priority: 50,
+                    config: ModeConfig {
+                        regional_urls: {
+                            let mut urls = HashMap::new();
+                            urls.insert(
+                                Region::International,
+                                RegionalConfig {
+                                    base_url: "https://api.test.com".to_string(),
+                                    auth_env_var: "OPENAI_API_KEY".to_string(),
+                                    recommended_model: None,
+                                    features: None,
+                                },
+                            );
+                            urls
+                        },
+                        models: None,
+                        additional_env: None,
+                        rate_limit: None,
+                    },
+                }
+            ],
             compatible_with: vec![AiType::Codex],
+            validation_endpoint: Some("https://api.test.com/validate".to_string()),
+            category: Some("Test".to_string()),
+            website: Some("https://test.com".to_string()),
+            regions: vec!["International".to_string()],
             env: {
                 let mut env = HashMap::new();
                 env.insert("OPENAI_API_KEY".to_string(), "test".to_string());
@@ -560,7 +714,9 @@ fn test_provider_reserved_name_cannot_delete() {
     let temp_dir = create_test_env();
     let mut manager = create_test_manager(&temp_dir);
 
-    let result = manager.remove_provider("official");
+    // "official" is a reserved name and cannot be added
+    let official_provider = create_test_provider(AiType::Claude, "test-key");
+    let result = manager.add_provider("official".to_string(), official_provider);
 
     // Should fail because "official" is reserved
     assert!(result.is_err());
@@ -652,9 +808,11 @@ fn test_complete_provider_lifecycle() {
     assert!(manager2.get_provider("lifecycle").is_ok());
     assert_eq!(manager2.default_provider_name(), "lifecycle");
 
-    // 5. Change default back to official
+    // 5. Add another provider to change default
     let mut manager3 = ProviderManager::new_with_path(&config_path).unwrap();
-    manager3.set_default("official").unwrap();
+    let another_provider = create_test_provider(AiType::Claude, "test-key-2");
+    manager3.add_provider("another".to_string(), another_provider).unwrap();
+    manager3.set_default("another").unwrap();
 
     // 6. Now can remove the lifecycle provider
     manager3.remove_provider("lifecycle").unwrap();
@@ -663,9 +821,9 @@ fn test_complete_provider_lifecycle() {
 
 #[test]
 fn test_provider_serialization_roundtrip() {
-    let config = ProviderConfig::default();
+    let config = ProvidersConfig::create_default().expect("Failed to create default config");
     let json = serde_json::to_string_pretty(&config).expect("Failed to serialize");
-    let deserialized: ProviderConfig = serde_json::from_str(&json).expect("Failed to deserialize");
+    let deserialized: ProvidersConfig = serde_json::from_str(&json).expect("Failed to deserialize");
 
     assert_eq!(config.default_provider, deserialized.default_provider);
     assert_eq!(config.providers.len(), deserialized.providers.len());

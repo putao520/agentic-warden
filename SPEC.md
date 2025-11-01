@@ -27,11 +27,11 @@
 
 ## 实现的功能模块
 
-### 1. SmartOAuth认证系统 ✅
-- 并发监听本地回调端口(8080)和用户手动输入
-- 智能环境检测(桌面/服务器/无头)
-- 自动选择最佳认证方式
-- 简单HTTP响应处理
+### 1. SmartOAuth认证系统 ✅ (OOB流程)
+- 使用Google OAuth OOB (Out-of-Band)流程，无需回调服务器
+- 自动打开浏览器并显示授权URL
+- 用户手动输入授权码完成认证
+- 适合CLI工具，兼容所有环境（桌面/服务器/无头）
 - Token持久化到 ~/.agentic-warden/auth.json
 
 ### 2. ConfigSyncManager ✅

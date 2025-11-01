@@ -63,11 +63,11 @@ flate2 = "1.0"
 # Browser integration
 open = "5.0"
 
-# HTTP server for OAuth callbacks
-axum = "0.7"
-axum-server = "0.6"
-tower = "0.4"
-tower-http = { version = "0.5", features = ["trace"] }
+# Removed: HTTP server for OAuth callbacks (now using OOB flow)
+# axum = "0.7"
+# axum-server = "0.6"
+# tower = "0.4"
+# tower-http = { version = "0.5", features = ["trace"] }
 
 # Temporary files
 tempfile = "3.0"

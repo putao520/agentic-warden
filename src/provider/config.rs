@@ -4,15 +4,12 @@ use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Provider configuration file root structure (New v2.0 format)
+/// Provider configuration file root structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProvidersConfig {
     /// JSON Schema (optional)
     #[serde(rename = "$schema", skip_serializing_if = "Option::is_none")]
     pub schema: Option<String>,
-
-    /// Configuration version
-    pub version: String,
 
     /// All provider configurations
     pub providers: HashMap<String, Provider>,
@@ -24,21 +21,7 @@ pub struct ProvidersConfig {
     pub user_tokens: HashMap<String, RegionalTokens>,
 }
 
-/// Legacy provider configuration file structure (for backward compatibility)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProviderConfig {
-    /// JSON Schema (optional)
-    #[serde(rename = "$schema", skip_serializing_if = "Option::is_none")]
-    pub schema: Option<String>,
-
-    /// All provider configurations
-    pub providers: HashMap<String, Provider>,
-
-    /// Default provider name
-    pub default_provider: String,
-}
-
-/// Single Provider configuration (New v2.0 format)
+/// Single Provider configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Provider {
     /// Display name
@@ -358,10 +341,10 @@ impl ProvidersConfig {
 
     /// Create default configuration
     pub fn create_default() -> Result<Self> {
+        // Create an empty default configuration - all providers should be loaded from providers.json file
         let config = Self {
-            schema: Some("https://agentic-warden.dev/schema/providers.json".to_string()),
-            version: "2.0".to_string(),
-            default_provider: "kimi".to_string(),
+            schema: Some("https://raw.githubusercontent.com/putao520/agentic-warden/main/schema/providers.json".to_string()),
+            default_provider: "official".to_string(),
             providers: HashMap::new(),
             user_tokens: HashMap::new(),
         };
@@ -509,8 +492,7 @@ impl Default for ProvidersConfig {
     fn default() -> Self {
         Self::create_default().unwrap_or_else(|_| Self {
             schema: None,
-            version: "2.0".to_string(),
-            default_provider: "kimi".to_string(),
+            default_provider: "official".to_string(),
             providers: HashMap::new(),
             user_tokens: HashMap::new(),
         })
@@ -527,192 +509,6 @@ impl Default for RegionalTokens {
     }
 }
 
-// Legacy compatibility functions
-impl ProviderConfig {
-    /// Create default configuration (legacy)
-    pub fn default() -> Self {
-        let mut providers = HashMap::new();
-        providers.insert(
-            "official".to_string(),
-            Provider {
-                name: "Official".to_string(),
-                description: "Official API endpoints".to_string(),
-                icon: Some("🏢".to_string()),
-                official: true,
-                protected: true,
-                custom: false,
-                support_modes: vec![],
-                compatible_with: vec![AiType::Codex, AiType::Claude, AiType::Gemini],
-                validation_endpoint: None,
-                category: Some("Official".to_string()),
-                website: None,
-                regions: vec![],
-                env: HashMap::new(),
-            },
-        );
-
-        Self {
-            schema: Some("https://agentic-warden.dev/schema/provider.json".to_string()),
-            providers,
-            default_provider: "official".to_string(),
-        }
-    }
-
-    /// Get provider by name (legacy)
-    pub fn get_provider(&self, name: &str) -> Option<&Provider> {
-        self.providers.get(name)
-    }
-
-    /// Get default provider (legacy)
-    pub fn get_default_provider(&self) -> Option<(String, &Provider)> {
-        let name = self.default_provider.clone();
-        self.get_provider(&name).map(|provider| (name, provider))
-    }
-
-    /// Get all providers (legacy)
-    pub fn list_providers(&self) -> Vec<(&String, &Provider)> {
-        self.providers.iter().collect()
-    }
-
-    // v2.0 methods for token management and provider operations
-
-    /// Get official providers
-    pub fn get_official_providers() -> Vec<(String, Provider)> {
-        let config = Self::load().unwrap_or_else(|_| Self::create_default().unwrap());
-        config
-            .providers
-            .into_iter()
-            .filter(|(_, p)| p.official)
-            .collect()
-    }
-
-    /// Get token for provider and region
-    pub fn get_token(&self, _provider_id: &str, _region: &Region) -> Option<&String> {
-        // This would need access to user_tokens, but it's not in this struct
-        // For now, return None to maintain compilation
-        None
-    }
-
-    /// Set token for provider and region
-    pub fn set_token(&mut self, _provider_id: &str, _region: &Region, _token: String) {
-        // This would need access to user_tokens, but it's not in this struct
-        // For now, do nothing to maintain compilation
-    }
-
-    /// Remove token for provider and region
-    pub fn remove_token(&mut self, _provider_id: &str, _region: &Region) -> Result<()> {
-        // This would need access to user_tokens, but it's not in this struct
-        // For now, return Ok to maintain compilation
-        Ok(())
-    }
-
-    /// Check if provider has token
-    pub fn has_token(&self, provider_id: &str, region: &Region) -> bool {
-        self.get_token(provider_id, region).is_some()
-    }
-
-    /// Add custom provider
-    pub fn add_custom_provider(&mut self, provider_id: &str, provider: Provider) -> Result<()> {
-        self.providers.insert(provider_id.to_string(), provider);
-        Ok(())
-    }
-
-    /// Remove provider
-    pub fn remove_provider(&mut self, provider_id: &str) -> Option<Provider> {
-        self.providers.remove(provider_id)
-    }
-
-    /// Load providers configuration from default location
-    pub fn load() -> Result<Self> {
-        let config_path = dirs::home_dir()
-            .ok_or_else(|| anyhow!("Cannot find home directory"))?
-            .join(".agentic-warden")
-            .join("providers.json");
-
-        Self::load_from_path(&config_path)
-    }
-
-    /// Load providers configuration from specific path
-    pub fn load_from_path(path: &std::path::Path) -> Result<Self> {
-        if path.exists() {
-            let content = std::fs::read_to_string(path)?;
-            let config: ProviderConfig = serde_json::from_str(&content)?;
-            Ok(config)
-        } else {
-            Self::create_default()
-        }
-    }
-
-    /// Create default providers configuration
-    pub fn create_default() -> Result<Self> {
-        let mut providers = std::collections::HashMap::new();
-
-        // Add official providers
-        providers.insert(
-            "glm".to_string(),
-            Provider {
-                name: "GLM (智谱AI)".to_string(),
-                description: "智谱AI GLM，国产大语言模型".to_string(),
-                icon: Some("🧠".to_string()),
-                official: true,
-                protected: true,
-                custom: false,
-                support_modes: vec![],
-                compatible_with: vec![AiType::Claude, AiType::Codex],
-                validation_endpoint: None,
-                category: Some("Official".to_string()),
-                website: Some("https://zhipuai.cn".to_string()),
-                regions: vec!["CN".to_string()],
-                env: std::collections::HashMap::new(),
-            },
-        );
-
-        providers.insert(
-            "kimi".to_string(),
-            Provider {
-                name: "Kimi (月之暗面)".to_string(),
-                description: "月之暗面Kimi，支持长上下文".to_string(),
-                icon: Some("🌙".to_string()),
-                official: true,
-                protected: true,
-                custom: false,
-                support_modes: vec![],
-                compatible_with: vec![AiType::Claude, AiType::Codex],
-                validation_endpoint: None,
-                category: Some("Official".to_string()),
-                website: Some("https://moonshot.cn".to_string()),
-                regions: vec!["CN".to_string()],
-                env: std::collections::HashMap::new(),
-            },
-        );
-
-        providers.insert(
-            "openai".to_string(),
-            Provider {
-                name: "OpenAI".to_string(),
-                description: "OpenAI GPT模型".to_string(),
-                icon: Some("🤖".to_string()),
-                official: true,
-                protected: true,
-                custom: false,
-                support_modes: vec![],
-                compatible_with: vec![AiType::Codex],
-                validation_endpoint: None,
-                category: Some("Official".to_string()),
-                website: Some("https://openai.com".to_string()),
-                regions: vec!["US".to_string()],
-                env: std::collections::HashMap::new(),
-            },
-        );
-
-        Ok(Self {
-            schema: Some("https://agentic-warden.dev/schema/providers.json".to_string()),
-            default_provider: "openai".to_string(),
-            providers,
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -722,7 +518,7 @@ mod tests {
         let config = ProvidersConfig::default();
         let json = serde_json::to_string(&config).unwrap();
         let deserialized: ProvidersConfig = serde_json::from_str(&json).unwrap();
-        assert_eq!(config.version, deserialized.version);
+        assert_eq!(config.default_provider, deserialized.default_provider);
     }
 
     #[test]
@@ -751,5 +547,14 @@ mod tests {
         assert_eq!(ModeType::ClaudeCodeNative.to_string(), "Claude Code Native");
         assert_eq!(ModeType::OpenAICompatible.to_string(), "OpenAI Compatible");
         assert_eq!(ModeType::GeminiNative.to_string(), "Gemini Native");
+    }
+
+    #[test]
+    fn test_empty_default_config() {
+        // Test that create_default creates an empty configuration
+        let config = ProvidersConfig::create_default().unwrap();
+        assert_eq!(config.providers.len(), 0);
+        assert_eq!(config.default_provider, "official");
+        assert!(config.user_tokens.is_empty());
     }
 }

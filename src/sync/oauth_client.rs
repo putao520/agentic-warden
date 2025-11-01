@@ -39,7 +39,7 @@ pub struct OAuthTokenResponse {
     pub scope: Option<String>,
 }
 
-/// OAuth client for handling authentication
+/// OAuth client for handling OOB authentication
 #[derive(Debug, Clone)]
 pub struct OAuthClient {
     config: OAuthConfig,
@@ -89,9 +89,9 @@ impl OAuthClient {
         self
     }
 
-    /// Generate authorization URL (using loopback flow)
+    /// Generate authorization URL
     pub fn generate_auth_url(&self) -> Result<String> {
-        let redirect_uri = "http://localhost:8080/oauth/callback"; // Loopback flow - modern approach
+        let redirect_uri = "urn:ietf:wg:oauth:2.0:oob"; // OOB flow
         let scope = self.config.scopes.join(" ");
         let auth_url = format!(
             "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&response_type=code&scope={}&access_type=offline&prompt=consent",
@@ -102,9 +102,9 @@ impl OAuthClient {
         Ok(auth_url)
     }
 
-    /// Exchange authorization code for tokens (loopback flow)
+    /// Exchange authorization code for tokens
     pub async fn exchange_code_for_tokens(&mut self, code: &str) -> Result<OAuthTokenResponse> {
-        info!("Exchanging authorization code for tokens...");
+        info!("Exchanging OOB authorization code for tokens...");
 
         let client = reqwest::Client::new();
         let params = [
@@ -112,10 +112,7 @@ impl OAuthClient {
             ("client_secret", self.config.client_secret.clone()),
             ("code", code.to_string()),
             ("grant_type", "authorization_code".to_string()),
-            (
-                "redirect_uri",
-                "http://localhost:8080/oauth/callback".to_string(), // Must match the redirect_uri used in auth URL
-            ),
+            ("redirect_uri", "urn:ietf:wg:oauth:2.0:oob".to_string()), // OOB redirect URI
         ];
 
         let response = client
@@ -137,7 +134,7 @@ impl OAuthClient {
             Ok(token_response)
         } else {
             let error_text = response.text().await?;
-            Err(anyhow::anyhow!("Code exchange failed: {}", error_text))
+            Err(anyhow::anyhow!("OOB code exchange failed: {}", error_text))
         }
     }
 
@@ -253,6 +250,21 @@ mod tests {
             client.config().refresh_token,
             Some("test_refresh_token".to_string())
         );
+    }
+
+    #[test]
+    fn test_oob_auth_url_generation() {
+        let client = OAuthClient::new(
+            "test_client_id".to_string(),
+            "test_client_secret".to_string(),
+            None,
+        );
+
+        let auth_url = client.generate_auth_url().unwrap();
+        // The OOB redirect URI gets URL encoded
+        assert!(auth_url.contains("urn%3Aietf%3Awg%3Aoauth%3A2.0%3Aoob") || auth_url.contains("urn:ietf:wg:oauth:2.0:oob"));
+        assert!(auth_url.contains("test_client_id"));
+        assert!(!auth_url.contains("localhost"));
     }
 
     #[test]

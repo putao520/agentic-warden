@@ -11,7 +11,4 @@ pub mod sync_command;
 pub mod sync_config_manager;
 
 // Re-export the official API implementations for convenient access
-pub use config_sync_manager::ConfigSyncManager;
-pub use google_drive_service::GoogleDriveService;
-pub use oauth_client::OAuthClient;
-pub use smart_oauth::SmartOAuthAuthenticator;
+// Note: These are used in TUI screens but may not show as used in static analysis

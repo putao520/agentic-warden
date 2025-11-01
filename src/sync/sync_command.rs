@@ -39,7 +39,9 @@ impl SyncCommand {
                     term.write_line("2. Create a new project or select existing one")?;
                     term.write_line("3. Enable Google Drive API")?;
                     term.write_line("4. Create OAuth 2.0 credentials")?;
-                    term.write_line("5. Add http://localhost:8080 to authorized redirect URIs")?;
+                    term.write_line(
+                        "5. Add urn:ietf:wg:oauth:2.0:oob to authorized redirect URIs",
+                    )?;
                     return Ok(1);
                 }
                 _ => return Err(e),

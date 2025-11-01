@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use super::{Screen, ScreenAction, ScreenType};
 
 use crate::task_record::TaskStatus;
+use crate::cli_manager::CliManager;
 
 /// AI CLI status information
 #[derive(Debug, Clone)]
@@ -67,6 +68,10 @@ impl DashboardScreen {
     }
 
     fn detect_ai_cli_status() -> Vec<AiCliStatus> {
+        // Try to use CliManager for comprehensive detection
+        let _cli_manager = CliManager::new().ok();
+        // Note: CliManager integration can be enhanced later to fully use its detection capabilities
+
         let cli_names = vec![
             ("codex", "Codex"),
             ("claude", "Claude"),
@@ -113,7 +118,7 @@ impl DashboardScreen {
     fn get_default_provider_for_cli(_cli_name: &str) -> Option<String> {
         // Try to read default provider from provider.json
         if let Ok(provider_manager) = crate::provider::ProviderManager::new() {
-            if let Ok((name, _)) = provider_manager.get_default_provider() {
+            if let Some((name, _)) = provider_manager.get_default_provider() {
                 return Some(name.clone());
             }
         }

@@ -182,9 +182,9 @@ impl ProviderAddWizard {
         if let Some(ai_type) = &self.selected_ai_type {
             let preferences = RecommendationPreferences::default();
 
-            // Use v2.0 recommendation engine
+            // Use recommendation engine
             let recommendations =
-                futures::executor::block_on(self.recommendation_engine.get_recommendations_v2(
+                futures::executor::block_on(self.recommendation_engine.get_recommendations(
                     &self.providers_config,
                     ai_type,
                     &preferences,
@@ -349,7 +349,7 @@ impl ProviderAddWizard {
             }
 
             // Set as default provider if it's the first one
-            if manager.list_providers_v2().len() == 1 {
+            if manager.list_providers().len() == 1 {
                 let _ = manager.set_default_provider(&provider_id);
             }
 
