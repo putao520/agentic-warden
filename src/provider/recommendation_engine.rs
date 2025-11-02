@@ -489,20 +489,18 @@ mod tests {
             official: false,
             protected: false,
             custom: false,
-            support_modes: vec![
-                crate::provider::config::SupportMode {
-                    mode_type: crate::provider::config::ModeType::ClaudeCodeNative,
-                    name: "Claude Code Native".to_string(),
-                    description: "Test mode".to_string(),
-                    priority: 100,
-                    config: crate::provider::config::ModeConfig {
-                        regional_urls: std::collections::HashMap::new(),
-                        models: None,
-                        additional_env: None,
-                        rate_limit: None,
-                    },
-                }
-            ],
+            support_modes: vec![crate::provider::config::SupportMode {
+                mode_type: crate::provider::config::ModeType::ClaudeCodeNative,
+                name: "Claude Code Native".to_string(),
+                description: "Test mode".to_string(),
+                priority: 100,
+                config: crate::provider::config::ModeConfig {
+                    regional_urls: std::collections::HashMap::new(),
+                    models: None,
+                    additional_env: None,
+                    rate_limit: None,
+                },
+            }],
             compatible_with: vec![],
             validation_endpoint: None,
             category: None,
@@ -511,6 +509,8 @@ mod tests {
             env: std::collections::HashMap::new(),
         };
 
-        assert!(RecommendationEngine::supports_claude_code_native(&test_provider));
+        assert!(RecommendationEngine::supports_claude_code_native(
+            &test_provider
+        ));
     }
 }

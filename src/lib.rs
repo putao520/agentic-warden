@@ -22,9 +22,9 @@ pub mod provider;
 pub mod tui;
 
 // Re-export commonly used types for convenience
+pub use cli_manager::{CliTool, CliToolDetector, InstallType};
 pub use process_tree::{ProcessTreeError, ProcessTreeInfo, get_process_tree};
 pub use registry::{RegistryEntry, RegistryError, TaskRegistry};
 pub use supervisor::ProcessError;
 pub use task_record::{TaskRecord, TaskStatus};
 pub use wait_mode::WaitError;
-pub use cli_manager::{CliManager, CliTool, InstallType};

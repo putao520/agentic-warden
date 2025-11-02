@@ -179,3 +179,83 @@ impl InputWidget {
         frame.render_widget(paragraph, area);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn handles_typing_and_navigation() {
+        let mut widget = InputWidget::new("Label".to_string());
+        widget.set_focused(true);
+
+        widget.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+        widget.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE));
+        widget.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+        widget.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
+        widget.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+
+        assert_eq!(widget.value(), "ab");
+    }
+
+    #[test]
+    fn enforces_max_length() {
+        let mut widget = InputWidget::new("Label".to_string()).with_max_length(2);
+        widget.set_focused(true);
+
+        widget.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+        widget.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE));
+        widget.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
+
+        assert_eq!(widget.value(), "ab");
+    }
+
+    #[test]
+    fn masked_render_hides_underlying_value() {
+        let backend = TestBackend::new(20, 3);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| {
+                let mut widget = InputWidget::new("Secret".to_string())
+                    .with_value("secret".to_string())
+                    .masked(true);
+                widget.set_focused(false);
+                let area = frame.size();
+                widget.render(frame, area);
+            })
+            .expect("draw");
+
+        let buffer = terminal.backend().buffer().clone();
+        let rendered: String = (1..7)
+            .map(|x| {
+                let cell = buffer.get(x, 1);
+                cell.symbol.chars().next().unwrap_or(' ')
+            })
+            .collect();
+        assert_eq!(rendered.trim(), "******");
+    }
+
+    #[test]
+    fn typing_and_backspace_updates_value() {
+        let mut input = InputWidget::new("Prompt".to_string());
+        input.set_focused(true);
+
+        input.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+        input.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE));
+        input.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+
+        assert_eq!(input.value(), "a");
+    }
+
+    #[test]
+    fn set_value_and_clear_resets_cursor() {
+        let mut input = InputWidget::new("Prompt".to_string());
+        input.set_value("hello".to_string());
+        assert_eq!(input.value(), "hello");
+
+        input.clear();
+        assert_eq!(input.value(), "");
+    }
+}

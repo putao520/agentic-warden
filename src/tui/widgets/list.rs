@@ -47,6 +47,15 @@ where
         self.state.selected()
     }
 
+    /// Manually select an item by index
+    pub fn select(&mut self, index: Option<usize>) {
+        match index {
+            Some(idx) if idx < self.items.len() => self.state.select(Some(idx)),
+            None => self.state.select(None),
+            _ => {}
+        }
+    }
+
     /// Set items
     pub fn set_items(&mut self, items: Vec<T>) {
         self.items = items;

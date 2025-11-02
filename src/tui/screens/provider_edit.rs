@@ -1,16 +1,16 @@
 //! Provider edit screen
 
-use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent};
+use anyhow::{Result, bail};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, List, ListItem, Paragraph},
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use super::{Screen, ScreenAction};
+use super::{Screen, ScreenAction, ScreenType};
 use crate::provider::env_mapping::{EnvVarMapping, get_env_vars_for_ai_type};
 use crate::provider::{AiType, Provider, ProviderManager};
 use crate::tui::widgets::{DialogResult, DialogWidget, InputWidget};
@@ -59,24 +59,37 @@ fn mask_if_sensitive(key: &str, value: &str) -> String {
 /// Edit field type
 #[derive(Debug, Clone, PartialEq)]
 enum EditField {
+    SectionTitle(String),
+    DisplayName,
     Description,
-    AiType(usize),  // Index: 0=Codex, 1=Claude, 2=Gemini
-    EnvVar(String), // Key of the environment variable
+    AiType(AiType),
+    EnvGroup(AiType),
+    EnvVar { ai_type: AiType, key: String },
+}
+
+/// Dialog handling behavior
+enum DialogOutcome {
+    Info { exit_on_close: bool },
+    ConfirmDiscard,
 }
 
 /// Provider edit mode
 enum EditMode {
     Browse,
     EditingField(EditField),
-    Dialog(DialogWidget),
+    Dialog {
+        widget: DialogWidget,
+        outcome: DialogOutcome,
+    },
 }
 
 /// Provider edit screen
 pub struct ProviderEditScreen {
-    provider_name: String,
+    provider_id: String,
     provider_manager: ProviderManager,
 
     // Editable data
+    display_name: String,
     description: String,
     ai_types_selected: Vec<bool>, // [Codex, Claude, Gemini]
     env_vars: HashMap<String, String>,
@@ -92,83 +105,174 @@ pub struct ProviderEditScreen {
 }
 
 impl ProviderEditScreen {
-    pub fn new(provider_name: String) -> Result<Self> {
-        // Load provider data first
-        let provider_manager_temp = ProviderManager::new()?;
-        let (_, provider) = provider_manager_temp
-            .list_providers()
-            .into_iter()
-            .find(|(name, _)| *name == &provider_name)
-            .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", provider_name))?;
+    pub fn new(provider_id: String) -> Result<Self> {
+        let provider_manager = ProviderManager::new()?;
+        let provider = provider_manager.get_provider(&provider_id)?.clone();
 
+        let display_name = provider.name.clone();
         let description = provider.description.clone();
         let env_vars = provider.env.clone();
-        let original_provider = provider.clone();
-
-        // Create a new provider manager instance for the struct
-        let provider_manager = ProviderManager::new()?;
-
-        // Initialize AI types selection
         let ai_types_selected = vec![
             provider.compatible_with.contains(&AiType::Codex),
             provider.compatible_with.contains(&AiType::Claude),
             provider.compatible_with.contains(&AiType::Gemini),
         ];
 
-        // Build field list
-        let mut all_fields = vec![EditField::Description];
-        all_fields.push(EditField::AiType(0)); // Codex
-        all_fields.push(EditField::AiType(1)); // Claude
-        all_fields.push(EditField::AiType(2)); // Gemini
-
-        // Add env vars for selected AI types
-        for (idx, selected) in ai_types_selected.iter().enumerate() {
-            if *selected {
-                let ai_type = match idx {
-                    0 => AiType::Codex,
-                    1 => AiType::Claude,
-                    2 => AiType::Gemini,
-                    _ => continue,
-                };
-                let vars = get_env_vars_for_ai_type(ai_type);
-                for var in vars {
-                    all_fields.push(EditField::EnvVar(var.key.to_string()));
-                }
-            }
-        }
-
-        Ok(Self {
-            provider_name,
+        let mut screen = Self {
+            provider_id,
             provider_manager,
+            display_name,
             description,
             ai_types_selected,
             env_vars,
             mode: EditMode::Browse,
             selected_field_idx: 0,
-            all_fields,
+            all_fields: Vec::new(),
             input_widget: InputWidget::new("".to_string()),
-            original_provider,
-        })
+            original_provider: provider,
+        };
+        screen.rebuild_fields();
+        Ok(screen)
+    }
+
+    fn ai_types() -> [AiType; 3] {
+        [AiType::Codex, AiType::Claude, AiType::Gemini]
+    }
+
+    fn ai_type_label(ai_type: &AiType) -> &'static str {
+        match ai_type {
+            AiType::Codex => "Codex",
+            AiType::Claude => "Claude",
+            AiType::Gemini => "Gemini",
+        }
+    }
+
+    fn ai_type_index(ai_type: &AiType) -> usize {
+        match ai_type {
+            AiType::Codex => 0,
+            AiType::Claude => 1,
+            AiType::Gemini => 2,
+        }
+    }
+
+    fn is_ai_type_selected(&self, ai_type: &AiType) -> bool {
+        let idx = Self::ai_type_index(ai_type);
+        self.ai_types_selected.get(idx).copied().unwrap_or(false)
+    }
+
+    fn remove_env_vars_for(&mut self, ai_type: &AiType) {
+        let keys: Vec<String> = get_env_vars_for_ai_type(ai_type.clone())
+            .into_iter()
+            .map(|mapping| mapping.key.to_string())
+            .collect();
+
+        for key in keys {
+            self.env_vars.remove(&key);
+        }
+    }
+
+    fn prune_env_for_unselected(&mut self) {
+        let mut allowed = HashSet::new();
+        for ai_type in Self::ai_types() {
+            if self.is_ai_type_selected(&ai_type) {
+                for mapping in get_env_vars_for_ai_type(ai_type.clone()) {
+                    allowed.insert(mapping.key.to_string());
+                }
+            }
+        }
+        self.env_vars.retain(|key, _| allowed.contains(key));
+    }
+
+    fn get_selected_ai_types(&self) -> Vec<AiType> {
+        Self::ai_types()
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, ai_type)| {
+                if self.ai_types_selected.get(idx).copied().unwrap_or(false) {
+                    Some(ai_type.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    fn has_changes(&self) -> bool {
+        if self.display_name != self.original_provider.name {
+            return true;
+        }
+
+        if self.description != self.original_provider.description {
+            return true;
+        }
+
+        let selected_types = self.get_selected_ai_types();
+        if selected_types != self.original_provider.compatible_with {
+            return true;
+        }
+
+        // Compare environment variables (after pruning unselected types)
+        let mut current_env = self.env_vars.clone();
+        let mut original_env = self.original_provider.env.clone();
+
+        let mut allowed = HashSet::new();
+        for ai_type in selected_types {
+            for mapping in get_env_vars_for_ai_type(ai_type.clone()) {
+                allowed.insert(mapping.key.to_string());
+            }
+        }
+
+        current_env.retain(|key, _| allowed.contains(key));
+        original_env.retain(|key, _| allowed.contains(key));
+
+        if current_env != original_env {
+            return true;
+        }
+
+        false
+    }
+
+    fn validate_required_env(&self, selected_types: &[AiType]) -> Result<()> {
+        for ai_type in selected_types {
+            for mapping in get_env_vars_for_ai_type(ai_type.clone())
+                .into_iter()
+                .filter(|m| m.required)
+            {
+                let value = self.env_vars.get(mapping.key).map(|s| s.trim());
+                if value.is_none() || value == Some("") {
+                    bail!(
+                        "Missing required environment variable '{}' for {}",
+                        mapping.key,
+                        Self::ai_type_label(ai_type)
+                    );
+                }
+            }
+        }
+        Ok(())
     }
 
     fn rebuild_fields(&mut self) {
         self.all_fields.clear();
+        self.all_fields
+            .push(EditField::SectionTitle("General".to_string()));
+        self.all_fields.push(EditField::DisplayName);
         self.all_fields.push(EditField::Description);
-        self.all_fields.push(EditField::AiType(0));
-        self.all_fields.push(EditField::AiType(1));
-        self.all_fields.push(EditField::AiType(2));
+        self.all_fields
+            .push(EditField::SectionTitle("Compatibility".to_string()));
 
-        for (idx, selected) in self.ai_types_selected.iter().enumerate() {
-            if *selected {
-                let ai_type = match idx {
-                    0 => AiType::Codex,
-                    1 => AiType::Claude,
-                    2 => AiType::Gemini,
-                    _ => continue,
-                };
-                let vars = get_env_vars_for_ai_type(ai_type);
+        for ai_type in Self::ai_types() {
+            self.all_fields.push(EditField::AiType(ai_type.clone()));
+        }
+
+        for ai_type in Self::ai_types() {
+            if self.is_ai_type_selected(&ai_type) {
+                self.all_fields.push(EditField::EnvGroup(ai_type.clone()));
+                let vars = get_env_vars_for_ai_type(ai_type.clone());
                 for var in vars {
-                    self.all_fields.push(EditField::EnvVar(var.key.to_string()));
+                    self.all_fields.push(EditField::EnvVar {
+                        ai_type: ai_type.clone(),
+                        key: var.key.to_string(),
+                    });
                 }
             }
         }
@@ -180,83 +284,86 @@ impl ProviderEditScreen {
     }
 
     fn save_changes(&mut self) -> Result<()> {
-        let compatible_types: Vec<AiType> = self
-            .ai_types_selected
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, selected)| {
-                if *selected {
-                    match idx {
-                        0 => Some(AiType::Codex),
-                        1 => Some(AiType::Claude),
-                        2 => Some(AiType::Gemini),
-                        _ => None,
-                    }
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let trimmed_name = self.display_name.trim();
+        if trimmed_name.is_empty() {
+            bail!("Display name cannot be empty");
+        }
+        self.display_name = trimmed_name.to_string();
 
-        let provider = Provider {
-            name: self.provider_name.clone(),
-            description: self.description.clone(),
-            icon: None,
-            official: false,
-            protected: false,
-            custom: true,
-            support_modes: vec![],
-            compatible_with: compatible_types,
-            validation_endpoint: None,
-            category: None,
-            website: None,
-            regions: vec![],
-            env: self.env_vars.clone(),
-        };
+        self.prune_env_for_unselected();
+
+        let compatible_types = self.get_selected_ai_types();
+        if compatible_types.is_empty() {
+            bail!("Select at least one compatible AI type");
+        }
+
+        self.validate_required_env(&compatible_types)?;
+
+        let mut provider = self.original_provider.clone();
+        provider.name = self.display_name.clone();
+        provider.description = self.description.clone();
+        provider.compatible_with = compatible_types;
+        provider.env = self.env_vars.clone();
 
         self.provider_manager
-            .add_provider(self.provider_name.clone(), provider)?;
+            .update_provider(&self.provider_id, provider.clone())?;
+        self.original_provider = provider;
         Ok(())
     }
 
     fn get_field_display(&self, field: &EditField) -> String {
         match field {
-            EditField::Description => {
-                format!("Description: {}", self.description)
+            EditField::SectionTitle(title) => format!("-- {} --", title),
+            EditField::DisplayName => format!("Display Name: {}", self.display_name),
+            EditField::Description => format!("Description: {}", self.description),
+            EditField::AiType(ai_type) => {
+                let selected = self.is_ai_type_selected(ai_type);
+                format!(
+                    "[{}] {}",
+                    if selected { "X" } else { " " },
+                    Self::ai_type_label(ai_type)
+                )
             }
-            EditField::AiType(idx) => {
-                let (name, selected) = match idx {
-                    0 => ("Codex", self.ai_types_selected[0]),
-                    1 => ("Claude", self.ai_types_selected[1]),
-                    2 => ("Gemini", self.ai_types_selected[2]),
-                    _ => return String::new(),
+            EditField::EnvGroup(ai_type) => {
+                format!("{} Environment Variables", Self::ai_type_label(ai_type))
+            }
+            EditField::EnvVar { ai_type, key } => {
+                let raw_value = self.env_vars.get(key).cloned().unwrap_or_default();
+                let trimmed_empty = raw_value.trim().is_empty();
+                let display_value = if trimmed_empty {
+                    "(not set)".to_string()
+                } else {
+                    mask_if_sensitive(key, &raw_value)
                 };
-                format!("[{}] {}", if selected { "X" } else { " " }, name)
-            }
-            EditField::EnvVar(key) => {
-                let value = self.env_vars.get(key).cloned().unwrap_or_default();
-                let display_value = mask_if_sensitive(key, &value);
-                format!("  {} = {}", key, display_value)
+
+                let status = if let Some(def) = self.get_env_var_def(ai_type, key) {
+                    if def.required && trimmed_empty {
+                        " (required - missing)"
+                    } else if def.required {
+                        " (required)"
+                    } else if trimmed_empty {
+                        " (optional)"
+                    } else {
+                        " (optional)"
+                    }
+                } else {
+                    ""
+                };
+
+                format!("  {} = {}{}", key, display_value, status)
             }
         }
     }
 
-    fn get_env_var_def(&self, key: &str) -> Option<EnvVarDef> {
-        for (idx, selected) in self.ai_types_selected.iter().enumerate() {
-            if *selected {
-                let ai_type = match idx {
-                    0 => AiType::Codex,
-                    1 => AiType::Claude,
-                    2 => AiType::Gemini,
-                    _ => continue,
-                };
-                let vars = get_env_vars_for_ai_type(ai_type);
-                if let Some(var) = vars.iter().find(|v| v.key == key) {
-                    return Some(var.clone().into());
-                }
-            }
+    fn get_env_var_def(&self, ai_type: &AiType, key: &str) -> Option<EnvVarDef> {
+        if !self.is_ai_type_selected(ai_type) {
+            return None;
         }
-        None
+
+        let vars = get_env_vars_for_ai_type(ai_type.clone());
+        vars.into_iter()
+            .find(|var| var.key == key)
+            .map(EnvVarDef::from)
     }
 }
 
@@ -273,8 +380,19 @@ impl Screen for ProviderEditScreen {
                     ])
                     .split(area);
 
-                // Title
-                let title = Paragraph::new(format!("Edit Provider: {}", self.provider_name))
+                let mut title_text = if self.display_name == self.provider_id {
+                    format!("Edit Provider: {}", self.provider_id)
+                } else {
+                    format!(
+                        "Edit Provider: {} ({})",
+                        self.display_name, self.provider_id
+                    )
+                };
+                if self.has_changes() {
+                    title_text.push_str(" *modified");
+                }
+
+                let title = Paragraph::new(title_text)
                     .style(
                         Style::default()
                             .fg(Color::Cyan)
@@ -319,7 +437,7 @@ impl Screen for ProviderEditScreen {
 
                 // Help
                 let help = Paragraph::new(
-                    "[Up/Down] Navigate  [Enter] Edit  [Space] Toggle  [Ctrl+S] Save  [ESC] Back",
+                    "[Up/Down] Navigate  [Enter] Edit  [Space] Toggle Compatibility  [Ctrl+S] Save  [Esc] Cancel",
                 )
                 .alignment(Alignment::Center)
                 .block(Block::default().borders(Borders::ALL));
@@ -336,9 +454,10 @@ impl Screen for ProviderEditScreen {
                     .split(area);
 
                 let field_name = match field {
+                    EditField::DisplayName => "Display Name",
                     EditField::Description => "Description",
-                    EditField::EnvVar(key) => key.as_str(),
-                    _ => "",
+                    EditField::EnvVar { key, .. } => key.as_str(),
+                    _ => "Field",
                 };
 
                 let title = Paragraph::new(format!("Edit Field: {}", field_name))
@@ -358,91 +477,124 @@ impl Screen for ProviderEditScreen {
                     .block(Block::default().borders(Borders::ALL));
                 frame.render_widget(help, chunks[2]);
             }
-            EditMode::Dialog(dialog) => {
-                dialog.render(frame, area);
+            EditMode::Dialog { widget, .. } => {
+                widget.render(frame, area);
             }
         }
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> Result<ScreenAction> {
         match &mut self.mode {
-            EditMode::Browse => {
-                match key.code {
-                    KeyCode::Up => {
-                        if self.selected_field_idx > 0 {
-                            self.selected_field_idx -= 1;
-                        }
-                        Ok(ScreenAction::None)
+            EditMode::Browse => match key.code {
+                KeyCode::Up => {
+                    if self.selected_field_idx > 0 {
+                        self.selected_field_idx -= 1;
                     }
-                    KeyCode::Down => {
-                        if self.selected_field_idx < self.all_fields.len() - 1 {
-                            self.selected_field_idx += 1;
-                        }
-                        Ok(ScreenAction::None)
+                    Ok(ScreenAction::None)
+                }
+                KeyCode::Down => {
+                    if self.selected_field_idx + 1 < self.all_fields.len() {
+                        self.selected_field_idx += 1;
                     }
-                    KeyCode::Enter => {
-                        let field = self.all_fields[self.selected_field_idx].clone();
-
-                        match &field {
-                            EditField::Description => {
-                                self.input_widget = InputWidget::new("Description".to_string())
-                                    .with_value(self.description.clone());
+                    Ok(ScreenAction::None)
+                }
+                KeyCode::Enter => {
+                    let field = self.all_fields[self.selected_field_idx].clone();
+                    match &field {
+                        EditField::DisplayName => {
+                            self.input_widget = InputWidget::new("Display Name".to_string())
+                                .with_value(self.display_name.clone());
+                            self.input_widget.set_focused(true);
+                            self.mode = EditMode::EditingField(field);
+                        }
+                        EditField::Description => {
+                            self.input_widget = InputWidget::new("Description".to_string())
+                                .with_value(self.description.clone());
+                            self.input_widget.set_focused(true);
+                            self.mode = EditMode::EditingField(field);
+                        }
+                        EditField::EnvVar { ai_type, key } => {
+                            if let Some(var_def) = self.get_env_var_def(ai_type, key) {
+                                let current_value =
+                                    self.env_vars.get(key).cloned().unwrap_or_default();
+                                self.input_widget = InputWidget::new(format!(
+                                    "{} [{}]\n{}",
+                                    var_def.key,
+                                    Self::ai_type_label(ai_type),
+                                    var_def.description
+                                ))
+                                .with_value(current_value)
+                                .masked(var_def.sensitive);
                                 self.input_widget.set_focused(true);
                                 self.mode = EditMode::EditingField(field);
                             }
-                            EditField::EnvVar(key) => {
-                                if let Some(var_def) = self.get_env_var_def(key) {
-                                    let current_value =
-                                        self.env_vars.get(key).cloned().unwrap_or_default();
-                                    self.input_widget = InputWidget::new(format!(
-                                        "{}\n{}",
-                                        var_def.key, var_def.description
-                                    ))
-                                    .with_value(current_value)
-                                    .masked(var_def.sensitive);
-                                    self.input_widget.set_focused(true);
-                                    self.mode = EditMode::EditingField(field);
-                                }
-                            }
-                            _ => {}
                         }
-                        Ok(ScreenAction::None)
+                        _ => {}
                     }
-                    KeyCode::Char(' ') => {
-                        // Toggle AI type
-                        if let EditField::AiType(idx) = self.all_fields[self.selected_field_idx] {
-                            self.ai_types_selected[idx] = !self.ai_types_selected[idx];
+                    Ok(ScreenAction::None)
+                }
+                KeyCode::Char(' ') => {
+                    if let EditField::AiType(ai_type) =
+                        self.all_fields[self.selected_field_idx].clone()
+                    {
+                        let idx = Self::ai_type_index(&ai_type);
+                        if let Some(selected) = self.ai_types_selected.get_mut(idx) {
+                            *selected = !*selected;
+                            if !*selected {
+                                self.remove_env_vars_for(&ai_type);
+                            }
                             self.rebuild_fields();
                         }
-                        Ok(ScreenAction::None)
                     }
-                    KeyCode::Char('s')
-                        if key
-                            .modifiers
-                            .contains(crossterm::event::KeyModifiers::CONTROL) =>
-                    {
-                        // Save changes
-                        if let Err(e) = self.save_changes() {
-                            let dialog = DialogWidget::error(
-                                "Error".to_string(),
-                                format!("Failed to save provider: {}", e),
-                            );
-                            self.mode = EditMode::Dialog(dialog);
-                        } else {
+                    Ok(ScreenAction::None)
+                }
+                KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    match self.save_changes() {
+                        Ok(()) => {
+                            self.rebuild_fields();
                             let dialog = DialogWidget::info(
                                 "Success".to_string(),
-                                format!("Provider '{}' saved successfully", self.provider_name),
+                                format!("Provider '{}' saved successfully", self.display_name),
                             );
-                            self.mode = EditMode::Dialog(dialog);
+                            self.mode = EditMode::Dialog {
+                                widget: dialog,
+                                outcome: DialogOutcome::Info {
+                                    exit_on_close: true,
+                                },
+                            };
                         }
-                        Ok(ScreenAction::None)
+                        Err(err) => {
+                            let dialog = DialogWidget::error(
+                                "Error".to_string(),
+                                format!("Failed to save provider: {}", err),
+                            );
+                            self.mode = EditMode::Dialog {
+                                widget: dialog,
+                                outcome: DialogOutcome::Info {
+                                    exit_on_close: false,
+                                },
+                            };
+                        }
                     }
-                    KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
-                        Ok(ScreenAction::Back)
-                    }
-                    _ => Ok(ScreenAction::None),
+                    Ok(ScreenAction::None)
                 }
-            }
+                KeyCode::Esc => {
+                    if self.has_changes() {
+                        let dialog = DialogWidget::confirm(
+                            "Discard Changes".to_string(),
+                            "Discard all unsaved changes?".to_string(),
+                        );
+                        self.mode = EditMode::Dialog {
+                            widget: dialog,
+                            outcome: DialogOutcome::ConfirmDiscard,
+                        };
+                        Ok(ScreenAction::None)
+                    } else {
+                        Ok(ScreenAction::SwitchTo(ScreenType::Provider))
+                    }
+                }
+                _ => Ok(ScreenAction::None),
+            },
             EditMode::EditingField(field) => {
                 if self.input_widget.handle_key(key) {
                     return Ok(ScreenAction::None);
@@ -451,18 +603,25 @@ impl Screen for ProviderEditScreen {
                 match key.code {
                     KeyCode::Enter => {
                         let value = self.input_widget.value().to_string();
-
                         match field {
+                            EditField::DisplayName => {
+                                self.display_name = value;
+                            }
                             EditField::Description => {
                                 self.description = value;
                             }
-                            EditField::EnvVar(key) => {
-                                self.env_vars.insert(key.clone(), value);
+                            EditField::EnvVar { key, .. } => {
+                                let trimmed = value.trim();
+                                if trimmed.is_empty() {
+                                    self.env_vars.remove(key);
+                                } else {
+                                    self.env_vars.insert(key.clone(), value);
+                                }
                             }
                             _ => {}
                         }
-
                         self.mode = EditMode::Browse;
+                        self.rebuild_fields();
                         Ok(ScreenAction::None)
                     }
                     KeyCode::Esc => {
@@ -472,16 +631,35 @@ impl Screen for ProviderEditScreen {
                     _ => Ok(ScreenAction::None),
                 }
             }
-            EditMode::Dialog(dialog) => {
-                let result = dialog.handle_key(key);
+            EditMode::Dialog { widget, outcome } => {
+                let result = widget.handle_key(key);
+                let next_action = match outcome {
+                    DialogOutcome::Info { exit_on_close } => match result {
+                        DialogResult::Closed
+                        | DialogResult::Confirmed
+                        | DialogResult::Cancelled => {
+                            if *exit_on_close {
+                                Some(ScreenAction::SwitchTo(ScreenType::Provider))
+                            } else {
+                                None
+                            }
+                        }
+                        DialogResult::None => return Ok(ScreenAction::None),
+                    },
+                    DialogOutcome::ConfirmDiscard => match result {
+                        DialogResult::Confirmed => {
+                            Some(ScreenAction::SwitchTo(ScreenType::Provider))
+                        }
+                        DialogResult::Cancelled | DialogResult::Closed => None,
+                        DialogResult::None => return Ok(ScreenAction::None),
+                    },
+                };
 
-                match result {
-                    DialogResult::Closed | DialogResult::Confirmed | DialogResult::Cancelled => {
-                        self.mode = EditMode::Browse;
-                        Ok(ScreenAction::None)
-                    }
-                    DialogResult::None => Ok(ScreenAction::None),
+                if next_action.is_none() {
+                    self.mode = EditMode::Browse;
                 }
+
+                Ok(next_action.unwrap_or(ScreenAction::None))
             }
         }
     }

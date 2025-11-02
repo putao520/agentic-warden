@@ -222,3 +222,52 @@ impl DialogWidget {
             .split(popup_layout[1])[1]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::KeyModifiers;
+
+    #[test]
+    fn confirm_dialog_handles_confirmation_and_cancellation() {
+        let mut dialog = DialogWidget::confirm("Confirm".to_string(), "Are you sure?".to_string());
+
+        assert!(matches!(
+            dialog.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            DialogResult::Confirmed
+        ));
+
+        let mut dialog = DialogWidget::confirm("Confirm".to_string(), "Are you sure?".to_string());
+        dialog.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+        assert!(matches!(
+            dialog.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            DialogResult::Cancelled
+        ));
+    }
+
+    #[test]
+    fn confirm_dialog_toggles_selection_with_keys() {
+        let mut dialog = DialogWidget::confirm("Confirm".to_string(), "Are you sure?".to_string());
+
+        assert!(matches!(
+            dialog.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE)),
+            DialogResult::Cancelled
+        ));
+
+        let mut dialog = DialogWidget::confirm("Confirm".to_string(), "Are you sure?".to_string());
+        dialog.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+        assert!(matches!(
+            dialog.handle_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE)),
+            DialogResult::Confirmed
+        ));
+    }
+
+    #[test]
+    fn info_dialog_enter_closes() {
+        let mut dialog = DialogWidget::info("Info".to_string(), "Done".to_string());
+        assert!(matches!(
+            dialog.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            DialogResult::Closed
+        ));
+    }
+}

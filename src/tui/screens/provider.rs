@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Paragraph, Wrap},
 };
 use std::collections::HashMap;
 
@@ -26,13 +26,41 @@ struct EnvVarDef {
 
 impl From<EnvVarMapping> for EnvVarDef {
     fn from(mapping: EnvVarMapping) -> Self {
-        let sensitive = mapping.key.contains("KEY") || mapping.key.contains("SECRET");
+        let key_upper = mapping.key.to_ascii_uppercase();
+        let sensitive = ["KEY", "SECRET", "TOKEN", "PASSWORD"]
+            .iter()
+            .any(|marker| key_upper.contains(marker));
         EnvVarDef {
             key: mapping.key.to_string(),
             description: mapping.description.to_string(),
             required: mapping.required,
             sensitive,
         }
+    }
+}
+
+#[derive(Clone)]
+struct ProviderListEntry {
+    id: String,
+    label: String,
+    is_default: bool,
+}
+
+fn mask_sensitive_value(key: &str, value: &str) -> String {
+    let upper_key = key.to_ascii_uppercase();
+    let is_sensitive = ["KEY", "SECRET", "TOKEN", "PASSWORD"]
+        .iter()
+        .any(|marker| upper_key.contains(marker));
+
+    if !is_sensitive {
+        return value.to_string();
+    }
+
+    if value.is_empty() {
+        "(not set)".to_string()
+    } else {
+        let prefix: String = value.chars().take(4).collect();
+        format!("{prefix}***")
     }
 }
 
@@ -51,33 +79,32 @@ enum ProviderMode {
         name: String,
         description: String,
         compatible_types: Vec<AiType>,
+        env_defs: Vec<(AiType, EnvVarDef)>,
         env_vars: HashMap<String, String>,
-        current_ai_type_idx: usize,
-        current_env_idx: usize,
+        current_idx: usize,
     },
-    DeleteConfirm(String),
+    DeleteConfirm {
+        provider_id: String,
+        dialog: DialogWidget,
+    },
     Dialog(DialogWidget),
 }
 
 /// Provider list screen
 pub struct ProviderScreen {
     provider_manager: ProviderManager,
-    list_widget: ListWidget<String>,
+    list_widget: ListWidget<ProviderListEntry>,
     mode: ProviderMode,
     input_widget: InputWidget,
     types_selected: Vec<bool>, // For multi-select AI types
+    pending_focus_id: Option<String>,
 }
 
 impl ProviderScreen {
     pub fn new() -> Result<Self> {
         let provider_manager = ProviderManager::new()?;
-        let provider_names: Vec<String> = provider_manager
-            .list_providers()
-            .into_iter()
-            .map(|(name, _)| name.clone())
-            .collect();
-
-        let list_widget = ListWidget::new("Providers".to_string(), provider_names);
+        let entries = Self::build_provider_entries(&provider_manager);
+        let list_widget = ListWidget::new("Providers".to_string(), entries);
 
         Ok(Self {
             provider_manager,
@@ -85,32 +112,34 @@ impl ProviderScreen {
             mode: ProviderMode::List,
             input_widget: InputWidget::new("Input".to_string()),
             types_selected: vec![false, false, false], // codex, claude, gemini
+            pending_focus_id: None,
         })
     }
 
     fn refresh_list(&mut self) -> Result<()> {
-        let provider_names: Vec<String> = self
-            .provider_manager
-            .list_providers()
-            .into_iter()
-            .map(|(name, _)| name.clone())
-            .collect();
-        self.list_widget = ListWidget::new("Providers".to_string(), provider_names);
-        Ok(())
-    }
+        let entries = Self::build_provider_entries(&self.provider_manager);
+        let target_focus = self.pending_focus_id.take();
+        let selected_id =
+            target_focus.or_else(|| self.list_widget.selected().map(|entry| entry.id.clone()));
 
-    fn get_selected_ai_types(&self) -> Vec<AiType> {
-        let mut types = Vec::new();
-        if self.types_selected[0] {
-            types.push(AiType::Codex);
+        self.list_widget.set_items(entries);
+
+        if self.list_widget.items().is_empty() {
+            self.list_widget.select(None);
+        } else if let Some(id) = selected_id {
+            if let Some(index) = self
+                .list_widget
+                .items()
+                .iter()
+                .position(|entry| entry.id == id)
+            {
+                self.list_widget.select(Some(index));
+            }
+        } else if self.list_widget.selected_index().is_none() {
+            self.list_widget.select(Some(0));
         }
-        if self.types_selected[1] {
-            types.push(AiType::Claude);
-        }
-        if self.types_selected[2] {
-            types.push(AiType::Gemini);
-        }
-        types
+
+        Ok(())
     }
 
     fn get_all_env_vars_for_types(types: &[AiType]) -> Vec<(AiType, EnvVarDef)> {
@@ -123,22 +152,194 @@ impl ProviderScreen {
         }
         all_vars
     }
+
+    fn collect_selected_types(flags: &[bool]) -> Vec<AiType> {
+        let mut types = Vec::new();
+        if flags.get(0).copied().unwrap_or(false) {
+            types.push(AiType::Codex);
+        }
+        if flags.get(1).copied().unwrap_or(false) {
+            types.push(AiType::Claude);
+        }
+        if flags.get(2).copied().unwrap_or(false) {
+            types.push(AiType::Gemini);
+        }
+        types
+    }
+
+    fn build_provider_entries(manager: &ProviderManager) -> Vec<ProviderListEntry> {
+        let default_id = manager.default_provider_name().to_string();
+
+        manager
+            .list_providers()
+            .into_iter()
+            .map(|(id, provider)| {
+                let label = if provider.name.is_empty() {
+                    id.clone()
+                } else if provider.name == *id {
+                    provider.name.clone()
+                } else {
+                    format!("{} ({})", provider.name, id)
+                };
+
+                ProviderListEntry {
+                    id: id.clone(),
+                    label,
+                    is_default: *id == default_id,
+                }
+            })
+            .collect()
+    }
+
+    fn format_provider_detail(&self, provider_id: &str) -> Option<String> {
+        let provider = self.provider_manager.get_provider(provider_id).ok()?;
+
+        let mut lines = Vec::new();
+        lines.push(format!("Provider ID: {}", provider_id));
+        lines.push(format!("Display Name: {}", provider.name));
+        if !provider.description.is_empty() {
+            lines.push(format!("Description: {}", provider.description));
+        }
+
+        if !provider.compatible_with.is_empty() {
+            let compat = provider
+                .compatible_with
+                .iter()
+                .map(|t| t.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(format!("Compatible CLI: {}", compat));
+        }
+
+        if !provider.support_modes.is_empty() {
+            lines.push(String::from("Support Modes:"));
+            for mode in &provider.support_modes {
+                lines.push(format!(
+                    "  - {} ({})",
+                    mode.name,
+                    mode.mode_type.to_string()
+                ));
+            }
+        }
+
+        lines.push(String::new());
+        lines.push("Environment Variables:".to_string());
+
+        for ai_type in &[AiType::Codex, AiType::Claude, AiType::Gemini] {
+            if provider.compatible_with.contains(ai_type) {
+                lines.push(format!("  {}:", ai_type));
+                let mappings = get_env_vars_for_ai_type(ai_type.clone());
+                for mapping in mappings {
+                    let value = provider
+                        .env
+                        .get(mapping.key)
+                        .map(|val| mask_sensitive_value(mapping.key, val))
+                        .unwrap_or_else(|| "(not set)".to_string());
+                    let required = if mapping.required { " (required)" } else { "" };
+                    lines.push(format!("    {} = {}{}", mapping.key, value, required));
+                }
+            }
+        }
+
+        Some(lines.join("\n"))
+    }
+
+    fn reset_to_list(&mut self) {
+        self.mode = ProviderMode::List;
+        self.input_widget = InputWidget::new("Input".to_string());
+        self.types_selected = vec![false, false, false];
+    }
+
+    fn begin_add_flow(&mut self) {
+        self.input_widget = InputWidget::new("Provider ID".to_string());
+        self.input_widget.set_focused(true);
+        self.types_selected = vec![false, false, false];
+        self.mode = ProviderMode::AddNameInput;
+    }
+
+    fn env_prompt_label(env_def: &(AiType, EnvVarDef)) -> String {
+        let (ai_type, var) = env_def;
+        let requirement = if var.required { "required" } else { "optional" };
+        format!(
+            "{} [{} | {}]\n{}",
+            var.key, ai_type, requirement, var.description
+        )
+    }
+
+    fn build_env_input_widget(
+        env_defs: &[(AiType, EnvVarDef)],
+        current_idx: usize,
+        env_vars: &HashMap<String, String>,
+    ) -> InputWidget {
+        let env_def = &env_defs[current_idx];
+        let label = Self::env_prompt_label(env_def);
+        let existing = env_vars.get(&env_def.1.key).cloned().unwrap_or_default();
+        let mut input = InputWidget::new(label)
+            .with_value(existing)
+            .masked(env_def.1.sensitive);
+        input.set_focused(true);
+        input
+    }
+
+    fn finish_provider_creation(
+        &mut self,
+        provider_id: String,
+        description: String,
+        compatible_types: Vec<AiType>,
+        env_vars: HashMap<String, String>,
+    ) -> Result<()> {
+        let provider = Provider {
+            name: provider_id.clone(),
+            description,
+            icon: None,
+            official: false,
+            protected: false,
+            custom: true,
+            support_modes: vec![],
+            compatible_with: compatible_types,
+            validation_endpoint: None,
+            category: None,
+            website: None,
+            regions: vec![],
+            env: env_vars,
+        };
+
+        match self
+            .provider_manager
+            .add_provider(provider_id.clone(), provider)
+        {
+            Ok(()) => {
+                self.pending_focus_id = Some(provider_id.clone());
+                self.refresh_list()?;
+                self.mode = ProviderMode::Dialog(DialogWidget::info(
+                    "Success".to_string(),
+                    format!("Provider '{}' added successfully", provider_id),
+                ));
+            }
+            Err(err) => {
+                self.mode = ProviderMode::Dialog(DialogWidget::error(
+                    "Error".to_string(),
+                    format!("Failed to add provider: {}", err),
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Screen for ProviderScreen {
     fn render(&mut self, frame: &mut Frame, area: Rect) {
         match &self.mode {
             ProviderMode::List => {
-                let chunks = Layout::default()
+                let layout = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints([
                         Constraint::Length(3),
-                        Constraint::Min(10),
+                        Constraint::Min(0),
                         Constraint::Length(3),
                     ])
                     .split(area);
 
-                // Title
                 let title = Paragraph::new("Provider Management")
                     .style(
                         Style::default()
@@ -147,33 +348,39 @@ impl Screen for ProviderScreen {
                     )
                     .alignment(Alignment::Center)
                     .block(Block::default().borders(Borders::ALL));
-                frame.render_widget(title, chunks[0]);
+                frame.render_widget(title, layout[0]);
 
-                // Provider list
-                let default_provider = self
-                    .provider_manager
-                    .get_default_provider()
-                    .map(|(name, _)| name.clone())
-                    .unwrap_or_else(|| "official".to_string());
+                let content = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([Constraint::Percentage(38), Constraint::Percentage(62)])
+                    .split(layout[1]);
 
-                self.list_widget
-                    .render(frame, chunks[1], |name, is_selected| {
-                        let marker = if name == &default_provider {
-                            " (default)"
-                        } else {
-                            ""
-                        };
-                        let prefix = if is_selected { "> " } else { "  " };
-                        format!("{}{}{}", prefix, name, marker)
+                let selected_id = self.list_widget.selected().map(|entry| entry.id.clone());
+
+                self.list_widget.render(frame, content[0], |entry, _| {
+                    let default_marker = if entry.is_default { " [default]" } else { "" };
+                    format!("{}{}", entry.label, default_marker)
+                });
+
+                let detail_text = selected_id
+                    .and_then(|id| self.format_provider_detail(&id))
+                    .unwrap_or_else(|| {
+                        "Select a provider to see configuration details.".to_string()
                     });
 
-                // Help
+                let detail = Paragraph::new(detail_text).wrap(Wrap { trim: true }).block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Provider Details"),
+                );
+                frame.render_widget(detail, content[1]);
+
                 let help = Paragraph::new(
-                    "[A] Add  [E] Edit  [D] Delete  [Enter] Set Default  [ESC] Back",
+                    "[Enter] Set Default  [A] Add  [E] Edit  [D] Delete  [R] Refresh  [ESC] Back",
                 )
                 .alignment(Alignment::Center)
                 .block(Block::default().borders(Borders::ALL));
-                frame.render_widget(help, chunks[2]);
+                frame.render_widget(help, layout[2]);
             }
             ProviderMode::AddNameInput | ProviderMode::AddDescriptionInput { .. } => {
                 let chunks = Layout::default()
@@ -253,10 +460,8 @@ impl Screen for ProviderScreen {
             }
             ProviderMode::AddEnvInput {
                 name,
-                compatible_types,
-                env_vars,
-                current_ai_type_idx,
-                current_env_idx,
+                env_defs,
+                current_idx,
                 ..
             } => {
                 let chunks = Layout::default()
@@ -279,44 +484,32 @@ impl Screen for ProviderScreen {
                         .block(Block::default().borders(Borders::ALL));
                 frame.render_widget(title, chunks[0]);
 
-                // Show current variable being input
-                let all_vars = Self::get_all_env_vars_for_types(compatible_types);
-                let total_vars = all_vars.len();
-                let current_idx = current_ai_type_idx * 3 + current_env_idx;
+                let total = env_defs.len();
 
-                if current_idx < total_vars {
-                    let (ai_type, var) = &all_vars[current_idx];
-                    let progress = format!(
-                        "Variable {} of {} for {}",
-                        current_idx + 1,
-                        total_vars,
-                        ai_type
-                    );
-                    let req_marker = if var.required {
-                        " (REQUIRED)"
-                    } else {
-                        " (optional)"
-                    };
+                if *current_idx < total {
+                    let (ai_type, var) = &env_defs[*current_idx];
+                    let progress =
+                        format!("Variable {} of {} | {}", current_idx + 1, total, ai_type);
+                    let requirement = if var.required { "Required" } else { "Optional" };
 
-                    let mut input =
-                        InputWidget::new(format!("{}{}\n{}", var.key, req_marker, var.description))
-                            .masked(var.sensitive);
-
-                    if let Some(existing) = env_vars.get(&var.key) {
-                        input = input.with_value(existing.clone());
-                    }
-                    input.set_focused(true);
-
-                    let info_text = format!("{}\n\n", progress);
-                    let info = Paragraph::new(info_text);
+                    let info_text = format!("{}\n{}\n{}", progress, var.key, var.description);
+                    let info = Paragraph::new(info_text)
+                        .block(Block::default().borders(Borders::ALL).title(requirement));
 
                     let inner_chunks = Layout::default()
                         .direction(Direction::Vertical)
-                        .constraints([Constraint::Length(3), Constraint::Min(5)])
+                        .constraints([Constraint::Length(4), Constraint::Min(5)])
                         .split(chunks[1]);
 
                     frame.render_widget(info, inner_chunks[0]);
-                    input.render(frame, inner_chunks[1]);
+                    self.input_widget.render(frame, inner_chunks[1]);
+                } else {
+                    let info = Paragraph::new(
+                        "All environment variables captured. Press Enter to finish.",
+                    )
+                    .alignment(Alignment::Center)
+                    .block(Block::default().borders(Borders::ALL));
+                    frame.render_widget(info, chunks[1]);
                 }
 
                 let help = Paragraph::new("[Enter] Next  [ESC] Cancel")
@@ -324,11 +517,7 @@ impl Screen for ProviderScreen {
                     .block(Block::default().borders(Borders::ALL));
                 frame.render_widget(help, chunks[2]);
             }
-            ProviderMode::DeleteConfirm(name) => {
-                let dialog = DialogWidget::confirm(
-                    "Confirm Delete".to_string(),
-                    format!("Are you sure you want to delete provider '{}'?", name),
-                );
+            ProviderMode::DeleteConfirm { dialog, .. } => {
                 dialog.render(frame, area);
             }
             ProviderMode::Dialog(dialog) => {
@@ -338,52 +527,64 @@ impl Screen for ProviderScreen {
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> Result<ScreenAction> {
-        // Extract selected_types before borrowing self.mode mutably
-        let selected_types = if matches!(self.mode, ProviderMode::AddSelectTypes { .. })
-            && matches!(key.code, KeyCode::Enter)
-        {
-            Some(self.get_selected_ai_types())
-        } else {
-            None
-        };
-
         match &mut self.mode {
             ProviderMode::List => {
-                // Let list widget handle navigation
                 if self.list_widget.handle_key(key) {
                     return Ok(ScreenAction::None);
                 }
 
                 match key.code {
                     KeyCode::Char('a') | KeyCode::Char('A') => {
-                        // Launch new provider add wizard (v2.0)
-                        Ok(ScreenAction::SwitchTo(ScreenType::ProviderAddWizard))
+                        self.begin_add_flow();
+                        Ok(ScreenAction::None)
                     }
                     KeyCode::Char('e') | KeyCode::Char('E') => {
-                        if let Some(provider_name) = self.list_widget.selected() {
+                        if let Some(entry) = self.list_widget.selected() {
                             Ok(ScreenAction::SwitchTo(ScreenType::ProviderEdit(
-                                provider_name.clone(),
+                                entry.id.clone(),
                             )))
                         } else {
                             Ok(ScreenAction::None)
                         }
                     }
                     KeyCode::Char('d') | KeyCode::Char('D') => {
-                        if let Some(provider_name) = self.list_widget.selected() {
-                            self.mode = ProviderMode::DeleteConfirm(provider_name.clone());
+                        if let Some(entry) = self.list_widget.selected() {
+                            let dialog = DialogWidget::confirm(
+                                "Confirm Delete".to_string(),
+                                format!(
+                                    "Are you sure you want to delete provider '{}'?",
+                                    entry.label
+                                ),
+                            );
+                            self.mode = ProviderMode::DeleteConfirm {
+                                provider_id: entry.id.clone(),
+                                dialog,
+                            };
                         }
                         Ok(ScreenAction::None)
                     }
+                    KeyCode::Char('r') | KeyCode::Char('R') => {
+                        self.refresh_list()?;
+                        Ok(ScreenAction::None)
+                    }
                     KeyCode::Enter => {
-                        if let Some(provider_name) = self.list_widget.selected() {
-                            if let Err(e) = self.provider_manager.set_default(&provider_name) {
-                                let dialog = DialogWidget::error(
-                                    "Error".to_string(),
-                                    format!("Failed to set default provider: {}", e),
-                                );
-                                self.mode = ProviderMode::Dialog(dialog);
-                            } else {
-                                self.refresh_list()?;
+                        if let Some(entry) = self.list_widget.selected().cloned() {
+                            let entry_id = entry.id.clone();
+                            let entry_label = entry.label.clone();
+                            match self.provider_manager.set_default(&entry_id) {
+                                Ok(()) => {
+                                    self.refresh_list()?;
+                                    self.mode = ProviderMode::Dialog(DialogWidget::info(
+                                        "Default Provider".to_string(),
+                                        format!("'{}' is now the default provider", entry_label),
+                                    ));
+                                }
+                                Err(err) => {
+                                    self.mode = ProviderMode::Dialog(DialogWidget::error(
+                                        "Error".to_string(),
+                                        format!("Failed to set default provider: {}", err),
+                                    ));
+                                }
                             }
                         }
                         Ok(ScreenAction::None)
@@ -401,15 +602,18 @@ impl Screen for ProviderScreen {
 
                 match key.code {
                     KeyCode::Enter => {
-                        let name = self.input_widget.value().to_string();
+                        let name = self.input_widget.value().trim().to_string();
                         if name.is_empty() {
-                            let dialog = DialogWidget::warning(
-                                "Warning".to_string(),
-                                "Provider name cannot be empty".to_string(),
-                            );
-                            self.mode = ProviderMode::Dialog(dialog);
+                            self.mode = ProviderMode::Dialog(DialogWidget::warning(
+                                "Validation".to_string(),
+                                "Provider ID cannot be empty".to_string(),
+                            ));
+                        } else if self.provider_manager.get_provider(&name).is_ok() {
+                            self.mode = ProviderMode::Dialog(DialogWidget::warning(
+                                "Validation".to_string(),
+                                format!("Provider '{}' already exists", name),
+                            ));
                         } else {
-                            // Move to description input
                             self.input_widget = InputWidget::new("Description".to_string());
                             self.input_widget.set_focused(true);
                             self.mode = ProviderMode::AddDescriptionInput { name };
@@ -417,7 +621,7 @@ impl Screen for ProviderScreen {
                         Ok(ScreenAction::None)
                     }
                     KeyCode::Esc => {
-                        self.mode = ProviderMode::List;
+                        self.reset_to_list();
                         Ok(ScreenAction::None)
                     }
                     _ => Ok(ScreenAction::None),
@@ -431,7 +635,6 @@ impl Screen for ProviderScreen {
                 match key.code {
                     KeyCode::Enter => {
                         let description = self.input_widget.value().to_string();
-                        // Move to type selection
                         self.types_selected = vec![false, false, false];
                         self.mode = ProviderMode::AddSelectTypes {
                             name: name.clone(),
@@ -440,64 +643,73 @@ impl Screen for ProviderScreen {
                         Ok(ScreenAction::None)
                     }
                     KeyCode::Esc => {
-                        self.mode = ProviderMode::List;
+                        self.reset_to_list();
                         Ok(ScreenAction::None)
                     }
                     _ => Ok(ScreenAction::None),
                 }
             }
-            ProviderMode::AddSelectTypes { name, description } => {
-                match key.code {
-                    KeyCode::Char('1') => {
-                        self.types_selected[0] = !self.types_selected[0];
-                        Ok(ScreenAction::None)
-                    }
-                    KeyCode::Char('2') => {
-                        self.types_selected[1] = !self.types_selected[1];
-                        Ok(ScreenAction::None)
-                    }
-                    KeyCode::Char('3') => {
-                        self.types_selected[2] = !self.types_selected[2];
-                        Ok(ScreenAction::None)
-                    }
-                    KeyCode::Enter => {
-                        if let Some(selected_types) = selected_types {
-                            if selected_types.is_empty() {
-                                let dialog = DialogWidget::warning(
-                                    "Warning".to_string(),
-                                    "Please select at least one AI type".to_string(),
-                                );
-                                self.mode = ProviderMode::Dialog(dialog);
-                            } else {
-                                // Start env input flow with collected data
-                                self.input_widget = InputWidget::new("".to_string());
-                                self.input_widget.set_focused(true);
-                                self.mode = ProviderMode::AddEnvInput {
-                                    name: name.clone(),
-                                    description: description.clone(),
-                                    compatible_types: selected_types,
-                                    env_vars: HashMap::new(),
-                                    current_ai_type_idx: 0,
-                                    current_env_idx: 0,
-                                };
-                            }
+            ProviderMode::AddSelectTypes { name, description } => match key.code {
+                KeyCode::Char('1') => {
+                    self.types_selected[0] = !self.types_selected[0];
+                    Ok(ScreenAction::None)
+                }
+                KeyCode::Char('2') => {
+                    self.types_selected[1] = !self.types_selected[1];
+                    Ok(ScreenAction::None)
+                }
+                KeyCode::Char('3') => {
+                    self.types_selected[2] = !self.types_selected[2];
+                    Ok(ScreenAction::None)
+                }
+                KeyCode::Enter => {
+                    let selected_types = Self::collect_selected_types(&self.types_selected);
+                    if selected_types.is_empty() {
+                        self.mode = ProviderMode::Dialog(DialogWidget::warning(
+                            "Validation".to_string(),
+                            "Please select at least one compatible AI type".to_string(),
+                        ));
+                    } else {
+                        let provider_name = name.clone();
+                        let provider_description = description.clone();
+                        let env_defs = Self::get_all_env_vars_for_types(&selected_types);
+                        let env_vars = HashMap::new();
+
+                        if env_defs.is_empty() {
+                            self.finish_provider_creation(
+                                provider_name,
+                                provider_description,
+                                selected_types,
+                                env_vars,
+                            )?;
+                        } else {
+                            self.input_widget =
+                                Self::build_env_input_widget(&env_defs, 0, &env_vars);
+                            self.mode = ProviderMode::AddEnvInput {
+                                name: provider_name,
+                                description: provider_description,
+                                compatible_types: selected_types,
+                                env_defs,
+                                current_idx: 0,
+                                env_vars,
+                            };
                         }
-                        Ok(ScreenAction::None)
                     }
-                    KeyCode::Esc => {
-                        self.mode = ProviderMode::List;
-                        Ok(ScreenAction::None)
-                    }
-                    _ => Ok(ScreenAction::None),
+                    Ok(ScreenAction::None)
                 }
-            }
+                KeyCode::Esc => {
+                    self.reset_to_list();
+                    Ok(ScreenAction::None)
+                }
+                _ => Ok(ScreenAction::None),
+            },
             ProviderMode::AddEnvInput {
                 name,
                 description,
                 compatible_types,
+                env_defs,
                 env_vars,
-                current_ai_type_idx,
-                current_env_idx,
+                current_idx,
             } => {
                 if self.input_widget.handle_key(key) {
                     return Ok(ScreenAction::None);
@@ -505,98 +717,87 @@ impl Screen for ProviderScreen {
 
                 match key.code {
                     KeyCode::Enter => {
-                        let all_vars = Self::get_all_env_vars_for_types(compatible_types);
-                        let total_vars = all_vars.len();
-                        let current_idx = *current_ai_type_idx * 3 + *current_env_idx;
-
-                        if current_idx < total_vars {
-                            let (_, var) = &all_vars[current_idx];
-                            let value = self.input_widget.value().to_string();
-
-                            if !value.is_empty() || !var.required {
-                                env_vars.insert(var.key.clone(), value);
-
-                                // Move to next variable
-                                if current_idx + 1 < total_vars {
-                                    let next_ai_type_idx = (current_idx + 1) / 3;
-                                    let next_env_idx = (current_idx + 1) % 3;
-                                    *current_ai_type_idx = next_ai_type_idx;
-                                    *current_env_idx = next_env_idx;
-                                    self.input_widget = InputWidget::new("".to_string());
-                                    self.input_widget.set_focused(true);
-                                } else {
-                                    // All done, save provider
-                                    let provider = Provider {
-                                        name: name.clone(),
-                                        description: description.clone(),
-                                        icon: None,
-                                        official: false,
-                                        protected: false,
-                                        custom: true,
-                                        support_modes: vec![],
-                                        compatible_with: compatible_types.clone(),
-                                        validation_endpoint: None,
-                                        category: None,
-                                        website: None,
-                                        regions: vec![],
-                                        env: env_vars.clone(),
-                                    };
-
-                                    let provider_name = name.clone();
-                                    let add_result = self
-                                        .provider_manager
-                                        .add_provider(provider_name.clone(), provider);
-
-                                    if let Err(e) = add_result {
-                                        let dialog = DialogWidget::error(
-                                            "Error".to_string(),
-                                            format!("Failed to add provider: {}", e),
-                                        );
-                                        self.mode = ProviderMode::Dialog(dialog);
-                                    } else {
-                                        self.refresh_list()?;
-                                        let dialog = DialogWidget::info(
-                                            "Success".to_string(),
-                                            format!(
-                                                "Provider '{}' added successfully",
-                                                provider_name
-                                            ),
-                                        );
-                                        self.mode = ProviderMode::Dialog(dialog);
-                                    }
-                                }
+                        if let Some((_, var)) = env_defs.get(*current_idx) {
+                            let value = self.input_widget.value().trim().to_string();
+                            if var.required && value.is_empty() {
+                                self.mode = ProviderMode::Dialog(DialogWidget::warning(
+                                    "Validation".to_string(),
+                                    format!("{} is required", var.key),
+                                ));
+                                return Ok(ScreenAction::None);
                             }
+
+                            if value.is_empty() {
+                                env_vars.remove(&var.key);
+                            } else {
+                                env_vars.insert(var.key.clone(), value);
+                            }
+
+                            *current_idx += 1;
+                            if *current_idx >= env_defs.len() {
+                                let env_snapshot = env_vars.clone();
+                                let provider_name = name.clone();
+                                let provider_description = description.clone();
+                                let compatible_clone = compatible_types.clone();
+                                self.finish_provider_creation(
+                                    provider_name,
+                                    provider_description,
+                                    compatible_clone,
+                                    env_snapshot,
+                                )?;
+                            } else {
+                                self.input_widget =
+                                    Self::build_env_input_widget(env_defs, *current_idx, env_vars);
+                            }
+                        } else {
+                            let env_snapshot = env_vars.clone();
+                            let provider_name = name.clone();
+                            let provider_description = description.clone();
+                            let compatible_clone = compatible_types.clone();
+                            self.finish_provider_creation(
+                                provider_name,
+                                provider_description,
+                                compatible_clone,
+                                env_snapshot,
+                            )?;
                         }
                         Ok(ScreenAction::None)
                     }
                     KeyCode::Esc => {
-                        self.mode = ProviderMode::List;
+                        self.reset_to_list();
                         Ok(ScreenAction::None)
                     }
                     _ => Ok(ScreenAction::None),
                 }
             }
-            ProviderMode::DeleteConfirm(name) => {
-                let mut dialog = DialogWidget::confirm("".to_string(), "".to_string());
+            ProviderMode::DeleteConfirm {
+                provider_id,
+                dialog,
+            } => {
                 let result = dialog.handle_key(key);
 
                 match result {
                     DialogResult::Confirmed => {
-                        let name_to_delete = name.clone();
-                        if let Err(e) = self.provider_manager.remove_provider(&name_to_delete) {
-                            let dialog = DialogWidget::error(
-                                "Error".to_string(),
-                                format!("Failed to delete provider: {}", e),
-                            );
-                            self.mode = ProviderMode::Dialog(dialog);
-                        } else {
-                            self.refresh_list()?;
-                            self.mode = ProviderMode::List;
+                        let target = provider_id.clone();
+                        match self.provider_manager.remove_provider(&target) {
+                            Ok(()) => {
+                                self.refresh_list()?;
+                                self.mode = ProviderMode::Dialog(DialogWidget::info(
+                                    "Provider Deleted".to_string(),
+                                    format!("Provider '{}' has been removed", target),
+                                ));
+                            }
+                            Err(err) => {
+                                self.mode = ProviderMode::Dialog(DialogWidget::error(
+                                    "Error".to_string(),
+                                    format!("Failed to delete provider: {}", err),
+                                ));
+                            }
                         }
                         Ok(ScreenAction::None)
                     }
                     DialogResult::Cancelled | DialogResult::Closed => {
-                        self.mode = ProviderMode::List;
+                        self.reset_to_list();
                         Ok(ScreenAction::None)
                     }
                     DialogResult::None => Ok(ScreenAction::None),
@@ -607,7 +808,7 @@ impl Screen for ProviderScreen {
 
                 match result {
                     DialogResult::Closed | DialogResult::Confirmed | DialogResult::Cancelled => {
-                        self.mode = ProviderMode::List;
+                        self.reset_to_list();
                         Ok(ScreenAction::None)
                     }
                     DialogResult::None => Ok(ScreenAction::None),

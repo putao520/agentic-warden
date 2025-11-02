@@ -262,7 +262,10 @@ mod tests {
 
         let auth_url = client.generate_auth_url().unwrap();
         // The OOB redirect URI gets URL encoded
-        assert!(auth_url.contains("urn%3Aietf%3Awg%3Aoauth%3A2.0%3Aoob") || auth_url.contains("urn:ietf:wg:oauth:2.0:oob"));
+        assert!(
+            auth_url.contains("urn%3Aietf%3Awg%3Aoauth%3A2.0%3Aoob")
+                || auth_url.contains("urn:ietf:wg:oauth:2.0:oob")
+        );
         assert!(auth_url.contains("test_client_id"));
         assert!(!auth_url.contains("localhost"));
     }

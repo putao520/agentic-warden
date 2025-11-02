@@ -54,6 +54,7 @@ which = "6.0"
 dialoguer = "0.11"
 console = "0.15"
 indicatif = "0.17"
+copypasta = "0.8"
 
 # File system operations
 walkdir = "2.4"
@@ -103,27 +104,5 @@ uuid = { version = "1", features = ["v4"] }
 default = []
 testing = []
 
-# Core Tests (essential functionality)
-
-[[test]]
-name = "test_safety"
-path = "tests/test_safety.rs"
-required-features = ["testing"]
-
-# Unit Tests
-[[test]]
-name = "unit_tests"
-path = "tests/unit/mod.rs"
-required-features = ["testing"]
-
-# Integration Tests
-[[test]]
-name = "integration_tests"
-path = "tests/integration/mod.rs"
-required-features = ["testing"]
-
-# End-to-End Tests
-[[test]]
-name = "e2e_tests"
-path = "tests/e2e/mod.rs"
-required-features = ["testing"]
+[package.metadata.cargo-check-cfg]
+features = ["testing"]

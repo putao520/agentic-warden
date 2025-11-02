@@ -1,11 +1,11 @@
 //! Provider configuration manager
 
 use super::config::{AiType, Provider, ProvidersConfig, Region};
+use super::env_mapping::get_env_vars_for_ai_type;
 use super::error::{ProviderError, ProviderResult};
 use crate::config::AUTH_DIRECTORY;
 use anyhow::Result;
-use std::fs;
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
 const NEW_PROVIDER_FILE_NAME: &str = "providers.json";
 
@@ -16,6 +16,82 @@ pub struct ProviderManager {
 }
 
 impl ProviderManager {
+    fn ensure_provider_exists(&self, provider_id: &str) -> ProviderResult<()> {
+        if self.providers_config.providers.contains_key(provider_id) {
+            Ok(())
+        } else {
+            Err(ProviderError::ProviderNotFound(provider_id.to_string()))
+        }
+    }
+
+    fn ensure_mutable_id(&self, provider_id: &str) -> ProviderResult<()> {
+        if provider_id.eq_ignore_ascii_case("official") {
+            return Err(ProviderError::ReservedName(provider_id.to_string()));
+        }
+        Ok(())
+    }
+
+    fn ensure_can_delete(&self, provider_id: &str) -> ProviderResult<()> {
+        self.ensure_provider_exists(provider_id)?;
+        self.ensure_mutable_id(provider_id)?;
+
+        if provider_id == self.providers_config.default_provider {
+            return Err(ProviderError::InvalidConfig(format!(
+                "Cannot remove default provider '{}'. Set another default first.",
+                provider_id
+            )));
+        }
+
+        if !self.providers_config.can_delete_provider(provider_id) {
+            return Err(ProviderError::InvalidConfig(format!(
+                "Provider '{}' is protected and cannot be deleted",
+                provider_id
+            )));
+        }
+
+        Ok(())
+    }
+
+    fn validate_provider(&self, provider_id: &str, provider: &Provider) -> ProviderResult<()> {
+        if provider.name.trim().is_empty() {
+            return Err(ProviderError::InvalidConfig(format!(
+                "Display name for provider '{}' cannot be empty",
+                provider_id
+            )));
+        }
+
+        if provider.compatible_with.is_empty() {
+            return Err(ProviderError::InvalidConfig(format!(
+                "Provider '{}' must be compatible with at least one AI type",
+                provider_id
+            )));
+        }
+
+        let mut seen = Vec::new();
+        for ai_type in &provider.compatible_with {
+            if seen.contains(ai_type) {
+                return Err(ProviderError::InvalidConfig(format!(
+                    "Provider '{}' has duplicate AI compatibility entry '{}'",
+                    provider_id, ai_type
+                )));
+            }
+            seen.push(ai_type.clone());
+
+            let required_vars = get_env_vars_for_ai_type(ai_type.clone());
+            for mapping in required_vars.into_iter().filter(|m| m.required) {
+                let value = provider.env.get(mapping.key).map(|s| s.trim());
+                if value.is_none() || value == Some("") {
+                    return Err(ProviderError::InvalidConfig(format!(
+                        "Provider '{}' missing required environment variable '{}' for {}",
+                        provider_id, mapping.key, ai_type
+                    )));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Create a new ProviderManager
     pub fn new() -> ProviderResult<Self> {
         let config_path = Self::get_config_path()?;
@@ -157,32 +233,36 @@ impl ProviderManager {
 
     /// Add new provider
     pub fn add_provider(&mut self, name: String, provider: Provider) -> ProviderResult<()> {
-        if name == "official" {
-            return Err(ProviderError::ReservedName(name));
+        self.ensure_mutable_id(&name)?;
+        if self.providers_config.providers.contains_key(&name) {
+            return Err(ProviderError::DuplicateProvider(name));
         }
 
-        self.providers_config.add_provider(name, provider);
+        self.validate_provider(&name, &provider)?;
+        self.providers_config.add_provider(name.clone(), provider);
+        self.save()?;
+        Ok(())
+    }
+
+    /// Update existing provider
+    pub fn update_provider(&mut self, name: &str, provider: Provider) -> ProviderResult<()> {
+        self.ensure_provider_exists(name)?;
+        self.ensure_mutable_id(name)?;
+        self.validate_provider(name, &provider)?;
+
+        self.providers_config
+            .add_provider(name.to_string(), provider);
         self.save()?;
         Ok(())
     }
 
     /// Remove provider
     pub fn remove_provider(&mut self, name: &str) -> ProviderResult<()> {
-        if name == "official" {
-            return Err(ProviderError::ReservedName(name.to_string()));
-        }
-
-        if name == self.providers_config.default_provider {
-            return Err(ProviderError::InvalidConfig(format!(
-                "Cannot remove default provider '{}'. Set another default first.",
-                name
-            )));
-        }
+        self.ensure_can_delete(name)?;
 
         self.providers_config
             .remove_provider(name)
             .ok_or_else(|| ProviderError::ProviderNotFound(name.to_string()))?;
-
         self.save()?;
         Ok(())
     }
@@ -190,7 +270,7 @@ impl ProviderManager {
     /// Set default provider
     pub fn set_default(&mut self, name: &str) -> ProviderResult<()> {
         // Verify provider exists
-        self.get_provider(name)?;
+        self.ensure_provider_exists(name)?;
 
         self.providers_config.default_provider = name.to_string();
         self.save()?;
@@ -209,7 +289,9 @@ impl ProviderManager {
 
     /// List all providers
     pub fn list_providers(&self) -> Vec<(&String, &Provider)> {
-        self.providers_config.providers.iter().collect()
+        let mut providers: Vec<_> = self.providers_config.providers.iter().collect();
+        providers.sort_by(|(name_a, _), (name_b, _)| name_a.cmp(name_b));
+        providers
     }
 
     /// Get default provider name
@@ -247,8 +329,7 @@ impl ProviderManager {
 
     /// Add custom provider
     pub fn add_custom_provider(&mut self, provider_id: String, provider: Provider) -> Result<()> {
-        self.providers_config.add_provider(provider_id, provider);
-        self.save()?;
+        self.add_provider(provider_id, provider)?;
         Ok(())
     }
 

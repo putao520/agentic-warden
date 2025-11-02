@@ -28,6 +28,9 @@ pub enum ProviderError {
     #[error("Provider name '{0}' is reserved and cannot be modified")]
     ReservedName(String),
 
+    #[error("Provider '{0}' already exists")]
+    DuplicateProvider(String),
+
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
 

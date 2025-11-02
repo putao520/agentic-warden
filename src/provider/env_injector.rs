@@ -86,5 +86,33 @@ mod tests {
         // Verify parent process environment variables are not modified
         assert!(std::env::var("TEST_KEY").is_err());
         assert!(std::env::var("ANOTHER_KEY").is_err());
+
+        // Ensure the command carries the injected environment variables
+        let collected: HashMap<_, _> = cmd
+            .get_envs()
+            .filter_map(|(key, value)| {
+                value.map(|v| {
+                    (
+                        key.to_string_lossy().into_owned(),
+                        v.to_string_lossy().into_owned(),
+                    )
+                })
+            })
+            .collect();
+
+        assert_eq!(collected.get("TEST_KEY"), Some(&"test_value".to_string()));
+        assert_eq!(
+            collected.get("ANOTHER_KEY"),
+            Some(&"another_value".to_string())
+        );
+    }
+
+    #[test]
+    fn mask_sensitive_value_handles_short_values() {
+        assert_eq!(EnvInjector::mask_sensitive_value("API_KEY", "short"), "***");
+        assert_eq!(
+            EnvInjector::mask_sensitive_value("TOKEN", "12345678"),
+            "***"
+        );
     }
 }

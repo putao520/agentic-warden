@@ -342,10 +342,9 @@ impl ProviderAddWizard {
             let mut manager = ProviderManager::new()?;
 
             if let Err(e) = manager.set_token(&provider_id, region.clone(), token.clone()) {
-                return Ok(ScreenAction::SwitchTo(ScreenType::ProviderEdit(format!(
-                    "保存失败: {}",
-                    e
-                ))));
+                self.token_validation_message = format!("Failed to save token: {}", e);
+                self.token_valid = Some(false);
+                return Ok(ScreenAction::None);
             }
 
             // Set as default provider if it's the first one
@@ -355,9 +354,10 @@ impl ProviderAddWizard {
 
             Ok(ScreenAction::SwitchTo(ScreenType::Provider))
         } else {
-            Ok(ScreenAction::SwitchTo(ScreenType::ProviderEdit(
-                "Configuration incomplete".to_string(),
-            )))
+            self.token_validation_message =
+                "Configuration incomplete, please complete all steps".to_string();
+            self.token_valid = Some(false);
+            Ok(ScreenAction::None)
         }
     }
 

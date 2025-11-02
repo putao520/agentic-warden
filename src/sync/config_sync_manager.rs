@@ -43,6 +43,60 @@ pub struct SyncOperationResult {
     pub message: String,
 }
 
+/// Progress updates emitted during a push operation.
+#[derive(Debug, Clone)]
+pub enum PushProgressEvent {
+    /// Starting work on the specified directory.
+    StartingDirectory {
+        directory: String,
+        index: usize,
+        total: usize,
+    },
+    /// Directory is being compressed into an archive.
+    Compressing { directory: String },
+    /// Archive is being uploaded to Google Drive.
+    Uploading {
+        directory: String,
+        file_name: String,
+        size: Option<u64>,
+    },
+    /// Uploaded archive is being verified and hashes updated.
+    Verifying { directory: String },
+    /// Directory was skipped (no changes or missing path).
+    Skipped { directory: String, reason: String },
+    /// Directory completed successfully.
+    Completed { directory: String },
+}
+
+/// Progress updates emitted during a pull operation.
+#[derive(Debug, Clone)]
+pub enum PullProgressEvent {
+    /// Starting work on the specified directory.
+    StartingDirectory {
+        directory: String,
+        index: usize,
+        total: usize,
+    },
+    /// Archive is being downloaded from Google Drive.
+    Downloading {
+        directory: String,
+        file_name: Option<String>,
+        size: Option<u64>,
+    },
+    /// Downloaded archive is being decompressed.
+    Decompressing { directory: String },
+    /// Restoring files from the archive to the target directory.
+    Restoring {
+        directory: String,
+        files_restored: Option<usize>,
+        total_files: Option<usize>,
+    },
+    /// Directory was skipped (no backup found or missing path).
+    Skipped { directory: String, reason: String },
+    /// Directory completed successfully.
+    Completed { directory: String },
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct SyncSummary {
@@ -120,12 +174,30 @@ impl ConfigSyncManager {
         &mut self,
         directory_path: &str,
     ) -> ErrorResult<SyncOperationResult> {
+        self.push_directory_with_observer(directory_path, |_| {})
+            .await
+    }
+
+    pub async fn push_directory_with_observer<F>(
+        &mut self,
+        directory_path: &str,
+        mut observer: F,
+    ) -> ErrorResult<SyncOperationResult>
+    where
+        F: FnMut(PushProgressEvent),
+    {
         let path = Path::new(directory_path);
 
         // Get directory name
         let directory_name = path.file_name().and_then(|n| n.to_str()).ok_or_else(|| {
             SyncError::DirectoryHashingError(format!("Invalid directory name: {}", directory_path))
         })?;
+
+        observer(PushProgressEvent::StartingDirectory {
+            directory: directory_name.to_string(),
+            index: 0,
+            total: 1,
+        });
 
         let mut sync_result = SyncOperationResult {
             directory_name: directory_name.to_string(),
@@ -137,7 +209,12 @@ impl ConfigSyncManager {
 
         // Check if directory exists
         if !path.exists() {
-            sync_result.message = format!("Directory does not exist: {}", directory_path);
+            let reason = format!("Directory does not exist: {}", directory_path);
+            observer(PushProgressEvent::Skipped {
+                directory: directory_name.to_string(),
+                reason: reason.clone(),
+            });
+            sync_result.message = reason;
             return Ok(sync_result);
         }
 
@@ -150,7 +227,12 @@ impl ConfigSyncManager {
             .should_sync(directory_name, &current_hash.hash)?;
 
         if !should_sync {
-            sync_result.message = "No changes detected".to_string();
+            let reason = "No changes detected".to_string();
+            observer(PushProgressEvent::Skipped {
+                directory: directory_name.to_string(),
+                reason: reason.clone(),
+            });
+            sync_result.message = reason;
             return Ok(sync_result);
         }
 
@@ -182,7 +264,19 @@ impl ConfigSyncManager {
         let archive_path = temp_dir.path().join(format!("{}.tar.gz", directory_name));
 
         // Pack directory
+        observer(PushProgressEvent::Compressing {
+            directory: directory_name.to_string(),
+        });
         let archive_size = self.config_packer.pack_directory(path, &archive_path)?;
+        observer(PushProgressEvent::Uploading {
+            directory: directory_name.to_string(),
+            file_name: archive_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default()
+                .to_string(),
+            size: Some(archive_size),
+        });
         sync_result.file_size = Some(archive_size);
         sync_result
             .message
@@ -204,6 +298,9 @@ impl ConfigSyncManager {
 
         // Upload new file
         let uploaded_file = service.upload_file(&archive_path, Some(&folder_id)).await?;
+        observer(PushProgressEvent::Verifying {
+            directory: directory_name.to_string(),
+        });
         sync_result.uploaded = true;
         sync_result
             .message
@@ -212,6 +309,10 @@ impl ConfigSyncManager {
         // Update stored hash
         self.config_manager
             .update_directory_hash(directory_name, current_hash)?;
+
+        observer(PushProgressEvent::Completed {
+            directory: directory_name.to_string(),
+        });
 
         Ok(sync_result)
     }
@@ -264,12 +365,30 @@ impl ConfigSyncManager {
         &mut self,
         directory_path: &str,
     ) -> ErrorResult<SyncOperationResult> {
+        self.pull_directory_with_observer(directory_path, |_| {})
+            .await
+    }
+
+    pub async fn pull_directory_with_observer<F>(
+        &mut self,
+        directory_path: &str,
+        mut observer: F,
+    ) -> ErrorResult<SyncOperationResult>
+    where
+        F: FnMut(PullProgressEvent),
+    {
         let path = Path::new(directory_path);
 
         // Get directory name
         let directory_name = path.file_name().and_then(|n| n.to_str()).ok_or_else(|| {
             SyncError::DirectoryHashingError(format!("Invalid directory name: {}", directory_path))
         })?;
+
+        observer(PullProgressEvent::StartingDirectory {
+            directory: directory_name.to_string(),
+            index: 0,
+            total: 1,
+        });
 
         let mut sync_result = SyncOperationResult {
             directory_name: directory_name.to_string(),
@@ -289,7 +408,12 @@ impl ConfigSyncManager {
         let base_folder_id = match service.find_folder("agentic-warden", None).await? {
             Some(id) => id,
             None => {
-                sync_result.message = format!("No backup found for directory: {}", directory_name);
+                let reason = format!("No backup found for directory: {}", directory_name);
+                observer(PullProgressEvent::Skipped {
+                    directory: directory_name.to_string(),
+                    reason: reason.clone(),
+                });
+                sync_result.message = reason;
                 return Ok(sync_result);
             }
         };
@@ -301,7 +425,12 @@ impl ConfigSyncManager {
         {
             Some(id) => id,
             None => {
-                sync_result.message = format!("No backup found for directory: {}", directory_name);
+                let reason = format!("No backup found for directory: {}", directory_name);
+                observer(PullProgressEvent::Skipped {
+                    directory: directory_name.to_string(),
+                    reason: reason.clone(),
+                });
+                sync_result.message = reason;
                 return Ok(sync_result);
             }
         };
@@ -310,7 +439,12 @@ impl ConfigSyncManager {
         let folder_files = service.list_folder_files(&target_folder_id).await?;
 
         if folder_files.is_empty() {
-            sync_result.message = format!("No backup files found in directory: {}", directory_name);
+            let reason = format!("No backup files found in directory: {}", directory_name);
+            observer(PullProgressEvent::Skipped {
+                directory: directory_name.to_string(),
+                reason: reason.clone(),
+            });
+            sync_result.message = reason;
             return Ok(sync_result);
         }
 
@@ -325,7 +459,12 @@ impl ConfigSyncManager {
         let backup_file = match folder_files.pop() {
             Some(file) => file,
             None => {
-                sync_result.message = "No valid backup files found".to_string();
+                let reason = "No valid backup files found".to_string();
+                observer(PullProgressEvent::Skipped {
+                    directory: directory_name.to_string(),
+                    reason: reason.clone(),
+                });
+                sync_result.message = reason;
                 return Ok(sync_result);
             }
         };
@@ -334,6 +473,12 @@ impl ConfigSyncManager {
         if reported_size_i64 > 0 {
             sync_result.file_size = Some(reported_size_i64 as u64);
         }
+
+        observer(PullProgressEvent::Downloading {
+            directory: directory_name.to_string(),
+            file_name: Some(backup_file.name.clone()),
+            size: sync_result.file_size,
+        });
 
         sync_result.message.push_str(&format!(
             "Found backup: {} ({} bytes)",
@@ -358,6 +503,10 @@ impl ConfigSyncManager {
             .await?;
         sync_result.message.push_str(" Downloaded backup file");
 
+        observer(PullProgressEvent::Decompressing {
+            directory: directory_name.to_string(),
+        });
+
         // Backup existing directory if it exists
         if path.exists() {
             let backup_path = format!(
@@ -371,6 +520,12 @@ impl ConfigSyncManager {
                 .push_str(&format!(" Backed up existing directory to {}", backup_path));
         }
 
+        observer(PullProgressEvent::Restoring {
+            directory: directory_name.to_string(),
+            files_restored: None,
+            total_files: None,
+        });
+
         // Extract the archive
         self.config_packer
             .unpack_archive(&local_archive_path, path)?;
@@ -381,6 +536,10 @@ impl ConfigSyncManager {
         let new_hash = self.directory_hasher.calculate_hash(path)?;
         self.config_manager
             .update_directory_hash(directory_name, new_hash)?;
+
+        observer(PullProgressEvent::Completed {
+            directory: directory_name.to_string(),
+        });
 
         Ok(sync_result)
     }

@@ -68,3 +68,25 @@ impl ProgressWidget {
         frame.render_widget(gauge, area);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn progress_clamps_to_hundred() {
+        let mut widget = ProgressWidget::new("Sync".to_string());
+        widget.set_progress(150);
+        assert_eq!(widget.progress(), 100);
+        assert!(widget.is_complete());
+    }
+
+    #[test]
+    fn progress_message_roundtrip() {
+        let mut widget = ProgressWidget::new("Sync".to_string());
+        widget.set_message("Uploading".to_string());
+        assert_eq!(widget.message.as_deref(), Some("Uploading"));
+        widget.clear_message();
+        assert!(widget.message.is_none());
+    }
+}

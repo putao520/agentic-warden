@@ -16,6 +16,8 @@ pub struct TuiApp {
     terminal: Terminal<CrosstermBackend<io::Stdout>>,
     event_handler: EventHandler,
     current_screen: Box<dyn Screen>,
+    current_screen_type: ScreenType,
+    screen_stack: Vec<ScreenType>,
     should_quit: bool,
 }
 
@@ -35,6 +37,8 @@ impl TuiApp {
             terminal,
             event_handler,
             current_screen,
+            current_screen_type: initial_screen,
+            screen_stack: Vec::new(),
             should_quit: false,
         })
     }
@@ -83,17 +87,27 @@ impl TuiApp {
         match action {
             ScreenAction::None => {}
             ScreenAction::SwitchTo(screen_type) => {
-                self.current_screen = screen_type.create()?;
+                self.screen_stack.push(self.current_screen_type.clone());
+                self.switch_to(screen_type)?;
             }
             ScreenAction::Back => {
-                // Navigate back to Dashboard by default
-                self.current_screen = ScreenType::Dashboard.create()?;
+                if let Some(previous) = self.screen_stack.pop() {
+                    self.switch_to(previous)?;
+                } else if !matches!(self.current_screen_type, ScreenType::Dashboard) {
+                    self.switch_to(ScreenType::Dashboard)?;
+                }
             }
             ScreenAction::Quit => {
                 self.should_quit = true;
             }
         }
 
+        Ok(())
+    }
+
+    fn switch_to(&mut self, screen_type: ScreenType) -> Result<()> {
+        self.current_screen = screen_type.create()?;
+        self.current_screen_type = screen_type;
         Ok(())
     }
 }
