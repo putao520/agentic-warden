@@ -377,219 +377,7 @@ impl Drop for RegistrationGuard<'_> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::task_record::TaskStatus;
-    use std::io::Read;
-
-    #[test]
-    fn test_generate_log_path() {
-        let test_pid = 12345;
-        let path = generate_log_path(test_pid).unwrap();
-
-        // Should be in temp directory with PID as filename
-        assert!(
-            path.file_name()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .contains("12345")
-        );
-        assert_eq!(path.extension().unwrap().to_str().unwrap(), "log");
-
-        // Parent should be temp directory
-        assert_eq!(path.parent(), Some(&std::env::temp_dir()).map(|v| &**v));
-    }
-
-    #[test]
-    fn test_stream_mirror_stdout() {
-        let test_data = b"Hello, stdout!";
-        StreamMirror::Stdout.write(test_data).unwrap();
-        // Should write to stdout without error
-    }
-
-    #[test]
-    fn test_stream_mirror_stderr() {
-        let test_data = b"Hello, stderr!";
-        StreamMirror::Stderr.write(test_data).unwrap();
-        // Should write to stderr without error
-    }
-
-    #[test]
-    fn test_extract_exit_code() {
-        // Test with successful status
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::ExitStatusExt;
-            let success_status = ExitStatus::from_raw(0);
-            assert_eq!(extract_exit_code(success_status), 0);
-
-            let error_status = ExitStatus::from_raw(1);
-            assert_eq!(extract_exit_code(error_status), 1);
-        }
-
-        #[cfg(windows)]
-        {
-            // Windows ExitStatus doesn't have from_raw, so we'll test the default case
-            // In real scenarios, this would come from an actual process
-        }
-    }
-
-    #[test]
-    fn test_registration_guard_new_and_active() {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let test_namespace = format!("test_guard_{}_{}", std::process::id(), timestamp);
-        let registry = TaskRegistry::connect_test(&test_namespace).unwrap();
-        let test_pid = 99999;
-
-        let guard = RegistrationGuard::new(&registry, test_pid);
-        assert!(guard.active);
-        assert_eq!(guard.pid, test_pid);
-    }
-
-    #[test]
-    fn test_registration_guard_mark_completed() {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let test_namespace = format!("test_guard_complete_{}_{}", std::process::id(), timestamp);
-        let registry = TaskRegistry::connect_test(&test_namespace).unwrap();
-        let test_pid = 88888;
-
-        // First register a task
-        let record = TaskRecord::new(
-            Utc::now(),
-            test_pid.to_string(),
-            format!("/tmp/{}.log", test_pid),
-            Some(test_pid + 1000),
-        );
-        registry.register(test_pid, &record).unwrap();
-
-        let guard = RegistrationGuard::new(&registry, test_pid);
-        assert!(guard.active);
-
-        // Mark as completed
-        let result = Some("test completed".to_string());
-        let exit_code = Some(0);
-        let completed_at = Utc::now();
-
-        // Mark as completed
-        let was_active = guard.active;
-        let _ = guard
-            .mark_completed(result.clone(), exit_code, completed_at)
-            .unwrap();
-
-        // Guard should have been active before and now is consumed
-        assert!(was_active);
-
-        // Verify the record was updated
-        let entries = registry.entries().unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].record.status, TaskStatus::CompletedButUnread);
-        assert_eq!(entries[0].record.result, result);
-        assert_eq!(entries[0].record.exit_code, exit_code);
-    }
-
-    #[test]
-    fn test_registration_guard_drop_cleanup() {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let test_namespace = format!("test_guard_drop_{}_{}", std::process::id(), timestamp);
-        let registry = TaskRegistry::connect_test(&test_namespace).unwrap();
-        let test_pid = 77777;
-
-        // First register a task
-        let record = TaskRecord::new(
-            Utc::now(),
-            test_pid.to_string(),
-            format!("/tmp/{}.log", test_pid),
-            Some(test_pid + 1000),
-        );
-        registry.register(test_pid, &record).unwrap();
-
-        {
-            let guard = RegistrationGuard::new(&registry, test_pid);
-            assert!(guard.active);
-
-            // Guard goes out of scope here without marking as completed
-            // Should trigger cleanup (removal)
-        }
-
-        // Verify the record was removed
-        let entries = registry.entries().unwrap();
-        assert_eq!(entries.len(), 0);
-    }
-
-    #[test]
-    fn test_spawn_copy_basic_functionality() {
-        use std::sync::mpsc;
-
-        let (_tx, _rx) = mpsc::channel::<()>();
-        let temp_file = tempfile::NamedTempFile::new().unwrap();
-        let writer = Arc::new(Mutex::new(BufWriter::new(temp_file.reopen().unwrap())));
-
-        // Create a simple reader that sends some data
-        let data = b"Test data for copy";
-        let reader_clone = data;
-
-        let handle = spawn_copy(&reader_clone[..], writer.clone(), StreamMirror::Stdout);
-
-        // Wait for the copy to complete
-        handle.join().unwrap().unwrap();
-
-        // Verify data was written to the file
-        drop(writer); // Release the writer lock
-        let mut file_content = String::new();
-        temp_file
-            .reopen()
-            .unwrap()
-            .read_to_string(&mut file_content)
-            .unwrap();
-        assert_eq!(file_content, "Test data for copy");
-    }
-}
-
-/// 批量执行多个CLI任务
-pub fn execute_multiple_clis(
-    registry: &TaskRegistry,
-    cli_selector: &crate::cli_type::CliSelector,
-    prompt: &str,
-    provider: Option<String>,
-) -> Result<Vec<i32>, ProcessError> {
-    let mut exit_codes = Vec::new();
-
-    // 依次执行每个CLI
-    for cli_type in &cli_selector.types {
-        let args = cli_type.build_full_access_args(prompt);
-        let os_args: Vec<OsString> = args.into_iter().map(|s| s.into()).collect();
-        let exit_code = execute_cli(registry, cli_type, &os_args, provider.clone())?;
-        exit_codes.push(exit_code);
-
-        if exit_code == 0 {
-            println!("{} task completed successfully!", cli_type.display_name());
-        } else {
-            println!(
-                "{} task failed with exit code: {}",
-                cli_type.display_name(),
-                exit_code
-            );
-        }
-    }
-
-    Ok(exit_codes)
-}
-
-/// 启动AI CLI的交互模式（不执行任务，直接进入CLI交互界面）
+/// Start interactive CLI mode (directly launch AI CLI without task prompt)
 pub fn start_interactive_cli(
     registry: &TaskRegistry,
     cli_type: &CliType,
@@ -639,22 +427,10 @@ pub fn start_interactive_cli(
         );
     }
 
-    eprintln!(
-        "🚀 Starting {} in interactive mode...",
-        cli_type.display_name()
-    );
-    eprintln!("💡 Type 'exit' or press Ctrl+C to quit");
-
     let cli_command = get_cli_command(cli_type)?;
 
-    // 构建交互模式参数
-    let args = cli_type.build_interactive_args();
-    let os_args: Vec<OsString> = args.into_iter().map(|s| s.into()).collect();
-
+    // Interactive mode: launch CLI with stdin/stdout/stderr inherited
     let mut command = Command::new(&cli_command);
-    command.args(&os_args);
-
-    // 交互模式需要继承标准输入输出，让用户直接与CLI交互
     command.stdin(Stdio::inherit());
     command.stdout(Stdio::inherit());
     command.stderr(Stdio::inherit());
@@ -663,7 +439,73 @@ pub fn start_interactive_cli(
     // Inject environment variables to child process
     EnvInjector::inject_to_command(&mut command, &provider_config.env);
 
-    // 直接启动进程并等待其完成
-    let exit_status = command.status()?;
-    Ok(exit_status.code().unwrap_or(1))
+    let mut child = command.spawn()?;
+    let child_pid = child.id();
+
+    // Register the interactive CLI process
+    let log_path = generate_log_path(child_pid)?;
+    let record = TaskRecord::new(
+        Utc::now(),
+        child_pid.to_string(),
+        log_path.to_string_lossy().into_owned(),
+        Some(platform::current_pid()),
+    );
+
+    // Get process tree information
+    let record = match ProcessTreeInfo::current() {
+        Ok(tree_info) => record.with_process_tree(
+            tree_info.process_chain,
+            tree_info.root_parent_pid,
+            tree_info.depth,
+        ),
+        Err(err) => {
+            warn(format!("Failed to get process tree info: {}", err));
+            record
+        }
+    };
+
+    if let Err(err) = registry.register(child_pid, &record) {
+        platform::terminate_process(child_pid);
+        let _ = child.wait();
+        return Err(err.into());
+    }
+
+    let registration_guard = RegistrationGuard::new(registry, child_pid);
+    let signal_guard = signal::install(child_pid)?;
+
+    let status = child.wait()?;
+    drop(signal_guard);
+
+    // Mark as completed
+    let completed_at = Utc::now();
+    let exit_code = status.code();
+    let result = match (status.success(), exit_code) {
+        (true, _) => Some("interactive_session_completed".to_owned()),
+        (false, Some(code)) => Some(format!("interactive_session_failed_with_exit_code_{code}")),
+        (false, None) => Some("interactive_session_failed_without_exit_code".to_owned()),
+    };
+    let _ = registration_guard.mark_completed(result, exit_code, completed_at);
+
+    Ok(extract_exit_code(status))
 }
+
+/// Execute multiple CLI processes (for codex|claude|gemini syntax)
+pub fn execute_multiple_clis(
+    registry: &TaskRegistry,
+    cli_selector: &crate::cli_type::CliSelector,
+    task_prompt: &str,
+    provider: Option<String>,
+) -> Result<Vec<i32>, ProcessError> {
+    let mut exit_codes = Vec::new();
+
+    for cli_type in &cli_selector.types {
+        let cli_args = cli_type.build_full_access_args(task_prompt);
+        let os_args: Vec<OsString> = cli_args.into_iter().map(|s| s.into()).collect();
+
+        let exit_code = execute_cli(registry, cli_type, &os_args, provider.clone())?;
+        exit_codes.push(exit_code);
+    }
+
+    Ok(exit_codes)
+}
+

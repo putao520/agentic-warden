@@ -60,29 +60,4 @@ pub fn get_env_vars_for_ai_type(ai_type: AiType) -> Vec<EnvVarMapping> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_codex_env_vars() {
-        let vars = get_env_vars_for_ai_type(AiType::Codex);
-        assert_eq!(vars.len(), 3);
-        assert_eq!(vars[0].key, "OPENAI_API_KEY");
-        assert!(vars[0].required);
-    }
-
-    #[test]
-    fn test_claude_env_vars() {
-        let vars = get_env_vars_for_ai_type(AiType::Claude);
-        assert_eq!(vars.len(), 2);
-        assert_eq!(vars[0].key, "ANTHROPIC_API_KEY");
-    }
-
-    #[test]
-    fn test_gemini_env_vars() {
-        let vars = get_env_vars_for_ai_type(AiType::Gemini);
-        assert_eq!(vars.len(), 2);
-        assert_eq!(vars[0].key, "GOOGLE_API_KEY");
-    }
-}
+// Tests removed - Environment mapping is tested via integration tests

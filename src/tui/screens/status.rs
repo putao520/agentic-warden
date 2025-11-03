@@ -54,7 +54,6 @@ impl PartialOrd for GroupKey {
 /// Group of tasks sharing the same parent process.
 #[derive(Debug, Clone)]
 struct TaskGroup {
-    key: GroupKey,
     label: String,
     tasks: Vec<TaskSnapshot>,
 }
@@ -210,7 +209,7 @@ impl StatusScreen {
                 tasks.sort_by(|a, b| b.started_at.cmp(&a.started_at));
                 let label = Self::build_group_label(&key, tasks.len());
 
-                TaskGroup { key, label, tasks }
+                TaskGroup { label, tasks }
             })
             .collect()
     }

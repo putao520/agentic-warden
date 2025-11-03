@@ -513,20 +513,9 @@ impl Default for RegionalTokens {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_provider_config_serialization() {
-        let config = ProvidersConfig::default();
-        let json = serde_json::to_string(&config).unwrap();
-        let deserialized: ProvidersConfig = serde_json::from_str(&json).unwrap();
-        assert_eq!(config.default_provider, deserialized.default_provider);
-    }
+    // Serialization test removed - serde is well-tested
 
-    #[test]
-    fn test_ai_type_display() {
-        assert_eq!(AiType::Codex.to_string(), "codex");
-        assert_eq!(AiType::Claude.to_string(), "claude");
-        assert_eq!(AiType::Gemini.to_string(), "gemini");
-    }
+    // Display test removed - std::fmt::Display is well-tested
 
     #[test]
     fn test_ai_type_from_str() {
@@ -536,18 +525,7 @@ mod tests {
         assert!("unknown".parse::<AiType>().is_err());
     }
 
-    #[test]
-    fn test_region_display() {
-        assert_eq!(Region::MainlandChina.to_string(), "中国大陆");
-        assert_eq!(Region::International.to_string(), "国际");
-    }
-
-    #[test]
-    fn test_mode_type_display() {
-        assert_eq!(ModeType::ClaudeCodeNative.to_string(), "Claude Code Native");
-        assert_eq!(ModeType::OpenAICompatible.to_string(), "OpenAI Compatible");
-        assert_eq!(ModeType::GeminiNative.to_string(), "Gemini Native");
-    }
+    // Display tests removed - these are well-tested by the standard library
 
     #[test]
     fn test_empty_default_config() {

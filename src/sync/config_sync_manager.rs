@@ -874,7 +874,8 @@ mod tests {
         // Status should be empty initially (no hashes stored yet)
         // The manager may have default directories configured, but no sync status yet
         // Note: The actual count depends on whether there's an existing sync.json file
-        assert!(status.len() >= 0, "Status should be a valid HashMap");
+        // Status should be a valid HashMap (empty or with existing sync data)
+        assert!(status.capacity() > 0, "Status HashMap should have capacity");
     }
 
     #[test]

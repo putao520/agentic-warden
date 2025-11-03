@@ -4,7 +4,10 @@ pub const CLAUDE_BIN: &str = "claude";
 pub const CODEX_BIN: &str = "codex";
 pub const GEMINI_BIN: &str = "gemini";
 pub const SHARED_NAMESPACE: &str = "agentic-task";
-pub const SHARED_MEMORY_SIZE: usize = 80 * 1024 * 1024;
+// Shared memory size for task registry (16MB)
+// Supports approximately 4000+ TaskRecord entries with overhead
+// Compatible with both 32-bit and 64-bit Windows systems
+pub const SHARED_MEMORY_SIZE: usize = 16 * 1024 * 1024;
 
 pub const WAIT_INTERVAL_ENV: &str = "AGENTIC_WARDEN_WAIT_INTERVAL_SEC";
 pub const LEGACY_WAIT_INTERVAL_ENV: &str = "CODEX_WORKER_WAIT_INTERVAL_SEC";
