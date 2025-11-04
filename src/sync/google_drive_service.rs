@@ -210,12 +210,12 @@ impl GoogleDriveService {
             .await
             .context("Failed to parse search response")?;
 
-        if let Some(files) = list_response.files
-            && !files.is_empty()
-        {
-            let folder_id = files[0].id.clone();
-            debug!("Found folder: {} (ID: {})", folder_name, folder_id);
-            return Ok(Some(folder_id));
+        if let Some(files) = list_response.files {
+            if !files.is_empty() {
+                let folder_id = files[0].id.clone();
+                debug!("Found folder: {} (ID: {})", folder_name, folder_id);
+                return Ok(Some(folder_id));
+            }
         }
 
         debug!("Folder not found: {}", folder_name);

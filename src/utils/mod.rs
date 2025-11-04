@@ -1,7 +1,16 @@
-/// Utility functions for the agentic-warden project
-///
-/// Get the instance ID for the current process
-/// Uses a simple hash of the process ID to ensure uniqueness
+//! 工具模块
+//!
+//! 提供各种工具函数和辅助功能
+
+pub mod config_paths;
+pub mod logger;
+pub mod version;
+
+pub use config_paths::ConfigPaths;
+pub use logger::init_logger;
+pub use version::{BuildInfo};
+
+/// 获取实例ID
 pub fn get_instance_id() -> u32 {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};

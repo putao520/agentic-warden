@@ -3,7 +3,7 @@ use crate::config::{
 };
 use crate::logging::warn;
 use crate::platform;
-use crate::process_tree::{ProcessTreeError, ProcessTreeInfo};
+use crate::core::process_tree::{ProcessTreeError, ProcessTreeInfo};
 use crate::registry::{CleanupReason, RegistryEntry, RegistryError, TaskRegistry};
 use crate::task_record::TaskRecord;
 use crate::task_record::TaskStatus;

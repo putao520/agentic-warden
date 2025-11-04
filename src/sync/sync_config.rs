@@ -1,4 +1,5 @@
 ﻿use crate::sync::error::{SyncError, SyncResult};
+use crate::provider::network_detector::NetworkStatus;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -51,6 +52,8 @@ pub struct SyncState {
     pub directories: HashMap<String, DirectoryHash>,
     pub last_sync: DateTime<Utc>,
     pub version: u32,
+    pub network_status: Option<NetworkStatus>,
+    pub network_last_checked: DateTime<Utc>,
 }
 
 impl Default for SyncState {
@@ -59,6 +62,8 @@ impl Default for SyncState {
             directories: HashMap::new(),
             last_sync: Utc::now(),
             version: 1,
+            network_status: None,
+            network_last_checked: Utc::now(),
         }
     }
 }
@@ -133,49 +138,14 @@ pub fn save_sync_data_to(path: impl AsRef<Path>, data: &SyncData) -> SyncResult<
     })
 }
 
-/// Convenience helper that only returns the configuration block.
-pub fn load_config() -> SyncResult<SyncConfig> {
-    Ok(load_sync_data()?.config)
-}
 
-/// Convenience helper that only returns the sync state block.
-pub fn load_state() -> SyncResult<SyncState> {
-    Ok(load_sync_data()?.state)
-}
 
-/// Persist an updated sync state.
-pub fn save_state(state: &SyncState) -> SyncResult<()> {
+/// Save network status to the sync configuration.
+pub fn save_network_status(status: NetworkStatus) -> SyncResult<()> {
     let mut data = load_sync_data()?;
-    data.state = state.clone();
+    data.state.network_status = Some(status);
+    data.state.network_last_checked = Utc::now();
     save_sync_data(&data)
-}
-
-/// Persist an updated sync config.
-pub fn save_config(config: &SyncConfig) -> SyncResult<()> {
-    let mut data = load_sync_data()?;
-    data.config = config.clone();
-    save_sync_data(&data)
-}
-
-/// Update (or insert) the stored hash for a directory.
-pub fn set_directory_hash(name: &str, hash: DirectoryHash) -> SyncResult<()> {
-    let mut data = load_sync_data()?;
-    data.state.directories.insert(name.to_string(), hash);
-    save_sync_data(&data)
-}
-
-/// Get the stored directory hash if available.
-pub fn directory_hash(name: &str) -> SyncResult<Option<DirectoryHash>> {
-    let data = load_sync_data()?;
-    Ok(data.state.directories.get(name).cloned())
-}
-
-/// Determine whether the currently calculated hash differs from the stored value.
-pub fn should_sync(name: &str, current_hash: &str) -> SyncResult<bool> {
-    Ok(match directory_hash(name)? {
-        Some(stored) => stored.hash != current_hash,
-        None => true,
-    })
 }
 
 /// Expand tilde based paths into absolute directories.
@@ -190,29 +160,6 @@ pub fn expand_path(path: &str) -> SyncResult<String> {
     }
 }
 
-/// Return the configured sync directories with home expansion applied.
-pub fn sync_directories() -> SyncResult<Vec<String>> {
-    let config = load_config()?;
-    let mut expanded = Vec::with_capacity(config.directories.len());
-    for dir in config.directories {
-        expanded.push(expand_path(&dir)?);
-    }
-    Ok(expanded)
-}
-
-/// Mark the last sync timestamp as now.
-pub fn update_last_sync() -> SyncResult<()> {
-    let mut state = load_state()?;
-    state.last_sync = Utc::now();
-    save_state(&state)
-}
-
-/// Reset the stored state to defaults without touching the configuration.
-pub fn reset_state() -> SyncResult<()> {
-    let mut data = load_sync_data()?;
-    data.state = SyncState::default();
-    save_sync_data(&data)
-}
 
 #[cfg(test)]
 mod tests {

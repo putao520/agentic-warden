@@ -5,11 +5,12 @@
 //! provider URL selection based on actual network conditions.
 
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::time::timeout;
 
 /// Network connectivity status for different regions
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum NetworkStatus {
     /// Both domestic and international networks work well
     Both {

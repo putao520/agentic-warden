@@ -1,5 +1,5 @@
-use crate::sync::error::SyncResult;
 use crate::sync::oauth_client::{OAuthClient, OAuthConfig, OAuthTokenResponse};
+use crate::sync::error::SyncResult;
 use anyhow::{Result, anyhow};
 use chrono::{DateTime, Duration, Utc};
 use console::Term;
@@ -168,7 +168,7 @@ impl SmartOAuthAuthenticator {
         }
     }
 
-    /// Get the current state snapshot.
+  /// Get the current state snapshot.
     pub async fn get_state(&self) -> AuthState {
         self.inner.state.read().await.clone()
     }
@@ -177,6 +177,7 @@ impl SmartOAuthAuthenticator {
     pub async fn last_auth_url(&self) -> Option<String> {
         self.inner.last_url.read().await.clone()
     }
+
 
     async fn exchange_code_for_tokens(&self, code: String) -> Result<OAuthTokenResponse> {
         let mut client = self.inner.client.lock().await;

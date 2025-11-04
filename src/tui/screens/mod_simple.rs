@@ -71,7 +71,5 @@ pub trait Screen {
     fn handle_key(&mut self, key: KeyEvent) -> Result<ScreenAction>;
 
     /// Update screen state (called on Tick event)
-    fn update(&mut self) -> Result<()> {
-        Ok(()) // Default implementation does nothing
-    }
+    fn update(&mut self) -> Result<()>;
 }

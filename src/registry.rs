@@ -1,7 +1,7 @@
 use crate::config::{MAX_RECORD_AGE, SHARED_MEMORY_SIZE, SHARED_NAMESPACE};
 use crate::logging::{debug, warn};
-use crate::process_tree::get_root_parent_pid_cached;
-use crate::shared_map::{SharedMapError, open_or_create};
+use crate::core::process_tree::get_root_parent_pid_cached;
+use crate::core::shared_map::{SharedMapError, open_or_create};
 use crate::task_record::{TaskRecord, TaskStatus};
 use crate::utils::get_instance_id;
 use chrono::{DateTime, Duration, Utc};
@@ -72,8 +72,8 @@ impl From<shared_hashmap::Error> for RegistryError {
     }
 }
 
-impl From<crate::process_tree::ProcessTreeError> for RegistryError {
-    fn from(value: crate::process_tree::ProcessTreeError) -> Self {
+impl From<crate::core::process_tree::ProcessTreeError> for RegistryError {
+    fn from(value: crate::core::process_tree::ProcessTreeError) -> Self {
         RegistryError::Map(format!("Process tree error: {}", value))
     }
 }

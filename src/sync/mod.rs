@@ -1,4 +1,3 @@
-pub mod auth_flow;
 pub mod compressor;
 pub mod config_packer;
 pub mod config_sync_manager;
@@ -8,6 +7,7 @@ pub mod google_drive_service;
 pub mod oauth_client;
 pub mod smart_oauth;
 pub mod sync_command;
+pub mod sync_config;
 pub mod sync_config_manager;
 
 // Re-export the official API implementations for convenient access

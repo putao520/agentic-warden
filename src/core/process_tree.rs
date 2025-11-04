@@ -79,10 +79,10 @@ pub fn find_ai_cli_root_parent(pid: u32) -> Result<u32, ProcessTreeError> {
     // Iterate through the process chain from current to root (excluding current process)
     for &process_pid in process_tree.process_chain.iter().skip(1) {
         // Check if this process is an AI CLI
-        if let Some(process_name) = get_process_name(process_pid)
-            && is_ai_cli_process(&process_name)
-        {
-            return Ok(process_pid);
+        if let Some(process_name) = get_process_name(process_pid) {
+            if is_ai_cli_process(&process_name) {
+                return Ok(process_pid);
+            }
         }
     }
 

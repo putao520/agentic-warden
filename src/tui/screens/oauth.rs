@@ -9,7 +9,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 use std::time::{Duration as StdDuration, Instant};
 use tokio::runtime::Runtime;
@@ -17,7 +17,6 @@ use tokio::runtime::Runtime;
 use super::{Screen, ScreenAction};
 use crate::sync::smart_oauth::{AuthState, SmartOAuthAuthenticator};
 use crate::tui::app_state::AppState;
-use crate::tui::widgets::{DialogWidget, InputWidget};
 
 const PROVIDER_GOOGLE_DRIVE: &str = "google-drive";
 const FLASH_DURATION: StdDuration = StdDuration::from_secs(3);
@@ -40,7 +39,9 @@ pub struct OAuthScreen {
     authenticator: Option<SmartOAuthAuthenticator>,
     flow_id: Option<String>,
     auth_url: Option<String>,
-    input_widget: InputWidget,
+    code_input: String,
+    code_cursor: usize,
+    code_focused: bool,
     last_state: Option<AuthState>,
     status_flash: Option<(String, Color, Instant)>,
     spinner_index: usize,
@@ -56,7 +57,9 @@ impl OAuthScreen {
             authenticator: None,
             flow_id: None,
             auth_url: None,
-            input_widget: InputWidget::new("Authorization Code".to_string()),
+            code_input: String::new(),
+            code_cursor: 0,
+            code_focused: false,
             last_state: None,
             status_flash: None,
             spinner_index: 0,
@@ -98,8 +101,9 @@ impl OAuthScreen {
         self.flow_id = Some(flow_id);
         self.mode = OAuthMode::AwaitingCode;
         self.spinner_index = 0;
-        self.input_widget.clear();
-        self.input_widget.set_focused(true);
+        self.code_input.clear();
+        self.code_cursor = 0;
+        self.code_focused = true;
 
         match open::that(&auth_url) {
             Ok(_) => {
@@ -141,6 +145,7 @@ impl OAuthScreen {
 
         self.mode = OAuthMode::Processing;
         self.spinner_index = 0;
+        self.code_focused = false;
 
         let exchange_result =
             runtime.block_on(authenticator.set_auth_code(code.trim().to_string()));
@@ -215,8 +220,9 @@ impl OAuthScreen {
         self.auth_url = None;
         self.flow_id = None;
         self.last_state = None;
-        self.input_widget.clear();
-        self.input_widget.set_focused(false);
+        self.code_input.clear();
+        self.code_cursor = 0;
+        self.code_focused = false;
         self.status_flash = None;
         self.spinner_index = 0;
     }
@@ -403,7 +409,7 @@ impl OAuthScreen {
         );
         frame.render_widget(url_paragraph, chunks[2]);
 
-        self.input_widget.render(frame, chunks[3]);
+        self.render_code_input(frame, chunks[3]);
 
         let help = Paragraph::new(
             "[Enter] Submit  [Alt+C] Copy URL  [Alt+O] Open URL  [Alt+R] Restart  [ESC] Cancel",
@@ -413,30 +419,174 @@ impl OAuthScreen {
         frame.render_widget(help, chunks[4]);
     }
 
+    fn render_code_input(&self, frame: &mut Frame, area: Rect) {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title("Authorization Code");
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        let line = if self.code_input.is_empty() {
+            Line::from(Span::styled(
+                "Paste the code from your browser prompt here",
+                Style::default().fg(Color::DarkGray),
+            ))
+        } else {
+            Line::from(self.code_input.clone())
+        };
+
+        let paragraph = Paragraph::new(line).wrap(Wrap { trim: true });
+        frame.render_widget(paragraph, inner);
+
+        if self.code_focused {
+            let (cursor_x, cursor_y) = self.code_cursor_position(inner);
+            frame.set_cursor(cursor_x, cursor_y);
+        }
+    }
+
+    fn code_cursor_position(&self, inner: Rect) -> (u16, u16) {
+        let width = inner.width.max(1) as usize;
+        let offset_chars = self.code_input[..self.code_cursor].chars().count();
+        let row = (offset_chars / width) as u16;
+        let col = (offset_chars % width) as u16;
+        (
+            inner.x + col.min(inner.width.saturating_sub(1)),
+            inner.y + row.min(inner.height.saturating_sub(1)),
+        )
+    }
+
+    fn handle_code_input(&mut self, key: KeyEvent) -> bool {
+        if !self.code_focused {
+            return false;
+        }
+
+        match key.code {
+            KeyCode::Char(c) => {
+                if key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+                {
+                    return false;
+                }
+                let insert_pos = self.code_cursor.min(self.code_input.len());
+                self.code_input.insert(insert_pos, c);
+                self.code_cursor = insert_pos + c.len_utf8();
+                true
+            }
+            KeyCode::Backspace => {
+                if self.code_cursor > 0 {
+                    let new_cursor = self.code_input[..self.code_cursor]
+                        .chars()
+                        .next_back()
+                        .map(|ch| self.code_cursor - ch.len_utf8())
+                        .unwrap_or(0);
+                    self.code_input.replace_range(new_cursor..self.code_cursor, "");
+                    self.code_cursor = new_cursor;
+                }
+                true
+            }
+            KeyCode::Delete => {
+                if self.code_cursor < self.code_input.len() {
+                    let delete_len = self.code_input[self.code_cursor..]
+                        .chars()
+                        .next()
+                        .map(|ch| ch.len_utf8())
+                        .unwrap_or(1);
+                    self.code_input
+                        .replace_range(self.code_cursor..self.code_cursor + delete_len, "");
+                }
+                true
+            }
+            KeyCode::Left => {
+                if self.code_cursor > 0 {
+                    let new_cursor = self.code_input[..self.code_cursor]
+                        .chars()
+                        .next_back()
+                        .map(|ch| self.code_cursor - ch.len_utf8())
+                        .unwrap_or(0);
+                    self.code_cursor = new_cursor;
+                }
+                true
+            }
+            KeyCode::Right => {
+                if self.code_cursor < self.code_input.len() {
+                    let advance = self.code_input[self.code_cursor..]
+                        .chars()
+                        .next()
+                        .map(|ch| ch.len_utf8())
+                        .unwrap_or(1);
+                    self.code_cursor += advance;
+                }
+                true
+            }
+            KeyCode::Home => {
+                self.code_cursor = 0;
+                true
+            }
+            KeyCode::End => {
+                self.code_cursor = self.code_input.len();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn paste_code_from_clipboard(&mut self) -> bool {
+        match ClipboardContext::new().and_then(|mut ctx| ctx.get_contents()) {
+            Ok(contents) => {
+                let trimmed = contents.trim();
+                if trimmed.is_empty() {
+                    self.flash_message("Clipboard does not contain a code", Color::Yellow);
+                } else {
+                    self.code_input = trimmed.to_string();
+                    self.code_cursor = self.code_input.len();
+                    self.code_focused = true;
+                    self.flash_message(
+                        "Authorization code pasted from clipboard",
+                        Color::Cyan,
+                    );
+                }
+                true
+            }
+            Err(err) => {
+                self.flash_message(format!("Clipboard unavailable: {}", err), Color::Red);
+                true
+            }
+        }
+    }
+
     fn render_processing(&self, frame: &mut Frame, area: Rect) {
         let message = format!(
             "{} Exchanging authorization code for tokens...",
             self.spinner_char()
         );
-        let dialog = DialogWidget::info("Processing".to_string(), message);
-        dialog.render(frame, area);
+        render_modal(
+            frame,
+            area,
+            "Processing",
+            &message,
+            Style::default().fg(Color::Cyan),
+        );
     }
 
     fn render_success(&self, frame: &mut Frame, area: Rect) {
-        let dialog = DialogWidget::info(
-            "Authentication Complete".to_string(),
-            "Google Drive OAuth succeeded.\nPress Enter to return to the previous screen."
-                .to_string(),
+        render_modal(
+            frame,
+            area,
+            "Authentication Complete",
+            "Google Drive OAuth succeeded.\nPress Enter to return to the previous screen.",
+            Style::default().fg(Color::Green),
         );
-        dialog.render(frame, area);
     }
 
     fn render_error(&self, frame: &mut Frame, area: Rect, message: &str) {
-        let dialog = DialogWidget::error(
-            "Authentication Failed".to_string(),
-            format!("{message}\nPress R to retry or ESC to cancel."),
+        render_modal(
+            frame,
+            area,
+            "Authentication Failed",
+            &format!("{message}\nPress R to retry or ESC to cancel."),
+            Style::default().fg(Color::Red),
         );
-        dialog.render(frame, area);
     }
 }
 
@@ -490,14 +640,14 @@ impl Screen for OAuthScreen {
                 }
 
                 if key.code == KeyCode::Enter {
-                    let code = self.input_widget.value().to_string();
+                    let code = self.code_input.clone();
                     if let Err(err) = self.submit_code(code) {
                         self.mode = OAuthMode::Error(err.to_string());
                     }
                     return Ok(ScreenAction::None);
                 }
 
-                if self.input_widget.handle_key(key) {
+                if self.handle_code_input(key) {
                     return Ok(ScreenAction::None);
                 }
 

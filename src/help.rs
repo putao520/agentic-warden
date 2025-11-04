@@ -69,6 +69,7 @@ pub fn print_command_help(command: &str) -> io::Result<()> {
         "status" => print_status_help(),
         "reset" => print_reset_help(),
         "list" => print_list_help(),
+        "provider" => print_provider_help(),
         _ => {
             eprintln!("Unknown command: {}", command);
             eprintln!("Use 'agentic-warden --help' for general help");
@@ -169,25 +170,67 @@ fn print_push_help() -> io::Result<()> {
 PUSH COMMAND
 
 USAGE:
-    agentic-warden push [DIRECTORY...]
-
-DESCRIPTION:
-    Push configuration directories to Google Drive cloud storage.
+    agentic-warden push [CONFIG_NAME]
 
 ARGUMENTS:
-    [DIRECTORY...]    Optional directories to push
-                      If not specified, uses default directories
+    <CONFIG_NAME>    Name for this configuration set
+                    (optional, defaults to "default")
+                    e.g., "work", "home", "dev"
 
-DEFAULT DIRECTORIES:
-    - ~/.claude
-    - ~/.codex
-    - ~/.gemini
+DESCRIPTION:
+    Save current AI CLI configurations to Google Drive with a name.
 
-FEATURES:
-    - Automatic change detection using MD5 hashing
-    - Cross-platform compression (TAR.GZ)
-    - Secure OAuth 2.0 authentication
-    - Incremental sync (only changed files)
+    Scans and uploads only specific configuration files.
+    All directories and files are optional - only existing items will be backed up.
+
+    NOTE: If ~/.claude, ~/.codex, and ~/.gemini do not exist,
+    a message will be shown and the operation will be cancelled.
+
+    Claude (~/.claude):
+    - CLAUDE.md (memory file, if exists)
+    - settings.json (config file, if exists)
+    - agents/ directory and contents (if exists)
+    - skills/ directory and all SKILL.md files (if exists)
+
+    Codex (~/.codex):
+    - auth.json (authentication config, if exists)
+    - config.toml (config file, if exists)
+    - version.json (version info, if exists)
+    - agents.md (memory file, if exists)
+    - history.jsonl (command history, if exists)
+
+    Gemini (~/.gemini):
+    - google_accounts.json (account config, if exists)
+    - oauth_creds.json (OAuth credentials, if exists)
+    - settings.json (config file, if exists)
+    - gemini.md (memory file, if exists)
+    - tmp/ directory (if exists)
+
+    EXCLUDED FILES:
+    - Cache files (.cache, __pycache__, etc.)
+    - Temp files (tmp/, *.tmp, *.temp)
+    - Log files (*.log, log/, sessions/)
+    - History files (history.jsonl, todos/)
+    - Binary files (.exe, .dll, .so)
+    - Large files (>10MB)
+    - Debug/IDE/shell snapshot files
+
+    All files are saved in a single zip file:
+    Google Drive: .agentic-warden/<CONFIG_NAME>.zip
+
+    OVERWRITE PROTECTION:
+    - Before uploading, the system checks if a configuration with the same name
+      already exists in Google Drive
+    - If a duplicate is found, you will be prompted to confirm overwrite:
+      * Choose 'Y' to overwrite the existing configuration
+      * Choose 'N' to cancel the upload operation
+    - This prevents accidental overwriting of existing configurations
+
+EXAMPLES:
+    agentic-warden push            # Save as default.zip
+    agentic-warden push work      # Save as work.zip
+    agentic-warden push home      # Save as home.zip
+    agentic-warden push dev       # Save as dev.zip
 
 SETUP:
     Requires Google Drive OAuth configuration in ~/.agentic-warden/auth.json
@@ -202,20 +245,39 @@ fn print_pull_help() -> io::Result<()> {
 PULL COMMAND
 
 USAGE:
-    agentic-warden pull [DIRECTORY...]
-
-DESCRIPTION:
-    Pull configuration directories from Google Drive cloud storage.
+    agentic-warden pull [CONFIG_NAME]
 
 ARGUMENTS:
-    [DIRECTORY...]    Optional directories to pull
-                      If not specified, uses default directories
+    <CONFIG_NAME>    Name of configuration set to restore
+                    (optional, defaults to "default")
+                    e.g., "work", "home", "dev"
 
-FEATURES:
-    - Automatic backup of local configurations
-    - Conflict resolution options
-    - Cross-platform decompression
-    - Secure file verification
+DESCRIPTION:
+    Download and restore AI CLI configurations from Google Drive.
+
+    Downloads and extracts:
+    - Google Drive: .agentic-warden/<CONFIG_NAME>.zip
+    - Extracts to: ~/.claude, ~/.codex, ~/.gemini (directories will be created if needed)
+
+    Restores only the specific configuration files that were backed up.
+    The backup may contain files from any of the three AI CLI tools:
+    - Claude: CLAUDE.md, settings.json, agents/, skills/ (all optional)
+    - Codex: auth.json, config.toml, version.json, agents.md, history.jsonl (all optional)
+    - Gemini: google_accounts.json, oauth_creds.json, settings.json, gemini.md, tmp/ (all optional)
+
+    Cache and other excluded files are not affected.
+
+EXAMPLES:
+    agentic-warden pull            # Restore default.zip
+    agentic-warden pull work      # Restore work.zip
+    agentic-warden pull home      # Restore home.zip
+    agentic-warden pull dev       # Restore dev.zip
+
+NOTES:
+    - Local configurations are overwritten
+    - No backup is created before restoring
+    - All three AI configs are restored together
+    - CONFIG_NAME is optional (defaults to "default")
 
 SETUP:
     Requires Google Drive OAuth configuration in ~/.agentic-warden/auth.json
@@ -357,5 +419,25 @@ For detailed help on any command:
     agentic-warden --help <command>
 "#;
     print!("{}", examples);
+    io::stdout().flush()
+}
+
+/// Print help for provider command
+fn print_provider_help() -> io::Result<()> {
+    let help_text = r#"
+PROVIDER COMMAND
+
+USAGE:
+    agentic-warden provider
+
+DESCRIPTION:
+    Launch the TUI Provider Management interface.
+
+    This is a shortcut command that directly opens the Provider Management
+    screen in the TUI. You can also access it from the Dashboard by pressing 'P'.
+
+    For more help while in the TUI, press '?' or 'H'.
+"#;
+    print!("{}", help_text);
     io::stdout().flush()
 }

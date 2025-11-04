@@ -1,121 +1,57 @@
-//! Main TUI application state and navigation
+//! 🚀 TUI应用主入口
+//!
+//! 基于成熟TUI库的应用启动和管理
 
-use anyhow::Result;
-use crossterm::{
-    execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
-};
-use ratatui::{Terminal, backend::CrosstermBackend};
-use std::io;
+use crate::tui::App;
 
-use super::event::{Event, EventHandler};
-use super::screens::{Screen, ScreenType};
-
-/// Main TUI application
-pub struct TuiApp {
-    terminal: Terminal<CrosstermBackend<io::Stdout>>,
-    event_handler: EventHandler,
-    current_screen: Box<dyn Screen>,
-    current_screen_type: ScreenType,
-    screen_stack: Vec<ScreenType>,
-    should_quit: bool,
-}
+/// TUI应用启动器
+pub struct TuiApp;
 
 impl TuiApp {
-    /// Create new TUI app with initial screen
-    pub fn new(initial_screen: ScreenType) -> Result<Self> {
-        enable_raw_mode()?;
-        let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen)?;
-        let backend = CrosstermBackend::new(stdout);
-        let terminal = Terminal::new(backend)?;
-
-        let event_handler = EventHandler::new(std::time::Duration::from_millis(250));
-        let current_screen = initial_screen.create()?;
-
-        Ok(Self {
-            terminal,
-            event_handler,
-            current_screen,
-            current_screen_type: initial_screen,
-            screen_stack: Vec::new(),
-            should_quit: false,
-        })
+    /// 启动TUI应用
+    pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+        let mut app = App::new();
+        app.run()
     }
 
-    /// Run the TUI application
-    pub fn run(&mut self) -> Result<()> {
-        loop {
-            // Draw the current screen
-            self.terminal.draw(|f| {
-                let area = f.size();
-                self.current_screen.render(f, area)
-            })?;
-
-            // Handle events
-            let event = self.event_handler.next()?;
-
-            match event {
-                Event::Key(key) => {
-                    if super::event::is_ctrl_c(&key) {
-                        self.should_quit = true;
-                    } else {
-                        let action = self.current_screen.handle_key(key)?;
-                        self.handle_screen_action(action)?;
-                    }
-                }
-                Event::Tick => {
-                    self.current_screen.update()?;
-                }
-                Event::Resize(_, _) => {
-                    // Terminal will automatically redraw on resize
-                }
-            }
-
-            if self.should_quit {
-                break;
-            }
+    /// 启动TUI应用并指定初始屏幕
+    pub fn run_with_screen(initial_screen: Option<crate::tui::ScreenType>) -> Result<(), Box<dyn std::error::Error>> {
+        let mut app = App::new();
+        if let Some(screen) = initial_screen {
+            app.set_initial_screen(screen);
         }
+        app.run()
+    }
 
+    /// 初始化TUI环境
+    pub fn init() -> Result<(), Box<dyn std::error::Error>> {
+        // 这里可以添加额外的初始化逻辑
+        // 比如日志初始化、配置加载等
         Ok(())
     }
 
-    /// Handle screen navigation actions
-    fn handle_screen_action(&mut self, action: super::screens::ScreenAction) -> Result<()> {
-        use super::screens::ScreenAction;
-
-        match action {
-            ScreenAction::None => {}
-            ScreenAction::SwitchTo(screen_type) => {
-                self.screen_stack.push(self.current_screen_type.clone());
-                self.switch_to(screen_type)?;
-            }
-            ScreenAction::Back => {
-                if let Some(previous) = self.screen_stack.pop() {
-                    self.switch_to(previous)?;
-                } else if !matches!(self.current_screen_type, ScreenType::Dashboard) {
-                    self.switch_to(ScreenType::Dashboard)?;
-                }
-            }
-            ScreenAction::Quit => {
-                self.should_quit = true;
-            }
-        }
-
-        Ok(())
-    }
-
-    fn switch_to(&mut self, screen_type: ScreenType) -> Result<()> {
-        self.current_screen = screen_type.create()?;
-        self.current_screen_type = screen_type;
+    /// 清理TUI环境
+    pub fn cleanup() -> Result<(), Box<dyn std::error::Error>> {
+        // 这里可以添加清理逻辑
         Ok(())
     }
 }
 
-impl Drop for TuiApp {
-    fn drop(&mut self) {
-        let _ = disable_raw_mode();
-        let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
-        let _ = self.terminal.show_cursor();
-    }
+/// 运行TUI应用的便捷函数
+pub fn run_tui_app() -> Result<(), Box<dyn std::error::Error>> {
+    run_tui_app_with_screen(None)
+}
+
+/// 运行TUI应用并指定初始屏幕
+pub fn run_tui_app_with_screen(initial_screen: Option<crate::tui::ScreenType>) -> Result<(), Box<dyn std::error::Error>> {
+    // 初始化
+    TuiApp::init()?;
+
+    // 运行应用
+    let result = TuiApp::run_with_screen(initial_screen);
+
+    // 清理
+    let _ = TuiApp::cleanup();
+
+    result
 }

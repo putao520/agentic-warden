@@ -1,29 +1,30 @@
-//! Codex Warden Library
+//! Agentic-Warden Library
 //!
-//! A supervisor wrapper around the Codex CLI with shared-memory task tracking
-//! and process tree-based isolation features.
+//! Universal AI agent manager with shared-memory task tracking, process management, and multi-agent orchestration.
 
 pub mod cli_type;
+pub mod commands;
 pub mod config;
+pub mod core;
+pub mod error;
 pub mod logging;
 pub mod platform;
-pub mod process_tree;
+pub mod provider;
 pub mod registry;
-pub mod shared_map;
 pub mod signal;
 pub mod supervisor;
 pub mod sync;
 pub mod task_record;
+pub mod tui;
 pub mod utils;
 pub mod wait_mode;
 
 pub mod cli_manager;
-pub mod provider;
-pub mod tui;
 
 // Re-export commonly used types for convenience
 pub use cli_manager::{CliTool, CliToolDetector, InstallType};
-pub use process_tree::{ProcessTreeError, ProcessTreeInfo, get_process_tree};
+pub use core::{ProcessTreeError, ProcessTreeInfo, get_process_tree};
+pub use core::models::*;
 pub use registry::{RegistryEntry, RegistryError, TaskRegistry};
 pub use supervisor::ProcessError;
 pub use task_record::{TaskRecord, TaskStatus};

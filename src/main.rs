@@ -1,17 +1,19 @@
 mod cli_manager;
 mod cli_type;
+mod commands;
 mod config;
+mod core;
+mod error;
 mod help;
 mod logging;
 mod platform;
-mod process_tree;
 mod provider;
 mod registry;
-mod shared_map;
 mod signal;
 mod supervisor;
 mod sync;
 mod task_record;
+mod tui;
 mod utils;
 mod wait_mode;
 
@@ -19,6 +21,7 @@ use crate::cli_type::parse_cli_selector;
 use crate::help::{print_command_help, print_general_help, print_quick_examples, print_version};
 use crate::provider::network_detector::NetworkDetector;
 use crate::registry::TaskRegistry;
+use crate::sync::sync_config::save_network_status;
 use std::env;
 use std::ffi::OsString;
 use std::process::ExitCode;
@@ -27,10 +30,9 @@ fn main() -> ExitCode {
     // Handle sync commands separately to avoid runtime conflicts
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
 
-    if !args.is_empty()
-        && let Some(first_arg) = args[0].to_str()
-    {
-        match first_arg.to_lowercase().as_str() {
+    if !args.is_empty() {
+        if let Some(first_arg) = args[0].to_str() {
+            match first_arg.to_lowercase().as_str() {
             // Help commands
             "--help" | "-h" | "help" => {
                 if args.len() > 1 {
@@ -72,21 +74,14 @@ fn main() -> ExitCode {
                 // Initialize color-eyre for better error handling
                 color_eyre::install().unwrap_or_default();
 
-                // Launch Provider TUI
-                use agentic_warden::tui::{TuiApp, screens::ScreenType};
-                match TuiApp::new(ScreenType::Provider) {
-                    Ok(mut app) => {
-                        if let Err(e) = app.run() {
-                            eprintln!("TUI error: {}", e);
-                            return ExitCode::from(1);
-                        }
-                        return ExitCode::from(0);
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to launch Provider TUI: {}", e);
-                        return ExitCode::from(1);
-                    }
+                // Launch TUI with Provider Management screen
+                use agentic_warden::tui::app::run_tui_app_with_screen;
+                use agentic_warden::tui::ScreenType;
+                if let Err(e) = run_tui_app_with_screen(Some(ScreenType::Provider)) {
+                    eprintln!("TUI error: {}", e);
+                    return ExitCode::from(1);
                 }
+                return ExitCode::from(0);
             }
 
             // Status command - launches TUI
@@ -94,34 +89,37 @@ fn main() -> ExitCode {
                 // Initialize color-eyre for better error handling
                 color_eyre::install().unwrap_or_default();
 
-                // Launch Status TUI
-                use agentic_warden::tui::{TuiApp, screens::ScreenType};
-                match TuiApp::new(ScreenType::Status) {
-                    Ok(mut app) => {
-                        if let Err(e) = app.run() {
-                            eprintln!("TUI error: {}", e);
-                            return ExitCode::from(1);
-                        }
-                        return ExitCode::from(0);
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to launch Status TUI: {}", e);
-                        return ExitCode::from(1);
-                    }
+                // Launch TUI with Sync Status screen
+                use agentic_warden::tui::app::run_tui_app_with_screen;
+                use agentic_warden::tui::ScreenType;
+                if let Err(e) = run_tui_app_with_screen(Some(ScreenType::Status)) {
+                    eprintln!("TUI error: {}", e);
+                    return ExitCode::from(1);
                 }
+                return ExitCode::from(0);
             }
 
             // Sync commands (but not "status" which is handled above)
             "push" | "pull" | "reset" | "list" => {
-                // Handle sync commands directly
-                let directories = if args.len() > 1 {
-                    Some(
-                        args[1..]
-                            .iter()
-                            .filter_map(|arg| arg.to_str())
-                            .map(|s| s.to_string())
-                            .collect(),
-                    )
+                // Check for help flag
+                if args.len() > 1 {
+                    if let Some(arg) = args[1].to_str() {
+                        if arg == "--help" || arg == "-h" {
+                            if let Err(e) = print_command_help(first_arg) {
+                                eprintln!("Failed to print help: {}", e);
+                                return ExitCode::from(1);
+                            }
+                            return ExitCode::from(0);
+                        }
+                    }
+                }
+
+                // Get configuration name (optional for push/pull, defaults to "default")
+                let config_name = if args.len() > 1 {
+                    args[1].to_str().map(|s| s.to_string())
+                } else if first_arg == "push" || first_arg == "pull" {
+                    // push and pull use "default" if no name provided
+                    Some("default".to_string())
                 } else {
                     None
                 };
@@ -134,7 +132,7 @@ fn main() -> ExitCode {
                     .unwrap_or_else(|_| std::process::exit(1));
 
                 match rt.block_on(async {
-                    sync::sync_command::handle_sync_command(first_arg, directories).await
+                    sync::sync_command::handle_sync_command(first_arg, config_name).await
                 }) {
                     Ok(code) => return ExitCode::from((code & 0xFF) as u8),
                     Err(e) => {
@@ -147,6 +145,7 @@ fn main() -> ExitCode {
                 // Continue to normal processing for other commands
             }
         }
+        }
     }
 
     // Normal processing for other commands
@@ -154,7 +153,16 @@ fn main() -> ExitCode {
         let rt = tokio::runtime::Runtime::new()
             .map_err(|e| format!("Failed to create async runtime: {}", e))?;
 
-        rt.block_on(async { run().await.map_err(|e| format!("Run failed: {}", e)) })
+        rt.block_on(async {
+            // Start background network detection
+        tokio::spawn(async {
+            if let Err(e) = perform_background_network_detection().await {
+                eprintln!("Warning: Background network detection failed: {}", e);
+            }
+        });
+
+            run().await.map_err(|e| format!("Run failed: {}", e))
+        })
     }) {
         Ok(result) => match result {
             Ok(code) => ExitCode::from((code & 0xFF) as u8),
@@ -180,21 +188,16 @@ async fn run() -> Result<i32, String> {
         // Initialize color-eyre for better error handling
         color_eyre::install().map_err(|e| format!("Failed to install error handler: {}", e))?;
 
-        // Create Tokio runtime for async operations
-        let rt = tokio::runtime::Runtime::new()
-            .map_err(|e| format!("Failed to create runtime: {}", e))?;
-
-        // Perform startup network detection
-        if let Err(e) = rt.block_on(perform_startup_network_detection()) {
-            eprintln!("Warning: Network detection failed: {}", e);
-        }
+        // Start background network detection
+        tokio::spawn(async {
+            if let Err(e) = perform_background_network_detection().await {
+                eprintln!("Warning: Background network detection failed: {}", e);
+            }
+        });
 
         // Launch Dashboard TUI
-        use agentic_warden::tui::{TuiApp, screens::ScreenType};
-        let mut app = TuiApp::new(ScreenType::Dashboard)
-            .map_err(|e| format!("Failed to create TUI app: {}", e))?;
-
-        app.run().map_err(|e| format!("TUI error: {}", e))?;
+        use agentic_warden::tui::app::run_tui_app;
+        run_tui_app().map_err(|e| format!("TUI error: {}", e))?;
 
         return Ok(0);
     }
@@ -300,48 +303,14 @@ async fn run() -> Result<i32, String> {
     }
 }
 
-/// Perform startup network detection to set global network status
-async fn perform_startup_network_detection() -> anyhow::Result<()> {
-    println!("🌐 Performing network connectivity detection...");
-
+/// Perform background network detection to update cached network status (non-blocking)
+async fn perform_background_network_detection() -> anyhow::Result<()> {
     let detector = NetworkDetector::new();
     let status = detector.detect().await?;
 
-    // Store network status globally (could use a global variable or config)
-    match status {
-        crate::provider::network_detector::NetworkStatus::Both {
-            domestic_quality: _,
-            international_quality: _,
-            is_china_mainland: _,
-        } => {
-            println!("✅ Both domestic and international networks are accessible");
-        }
-        crate::provider::network_detector::NetworkStatus::DomesticOnly {
-            quality: _,
-            is_china_mainland: _,
-        } => {
-            println!("🇨🇳 Domestic network accessible, international network may require VPN");
-        }
-        crate::provider::network_detector::NetworkStatus::InternationalOnly {
-            quality: _,
-            is_china_mainland: _,
-        } => {
-            println!("🌍 International network accessible, domestic network may have issues");
-        }
-        crate::provider::network_detector::NetworkStatus::Poor {
-            domestic_quality: _,
-            international_quality: _,
-            is_china_mainland: _,
-        } => {
-            println!(
-                "⚠️  Network connectivity issues detected for both domestic and international services"
-            );
-        }
-        crate::provider::network_detector::NetworkStatus::Unknown {
-            is_china_mainland: _,
-        } => {
-            println!("❓ Unable to determine network status");
-        }
+    // Save network status to sync configuration for future use
+    if let Err(e) = save_network_status(status) {
+        eprintln!("Warning: Failed to save network status: {}", e);
     }
 
     Ok(())

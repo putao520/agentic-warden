@@ -2,7 +2,7 @@ use crate::cli_type::CliType;
 use crate::logging::debug;
 use crate::logging::warn;
 use crate::platform::{self, ChildResources};
-use crate::process_tree::{ProcessTreeError, ProcessTreeInfo};
+use crate::core::process_tree::{ProcessTreeError, ProcessTreeInfo};
 use crate::provider::{AiType, EnvInjector, ProviderManager};
 use crate::registry::{RegistryError, TaskRegistry};
 use crate::signal;

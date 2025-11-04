@@ -87,17 +87,40 @@ fn map_from_shmem(
     let data_size = total_len - aligned_lock_region;
     let lock_ptr = unsafe { ptr.add(aligned_lock_region) };
 
+    // Retry mutex creation with better error handling
     let lock_impl = if init {
-        unsafe {
-            Mutex::new(ptr, lock_ptr)
-                .map_err(|e| SharedMapError::LockInit(e.to_string()))?
-                .0
+        let mut retry_count = 0;
+        let max_retries = 3;
+
+        loop {
+            match unsafe { Mutex::new(ptr, lock_ptr) } {
+                Ok(mutex) => break mutex.0,
+                Err(e) => {
+                    retry_count += 1;
+                    if retry_count >= max_retries {
+                        return Err(SharedMapError::LockInit(
+                            format!("Failed to create mutex after {} retries: {}", max_retries, e)
+                        ));
+                    }
+                    // Small delay before retry
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
         }
     } else {
-        unsafe {
-            Mutex::from_existing(ptr, lock_ptr)
-                .map_err(|e| SharedMapError::LockInit(e.to_string()))?
-                .0
+        match unsafe { Mutex::from_existing(ptr, lock_ptr) } {
+            Ok(mutex) => mutex.0,
+            Err(e) => {
+                // If opening existing fails, try to create new one
+                match unsafe { Mutex::new(ptr, lock_ptr) } {
+                    Ok(mutex) => mutex.0,
+                    Err(e2) => {
+                        return Err(SharedMapError::LockInit(
+                            format!("Failed to open or create mutex: from_existing={}, new={}", e, e2)
+                        ));
+                    }
+                }
+            }
         }
     };
 

@@ -7,7 +7,7 @@ readme = "README.md"
 keywords = ["ai", "agents", "cli", "supervisor", "automation", "shared-memory", "claude", "codex", "gemini"]
 categories = ["command-line-utilities", "development-tools", "ai-tools"]
 version = "0.3.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
@@ -19,10 +19,10 @@ thiserror = "1.0"
 uuid = { version = "1", features = ["v4"] }
 raw_sync = "0.1.5"
 
-# Google OAuth and Drive support
-reqwest = { version = "0.11", features = ["json", "multipart"] }
+# Google OAuth and Drive support - Modernized
+reqwest = { version = "0.12", features = ["json", "multipart", "cookies"] }
 url = "2.4"
-base64 = "0.21"
+base64 = "0.22"
 sha2 = "0.10"
 md5 = "0.7"
 tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "signal"] }
@@ -37,16 +37,47 @@ anyhow = "1.0"
 tracing = "0.1"
 parking_lot = "0.12"
 futures = "0.3"
+async-trait = "0.1"
+clap = { version = "4.4", features = ["derive"] }
 
-# CLI UI and graphics
-ratatui = "0.24"
-crossterm = "0.27"
+# Dependency Injection Framework
+shaku = { version = "0.6", features = ["derive"] }
+
+# Enhanced Configuration Management
+config = { version = "0.14", features = ["toml", "json", "yaml"] }
+confy = "0.6"
+
+# TUI Framework - 使用 ratatui 作为唯一的 TUI 库
+# 根据 SPEC 设计，不使用其他 TUI 组件库
+
+# User Experience Enhancements
+arboard = "3.3"
+webbrowser = "0.8"
+notify-rust = "4.10"
+
+# State Management
+state = "0.6"
+
+# Serialization Enhancements
+bincode = "1.3"
+rmp-serde = "1.1"
+
+# Security and Encryption
+secrecy = "0.8"
+
+# Search Functionality
+tantivy = "0.19"
+
+# CLI UI and graphics - Modernized
+ratatui = { version = "0.26", features = ["all-widgets", "serde"] }
+crossterm = { version = "0.28", features = ["event-stream"] }
 plotters = "0.3"
 plotters-bitmap = "0.3"
 color-eyre = "0.6"
 
 # Configuration and directories
 dirs = "5.0"
+walkdir = "2.5"
 toml = "0.8"
 which = "6.0"
 
@@ -57,7 +88,6 @@ indicatif = "0.17"
 copypasta = "0.8"
 
 # File system operations
-walkdir = "2.4"
 tar = "0.4"
 flate2 = "1.0"
 

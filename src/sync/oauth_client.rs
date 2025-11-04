@@ -72,17 +72,7 @@ impl OAuthClient {
         }
     }
 
-    /// Create OAuth client from environment variables
-    pub fn from_env() -> Result<Self> {
-        let client_id = std::env::var("GOOGLE_CLIENT_ID")
-            .map_err(|_| anyhow::anyhow!("GOOGLE_CLIENT_ID environment variable not set"))?;
-        let client_secret = std::env::var("GOOGLE_CLIENT_SECRET")
-            .map_err(|_| anyhow::anyhow!("GOOGLE_CLIENT_SECRET environment variable not set"))?;
-        let refresh_token = std::env::var("GOOGLE_REFRESH_TOKEN").ok();
-
-        Ok(Self::new(client_id, client_secret, refresh_token))
-    }
-
+    
     /// Create OAuth client with scopes
     pub fn with_scopes(mut self, scopes: Vec<String>) -> Self {
         self.config.scopes = scopes;

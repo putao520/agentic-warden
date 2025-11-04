@@ -8,7 +8,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -18,7 +18,6 @@ use super::{Screen, ScreenAction};
 use crate::registry::TaskRegistry;
 use crate::task_record::TaskStatus;
 use crate::tui::app_state::{AppState, TaskSnapshot, TaskUiState};
-use crate::tui::widgets::{DialogResult, DialogWidget};
 
 /// Origin of a task grouping.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
@@ -71,23 +70,50 @@ enum StatusMode {
     Dialog(DialogContext),
 }
 
-/// Context for an active dialog widget.
+/// Results emitted from inline dialogs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DialogResult {
+    Confirmed,
+    Cancelled,
+    Closed,
+    None,
+}
+
+/// Dialog visual state.
+#[derive(Debug, Clone)]
+enum DialogState {
+    Info { title: String, message: String },
+    Error { title: String, message: String },
+    Confirm {
+        title: String,
+        message: String,
+        selected: usize,
+    },
+}
+
+/// Context for an active dialog.
 struct DialogContext {
-    widget: DialogWidget,
+    state: DialogState,
     action: Option<DialogAction>,
 }
 
 impl DialogContext {
     fn info(title: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
-            widget: DialogWidget::info(title.into(), message.into()),
+            state: DialogState::Info {
+                title: title.into(),
+                message: message.into(),
+            },
             action: None,
         }
     }
 
     fn error(title: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
-            widget: DialogWidget::error(title.into(), message.into()),
+            state: DialogState::Error {
+                title: title.into(),
+                message: message.into(),
+            },
             action: None,
         }
     }
@@ -96,8 +122,69 @@ impl DialogContext {
         let display_name = process_name.unwrap_or("<unknown>");
         let message = format!("Terminate task {} (PID {})?", display_name, pid);
         Self {
-            widget: DialogWidget::confirm("Confirm Kill".to_string(), message),
+            state: DialogState::Confirm {
+                title: "Confirm Kill".to_string(),
+                message,
+                selected: 0,
+            },
             action: Some(DialogAction::Kill(pid)),
+        }
+    }
+
+    fn render(&self, frame: &mut Frame, area: Rect) {
+        let popup_area = centered_rect(60, 40, area);
+        frame.render_widget(Clear, popup_area);
+
+        match &self.state {
+            DialogState::Info { title, message } => {
+                render_basic_dialog(frame, popup_area, title, message, None)
+            }
+            DialogState::Error { title, message } => render_basic_dialog(
+                frame,
+                popup_area,
+                title,
+                message,
+                Some(Style::default().fg(Color::Red)),
+            ),
+            DialogState::Confirm {
+                title,
+                message,
+                selected,
+            } => render_confirm_dialog(frame, popup_area, title, message, *selected),
+        }
+    }
+
+    fn handle_key(&mut self, key: KeyEvent) -> DialogResult {
+        match &mut self.state {
+            DialogState::Info { .. } | DialogState::Error { .. } => match key.code {
+                KeyCode::Enter | KeyCode::Char(' ') => DialogResult::Closed,
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => DialogResult::Cancelled,
+                _ => DialogResult::None,
+            },
+            DialogState::Confirm { selected, .. } => match key.code {
+                KeyCode::Left | KeyCode::Char('h') => {
+                    *selected = 0;
+                    DialogResult::None
+                }
+                KeyCode::Right | KeyCode::Char('l') => {
+                    *selected = 1;
+                    DialogResult::None
+                }
+                KeyCode::Tab | KeyCode::BackTab => {
+                    *selected = (*selected + 1) % 2;
+                    DialogResult::None
+                }
+                KeyCode::Enter | KeyCode::Char(' ') => {
+                    if *selected == 0 {
+                        DialogResult::Confirmed
+                    } else {
+                        DialogResult::Cancelled
+                    }
+                }
+                KeyCode::Char('y') | KeyCode::Char('Y') => DialogResult::Confirmed,
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => DialogResult::Cancelled,
+                _ => DialogResult::None,
+            },
         }
     }
 }
@@ -470,6 +557,98 @@ impl StatusScreen {
     }
 }
 
+fn render_basic_dialog(
+    frame: &mut Frame,
+    area: Rect,
+    title: &str,
+    message: &str,
+    text_style: Option<Style>,
+) {
+    let block = Block::default().borders(Borders::ALL).title(title);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let mut paragraph = Paragraph::new(message.to_string())
+        .wrap(Wrap { trim: true })
+        .alignment(Alignment::Left);
+    if let Some(style) = text_style {
+        paragraph = paragraph.style(style);
+    }
+    frame.render_widget(paragraph, inner);
+}
+
+fn render_confirm_dialog(
+    frame: &mut Frame,
+    area: Rect,
+    title: &str,
+    message: &str,
+    selected: usize,
+) {
+    let block = Block::default().borders(Borders::ALL).title(title);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(2), Constraint::Length(3)])
+        .split(inner);
+
+    let message_widget = Paragraph::new(message.to_string()).wrap(Wrap { trim: true });
+    frame.render_widget(message_widget, chunks[0]);
+
+    let buttons = ["Confirm", "Cancel"];
+    let mut spans = Vec::new();
+    for (idx, label) in buttons.iter().enumerate() {
+        if idx == selected {
+            spans.push(Span::styled(
+                format!("[ {} ]", label),
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        } else {
+            spans.push(Span::styled(
+                format!("  {}  ", label),
+                Style::default().fg(Color::Gray),
+            ));
+        }
+
+        if idx == 0 {
+            spans.push(Span::raw("   "));
+        }
+    }
+
+    let button_line = Line::from(spans);
+    let button_widget = Paragraph::new(button_line).alignment(Alignment::Center);
+    frame.render_widget(button_widget, chunks[1]);
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
+    let vertical_margin = (100 - percent_y).saturating_div(2);
+    let horizontal_margin = (100 - percent_x).saturating_div(2);
+
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(vertical_margin),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage(100 - percent_y - vertical_margin),
+        ])
+        .split(area);
+
+    let horizontal = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(horizontal_margin),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage(100 - percent_x - horizontal_margin),
+        ])
+        .split(vertical[1]);
+
+    horizontal[1]
+}
+
 impl Screen for StatusScreen {
     fn render(&mut self, frame: &mut Frame, area: Rect) {
         match &self.mode {
@@ -588,7 +767,7 @@ impl Screen for StatusScreen {
                 frame.render_widget(help, layout[2]);
             }
             StatusMode::Dialog(context) => {
-                context.widget.render(frame, area);
+                context.render(frame, area);
             }
         }
     }
@@ -622,7 +801,7 @@ impl Screen for StatusScreen {
             },
             StatusMode::Dialog(context) => {
                 let action = context.action;
-                let result = context.widget.handle_key(key);
+                let result = context.handle_key(key);
 
                 match result {
                     DialogResult::Confirmed => {
