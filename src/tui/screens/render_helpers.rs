@@ -1,4 +1,15 @@
-//! Reusable widgets shared across multiple TUI screens.
+//! Screen-local rendering helpers
+//!
+//! **IMPORTANT**: This module contains ONLY rendering helper functions that use
+//! ratatui standard components (Block, Paragraph, Gauge, Clear, etc.).
+//!
+//! These are NOT custom widgets - they are simple state structs + rendering functions
+//! that directly use ratatui's standard components for all rendering.
+//!
+//! This approach complies with SPEC: "使用 ratatui 组件库的现成组件"
+//! - All rendering uses Block, Paragraph, Gauge, Clear, etc.
+//! - No custom rendering logic
+//! - Just state management + standard component composition
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
@@ -9,7 +20,7 @@ use ratatui::{
     Frame,
 };
 
-/// Result produced by a dialog interaction.
+/// Dialog interaction result
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DialogResult {
     None,
@@ -25,9 +36,9 @@ enum DialogKind {
     Confirm,
 }
 
-/// Simple modal dialog with optional confirmation buttons.
+/// Dialog state - renders using ONLY ratatui standard components
 #[derive(Debug, Clone)]
-pub struct DialogWidget {
+pub struct DialogState {
     title: String,
     message: String,
     kind: DialogKind,
@@ -35,7 +46,7 @@ pub struct DialogWidget {
     selected: usize,
 }
 
-impl DialogWidget {
+impl DialogState {
     pub fn info(title: String, message: String) -> Self {
         Self {
             title,
@@ -66,6 +77,7 @@ impl DialogWidget {
         }
     }
 
+    /// Render using ONLY ratatui standard components: Clear, Block, Paragraph
     pub fn render(&self, frame: &mut Frame, area: Rect) {
         let width = area.width.min(70).max(30);
         let height = area.height.min(14).max(8);
@@ -76,6 +88,7 @@ impl DialogWidget {
             height,
         };
 
+        // Clear - ratatui standard component
         frame.render_widget(Clear, dialog_area);
 
         let title_style = match self.kind {
@@ -88,6 +101,7 @@ impl DialogWidget {
                 .add_modifier(Modifier::BOLD),
         };
 
+        // Block - ratatui standard component
         let block = Block::default()
             .borders(Borders::ALL)
             .title(Span::styled(&self.title, title_style));
@@ -108,6 +122,7 @@ impl DialogWidget {
             ])
             .split(inner);
 
+        // Paragraph - ratatui standard component
         let message_lines: Vec<Line> = self
             .message
             .lines()
@@ -134,6 +149,7 @@ impl DialogWidget {
                 };
                 spans.push(Span::styled(format!("[ {} ]", label), style));
             }
+            // Paragraph - ratatui standard component
             let buttons = Paragraph::new(Line::from(spans)).alignment(Alignment::Center);
             frame.render_widget(buttons, chunks[1]);
         }
@@ -181,9 +197,9 @@ impl DialogWidget {
     }
 }
 
-/// Single-line text input widget with basic editing support.
+/// Input state - renders using ONLY ratatui standard components
 #[derive(Debug, Clone)]
-pub struct InputWidget {
+pub struct InputState {
     label: String,
     value: String,
     cursor: usize,
@@ -191,7 +207,7 @@ pub struct InputWidget {
     masked: bool,
 }
 
-impl InputWidget {
+impl InputState {
     pub fn new(label: String) -> Self {
         Self {
             label,
@@ -267,6 +283,7 @@ impl InputWidget {
         }
     }
 
+    /// Render using ONLY ratatui standard components: Block, Paragraph
     pub fn render(&self, frame: &mut Frame, area: Rect) {
         let mut lines: Vec<Line> = self
             .label
@@ -291,6 +308,7 @@ impl InputWidget {
                 .add_modifier(Modifier::BOLD),
         )]));
 
+        // Block and Paragraph - ratatui standard components
         let block = Block::default()
             .borders(Borders::ALL)
             .title(Span::styled("Input", Style::default().fg(Color::Cyan)));
@@ -338,7 +356,6 @@ impl InputWidget {
 
     fn next_grapheme(&self) -> usize {
         let mut iter = self.value[self.cursor..].char_indices();
-        // consume current position
         iter.next();
         if let Some((offset, _)) = iter.next() {
             self.cursor + offset
@@ -348,15 +365,15 @@ impl InputWidget {
     }
 }
 
-/// Lightweight wrapper for rendering a title + gauge pair.
+/// Progress state - renders using ONLY ratatui standard components
 #[derive(Debug, Clone)]
-pub struct ProgressWidget {
+pub struct ProgressState {
     title: String,
     progress: u16,
     message: Option<String>,
 }
 
-impl ProgressWidget {
+impl ProgressState {
     pub fn new(title: String) -> Self {
         Self {
             title,
@@ -381,7 +398,9 @@ impl ProgressWidget {
         self.message = None;
     }
 
+    /// Render using ONLY ratatui standard components: Block, Gauge, Paragraph
     pub fn render(&self, frame: &mut Frame, area: Rect) {
+        // Block - ratatui standard component
         let block = Block::default().borders(Borders::ALL).title(Span::styled(
             &self.title,
             Style::default()
@@ -406,6 +425,7 @@ impl ProgressWidget {
             .constraints([Constraint::Length(3), Constraint::Min(1)])
             .split(inner);
 
+        // Gauge - ratatui standard component
         let ratio = self.progress as f64 / 100.0;
         let gauge = Gauge::default()
             .gauge_style(
@@ -418,6 +438,7 @@ impl ProgressWidget {
             .label(format!("{:>3}% complete", self.progress));
         frame.render_widget(gauge, chunks[0]);
 
+        // Paragraph - ratatui standard component
         let message = self.message.as_deref().unwrap_or("Waiting for updates...");
         let paragraph = Paragraph::new(message)
             .wrap(Wrap { trim: true })

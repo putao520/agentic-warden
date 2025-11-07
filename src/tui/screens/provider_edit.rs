@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 use super::{Screen, ScreenAction, ScreenType};
 use crate::provider::env_mapping::{EnvVarMapping, get_env_vars_for_ai_type};
 use crate::provider::{AiType, Provider, ProviderManager};
-use crate::tui::widgets::{DialogResult, DialogWidget, InputWidget};
+use super::render_helpers::{DialogResult, DialogState, InputState};
 
 /// Environment variable definition for TUI
 #[derive(Debug, Clone)]
@@ -78,7 +78,7 @@ enum EditMode {
     Browse,
     EditingField(EditField),
     Dialog {
-        widget: DialogWidget,
+        widget: DialogState,
         outcome: DialogOutcome,
     },
 }
@@ -98,7 +98,7 @@ pub struct ProviderEditScreen {
     mode: EditMode,
     selected_field_idx: usize,
     all_fields: Vec<EditField>,
-    input_widget: InputWidget,
+    input_widget: InputState,
 
     // Original data for comparison
     original_provider: Provider,
@@ -128,7 +128,7 @@ impl ProviderEditScreen {
             mode: EditMode::Browse,
             selected_field_idx: 0,
             all_fields: Vec::new(),
-            input_widget: InputWidget::new("".to_string()),
+            input_widget: InputState::new("".to_string()),
             original_provider: provider,
         };
         screen.rebuild_fields();
@@ -502,13 +502,13 @@ impl Screen for ProviderEditScreen {
                     let field = self.all_fields[self.selected_field_idx].clone();
                     match &field {
                         EditField::DisplayName => {
-                            self.input_widget = InputWidget::new("Display Name".to_string())
+                            self.input_widget = InputState::new("Display Name".to_string())
                                 .with_value(self.display_name.clone());
                             self.input_widget.set_focused(true);
                             self.mode = EditMode::EditingField(field);
                         }
                         EditField::Description => {
-                            self.input_widget = InputWidget::new("Description".to_string())
+                            self.input_widget = InputState::new("Description".to_string())
                                 .with_value(self.description.clone());
                             self.input_widget.set_focused(true);
                             self.mode = EditMode::EditingField(field);
@@ -517,7 +517,7 @@ impl Screen for ProviderEditScreen {
                             if let Some(var_def) = self.get_env_var_def(ai_type, key) {
                                 let current_value =
                                     self.env_vars.get(key).cloned().unwrap_or_default();
-                                self.input_widget = InputWidget::new(format!(
+                                self.input_widget = InputState::new(format!(
                                     "{} [{}]\n{}",
                                     var_def.key,
                                     Self::ai_type_label(ai_type),
@@ -552,7 +552,7 @@ impl Screen for ProviderEditScreen {
                     match self.save_changes() {
                         Ok(()) => {
                             self.rebuild_fields();
-                            let dialog = DialogWidget::info(
+                            let dialog = DialogState::info(
                                 "Success".to_string(),
                                 format!("Provider '{}' saved successfully", self.display_name),
                             );
@@ -564,7 +564,7 @@ impl Screen for ProviderEditScreen {
                             };
                         }
                         Err(err) => {
-                            let dialog = DialogWidget::error(
+                            let dialog = DialogState::error(
                                 "Error".to_string(),
                                 format!("Failed to save provider: {}", err),
                             );
@@ -580,7 +580,7 @@ impl Screen for ProviderEditScreen {
                 }
                 KeyCode::Esc => {
                     if self.has_changes() {
-                        let dialog = DialogWidget::confirm(
+                        let dialog = DialogState::confirm(
                             "Discard Changes".to_string(),
                             "Discard all unsaved changes?".to_string(),
                         );
