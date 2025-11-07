@@ -31,7 +31,12 @@ impl TaskId {
         Self(
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_else(|_| {
+                    // Fallback: Use a pseudo-random value if system time is before UNIX_EPOCH
+                    // This should never happen on properly configured systems
+                    use std::time::Duration;
+                    Duration::from_nanos(std::process::id() as u64)
+                })
                 .as_nanos() as u64,
         )
     }

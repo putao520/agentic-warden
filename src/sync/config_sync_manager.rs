@@ -695,7 +695,9 @@ impl ConfigSyncManager {
             fs::create_dir_all(parent).map_err(SyncError::io)?;
         }
 
-        let archive_path = self.temp_archive_path.as_ref().unwrap();
+        // Safe: temp_archive_path was just set above
+        let archive_path = self.temp_archive_path.as_ref()
+            .expect("temp_archive_path must be set");
         let size = self
             .config_packer
             .pack_ai_configs(config_name, archive_path.clone())?;
@@ -788,7 +790,9 @@ impl ConfigSyncManager {
                 self.temp_archive_path = Some(path);
             }
 
-            let archive_path = self.temp_archive_path.as_ref().unwrap();
+            // Safe: temp_archive_path was just set above if it was None
+            let archive_path = self.temp_archive_path.as_ref()
+                .expect("temp_archive_path must be set");
 
             if let Some(parent) = archive_path.parent() {
                 fs::create_dir_all(parent).map_err(SyncError::io)?;

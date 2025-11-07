@@ -143,7 +143,11 @@ impl App {
             ScreenAction::Back => {
                 if self.history.len() > 1 {
                     self.history.pop();
-                    self.current_screen = self.history.last().unwrap().clone();
+                    // Safe: We just checked that len > 1, so after pop there's at least 1 element
+                    self.current_screen = self.history
+                        .last()
+                        .expect("history should have at least one screen after pop")
+                        .clone();
                 }
             }
             ScreenAction::Quit => {

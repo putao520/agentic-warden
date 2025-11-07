@@ -53,12 +53,54 @@ impl ProviderManagementScreen {
     }
 
     /// 刷新Provider列表
+    ///
+    /// 从 ProviderManager 加载最新的 provider 配置
     pub fn refresh_providers(&mut self) {
-        // TODO: 从真实的ProviderManager加载
-        self.set_message(
-            "Provider list refreshed".to_string(),
-            "info".to_string()
-        );
+        use crate::provider::ProviderManager;
+
+        match ProviderManager::new() {
+            Ok(manager) => {
+                let default_provider = manager.default_provider_name().to_string();
+
+                // 转换 Provider 数据到显示格式
+                self.providers = manager
+                    .list_providers()
+                    .into_iter()
+                    .filter_map(|(id, provider)| {
+                        // 获取第一个 region，如果没有则跳过该 provider
+                        let first_region = provider.regions.keys().next()?;
+
+                        Some(ProviderDisplayItem {
+                            id: id.clone(),
+                            name: provider.name.clone(),
+                            description: provider.description.clone().unwrap_or_default(),
+                            status: if manager.get_token(id, first_region).is_some() {
+                                "Active".to_string()
+                            } else {
+                                "Inactive".to_string()
+                            },
+                            icon: provider.icon.clone().unwrap_or_else(|| "🔧".to_string()),
+                            ai_types: provider.modes.keys().cloned().collect(),
+                            region: Some(first_region.to_string()),
+                            is_default: id == &default_provider,
+                            is_official: provider.official.unwrap_or(false),
+                            has_token: manager.has_token(id, first_region),
+                        })
+                    })
+                    .collect();
+
+                self.set_message(
+                    format!("Loaded {} providers", self.providers.len()),
+                    "success".to_string()
+                );
+            }
+            Err(e) => {
+                self.set_message(
+                    format!("Failed to load providers: {}", e),
+                    "error".to_string()
+                );
+            }
+        }
     }
 
     /// 设置临时消息
