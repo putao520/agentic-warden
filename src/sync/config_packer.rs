@@ -1,9 +1,9 @@
 use super::error::{SyncError, SyncResult};
-use flate2::Compression;
 use flate2::write::GzEncoder;
+use flate2::Compression;
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tar::Builder;
 use tracing::{debug, info, warn};
 
@@ -32,79 +32,91 @@ impl ConfigPacker {
         // Create parent directory for output file if it doesn't exist
         if let Some(parent) = output_path.parent() {
             fs::create_dir_all(parent).map_err(|e| {
-                SyncError::ConfigPackingError(format!("Failed to create output directory: {}", e))
+                SyncError::config_packing(format!("Failed to create output directory: {}", e))
             })?;
         }
 
         // Create tar.gz file
         let file = fs::File::create(output_path).map_err(|e| {
-            SyncError::ConfigPackingError(format!("Failed to create output file: {}", e))
+            SyncError::config_packing(format!("Failed to create output file: {}", e))
         })?;
 
         let encoder = GzEncoder::new(file, Compression::default());
         let mut tar = Builder::new(encoder);
 
         let mut file_count = 0;
-        let mut total_size = 0u64;
-
         // Pack Claude configurations
         if let Some((count, size)) = self.pack_claude_configs(&mut tar)? {
             file_count += count;
-            total_size += size;
-            info!("Packed {} files from Claude configuration ({} bytes)", count, size);
+            info!(
+                "Packed {} files from Claude configuration ({} bytes)",
+                count, size
+            );
         }
 
         // Pack Codex configurations
         if let Some((count, size)) = self.pack_codex_configs(&mut tar)? {
             file_count += count;
-            total_size += size;
-            info!("Packed {} files from Codex configuration ({} bytes)", count, size);
+            info!(
+                "Packed {} files from Codex configuration ({} bytes)",
+                count, size
+            );
         }
 
         // Pack Gemini configurations
         if let Some((count, size)) = self.pack_gemini_configs(&mut tar)? {
             file_count += count;
-            total_size += size;
-            info!("Packed {} files from Gemini configuration ({} bytes)", count, size);
+            info!(
+                "Packed {} files from Gemini configuration ({} bytes)",
+                count, size
+            );
         }
 
         if file_count == 0 {
-            warn!("No configuration files found to pack for config '{}'", config_name);
-            return Err(SyncError::ConfigPackingError(
+            warn!(
+                "No configuration files found to pack for config '{}'",
+                config_name
+            );
+            return Err(SyncError::config_packing(
                 "No configuration files found".to_string(),
             ));
         }
 
         // Finish tar and get compressed file size
         let encoder = tar.into_inner().map_err(|e| {
-            SyncError::ConfigPackingError(format!("Failed to finish tar creation: {}", e))
+            SyncError::config_packing(format!("Failed to finish tar creation: {}", e))
         })?;
 
         let mut file = encoder.finish().map_err(|e| {
-            SyncError::ConfigPackingError(format!("Failed to finish compression: {}", e))
+            SyncError::config_packing(format!("Failed to finish compression: {}", e))
         })?;
 
         file.flush().map_err(|e| {
-            SyncError::ConfigPackingError(format!("Failed to flush output file: {}", e))
+            SyncError::config_packing(format!("Failed to flush output file: {}", e))
         })?;
 
         // Get file size
         let metadata = fs::metadata(output_path).map_err(|e| {
-            SyncError::ConfigPackingError(format!("Failed to get output file metadata: {}", e))
+            SyncError::config_packing(format!("Failed to get output file metadata: {}", e))
         })?;
 
         info!(
             "Successfully packed configuration '{}' with {} files ({} bytes compressed)",
-            config_name, file_count, metadata.len()
+            config_name,
+            file_count,
+            metadata.len()
         );
 
         Ok(metadata.len())
     }
 
     /// Pack Claude configuration files
-    fn pack_claude_configs<W: Write>(&self, tar: &mut Builder<W>) -> SyncResult<Option<(usize, u64)>> {
+    fn pack_claude_configs<W: Write>(
+        &self,
+        tar: &mut Builder<W>,
+    ) -> SyncResult<Option<(usize, u64)>> {
         let claude_dir = dirs::home_dir()
-            .ok_or_else(|| SyncError::ConfigPackingError("Could not find home directory".to_string()))?
+            .ok_or_else(|| SyncError::config_packing("Could not find home directory".to_string()))?
             .join(".claude");
 
         if !claude_dir.exists() {
@@ -124,7 +136,9 @@ impl ConfigPacker {
         for (file, description) in &files_to_pack {
             let file_path = claude_dir.join(file);
             if file_path.exists() {
-                if let Ok(size) = self.add_file_to_tar(tar, &file_path, &format!(".claude/{}", file)) {
+                if let Ok(size) =
+                    self.add_file_to_tar(tar, &file_path, &format!(".claude/{}", file))
+                {
                     file_count += 1;
                     total_size += size;
                     debug!("Added {}: {} ({} bytes)", description, file, size);
@@ -135,10 +149,15 @@ impl ConfigPacker {
         // Pack agents directory if it exists
         let agents_dir = claude_dir.join("agents");
         if agents_dir.exists() && agents_dir.is_dir() {
-            if let Some((count, size)) = self.add_directory_to_tar(tar, &agents_dir, ".claude/agents")? {
+            if let Some((count, size)) =
+                self.add_directory_to_tar(tar, &agents_dir, ".claude/agents")?
+            {
                 file_count += count;
                 total_size += size;
-                debug!("Added agents directory with {} files ({} bytes)", count, size);
+                debug!(
+                    "Added agents directory with {} files ({} bytes)",
+                    count, size
+                );
             }
         }
 
@@ -149,7 +168,10 @@ impl ConfigPacker {
             if let Ok((count, size)) = self.pack_skills_directory(tar, &skills_dir) {
                 file_count += count;
                 total_size += size;
-                debug!("Added skills directory with {} SKILL files ({} bytes)", count, size);
+                debug!(
+                    "Added skills directory with {} SKILL files ({} bytes)",
+                    count, size
+                );
             }
         }
 
@@ -161,9 +183,12 @@ impl ConfigPacker {
     }
 
     /// Pack Codex configuration files
-    fn pack_codex_configs<W: Write>(&self, tar: &mut Builder<W>) -> SyncResult<Option<(usize, u64)>> {
+    fn pack_codex_configs<W: Write>(
+        &self,
+        tar: &mut Builder<W>,
+    ) -> SyncResult<Option<(usize, u64)>> {
         let codex_dir = dirs::home_dir()
-            .ok_or_else(|| SyncError::ConfigPackingError("Could not find home directory".to_string()))?
+            .ok_or_else(|| SyncError::config_packing("Could not find home directory".to_string()))?
             .join(".codex");
 
         if !codex_dir.exists() {
@@ -186,7 +211,8 @@ impl ConfigPacker {
         for (file, description) in &files_to_pack {
             let file_path = codex_dir.join(file);
             if file_path.exists() {
-                if let Ok(size) = self.add_file_to_tar(tar, &file_path, &format!(".codex/{}", file)) {
+                if let Ok(size) = self.add_file_to_tar(tar, &file_path, &format!(".codex/{}", file))
+                {
                     file_count += 1;
                     total_size += size;
                     debug!("Added {}: {} ({} bytes)", description, file, size);
@@ -202,9 +228,12 @@ impl ConfigPacker {
     }
 
     /// Pack Gemini configuration files
-    fn pack_gemini_configs<W: Write>(&self, tar: &mut Builder<W>) -> SyncResult<Option<(usize, u64)>> {
+    fn pack_gemini_configs<W: Write>(
+        &self,
+        tar: &mut Builder<W>,
+    ) -> SyncResult<Option<(usize, u64)>> {
         let gemini_dir = dirs::home_dir()
-            .ok_or_else(|| SyncError::ConfigPackingError("Could not find home directory".to_string()))?
+            .ok_or_else(|| SyncError::config_packing("Could not find home directory".to_string()))?
             .join(".gemini");
 
         if !gemini_dir.exists() {
@@ -226,7 +255,9 @@ impl ConfigPacker {
         for (file, description) in &files_to_pack {
             let file_path = gemini_dir.join(file);
             if file_path.exists() {
-                if let Ok(size) = self.add_file_to_tar(tar, &file_path, &format!(".gemini/{}", file)) {
+                if let Ok(size) =
+                    self.add_file_to_tar(tar, &file_path, &format!(".gemini/{}", file))
+                {
                     file_count += 1;
                     total_size += size;
                     debug!("Added {}: {} ({} bytes)", description, file, size);
@@ -265,7 +296,7 @@ impl ConfigPacker {
             .filter_entry(|e| !e.file_name().to_string_lossy().starts_with('.'))
         {
             let entry = entry.map_err(|e| {
-                SyncError::ConfigPackingError(format!("Failed to walk skills directory: {}", e))
+                SyncError::config_packing(format!("Failed to walk skills directory: {}", e))
             })?;
 
             if entry.file_type().is_file() {
@@ -273,7 +304,9 @@ impl ConfigPacker {
                     if file_name.eq_ignore_ascii_case("skill.md") {
                         let path_in_tar = Path::new(".claude/skills")
                             .join(entry.path().strip_prefix(skills_dir).unwrap());
-                        if let Ok(size) = self.add_file_to_tar(tar, entry.path(), &path_in_tar.to_string_lossy()) {
+                        if let Ok(size) =
+                            self.add_file_to_tar(tar, entry.path(), &path_in_tar.to_string_lossy())
+                        {
                             file_count += 1;
                             total_size += size;
                         }
@@ -293,16 +326,20 @@ impl ConfigPacker {
         tar_path: &str,
     ) -> SyncResult<u64> {
         let mut file = fs::File::open(file_path).map_err(|e| {
-            SyncError::ConfigPackingError(format!("Failed to open file {}: {}", file_path.display(), e))
+            SyncError::config_packing(format!(
+                "Failed to open file {}: {}",
+                file_path.display(),
+                e
+            ))
         })?;
 
-        let size = file.metadata().map_err(|e| {
-            SyncError::ConfigPackingError(format!("Failed to get file metadata: {}", e))
-        })?.len();
+        let size = file
+            .metadata()
+            .map_err(|e| SyncError::config_packing(format!("Failed to get file metadata: {}", e)))?
+            .len();
 
-        tar.append_file(tar_path, &mut file).map_err(|e| {
-            SyncError::ConfigPackingError(format!("Failed to add file to tar: {}", e))
-        })?;
+        tar.append_file(tar_path, &mut file)
+            .map_err(|e| SyncError::config_packing(format!("Failed to add file to tar: {}", e)))?;
 
         Ok(size)
     }
@@ -326,7 +363,7 @@ impl ConfigPacker {
             .filter_entry(|e| !e.file_name().to_string_lossy().starts_with('.'))
         {
             let entry = entry.map_err(|e| {
-                SyncError::ConfigPackingError(format!("Failed to walk directory: {}", e))
+                SyncError::config_packing(format!("Failed to walk directory: {}", e))
             })?;
 
             let path = entry.path();
@@ -358,7 +395,7 @@ impl ConfigPacker {
         let output_path = output_dir.as_ref();
 
         if !archive_path.exists() {
-            return Err(SyncError::ConfigPackingError(format!(
+            return Err(SyncError::config_packing(format!(
                 "Archive file not found: {}",
                 archive_path.to_string_lossy()
             )));
@@ -366,20 +403,20 @@ impl ConfigPacker {
 
         // Create output directory if it doesn't exist
         fs::create_dir_all(output_path).map_err(|e| {
-            SyncError::ConfigPackingError(format!("Failed to create output directory: {}", e))
+            SyncError::config_packing(format!("Failed to create output directory: {}", e))
         })?;
 
         // Open and extract archive
         let file = fs::File::open(archive_path).map_err(|e| {
-            SyncError::ConfigPackingError(format!("Failed to open archive file: {}", e))
+            SyncError::config_packing(format!("Failed to open archive file: {}", e))
         })?;
 
         let decoder = flate2::read::GzDecoder::new(file);
         let mut archive = tar::Archive::new(decoder);
 
-        archive.unpack(output_path).map_err(|e| {
-            SyncError::ConfigPackingError(format!("Failed to unpack archive: {}", e))
-        })?;
+        archive
+            .unpack(output_path)
+            .map_err(|e| SyncError::config_packing(format!("Failed to unpack archive: {}", e)))?;
 
         Ok(())
     }
@@ -396,47 +433,51 @@ impl ConfigPacker {
         // Create parent directory for output file if it doesn't exist
         if let Some(parent) = output_path.parent() {
             fs::create_dir_all(parent).map_err(|e| {
-                SyncError::ConfigPackingError(format!("Failed to create output directory: {}", e))
+                SyncError::config_packing(format!("Failed to create output directory: {}", e))
             })?;
         }
 
         // Create tar.gz file
         let file = fs::File::create(output_path).map_err(|e| {
-            SyncError::ConfigPackingError(format!("Failed to create output file: {}", e))
+            SyncError::config_packing(format!("Failed to create output file: {}", e))
         })?;
 
         let encoder = GzEncoder::new(file, Compression::default());
         let mut tar = Builder::new(encoder);
 
         // Add the entire directory to the archive
-        let dir_name = dir_path.file_name()
+        let dir_name = dir_path
+            .file_name()
             .and_then(|n| n.to_str())
-            .ok_or_else(|| SyncError::ConfigPackingError("Invalid directory name".to_string()))?;
+            .ok_or_else(|| SyncError::config_packing("Invalid directory name".to_string()))?;
 
-        if let Some((count, size)) = self.add_directory_to_tar(&mut tar, dir_path, dir_name)? {
+        if self
+            .add_directory_to_tar(&mut tar, dir_path, dir_name)?
+            .is_some()
+        {
             tar.finish().map_err(|e| {
-                SyncError::ConfigPackingError(format!("Failed to finish tar creation: {}", e))
+                SyncError::config_packing(format!("Failed to finish tar creation: {}", e))
             })?;
 
-            let encoder = tar.into_inner().map_err(|e| {
-                SyncError::ConfigPackingError(format!("Failed to get encoder: {}", e))
-            })?;
+            let encoder = tar
+                .into_inner()
+                .map_err(|e| SyncError::config_packing(format!("Failed to get encoder: {}", e)))?;
 
             let mut file = encoder.finish().map_err(|e| {
-                SyncError::ConfigPackingError(format!("Failed to finish compression: {}", e))
+                SyncError::config_packing(format!("Failed to finish compression: {}", e))
             })?;
 
             file.flush().map_err(|e| {
-                SyncError::ConfigPackingError(format!("Failed to flush output file: {}", e))
+                SyncError::config_packing(format!("Failed to flush output file: {}", e))
             })?;
 
             let metadata = fs::metadata(output_path).map_err(|e| {
-                SyncError::ConfigPackingError(format!("Failed to get output file metadata: {}", e))
+                SyncError::config_packing(format!("Failed to get output file metadata: {}", e))
             })?;
 
             Ok(metadata.len())
         } else {
-            Err(SyncError::ConfigPackingError(
+            Err(SyncError::config_packing(
                 "No files found to pack".to_string(),
             ))
         }
@@ -447,18 +488,18 @@ impl ConfigPacker {
         let archive_path = archive_file.as_ref();
 
         if !archive_path.exists() {
-            return Err(SyncError::ConfigPackingError(format!(
+            return Err(SyncError::config_packing(format!(
                 "Archive file not found: {}",
                 archive_path.to_string_lossy()
             )));
         }
 
         let metadata = fs::metadata(archive_path).map_err(|e| {
-            SyncError::ConfigPackingError(format!("Failed to get archive metadata: {}", e))
+            SyncError::config_packing(format!("Failed to get archive metadata: {}", e))
         })?;
 
         let file = fs::File::open(archive_path).map_err(|e| {
-            SyncError::ConfigPackingError(format!("Failed to open archive file: {}", e))
+            SyncError::config_packing(format!("Failed to open archive file: {}", e))
         })?;
 
         let decoder = flate2::read::GzDecoder::new(file);
@@ -468,10 +509,10 @@ impl ConfigPacker {
         let mut total_uncompressed_size = 0u64;
 
         for entry in archive.entries().map_err(|e| {
-            SyncError::ConfigPackingError(format!("Failed to read archive entries: {}", e))
+            SyncError::config_packing(format!("Failed to read archive entries: {}", e))
         })? {
             let entry = entry.map_err(|e| {
-                SyncError::ConfigPackingError(format!("Failed to read archive entry: {}", e))
+                SyncError::config_packing(format!("Failed to read archive entry: {}", e))
             })?;
 
             if entry.header().entry_type().is_file() {
@@ -511,27 +552,30 @@ mod tests {
     #[test]
     fn test_pack_and_unpack() {
         let source_dir = TempDir::new().unwrap();
+        let source_root = source_dir.path().join("payload");
+        fs::create_dir_all(&source_root).unwrap();
         let output_dir = TempDir::new().unwrap();
         let archive_file = output_dir.path().join("test.tar.gz");
 
         // Create some test files
-        fs::write(source_dir.path().join("file1.txt"), "Hello, World!").unwrap();
-        fs::write(source_dir.path().join("file2.txt"), "Another file").unwrap();
+        fs::write(source_root.join("file1.txt"), "Hello, World!").unwrap();
+        fs::write(source_root.join("file2.txt"), "Another file").unwrap();
 
         let packer = ConfigPacker::new();
 
         // Pack directory
-        let compressed_size = packer
-            .pack_directory(source_dir.path(), &archive_file)
-            .unwrap();
+        let compressed_size = packer.pack_directory(&source_root, &archive_file).unwrap();
 
         assert!(compressed_size > 0);
 
         // Unpack archive
-        packer.unpack_archive(&archive_file, output_dir.path()).unwrap();
+        packer
+            .unpack_archive(&archive_file, output_dir.path())
+            .unwrap();
 
         // Verify files were unpacked
-        assert!(output_dir.path().join("file1.txt").exists());
-        assert!(output_dir.path().join("file2.txt").exists());
+        let unpacked_root = output_dir.path().join("payload");
+        assert!(unpacked_root.join("file1.txt").exists());
+        assert!(unpacked_root.join("file2.txt").exists());
     }
 }

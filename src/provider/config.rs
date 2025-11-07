@@ -1,8 +1,10 @@
 //! Provider configuration data structures
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+const DEFAULT_SCHEMA_URL: &str = "https://agentic-warden.dev/schema/provider.json";
 
 /// Provider configuration file root structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,6 +20,7 @@ pub struct ProvidersConfig {
     pub default_provider: String,
 
     /// User stored tokens (regional)
+    #[serde(default)]
     pub user_tokens: HashMap<String, RegionalTokens>,
 }
 
@@ -70,7 +73,7 @@ pub struct Provider {
 }
 
 /// AI type enumeration
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, std::hash::Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum AiType {
     Codex,
@@ -114,6 +117,7 @@ pub enum ModeType {
     /// Claude Code native mode with ANTHROPIC_* variables
     ClaudeCodeNative,
     /// OpenAI compatible mode with OPENAI_* variables
+    #[serde(rename = "openai_compatible")]
     OpenAICompatible,
     /// Gemini native mode with GOOGLE_* variables
     GeminiNative,
@@ -294,6 +298,104 @@ impl std::str::FromStr for AiType {
 }
 
 impl ProvidersConfig {
+    fn default_schema() -> String {
+        DEFAULT_SCHEMA_URL.to_string()
+    }
+
+    /// Ensure optional fields have defaults applied
+    pub fn ensure_defaults(&mut self) {
+        if self.schema.is_none() {
+            self.schema = Some(Self::default_schema());
+        }
+    }
+
+    /// Apply defaults and validate configuration integrity
+    pub fn ensure_defaults_and_validate(&mut self) -> Result<()> {
+        self.ensure_defaults();
+        self.validate()
+    }
+
+    /// Validate configuration integrity
+    pub fn validate(&self) -> Result<()> {
+        if self.providers.is_empty() {
+            return Err(anyhow!("Provider configuration is empty"));
+        }
+
+        if !self.providers.contains_key(&self.default_provider) {
+            return Err(anyhow!(
+                "Default provider '{}' does not exist",
+                self.default_provider
+            ));
+        }
+
+        for (provider_id, provider) in &self.providers {
+            self.validate_provider_entry(provider_id, provider)?;
+        }
+
+        for provider_id in self.user_tokens.keys() {
+            if !self.providers.contains_key(provider_id) {
+                return Err(anyhow!(
+                    "User tokens reference unknown provider '{}'",
+                    provider_id
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_provider_entry(&self, provider_id: &str, provider: &Provider) -> Result<()> {
+        if provider.name.trim().is_empty() {
+            return Err(anyhow!(
+                "Provider '{}' must have a non-empty display name",
+                provider_id
+            ));
+        }
+
+        if provider.description.trim().is_empty() {
+            return Err(anyhow!(
+                "Provider '{}' must have a description",
+                provider_id
+            ));
+        }
+
+        if provider.compatible_with.is_empty() {
+            return Err(anyhow!(
+                "Provider '{}' must support at least one AI CLI",
+                provider_id
+            ));
+        }
+
+        let mut seen: HashSet<&AiType> = HashSet::new();
+        for ai_type in &provider.compatible_with {
+            if !seen.insert(ai_type) {
+                return Err(anyhow!(
+                    "Provider '{}' contains duplicate AI compatibility entry '{}'",
+                    provider_id,
+                    ai_type
+                ));
+            }
+        }
+
+        for mode in &provider.support_modes {
+            if mode.name.trim().is_empty() {
+                return Err(anyhow!(
+                    "Provider '{}' has a support mode without a name",
+                    provider_id
+                ));
+            }
+            if mode.config.regional_urls.is_empty() {
+                return Err(anyhow!(
+                    "Provider '{}' mode '{}' must declare at least one regional URL",
+                    provider_id,
+                    mode.name
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
     /// Load configuration from the default location
     pub fn load() -> Result<Self> {
         let config_path = Self::get_config_path()?;
@@ -304,8 +406,9 @@ impl ProvidersConfig {
     pub fn load_from_path(path: &std::path::Path) -> Result<Self> {
         if path.exists() {
             let content = std::fs::read_to_string(path)?;
-            let config: ProvidersConfig = serde_json::from_str(&content)
+            let mut config: ProvidersConfig = serde_json::from_str(&content)
                 .map_err(|e| anyhow!("Failed to parse providers config: {}", e))?;
+            config.ensure_defaults_and_validate()?;
             Ok(config)
         } else {
             // Create default config if it doesn't exist
@@ -341,13 +444,15 @@ impl ProvidersConfig {
 
     /// Create default configuration
     pub fn create_default() -> Result<Self> {
-        // Create an empty default configuration - all providers should be loaded from providers.json file
-        let config = Self {
-            schema: Some("https://raw.githubusercontent.com/putao520/agentic-warden/main/schema/providers.json".to_string()),
-            default_provider: "official".to_string(),
-            providers: HashMap::new(),
-            user_tokens: HashMap::new(),
-        };
+        let template_str = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/config/provider.json.template"
+        ));
+
+        let mut config: ProvidersConfig = serde_json::from_str(template_str)
+            .map_err(|e| anyhow!("Failed to parse default provider template: {}", e))?;
+        config.ensure_defaults_and_validate()?;
+
         Ok(config)
     }
 
@@ -528,11 +633,61 @@ mod tests {
     // Display tests removed - these are well-tested by the standard library
 
     #[test]
-    fn test_empty_default_config() {
-        // Test that create_default creates an empty configuration
+    fn test_default_config_from_template() {
         let config = ProvidersConfig::create_default().unwrap();
-        assert_eq!(config.providers.len(), 0);
+        assert!(config.providers.contains_key("openrouter"));
+        assert!(config.providers.contains_key("litellm"));
+        assert!(config.providers.contains_key("official"));
         assert_eq!(config.default_provider, "official");
         assert!(config.user_tokens.is_empty());
+        let openrouter = config.providers.get("openrouter").unwrap();
+        assert_eq!(
+            openrouter.env.get("OPENAI_BASE_URL").unwrap(),
+            "https://openrouter.ai/api/v1"
+        );
+    }
+
+    #[test]
+    fn ensure_defaults_fill_schema() {
+        let mut providers = HashMap::new();
+        providers.insert(
+            "official".to_string(),
+            Provider {
+                name: "Official".to_string(),
+                description: "Built-in".to_string(),
+                icon: None,
+                official: true,
+                protected: true,
+                custom: false,
+                support_modes: vec![],
+                compatible_with: vec![AiType::Claude],
+                validation_endpoint: None,
+                category: None,
+                website: None,
+                regions: vec![],
+                env: HashMap::new(),
+            },
+        );
+
+        let mut config = ProvidersConfig {
+            schema: None,
+            providers,
+            default_provider: "official".to_string(),
+            user_tokens: HashMap::new(),
+        };
+
+        config.ensure_defaults_and_validate().unwrap();
+        assert_eq!(
+            config.schema,
+            Some(DEFAULT_SCHEMA_URL.to_string()),
+            "schema should be populated automatically"
+        );
+    }
+
+    #[test]
+    fn validate_fails_when_default_missing() {
+        let mut config = ProvidersConfig::default();
+        config.default_provider = "missing".to_string();
+        assert!(config.validate().is_err());
     }
 }

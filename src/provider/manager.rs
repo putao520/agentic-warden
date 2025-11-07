@@ -152,8 +152,12 @@ impl ProviderManager {
         let content =
             fs::read_to_string(path).map_err(|e| ProviderError::ConfigLoadError(e.to_string()))?;
 
-        let config: ProvidersConfig = serde_json::from_str(&content)
+        let mut config: ProvidersConfig = serde_json::from_str(&content)
             .map_err(|e| ProviderError::ConfigLoadError(format!("Invalid JSON: {}", e)))?;
+
+        config
+            .ensure_defaults_and_validate()
+            .map_err(|e| ProviderError::ConfigLoadError(e.to_string()))?;
 
         Ok(config)
     }
@@ -401,11 +405,9 @@ mod tests {
             providers_config,
         };
 
-        assert!(
-            manager
-                .validate_compatibility("test", AiType::Codex)
-                .is_ok()
-        );
+        assert!(manager
+            .validate_compatibility("test", AiType::Codex)
+            .is_ok());
     }
 
     #[test]
@@ -442,11 +444,9 @@ mod tests {
             providers_config,
         };
 
-        assert!(
-            manager
-                .validate_compatibility("test", AiType::Gemini)
-                .is_err()
-        );
+        assert!(manager
+            .validate_compatibility("test", AiType::Gemini)
+            .is_err());
     }
 
     #[test]
@@ -473,11 +473,9 @@ mod tests {
             env: HashMap::new(),
         };
 
-        assert!(
-            manager
-                .add_provider("official".to_string(), provider)
-                .is_err()
-        );
+        assert!(manager
+            .add_provider("official".to_string(), provider)
+            .is_err());
         assert!(manager.remove_provider("official").is_err());
     }
 }

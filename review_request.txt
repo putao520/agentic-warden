@@ -1,0 +1,19 @@
+基于不信任原则，独立审查 agentic-warden 项目的配置同步功能实现。
+
+项目位置: E:/code/rust/agentic-warden
+
+请执行以下审查：
+1. 读取 SPEC/DATA_MODEL.md 文件第377-506行的配置同步策略
+2. 验证代码实现是否符合SPEC要求：
+   - src/main.rs - 检查默认配置名处理
+   - src/sync/sync_command.rs - 检查覆盖确认流程
+   - src/sync/config_sync_manager.rs - 检查云端检测机制
+   - src/help.rs - 检查帮助文档
+
+重点验证：
+- push/pull无配置名时是否使用'default'
+- 是否有云端同名配置检测
+- 覆盖确认流程是否完整
+- 用户取消时是否返回退出码0
+
+请提供详细的审查报告，列出所有不一致之处。

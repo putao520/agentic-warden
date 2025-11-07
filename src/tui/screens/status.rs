@@ -1,326 +1,146 @@
-//! Status monitoring screen
+//! Task status screen
+//!
+//! Displays running tasks grouped by their parent process and supports
+//! keyboard navigation per SPEC/API.md §3.
+
+use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use chrono::{DateTime, Local, Utc};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
-    Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    Frame,
 };
-use std::cmp::Ordering;
-use std::collections::BTreeMap;
-use std::time::{Duration, Instant};
 
 use super::{Screen, ScreenAction};
+use crate::platform;
 use crate::registry::TaskRegistry;
-use crate::task_record::TaskStatus;
-use crate::tui::app_state::{AppState, TaskSnapshot, TaskUiState};
+use crate::task_record::{TaskRecord, TaskStatus};
+use crate::tui::app_state::{AppState, TaskSnapshot};
 
-/// Origin of a task grouping.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
-enum GroupSource {
-    Manager,
-    RootParent,
-    Unknown,
+const REFRESH_INTERVAL: Duration = Duration::from_secs(2);
+
+pub struct StatusScreen {
+    registry: TaskRegistry,
+    app_state: &'static AppState,
+    groups: Vec<TaskGroup>,
+    flat_entries: Vec<FlatEntry>,
+    selected_index: usize,
+    last_refresh: Instant,
+    last_loaded_at: Option<DateTime<Utc>>,
+    message: Option<String>,
 }
 
-/// Key used to group tasks by their parent process.
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct GroupKey {
-    parent_pid: Option<u32>,
-    parent_name: Option<String>,
-    source: GroupSource,
+#[derive(Clone)]
+struct TaskItem {
+    pid: u32,
+    record: TaskRecord,
 }
 
-impl Ord for GroupKey {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.source
-            .cmp(&other.source)
-            .then_with(|| self.parent_name.cmp(&other.parent_name))
-            .then_with(|| self.parent_pid.cmp(&other.parent_pid))
-    }
-}
-
-impl PartialOrd for GroupKey {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-/// Group of tasks sharing the same parent process.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct TaskGroup {
     label: String,
-    tasks: Vec<TaskSnapshot>,
+    tasks: Vec<TaskItem>,
 }
 
-/// Flat entry used for navigation within grouped tasks.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 struct FlatEntry {
     group_idx: usize,
     task_idx: usize,
 }
 
-/// Active mode for the status screen.
-enum StatusMode {
-    List,
-    Dialog(DialogContext),
-}
-
-/// Results emitted from inline dialogs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DialogResult {
-    Confirmed,
-    Cancelled,
-    Closed,
-    None,
-}
-
-/// Dialog visual state.
-#[derive(Debug, Clone)]
-enum DialogState {
-    Info { title: String, message: String },
-    Error { title: String, message: String },
-    Confirm {
-        title: String,
-        message: String,
-        selected: usize,
-    },
-}
-
-/// Context for an active dialog.
-struct DialogContext {
-    state: DialogState,
-    action: Option<DialogAction>,
-}
-
-impl DialogContext {
-    fn info(title: impl Into<String>, message: impl Into<String>) -> Self {
-        Self {
-            state: DialogState::Info {
-                title: title.into(),
-                message: message.into(),
-            },
-            action: None,
-        }
-    }
-
-    fn error(title: impl Into<String>, message: impl Into<String>) -> Self {
-        Self {
-            state: DialogState::Error {
-                title: title.into(),
-                message: message.into(),
-            },
-            action: None,
-        }
-    }
-
-    fn confirm_kill(pid: u32, process_name: Option<&str>) -> Self {
-        let display_name = process_name.unwrap_or("<unknown>");
-        let message = format!("Terminate task {} (PID {})?", display_name, pid);
-        Self {
-            state: DialogState::Confirm {
-                title: "Confirm Kill".to_string(),
-                message,
-                selected: 0,
-            },
-            action: Some(DialogAction::Kill(pid)),
-        }
-    }
-
-    fn render(&self, frame: &mut Frame, area: Rect) {
-        let popup_area = centered_rect(60, 40, area);
-        frame.render_widget(Clear, popup_area);
-
-        match &self.state {
-            DialogState::Info { title, message } => {
-                render_basic_dialog(frame, popup_area, title, message, None)
-            }
-            DialogState::Error { title, message } => render_basic_dialog(
-                frame,
-                popup_area,
-                title,
-                message,
-                Some(Style::default().fg(Color::Red)),
-            ),
-            DialogState::Confirm {
-                title,
-                message,
-                selected,
-            } => render_confirm_dialog(frame, popup_area, title, message, *selected),
-        }
-    }
-
-    fn handle_key(&mut self, key: KeyEvent) -> DialogResult {
-        match &mut self.state {
-            DialogState::Info { .. } | DialogState::Error { .. } => match key.code {
-                KeyCode::Enter | KeyCode::Char(' ') => DialogResult::Closed,
-                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => DialogResult::Cancelled,
-                _ => DialogResult::None,
-            },
-            DialogState::Confirm { selected, .. } => match key.code {
-                KeyCode::Left | KeyCode::Char('h') => {
-                    *selected = 0;
-                    DialogResult::None
-                }
-                KeyCode::Right | KeyCode::Char('l') => {
-                    *selected = 1;
-                    DialogResult::None
-                }
-                KeyCode::Tab | KeyCode::BackTab => {
-                    *selected = (*selected + 1) % 2;
-                    DialogResult::None
-                }
-                KeyCode::Enter | KeyCode::Char(' ') => {
-                    if *selected == 0 {
-                        DialogResult::Confirmed
-                    } else {
-                        DialogResult::Cancelled
-                    }
-                }
-                KeyCode::Char('y') | KeyCode::Char('Y') => DialogResult::Confirmed,
-                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => DialogResult::Cancelled,
-                _ => DialogResult::None,
-            },
-        }
-    }
-}
-
-/// Supported dialog actions.
-#[derive(Debug, Clone, Copy)]
-enum DialogAction {
-    Kill(u32),
-}
-
-/// Status monitoring screen.
-pub struct StatusScreen {
-    registry: TaskRegistry,
-    app_state: &'static AppState,
-    last_update: Instant,
-    groups: Vec<TaskGroup>,
-    flat_entries: Vec<FlatEntry>,
-    selected_index: usize,
-    last_refresh_at: Option<DateTime<Utc>>,
-    mode: StatusMode,
+#[derive(Eq, PartialEq, Ord, PartialOrd)]
+enum GroupKey {
+    Manager(u32),
+    Root(u32),
+    Standalone,
 }
 
 impl StatusScreen {
     pub fn new() -> Result<Self> {
         let registry = TaskRegistry::connect()?;
-        let app_state = AppState::global();
-
         let mut screen = Self {
             registry,
-            app_state,
-            last_update: Instant::now(),
+            app_state: AppState::global(),
             groups: Vec::new(),
             flat_entries: Vec::new(),
             selected_index: 0,
-            last_refresh_at: None,
-            mode: StatusMode::List,
+            last_refresh: Instant::now()
+                .checked_sub(REFRESH_INTERVAL)
+                .unwrap_or_else(Instant::now),
+            last_loaded_at: None,
+            message: None,
         };
 
+        screen.sync_from_registry()?;
         screen.refresh_tasks()?;
-
         Ok(screen)
     }
 
     fn refresh_tasks(&mut self) -> Result<()> {
-        self.app_state.refresh_tasks_from_registry(&self.registry)?;
-        let state = self.app_state.task_state();
-        self.apply_task_state(state);
+        let snapshots = self.app_state.tasks_snapshot();
+        let tasks = Self::convert_snapshots(snapshots);
+        self.groups = Self::group_tasks(tasks);
+        self.flat_entries = Self::build_flat_index(&self.groups);
+        if self.selected_index >= self.flat_entries.len() && !self.flat_entries.is_empty() {
+            self.selected_index = self.flat_entries.len() - 1;
+        }
+        self.last_loaded_at = Some(Utc::now());
         Ok(())
     }
 
-    fn apply_task_state(&mut self, state: TaskUiState) {
-        let previously_selected_pid = self.selected_task().map(|task| task.pid);
-
-        self.groups = Self::group_snapshots(state.tasks);
-        self.flat_entries = Self::flatten_indices(&self.groups);
-        self.last_refresh_at = state.last_refresh;
-
-        if let Some(pid) = previously_selected_pid {
-            if let Some(idx) = self
-                .flat_entries
-                .iter()
-                .position(|entry| self.groups[entry.group_idx].tasks[entry.task_idx].pid == pid)
-            {
-                self.selected_index = idx;
-            } else {
-                self.selected_index = 0;
-            }
-        } else {
-            self.selected_index = 0;
-        }
-
-        if !self.flat_entries.is_empty() && self.selected_index >= self.flat_entries.len() {
-            self.selected_index = self.flat_entries.len() - 1;
-        }
+    fn convert_snapshots(snapshots: Vec<TaskSnapshot>) -> Vec<TaskItem> {
+        snapshots
+            .into_iter()
+            .map(|snapshot| TaskItem {
+                pid: snapshot.pid,
+                record: snapshot.record,
+            })
+            .collect()
     }
 
-    fn group_snapshots(snapshots: Vec<TaskSnapshot>) -> Vec<TaskGroup> {
-        let mut groups: BTreeMap<GroupKey, Vec<TaskSnapshot>> = BTreeMap::new();
+    fn sync_from_registry(&mut self) -> Result<()> {
+        let entries = self.registry.entries()?;
+        self.app_state.replace_tasks_from_registry(entries);
+        Ok(())
+    }
 
-        for snapshot in snapshots {
-            let (source, parent_pid, parent_name) = if let Some(pid) = snapshot.manager_pid {
-                (
-                    GroupSource::Manager,
-                    Some(pid),
-                    snapshot.manager_name.clone(),
-                )
-            } else if let Some(pid) = snapshot.root_parent_pid {
-                (
-                    GroupSource::RootParent,
-                    Some(pid),
-                    snapshot.root_parent_name.clone(),
-                )
+    fn group_tasks(tasks: Vec<TaskItem>) -> Vec<TaskGroup> {
+        let mut groups: BTreeMap<GroupKey, Vec<TaskItem>> = BTreeMap::new();
+
+        for task in tasks {
+            let key = if let Some(pid) = task.record.manager_pid {
+                GroupKey::Manager(pid)
+            } else if let Some(pid) = task.record.resolved_root_parent_pid() {
+                GroupKey::Root(pid)
             } else {
-                (GroupSource::Unknown, None, None)
+                GroupKey::Standalone
             };
 
-            let key = GroupKey {
-                parent_pid,
-                parent_name,
-                source,
-            };
-
-            groups.entry(key).or_default().push(snapshot);
+            groups.entry(key).or_default().push(task);
         }
 
         groups
             .into_iter()
             .map(|(key, mut tasks)| {
-                tasks.sort_by(|a, b| b.started_at.cmp(&a.started_at));
-                let label = Self::build_group_label(&key, tasks.len());
-
+                tasks.sort_by(|a, b| b.record.started_at.cmp(&a.record.started_at));
+                let label = match key {
+                    GroupKey::Manager(pid) => format!("Manager PID {pid}"),
+                    GroupKey::Root(pid) => format!("Parent PID {pid}"),
+                    GroupKey::Standalone => "Standalone Tasks".to_string(),
+                };
                 TaskGroup { label, tasks }
             })
             .collect()
     }
 
-    fn build_group_label(key: &GroupKey, count: usize) -> String {
-        let role = match key.source {
-            GroupSource::Manager => "Manager",
-            GroupSource::RootParent => "Root Parent",
-            GroupSource::Unknown => "Standalone",
-        };
-        let unit = if count == 1 { "task" } else { "tasks" };
-
-        match (key.parent_pid, key.parent_name.as_deref()) {
-            (Some(pid), Some(name)) if !name.is_empty() => {
-                format!("{role}: {name} (PID {pid}) - {count} {unit}")
-            }
-            (Some(pid), _) => format!("{role}: PID {pid} - {count} {unit}"),
-            (None, _) => format!("{role} tasks - {count} {unit}"),
-        }
-    }
-
-    fn flatten_indices(groups: &[TaskGroup]) -> Vec<FlatEntry> {
+    fn build_flat_index(groups: &[TaskGroup]) -> Vec<FlatEntry> {
         let mut entries = Vec::new();
-
         for (group_idx, group) in groups.iter().enumerate() {
             for (task_idx, _) in group.tasks.iter().enumerate() {
                 entries.push(FlatEntry {
@@ -329,503 +149,418 @@ impl StatusScreen {
                 });
             }
         }
-
         entries
     }
 
-    fn selected_task(&self) -> Option<&TaskSnapshot> {
+    fn counts(&self) -> (usize, usize, usize) {
+        let total = self
+            .groups
+            .iter()
+            .map(|group| group.tasks.len())
+            .sum::<usize>();
+        let running = self
+            .groups
+            .iter()
+            .flat_map(|group| group.tasks.iter())
+            .filter(|task| task.record.status == TaskStatus::Running)
+            .count();
+        let completed = total.saturating_sub(running);
+        (total, running, completed)
+    }
+
+    fn selected_task(&self) -> Option<&TaskItem> {
         let entry = self.flat_entries.get(self.selected_index)?;
         self.groups.get(entry.group_idx)?.tasks.get(entry.task_idx)
     }
 
     fn move_selection_up(&mut self) {
-        if self.flat_entries.is_empty() || self.selected_index == 0 {
-            return;
+        if self.selected_index > 0 {
+            self.selected_index -= 1;
         }
-        self.selected_index -= 1;
     }
 
     fn move_selection_down(&mut self) {
-        if self.flat_entries.is_empty() || self.selected_index + 1 >= self.flat_entries.len() {
-            return;
-        }
-        self.selected_index += 1;
-    }
-
-    fn counts(&self) -> (usize, usize, usize) {
-        let mut total: usize = 0;
-        let mut running: usize = 0;
-
-        for group in &self.groups {
-            for task in &group.tasks {
-                total += 1;
-                if task.status == TaskStatus::Running {
-                    running += 1;
-                }
-            }
-        }
-
-        let completed = total.saturating_sub(running);
-        (total, running, completed)
-    }
-
-    fn status_label(status: &TaskStatus) -> (&'static str, Color) {
-        match status {
-            TaskStatus::Running => ("[RUN]", Color::Green),
-            TaskStatus::CompletedButUnread => ("[DONE]", Color::Blue),
+        if self.selected_index + 1 < self.flat_entries.len() {
+            self.selected_index += 1;
         }
     }
 
-    fn status_description(status: &TaskStatus) -> &'static str {
-        match status {
-            TaskStatus::Running => "Running",
-            TaskStatus::CompletedButUnread => "Completed (unread)",
-        }
-    }
-
-    fn format_elapsed(started: &DateTime<Utc>, completed: Option<&DateTime<Utc>>) -> String {
-        let now = Utc::now();
-        let end = completed.unwrap_or(&now);
-        let mut seconds = end.timestamp() - started.timestamp();
-
+    fn format_elapsed(record: &TaskRecord) -> String {
+        let end = record.completed_at.unwrap_or_else(Utc::now);
+        let mut seconds = (end - record.started_at).num_seconds();
         if seconds < 0 {
             seconds = 0;
         }
-
-        if seconds < 60 {
-            format!("{seconds}s")
-        } else if seconds < 3600 {
-            format!("{}m {}s", seconds / 60, seconds % 60)
+        let minutes = seconds / 60;
+        let hours = minutes / 60;
+        if hours > 0 {
+            format!("{hours}h {}m", minutes % 60)
+        } else if minutes > 0 {
+            format!("{minutes}m {}s", seconds % 60)
         } else {
-            format!("{}h {}m", seconds / 3600, (seconds % 3600) / 60)
+            format!("{seconds}s")
         }
     }
 
-    fn format_last_refresh(last_refresh: Option<DateTime<Utc>>) -> String {
-        match last_refresh {
-            Some(utc) => {
-                let local: DateTime<Local> = DateTime::from(utc);
+    fn summary_line(&self) -> String {
+        let (total, running, completed) = self.counts();
+        let refreshed = match self.last_loaded_at {
+            Some(ts) => {
+                let local: DateTime<Local> = DateTime::from(ts);
                 format!("Last refresh: {}", local.format("%Y-%m-%d %H:%M:%S"))
             }
             None => "Last refresh: pending".to_string(),
-        }
+        };
+        format!(
+            "Tasks: {} (Running: {}, Completed: {})    {}",
+            total, running, completed, refreshed
+        )
     }
 
-    fn truncate(text: &str, max_len: usize) -> String {
-        if text.len() <= max_len {
-            text.to_string()
-        } else if max_len <= 3 {
-            ".".repeat(max_len)
-        } else {
-            format!("{}...", &text[..max_len - 3])
-        }
-    }
-
-    fn build_detail_lines(task: &TaskSnapshot) -> Vec<Line<'static>> {
-        let mut lines = Vec::new();
-
-        lines.push(Self::detail_line(
-            "Process",
-            task.process_name
-                .as_deref()
-                .unwrap_or("<unknown>")
-                .to_string(),
-        ));
-        lines.push(Self::detail_line("PID", task.pid.to_string()));
-        lines.push(Self::detail_line(
-            "Status",
-            Self::status_description(&task.status).to_string(),
-        ));
-
-        let started_local: DateTime<Local> = DateTime::from(task.started_at);
-        lines.push(Self::detail_line(
-            "Started",
-            started_local.format("%Y-%m-%d %H:%M:%S").to_string(),
-        ));
-        lines.push(Self::detail_line(
-            "Elapsed",
-            Self::format_elapsed(&task.started_at, task.completed_at.as_ref()),
-        ));
-
-        if let Some(completed_at) = task.completed_at {
-            let local_completed: DateTime<Local> = DateTime::from(completed_at);
-            lines.push(Self::detail_line(
-                "Completed",
-                local_completed.format("%Y-%m-%d %H:%M:%S").to_string(),
-            ));
-        }
-
-        if let Some(pid) = task.manager_pid {
-            let name = task.manager_name.as_deref().unwrap_or("<unknown>");
-            lines.push(Self::detail_line("Manager", format!("{name} (PID {pid})")));
-        }
-
-        if let Some(pid) = task.root_parent_pid {
-            let name = task.root_parent_name.as_deref().unwrap_or("<unknown>");
-            lines.push(Self::detail_line(
-                "Root Parent",
-                format!("{name} (PID {pid})"),
-            ));
-        }
-
-        if !task.process_chain.is_empty() {
-            let chain = task
-                .process_chain
-                .iter()
-                .map(|pid| pid.to_string())
-                .collect::<Vec<_>>()
-                .join(" -> ");
-            lines.push(Self::detail_line("Process Chain", chain));
-        }
-
-        lines.push(Self::detail_line("Log Path", task.log_path.clone()));
-
-        let result_value = task
-            .result
-            .as_deref()
-            .map(|r| r.to_string())
-            .unwrap_or_else(|| "<pending>".to_string());
-        lines.push(Self::detail_line("Result", result_value));
-
-        let exit_code_value = task
-            .exit_code
-            .map(|code| code.to_string())
-            .unwrap_or_else(|| "<pending>".to_string());
-        lines.push(Self::detail_line("Exit Code", exit_code_value));
-
-        if let Some(reason) = &task.cleanup_reason {
-            lines.push(Self::detail_line("Cleanup", reason.clone()));
-        }
-
-        lines
-    }
-
-    fn detail_line(label: &str, value: String) -> Line<'static> {
-        Line::from(vec![
-            Span::styled(
-                format!("{label}: "),
+    fn render_list(&self, frame: &mut Frame, area: Rect) {
+        let mut items: Vec<ListItem> = Vec::new();
+        for (group_idx, group) in self.groups.iter().enumerate() {
+            items.push(ListItem::new(Line::from(vec![Span::styled(
+                group.label.clone(),
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(value),
-        ])
-    }
+            )])));
 
-    fn execute_dialog_action(&mut self, action: DialogAction) -> Result<()> {
-        match action {
-            DialogAction::Kill(pid) => {
-                match Self::kill_process(pid) {
-                    Ok(()) => {
-                        // Attempt to refresh immediately so the UI reflects the change.
-                        self.refresh_tasks()?;
-                        self.last_update = Instant::now();
-                        self.mode = StatusMode::Dialog(DialogContext::info(
-                            "Task Terminated",
-                            format!("Process {pid} terminated successfully."),
-                        ));
-                    }
-                    Err(err) => {
-                        self.mode = StatusMode::Dialog(DialogContext::error(
-                            "Kill Failed",
-                            format!("Failed to terminate {pid}: {err}"),
-                        ));
-                    }
-                }
+            for (task_idx, task) in group.tasks.iter().enumerate() {
+                let is_selected = self
+                    .flat_entries
+                    .get(self.selected_index)
+                    .map(|entry| entry.group_idx == group_idx && entry.task_idx == task_idx)
+                    .unwrap_or(false);
+
+                let (status_label, status_color) = match task.record.status {
+                    TaskStatus::Running => ("RUN", Color::Green),
+                    TaskStatus::CompletedButUnread => ("DONE", Color::Blue),
+                };
+
+                let prefix = if is_selected { "> " } else { "  " };
+                let elapsed = Self::format_elapsed(&task.record);
+                let log = truncate(&task.record.log_id, 40);
+
+                let content = Line::from(vec![
+                    Span::raw(prefix),
+                    Span::styled(status_label, Style::default().fg(status_color)),
+                    Span::raw(" "),
+                    Span::raw(format!("PID {} ", task.pid)),
+                    Span::styled(format!("[{}]", elapsed), Style::default().fg(Color::Gray)),
+                    Span::raw(" "),
+                    Span::raw(log),
+                ]);
+
+                let style = if is_selected {
+                    Style::default().add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                };
+
+                items.push(ListItem::new(content).style(style));
             }
         }
-        Ok(())
+
+        let list = List::new(items).block(Block::default().borders(Borders::ALL).title("Tasks"));
+        frame.render_widget(list, area);
     }
 
-    fn kill_process(pid: u32) -> Result<()> {
-        #[cfg(unix)]
-        {
-            use nix::sys::signal::{Signal, kill};
-            use nix::unistd::Pid;
-            kill(Pid::from_raw(pid as i32), Signal::SIGTERM)?;
-        }
+    fn render_details(&self, frame: &mut Frame, area: Rect) {
+        if let Some(task) = self.selected_task() {
+            let record = &task.record;
+            let started_local: DateTime<Local> = DateTime::from(record.started_at);
+            let completed_local = record.completed_at.map(DateTime::<Local>::from);
 
-        #[cfg(windows)]
-        {
-            use std::process::Command;
-            Command::new("taskkill")
-                .args(["/PID", &pid.to_string(), "/F"])
-                .output()?;
-        }
-
-        Ok(())
-    }
-}
-
-fn render_basic_dialog(
-    frame: &mut Frame,
-    area: Rect,
-    title: &str,
-    message: &str,
-    text_style: Option<Style>,
-) {
-    let block = Block::default().borders(Borders::ALL).title(title);
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    let mut paragraph = Paragraph::new(message.to_string())
-        .wrap(Wrap { trim: true })
-        .alignment(Alignment::Left);
-    if let Some(style) = text_style {
-        paragraph = paragraph.style(style);
-    }
-    frame.render_widget(paragraph, inner);
-}
-
-fn render_confirm_dialog(
-    frame: &mut Frame,
-    area: Rect,
-    title: &str,
-    message: &str,
-    selected: usize,
-) {
-    let block = Block::default().borders(Borders::ALL).title(title);
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(2), Constraint::Length(3)])
-        .split(inner);
-
-    let message_widget = Paragraph::new(message.to_string()).wrap(Wrap { trim: true });
-    frame.render_widget(message_widget, chunks[0]);
-
-    let buttons = ["Confirm", "Cancel"];
-    let mut spans = Vec::new();
-    for (idx, label) in buttons.iter().enumerate() {
-        if idx == selected {
-            spans.push(Span::styled(
-                format!("[ {} ]", label),
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
+            let mut lines = Vec::new();
+            lines.push(detail_line("PID", task.pid.to_string()));
+            lines.push(detail_line(
+                "Status",
+                match record.status {
+                    TaskStatus::Running => "Running",
+                    TaskStatus::CompletedButUnread => "Completed",
+                }
+                .to_string(),
             ));
+            lines.push(detail_line(
+                "Started",
+                started_local.format("%Y-%m-%d %H:%M:%S").to_string(),
+            ));
+            lines.push(detail_line("Elapsed", Self::format_elapsed(record)));
+            if let Some(completed) = completed_local {
+                lines.push(detail_line(
+                    "Completed",
+                    completed.format("%Y-%m-%d %H:%M:%S").to_string(),
+                ));
+            }
+            if let Some(manager) = record.manager_pid {
+                lines.push(detail_line("Manager PID", manager.to_string()));
+            }
+            if let Some(root) = record.resolved_root_parent_pid() {
+                lines.push(detail_line("Parent PID", root.to_string()));
+            }
+            if let Some(ai_info) = record.ai_cli_process.as_ref() {
+                let desc = ai_info.get_description();
+                lines.push(detail_line("AI CLI Root", desc));
+            }
+            if !record.process_chain.is_empty() {
+                let chain = record
+                    .process_chain
+                    .iter()
+                    .map(|pid| pid.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" -> ");
+                lines.push(detail_line("Process Chain", chain));
+            }
+            lines.push(detail_line("Log ID", record.log_id.clone()));
+            lines.push(detail_line("Log Path", record.log_path.clone()));
+            if let Some(reason) = &record.cleanup_reason {
+                lines.push(detail_line("Cleanup", reason.clone()));
+            }
+
+            let paragraph = Paragraph::new(lines)
+                .wrap(Wrap { trim: true })
+                .block(Block::default().borders(Borders::ALL).title("Details"));
+            frame.render_widget(paragraph, area);
         } else {
-            spans.push(Span::styled(
-                format!("  {}  ", label),
-                Style::default().fg(Color::Gray),
-            ));
-        }
-
-        if idx == 0 {
-            spans.push(Span::raw("   "));
+            let paragraph = Paragraph::new("No task selected.")
+                .block(Block::default().borders(Borders::ALL).title("Details"));
+            frame.render_widget(paragraph, area);
         }
     }
-
-    let button_line = Line::from(spans);
-    let button_widget = Paragraph::new(button_line).alignment(Alignment::Center);
-    frame.render_widget(button_widget, chunks[1]);
-}
-
-fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
-    let vertical_margin = (100 - percent_y).saturating_div(2);
-    let horizontal_margin = (100 - percent_x).saturating_div(2);
-
-    let vertical = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage(vertical_margin),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage(100 - percent_y - vertical_margin),
-        ])
-        .split(area);
-
-    let horizontal = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(horizontal_margin),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage(100 - percent_x - horizontal_margin),
-        ])
-        .split(vertical[1]);
-
-    horizontal[1]
 }
 
 impl Screen for StatusScreen {
     fn render(&mut self, frame: &mut Frame, area: Rect) {
-        match &self.mode {
-            StatusMode::List => {
-                let layout = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([
-                        Constraint::Length(3),
-                        Constraint::Min(10),
-                        Constraint::Length(3),
-                    ])
-                    .split(area);
+        let layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Min(10),
+                Constraint::Length(3),
+                Constraint::Length(2),
+            ])
+            .split(area);
 
-                let (total, running, completed) = self.counts();
-                let summary = format!(
-                    "Tasks: {total} (Running: {running}, Completed: {completed})    {}",
-                    Self::format_last_refresh(self.last_refresh_at)
-                );
+        let header = Paragraph::new(self.summary_line())
+            .alignment(ratatui::layout::Alignment::Center)
+            .style(
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .block(Block::default().borders(Borders::ALL));
+        frame.render_widget(header, layout[0]);
 
-                let title = Paragraph::new(summary)
-                    .style(
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
-                    )
-                    .alignment(Alignment::Center)
-                    .block(Block::default().borders(Borders::ALL));
-                frame.render_widget(title, layout[0]);
+        let body = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+            .split(layout[1]);
 
-                let body = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
-                    .split(layout[1]);
-
-                if self.groups.is_empty() {
-                    let content = Paragraph::new("No active tasks detected.")
-                        .alignment(Alignment::Center)
-                        .block(Block::default().borders(Borders::ALL).title("Tasks"));
-                    frame.render_widget(content, body[0]);
-                } else {
-                    let mut items = Vec::new();
-
-                    for (group_idx, group) in self.groups.iter().enumerate() {
-                        let header = ListItem::new(Line::from(vec![Span::styled(
-                            group.label.clone(),
-                            Style::default()
-                                .fg(Color::Yellow)
-                                .add_modifier(Modifier::BOLD),
-                        )]));
-                        items.push(header);
-
-                        for (task_idx, task) in group.tasks.iter().enumerate() {
-                            let is_selected = self
-                                .flat_entries
-                                .get(self.selected_index)
-                                .map(|entry| {
-                                    entry.group_idx == group_idx && entry.task_idx == task_idx
-                                })
-                                .unwrap_or(false);
-
-                            let (status_icon, status_color) = Self::status_label(&task.status);
-                            let elapsed =
-                                Self::format_elapsed(&task.started_at, task.completed_at.as_ref());
-                            let name = task.process_name.as_deref().unwrap_or("<unknown process>");
-                            let prompt = Self::truncate(&task.log_id, 40);
-                            let prefix = if is_selected { "> " } else { "  " };
-
-                            let content = vec![
-                                Span::raw(prefix),
-                                Span::styled(status_icon, Style::default().fg(status_color)),
-                                Span::raw(" "),
-                                Span::raw(format!("{name} (PID {}) ", task.pid)),
-                                Span::styled(
-                                    format!("[{}]", elapsed),
-                                    Style::default().fg(Color::Gray),
-                                ),
-                                Span::raw(" "),
-                                Span::raw(prompt),
-                            ];
-
-                            let style = if is_selected {
-                                Style::default().add_modifier(Modifier::BOLD)
-                            } else {
-                                Style::default()
-                            };
-
-                            items.push(ListItem::new(Line::from(content)).style(style));
-                        }
-                    }
-
-                    let list = List::new(items)
-                        .block(Block::default().borders(Borders::ALL).title("Tasks"))
-                        .highlight_style(
-                            Style::default()
-                                .fg(Color::White)
-                                .add_modifier(Modifier::BOLD),
-                        );
-
-                    frame.render_widget(list, body[0]);
-                }
-
-                let details = if let Some(task) = self.selected_task() {
-                    Paragraph::new(Self::build_detail_lines(task))
-                        .wrap(Wrap { trim: true })
-                        .block(Block::default().borders(Borders::ALL).title("Details"))
-                } else {
-                    Paragraph::new("No task selected.")
-                        .block(Block::default().borders(Borders::ALL).title("Details"))
-                };
-
-                frame.render_widget(details, body[1]);
-
-                let help = Paragraph::new("[Up/Down] Navigate  [R] Refresh  [K] Kill  [ESC] Back")
-                    .alignment(Alignment::Center)
-                    .block(Block::default().borders(Borders::ALL));
-                frame.render_widget(help, layout[2]);
-            }
-            StatusMode::Dialog(context) => {
-                context.render(frame, area);
-            }
+        if self.flat_entries.is_empty() {
+            let empty = Paragraph::new("No active tasks detected.")
+                .alignment(ratatui::layout::Alignment::Center)
+                .block(Block::default().borders(Borders::ALL).title("Tasks"));
+            frame.render_widget(empty, body[0]);
+        } else {
+            self.render_list(frame, body[0]);
         }
+
+        self.render_details(frame, body[1]);
+
+        let help = Paragraph::new("[↑/↓] Navigate  [R] Refresh  [K] Kill  [ESC/Q] Back")
+            .alignment(ratatui::layout::Alignment::Center)
+            .block(Block::default().borders(Borders::ALL));
+        frame.render_widget(help, layout[2]);
+
+        let status_text = self.message.as_deref().unwrap_or("Ready");
+        let status = Paragraph::new(status_text)
+            .block(Block::default().borders(Borders::ALL).title("Status"));
+        frame.render_widget(status, layout[3]);
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> Result<ScreenAction> {
-        match &mut self.mode {
-            StatusMode::List => match key.code {
-                KeyCode::Up => {
-                    self.move_selection_up();
-                    Ok(ScreenAction::None)
-                }
-                KeyCode::Down => {
-                    self.move_selection_down();
-                    Ok(ScreenAction::None)
-                }
-                KeyCode::Char('r') | KeyCode::Char('R') => {
-                    self.refresh_tasks()?;
-                    self.last_update = Instant::now();
-                    Ok(ScreenAction::None)
-                }
-                KeyCode::Char('k') | KeyCode::Char('K') => {
-                    if let Some(task) = self.selected_task() {
-                        let dialog =
-                            DialogContext::confirm_kill(task.pid, task.process_name.as_deref());
-                        self.mode = StatusMode::Dialog(dialog);
-                    }
-                    Ok(ScreenAction::None)
-                }
-                KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => Ok(ScreenAction::Back),
-                _ => Ok(ScreenAction::None),
-            },
-            StatusMode::Dialog(context) => {
-                let action = context.action;
-                let result = context.handle_key(key);
-
-                match result {
-                    DialogResult::Confirmed => {
-                        self.mode = StatusMode::List;
-                        if let Some(action) = action {
-                            self.execute_dialog_action(action)?;
-                        }
-                        Ok(ScreenAction::None)
-                    }
-                    DialogResult::Cancelled | DialogResult::Closed => {
-                        self.mode = StatusMode::List;
-                        Ok(ScreenAction::None)
-                    }
-                    DialogResult::None => Ok(ScreenAction::None),
-                }
+        match key.code {
+            KeyCode::Up => {
+                self.move_selection_up();
+                Ok(ScreenAction::None)
             }
+            KeyCode::Down => {
+                self.move_selection_down();
+                Ok(ScreenAction::None)
+            }
+            KeyCode::Char('r') | KeyCode::Char('R') => {
+                self.sync_from_registry()?;
+                self.refresh_tasks()?;
+                self.last_refresh = Instant::now();
+                self.message = Some("Tasks refreshed.".to_string());
+                Ok(ScreenAction::None)
+            }
+            KeyCode::Char('k') | KeyCode::Char('K') => {
+                if let Some(task) = self.selected_task() {
+                    match Self::terminate_task(task.pid) {
+                        Ok(()) => {
+                            self.message =
+                                Some(format!("Sent terminate signal to PID {}", task.pid));
+                            self.sync_from_registry()?;
+                            self.refresh_tasks()?;
+                            self.last_refresh = Instant::now();
+                        }
+                        Err(err) => {
+                            self.message =
+                                Some(format!("Failed to terminate {}: {}", task.pid, err));
+                        }
+                    }
+                }
+                Ok(ScreenAction::None)
+            }
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => Ok(ScreenAction::Back),
+            _ => Ok(ScreenAction::None),
         }
     }
 
     fn update(&mut self) -> Result<()> {
-        if self.last_update.elapsed() >= Duration::from_secs(2) {
+        if self.last_refresh.elapsed() >= REFRESH_INTERVAL {
+            self.sync_from_registry()?;
             self.refresh_tasks()?;
-            self.last_update = Instant::now();
+            self.last_refresh = Instant::now();
         }
         Ok(())
+    }
+}
+
+impl StatusScreen {
+    fn terminate_task(pid: u32) -> Result<()> {
+        platform::terminate_process(pid);
+        Ok(())
+    }
+}
+
+fn detail_line(label: &str, value: String) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(
+            format!("{label}: "),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(value),
+    ])
+}
+
+fn truncate(text: &str, max_len: usize) -> String {
+    if text.len() <= max_len {
+        text.to_string()
+    } else if max_len <= 3 {
+        ".".repeat(max_len)
+    } else {
+        format!("{}...", &text[..max_len - 3])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn sample_task(pid: u32, manager: Option<u32>, root: Option<u32>) -> TaskItem {
+        use crate::core::models::ProcessTreeInfo;
+
+        let base = TaskRecord::new(
+            Utc::now(),
+            format!("task-{pid}"),
+            format!("/tmp/{pid}.log"),
+            manager,
+        );
+
+        let record = if let Some(root_pid) = root {
+            base.with_process_tree_info(ProcessTreeInfo::new(vec![pid, root_pid]))
+                .expect("process tree injection")
+        } else {
+            base
+        };
+
+        TaskItem { pid, record }
+    }
+
+    fn buffer_to_string(buffer: &ratatui::buffer::Buffer) -> String {
+        let mut text = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                text.push_str(buffer.get(x, y).symbol());
+            }
+            text.push('\n');
+        }
+        text
+    }
+
+    #[test]
+    fn groups_tasks_by_manager_and_root_pid() {
+        let tasks = vec![
+            sample_task(10, Some(1), None),
+            sample_task(11, Some(1), None),
+            sample_task(20, None, Some(9)),
+            sample_task(30, None, None),
+        ];
+
+        let groups = StatusScreen::group_tasks(tasks);
+        assert_eq!(groups.len(), 3);
+        assert_eq!(groups[0].label, "Manager PID 1");
+        assert_eq!(groups[1].label, "Parent PID 9");
+        assert_eq!(groups[2].label, "Standalone Tasks");
+    }
+
+    #[test]
+    fn status_screen_handle_key_updates_selection_and_refreshes() {
+        let mut screen = StatusScreen::new().expect("screen should initialise");
+        screen.groups = vec![TaskGroup {
+            label: "Manager PID 1".into(),
+            tasks: vec![sample_task(10, Some(1), None)],
+        }];
+        screen.flat_entries = vec![FlatEntry {
+            group_idx: 0,
+            task_idx: 0,
+        }];
+        screen.selected_index = 0;
+
+        let refresh = screen
+            .handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE))
+            .expect("handle key");
+        assert!(matches!(refresh, ScreenAction::None));
+        assert!(screen.message.is_some());
+
+        let back = screen
+            .handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .expect("handle key");
+        assert!(matches!(back, ScreenAction::Back));
+    }
+
+    #[test]
+    fn status_screen_render_includes_task_details() {
+        let mut screen = StatusScreen::new().expect("screen should initialise");
+        screen.groups = vec![TaskGroup {
+            label: "Manager PID 7".into(),
+            tasks: vec![sample_task(100, Some(7), None)],
+        }];
+        screen.flat_entries = vec![FlatEntry {
+            group_idx: 0,
+            task_idx: 0,
+        }];
+        screen.selected_index = 0;
+        screen.last_loaded_at = Some(Utc::now());
+
+        let backend = TestBackend::new(90, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| screen.render(frame, frame.size()))
+            .unwrap();
+
+        let rendered = buffer_to_string(terminal.backend().buffer());
+        assert!(
+            rendered.contains("Manager PID 7") && rendered.contains("task-100"),
+            "render output missing details:\n{rendered}"
+        );
     }
 }

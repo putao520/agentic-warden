@@ -1,12 +1,16 @@
 use crate::config::{MAX_RECORD_AGE, SHARED_MEMORY_SIZE, SHARED_NAMESPACE};
-use crate::logging::{debug, warn};
 use crate::core::process_tree::get_root_parent_pid_cached;
-use crate::core::shared_map::{SharedMapError, open_or_create};
+use crate::core::shared_map::{open_or_create, SharedMapError};
+use crate::error::AgenticWardenError;
+use crate::logging::{debug, warn};
 use crate::task_record::{TaskRecord, TaskStatus};
 use crate::utils::get_instance_id;
 use chrono::{DateTime, Duration, Utc};
+use parking_lot::Mutex as ParkingMutex;
 use shared_hashmap::SharedMemoryHashMap;
-use std::sync::{Arc, Mutex};
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex as StdMutex, OnceLock, Weak};
 use thiserror::Error;
 
 /// Represents a connected task registry with metadata
@@ -28,9 +32,15 @@ pub struct GlobalTaskEntry {
     pub task: TaskRecord,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TaskRegistry {
-    map: Mutex<SharedMemoryHashMap<String, String>>,
+    inner: Arc<RegistryInner>,
+}
+
+#[derive(Debug)]
+struct RegistryInner {
+    namespace: String,
+    map: ParkingMutex<SharedMemoryHashMap<String, String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -57,7 +67,7 @@ pub enum CleanupReason {
 #[derive(Debug, Error)]
 pub enum RegistryError {
     #[error("shared task map init failed: {0}")]
-    Shared(#[from] SharedMapError),
+    Shared(String),
     #[error("shared hashmap operation failed: {0}")]
     Map(String),
     #[error("registry mutex poisoned")]
@@ -75,6 +85,18 @@ impl From<shared_hashmap::Error> for RegistryError {
 impl From<crate::core::process_tree::ProcessTreeError> for RegistryError {
     fn from(value: crate::core::process_tree::ProcessTreeError) -> Self {
         RegistryError::Map(format!("Process tree error: {}", value))
+    }
+}
+
+impl From<AgenticWardenError> for RegistryError {
+    fn from(value: AgenticWardenError) -> Self {
+        RegistryError::Map(format!("Agentic error: {}", value))
+    }
+}
+
+impl From<SharedMapError> for RegistryError {
+    fn from(value: SharedMapError) -> Self {
+        RegistryError::Shared(value.to_string())
     }
 }
 
@@ -106,18 +128,40 @@ impl TaskRegistry {
     pub fn connect() -> Result<Self, RegistryError> {
         let root_parent_pid = get_root_parent_pid_cached()?;
         let namespace = format!("{}-{}", SHARED_NAMESPACE, root_parent_pid);
-        let map = open_or_create(&namespace, SHARED_MEMORY_SIZE)?;
-        Ok(Self {
-            map: Mutex::new(map),
-        })
+        Self::connect_with_namespace(namespace)
     }
 
     #[cfg(any(test, feature = "testing"))]
     pub fn connect_test(namespace: &str) -> Result<Self, RegistryError> {
-        let map = open_or_create(namespace, SHARED_MEMORY_SIZE)?;
-        Ok(Self {
-            map: Mutex::new(map),
-        })
+        Self::connect_with_namespace(namespace.to_string())
+    }
+
+    fn connect_with_namespace(namespace: String) -> Result<Self, RegistryError> {
+        if let Some(existing) = registry_pool_lookup(&namespace) {
+            return Ok(Self { inner: existing });
+        }
+
+        let map = open_or_create(&namespace, SHARED_MEMORY_SIZE)?;
+        let inner = Arc::new(RegistryInner {
+            namespace: namespace.clone(),
+            map: ParkingMutex::new(map),
+        });
+
+        let pool = registry_pool();
+        let mut guard = pool.lock().map_err(|_| RegistryError::Poison)?;
+        match guard.entry(namespace.clone()) {
+            Entry::Occupied(mut entry) => {
+                if let Some(existing) = entry.get().upgrade() {
+                    return Ok(Self { inner: existing });
+                }
+                entry.insert(Arc::downgrade(&inner));
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(Arc::downgrade(&inner));
+            }
+        }
+
+        Ok(Self { inner })
     }
 
     pub fn register(&self, pid: u32, record: &TaskRecord) -> Result<(), RegistryError> {
@@ -164,7 +208,7 @@ impl TaskRegistry {
 
     pub fn entries(&self) -> Result<Vec<RegistryEntry>, RegistryError> {
         let snapshot: Vec<(String, String)> = {
-            let guard = self.map.lock().map_err(|_| RegistryError::Poison)?;
+            let guard = self.inner.map.lock();
             guard.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
         };
 
@@ -286,7 +330,7 @@ impl TaskRegistry {
         &self,
         f: impl FnOnce(&mut SharedMemoryHashMap<String, String>) -> Result<T, RegistryError>,
     ) -> Result<T, RegistryError> {
-        let mut guard = self.map.lock().map_err(|_| RegistryError::Poison)?;
+        let mut guard = self.inner.map.lock();
         f(&mut guard)
     }
 
@@ -332,10 +376,8 @@ impl TaskRegistry {
         let namespace = format!("agentic-warden-{}", instance_id);
 
         // 尝试连接到已存在的共享内存
-        let map = open_or_create(&namespace, SHARED_MEMORY_SIZE)?;
-        let registry = TaskRegistry {
-            map: Mutex::new(map),
-        };
+        let registry =
+            TaskRegistry::connect_with_namespace(namespace).map_err(anyhow::Error::from)?;
 
         // 获取该实例的进程ID（从任务信息中推断）
         let process_id = instance_id; // 简化：使用实例ID作为进程ID
@@ -355,10 +397,7 @@ impl TaskRegistry {
         // 添加当前实例的任务
         let current_instance_id = get_instance_id();
         let namespace = format!("agentic-warden-{}", current_instance_id);
-        let map = open_or_create(&namespace, SHARED_MEMORY_SIZE)?;
-        let current_registry = TaskRegistry {
-            map: Mutex::new(map),
-        };
+        let current_registry = TaskRegistry::connect_with_namespace(namespace)?;
         let current_entries = current_registry.entries().unwrap_or_default();
 
         for entry in current_entries {
@@ -388,3 +427,16 @@ impl TaskRegistry {
     }
 }
 
+fn registry_pool() -> &'static StdMutex<HashMap<String, Weak<RegistryInner>>> {
+    static REGISTRY_POOL: OnceLock<StdMutex<HashMap<String, Weak<RegistryInner>>>> =
+        OnceLock::new();
+    REGISTRY_POOL.get_or_init(|| StdMutex::new(HashMap::new()))
+}
+
+fn registry_pool_lookup(namespace: &str) -> Option<Arc<RegistryInner>> {
+    let pool = registry_pool();
+    match pool.lock() {
+        Ok(guard) => guard.get(namespace).and_then(|weak| weak.upgrade()),
+        Err(_) => None,
+    }
+}

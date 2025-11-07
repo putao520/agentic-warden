@@ -240,26 +240,57 @@ impl App {
 ### 3. core/ - 核心业务逻辑
 
 #### 3.1 core/process_tree.rs
-**职责**: 进程树管理和监控
-- 根进程查找（优化 Windows 下的查找）
-- AI CLI 进程识别
-- 进程树构建和维护
-- 进程间关系管理
+**职责**: 智能进程树管理和AI CLI归属追踪
+
+**核心功能**:
+- **AI CLI根进程识别**: 向上遍历进程树，找到启动当前进程的AI CLI
+- **智能进程检测**: 识别Native和NPM包形式的AI CLI进程
+- **进程归属管理**: 基于AI CLI根进程进行任务分组和隔离
+- **性能优化**: 使用缓存避免重复的进程树遍历
+- **跨平台支持**: 优化Windows下的进程查找，避免explorer.exe问题
+
+**AI CLI识别规则**:
+```rust
+/// 支持的AI CLI类型
+/// Native: claude, claude-cli, codex, codex-cli, gemini, gemini-cli
+/// NPM包: @anthropic-ai/claude-cli, codex-cli, @google/generative-ai-cli
+fn is_ai_cli_process(process_name: &str) -> bool {
+    // 1. 精确匹配Native进程
+    // 2. 部分匹配（排除混淆进程如claude-desktop）
+    // 3. NPM进程检测 + 命令行参数分析
+}
+```
 
 **主要结构**:
 ```rust
+/// 进程树信息，包含完整的进程链
+pub struct ProcessTreeInfo {
+    pub process_chain: Vec<u32>,      // 从当前到根的PID链
+    pub root_parent_pid: Option<u32>, // AI CLI根进程PID
+    pub depth: usize,                 // 进程树深度
+}
+
+/// 进程树管理器
 pub struct ProcessTreeManager {
     registry: Arc<TaskRegistry>,
-    // 使用 TaskRegistry 替代单独的 TaskTracker
+    root_process_cache: OnceLock<u32>, // 性能优化缓存
 }
 
 impl ProcessTreeManager {
-    pub fn new() -> Self;
-    pub fn find_root_process(&self) -> Option<ProcessInfo>;
-    pub fn track_ai_cli_process(&mut self, cmd: &AiCliCommand) -> Result<TaskId>;
-    pub fn get_all_tasks(&self) -> Vec<TaskInfo>;
-    pub fn terminate_task(&mut self, task_id: TaskId) -> Result<()>;
-    pub fn cleanup_dead_processes(&mut self) -> Result<()>;
+    /// 获取AI CLI根进程（带缓存）
+    pub fn get_root_parent_cached() -> Result<u32, ProcessTreeError>;
+
+    /// 查找最近的AI CLI进程作为根进程
+    pub fn find_ai_cli_root_parent(pid: u32) -> Result<u32, ProcessTreeError>;
+
+    /// 获取特定AI CLI类型的进程
+    pub fn get_ai_cli_process(ai_type: &str) -> Option<ProcessInfo>;
+
+    /// 检查两个进程是否属于同一AI CLI根进程
+    pub fn same_ai_cli_root(pid1: u32, pid2: u32) -> Result<bool, ProcessTreeError>;
+
+    /// 获取完整进程树信息
+    pub fn get_process_tree(pid: u32) -> Result<ProcessTreeInfo, ProcessTreeError>;
 }
 ```
 

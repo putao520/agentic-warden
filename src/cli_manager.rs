@@ -59,9 +59,7 @@ impl Default for CliToolDetector {
 impl CliToolDetector {
     /// Create a new CLI tool detector
     pub fn new() -> Self {
-        let mut detector = Self {
-            tools: Vec::new(),
-        };
+        let mut detector = Self { tools: Vec::new() };
         detector.initialize_tools();
         detector
     }
@@ -242,7 +240,12 @@ impl CliToolDetector {
         return "Linux";
         #[cfg(target_os = "freebsd")]
         return "FreeBSD";
-        #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux", target_os = "freebsd")))]
+        #[cfg(not(any(
+            target_os = "windows",
+            target_os = "macos",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
         return "Unknown";
     }
 }

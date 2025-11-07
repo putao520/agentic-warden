@@ -175,20 +175,91 @@ fn render_popup(frame: &mut Frame, content: &str, area: Rect) {
 
 ### 3. 核心引擎模块 (Core Engine)
 
-#### 3.1 进程树管理器
+#### 3.1 智能进程树管理器
+
+**核心价值**: 自动识别启动当前进程的AI CLI根进程，提供精确的进程归属追踪
+
+##### 进程树追踪算法
+
 ```rust
-// src/process_tree/
+/// 查找最近的AI CLI进程作为根进程
+/// 如果没有找到AI CLI，则回退到传统的根父进程
+pub fn find_ai_cli_root_parent(pid: u32) -> Result<u32, ProcessTreeError> {
+    // 1. 获取完整进程链：当前进程 → 所有父进程 → 系统根进程
+    let process_tree = get_process_tree(pid)?;
+
+    // 2. 向上遍历进程链，跳过当前进程
+    for &process_pid in process_tree.process_chain.iter().skip(1) {
+        // 3. 检查是否为AI CLI进程
+        if let Some(process_name) = get_process_name(process_pid) {
+            if is_ai_cli_process(&process_name) {
+                return Ok(process_pid); // 返回第一个找到的AI CLI
+            }
+        }
+    }
+
+    // 4. 如果没找到AI CLI，返回传统根父进程
+    Ok(process_tree.root_parent_pid.unwrap())
+}
+```
+
+##### AI CLI 识别规则
+
+**支持的AI CLI类型**:
+- **Native进程**: `claude`, `claude-cli`, `anthropic-claude`
+- **Native进程**: `codex`, `codex-cli`, `openai-codex`
+- **Native进程**: `gemini`, `gemini-cli`, `google-gemini`
+- **NPM包**: `@anthropic-ai/claude-cli`, `codex-cli`, `@google/generative-ai-cli`
+
+**智能检测逻辑**:
+```rust
+fn is_ai_cli_process(process_name: &str) -> bool {
+    // 1. 精确匹配Native进程
+    match process_name.to_lowercase().as_str() {
+        "claude" | "claude-cli" | "anthropic-claude" => return true,
+        "codex" | "codex-cli" | "openai-codex" => return true,
+        "gemini" | "gemini-cli" | "google-gemini" => return true,
+        _ => {}
+    }
+
+    // 2. 部分匹配（排除混淆进程如claude-desktop）
+    if process_name.to_lowercase().contains("claude")
+        && !process_name.to_lowercase().contains("claude-desktop") {
+        return true;
+    }
+
+    // 3. NPM进程检测 + 命令行参数分析
+    if is_npm_node_process(process_name) {
+        return analyze_command_line_for_ai_cli(process_pid);
+    }
+
+    false
+}
+```
+
+##### 核心结构设计
+
+```rust
 pub struct ProcessTreeManager {
-    registry: ConnectedRegistry,
-    task_tracker: TaskTracker,
+    registry: Arc<TaskRegistry>,
+    // 使用缓存优化性能
+    root_process_cache: OnceLock<u32>,
 }
 
 impl ProcessTreeManager {
-    pub fn find_root_process(&self) -> Option<ProcessInfo>;
+    /// 获取当前进程的AI CLI根进程（带缓存）
+    pub fn get_root_parent_cached(&self) -> Result<u32, ProcessTreeError>;
+
+    /// 追踪新的AI CLI进程
     pub fn track_ai_cli_process(&mut self, cmd: &AiCliCommand) -> Result<TaskId>;
-    pub fn get_all_tasks(&self) -> Vec<TaskInfo>;
-    pub fn terminate_task(&mut self, task_id: TaskId) -> Result<()>;
+
+    /// 获取所有任务，按AI CLI根进程分组
+    pub fn get_tasks_by_ai_cli_root(&self) -> HashMap<u32, Vec<TaskInfo>>;
+
+    /// 检查两个进程是否属于同一个AI CLI根进程
+    pub fn same_ai_cli_root(&self, pid1: u32, pid2: u32) -> Result<bool, ProcessTreeError>;
 }
+```
 
 pub struct TaskInfo {
     pub id: TaskId,
@@ -285,7 +356,34 @@ impl SharedMemoryMap {
 
 ### 1. AI CLI 启动流程
 ```
-用户命令 → CLI 解析 → Provider 选择 → 环境变量注入 → 子进程启动 → 进程树注册
+用户命令 → CLI 解析 → Provider 选择 → 环境变量注入 → 子进程启动 → 智能进程树追踪 → 任务注册
+```
+
+**详细进程树追踪流程**:
+```
+1. agentic-warden 启动 → 获取当前进程PID
+2. 向上遍历进程树 → 查找最近的AI CLI进程
+3. AI CLI类型识别 → claude/codex/gemini + NPM包检测
+4. 根进程缓存 → 优化性能，避免重复计算
+5. 任务归属标记 → 将新任务关联到AI CLI根进程
+6. 共享内存隔离 → 按AI CLI根进程分组管理
+```
+
+### 1.1 进程归属示例
+```
+示例场景：用户在Claude CLI中运行agentic-warden codex "prompt"
+
+进程树：
+explorer.exe (PID: 1234)
+└── cmd.exe (PID: 2345)
+    └── claude.exe (PID: 3456) ← AI CLI根进程
+        └── agentic-warden.exe (PID: 4567)
+            └── codex.exe (PID: 5678) ← 被追踪的任务
+
+追踪结果：
+- agentic-warden进程向上找到claude.exe作为AI CLI根进程
+- codex任务被标记为属于claude.exe会话
+- TUI界面显示："Claude CLI 会话中的任务"
 ```
 
 ### 2. TUI 管理流程

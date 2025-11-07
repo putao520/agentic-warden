@@ -1,5 +1,5 @@
-﻿use crate::sync::error::{SyncError, SyncResult};
 use crate::provider::network_detector::NetworkStatus;
+use crate::sync::error::{SyncError, SyncResult};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -78,12 +78,12 @@ pub struct DirectoryHash {
 /// Resolve the default sync file path within the agentic-warden directory.
 pub fn default_sync_file_path() -> SyncResult<PathBuf> {
     let home_dir = dirs::home_dir().ok_or_else(|| {
-        SyncError::SyncConfigError("Could not determine the home directory".to_string())
+        SyncError::sync_config("Could not determine the home directory".to_string())
     })?;
 
     let warden_dir = home_dir.join(".agentic-warden");
     fs::create_dir_all(&warden_dir).map_err(|err| {
-        SyncError::SyncConfigError(format!("Failed to create config directory: {err}"))
+        SyncError::sync_config(format!("Failed to create config directory: {err}"))
     })?;
 
     Ok(warden_dir.join(SYNC_FILE_NAME))
@@ -105,12 +105,11 @@ pub fn load_sync_data_from(path: impl AsRef<Path>) -> SyncResult<SyncData> {
         return Ok(data);
     }
 
-    let content = fs::read_to_string(path).map_err(|err| {
-        SyncError::SyncConfigError(format!("Failed to read sync file: {err}"))
-    })?;
+    let content = fs::read_to_string(path)
+        .map_err(|err| SyncError::sync_config(format!("Failed to read sync file: {err}")))?;
 
     serde_json::from_str(&content)
-        .map_err(|err| SyncError::SyncConfigError(format!("Invalid sync file: {err}")))
+        .map_err(|err| SyncError::sync_config(format!("Invalid sync file: {err}")))
 }
 
 /// Save sync data to the default location.
@@ -125,20 +124,16 @@ pub fn save_sync_data_to(path: impl AsRef<Path>, data: &SyncData) -> SyncResult<
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|err| {
-            SyncError::SyncConfigError(format!("Failed to create parent directory: {err}"))
+            SyncError::sync_config(format!("Failed to create parent directory: {err}"))
         })?;
     }
 
-    let content = serde_json::to_string_pretty(data).map_err(|err| {
-        SyncError::SyncConfigError(format!("Failed to serialise sync data: {err}"))
-    })?;
+    let content = serde_json::to_string_pretty(data)
+        .map_err(|err| SyncError::sync_config(format!("Failed to serialise sync data: {err}")))?;
 
-    fs::write(path, content).map_err(|err| {
-        SyncError::SyncConfigError(format!("Failed to write sync data: {err}"))
-    })
+    fs::write(path, content)
+        .map_err(|err| SyncError::sync_config(format!("Failed to write sync data: {err}")))
 }
-
-
 
 /// Save network status to the sync configuration.
 pub fn save_network_status(status: NetworkStatus) -> SyncResult<()> {
@@ -152,14 +147,13 @@ pub fn save_network_status(status: NetworkStatus) -> SyncResult<()> {
 pub fn expand_path(path: &str) -> SyncResult<String> {
     if let Some(stripped) = path.strip_prefix("~/") {
         let home = dirs::home_dir().ok_or_else(|| {
-            SyncError::SyncConfigError("Could not determine the home directory".to_string())
+            SyncError::sync_config("Could not determine the home directory".to_string())
         })?;
         Ok(home.join(stripped).to_string_lossy().into_owned())
     } else {
         Ok(path.to_string())
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -220,5 +214,3 @@ mod tests {
         })
     }
 }
-
-

@@ -1,3 +1,5 @@
+use crate::core::models::{AiCliProcessInfo, ProcessTreeInfo};
+use crate::error::AgenticResult;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -33,6 +35,10 @@ pub struct TaskRecord {
     pub root_parent_pid: Option<u32>,
     #[serde(default)]
     pub process_tree_depth: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_tree: Option<ProcessTreeInfo>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_cli_process: Option<AiCliProcessInfo>,
 }
 
 impl TaskRecord {
@@ -55,19 +61,26 @@ impl TaskRecord {
             process_chain: Vec::new(),
             root_parent_pid: None,
             process_tree_depth: 0,
+            process_tree: None,
+            ai_cli_process: None,
         }
     }
 
-    pub fn with_process_tree(
-        mut self,
-        process_chain: Vec<u32>,
-        root_parent_pid: Option<u32>,
-        process_tree_depth: usize,
-    ) -> Self {
-        self.process_chain = process_chain;
-        self.root_parent_pid = root_parent_pid;
-        self.process_tree_depth = process_tree_depth;
-        self
+    pub fn with_process_tree_info(mut self, process_tree: ProcessTreeInfo) -> AgenticResult<Self> {
+        process_tree.validate()?;
+        self.process_chain = process_tree.process_chain.clone();
+        self.root_parent_pid = process_tree.root_parent_pid;
+        self.process_tree_depth = process_tree.depth;
+        self.ai_cli_process = process_tree.ai_cli_process.clone();
+        self.process_tree = Some(process_tree);
+        Ok(self)
+    }
+
+    pub fn resolved_root_parent_pid(&self) -> Option<u32> {
+        self.process_tree
+            .as_ref()
+            .and_then(|tree| tree.get_ai_cli_root())
+            .or(self.root_parent_pid)
     }
 
     pub fn mark_completed(
@@ -109,15 +122,19 @@ mod tests {
         );
 
         let process_chain = vec![5678, 1, 0];
-        let root_parent_pid = Some(0);
-        let depth = 3;
+        let tree_info = ProcessTreeInfo::new(process_chain.clone());
+        let depth = tree_info.depth;
+        let root_parent_pid = tree_info.root_parent_pid;
 
-        let enhanced_record =
-            record.with_process_tree(process_chain.clone(), root_parent_pid, depth);
+        let enhanced_record = record
+            .with_process_tree_info(tree_info.clone())
+            .expect("process tree injection should succeed");
 
         assert_eq!(enhanced_record.process_chain, process_chain);
         assert_eq!(enhanced_record.root_parent_pid, root_parent_pid);
         assert_eq!(enhanced_record.process_tree_depth, depth);
+        assert!(enhanced_record.process_tree.is_some());
+        assert_eq!(enhanced_record.resolved_root_parent_pid(), root_parent_pid);
         assert_eq!(enhanced_record.log_id, "1234");
         assert_eq!(enhanced_record.manager_pid, Some(5678));
     }
@@ -130,8 +147,10 @@ mod tests {
             "1234".to_string(),
             "/tmp/1234.log".to_string(),
             Some(5678),
-        )
-        .with_process_tree(vec![5678, 1], Some(1), 2);
+        );
+        let record = record
+            .with_process_tree_info(ProcessTreeInfo::new(vec![5678, 1]))
+            .expect("process tree should attach");
 
         // Test that the record can be serialized to JSON
         let json_str = serde_json::to_string(&record).expect("Failed to serialize");
@@ -143,6 +162,7 @@ mod tests {
         assert_eq!(deserialized.process_chain, vec![5678, 1]);
         assert_eq!(deserialized.root_parent_pid, Some(1));
         assert_eq!(deserialized.process_tree_depth, 2);
+        assert!(deserialized.process_tree.is_some());
     }
 
     #[test]
@@ -179,7 +199,8 @@ mod tests {
             "/tmp/1234.log".to_string(),
             Some(5678),
         )
-        .with_process_tree(vec![5678, 1], Some(1), 2);
+        .with_process_tree_info(ProcessTreeInfo::new(vec![5678, 1]))
+        .expect("process tree should attach");
 
         let completed_record =
             record.mark_completed(Some("success".to_string()), Some(0), Utc::now());
@@ -188,6 +209,7 @@ mod tests {
         assert_eq!(completed_record.process_chain, vec![5678, 1]);
         assert_eq!(completed_record.root_parent_pid, Some(1));
         assert_eq!(completed_record.process_tree_depth, 2);
+        assert!(completed_record.process_tree.is_some());
 
         // Status should be updated
         assert_eq!(completed_record.status, TaskStatus::CompletedButUnread);

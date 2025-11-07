@@ -119,7 +119,7 @@ impl Compressor for TarGzCompressor {
         _output_file: &Path,
     ) -> SyncResult<CompressionResult> {
         // Implementation would go here
-        Err(SyncError::NotImplemented)
+        Err(SyncError::not_implemented())
     }
 
     fn extract_archive(
@@ -128,7 +128,7 @@ impl Compressor for TarGzCompressor {
         _target_dir: &Path,
     ) -> SyncResult<ExtractionResult> {
         // Implementation would go here
-        Err(SyncError::NotImplemented)
+        Err(SyncError::not_implemented())
     }
 
     fn name(&self) -> &'static str {
@@ -157,7 +157,7 @@ impl Compressor for ZipCompressor {
         _output_file: &Path,
     ) -> SyncResult<CompressionResult> {
         // Implementation would go here
-        Err(SyncError::NotImplemented)
+        Err(SyncError::not_implemented())
     }
 
     fn extract_archive(
@@ -166,7 +166,7 @@ impl Compressor for ZipCompressor {
         _target_dir: &Path,
     ) -> SyncResult<ExtractionResult> {
         // Implementation would go here
-        Err(SyncError::NotImplemented)
+        Err(SyncError::not_implemented())
     }
 
     fn name(&self) -> &'static str {
@@ -195,7 +195,7 @@ impl Compressor for SevenZipCompressor {
         _output_file: &Path,
     ) -> SyncResult<CompressionResult> {
         // Implementation would go here
-        Err(SyncError::NotImplemented)
+        Err(SyncError::not_implemented())
     }
 
     fn extract_archive(
@@ -204,7 +204,7 @@ impl Compressor for SevenZipCompressor {
         _target_dir: &Path,
     ) -> SyncResult<ExtractionResult> {
         // Implementation would go here
-        Err(SyncError::NotImplemented)
+        Err(SyncError::not_implemented())
     }
 
     fn name(&self) -> &'static str {

@@ -1,6 +1,6 @@
-use crate::sync::oauth_client::{OAuthClient, OAuthConfig, OAuthTokenResponse};
 use crate::sync::error::SyncResult;
-use anyhow::{Result, anyhow};
+use crate::sync::oauth_client::{OAuthClient, OAuthConfig, OAuthTokenResponse};
+use anyhow::{anyhow, Result};
 use chrono::{DateTime, Duration, Utc};
 use console::Term;
 use serde::{Deserialize, Serialize};
@@ -168,7 +168,7 @@ impl SmartOAuthAuthenticator {
         }
     }
 
-  /// Get the current state snapshot.
+    /// Get the current state snapshot.
     pub async fn get_state(&self) -> AuthState {
         self.inner.state.read().await.clone()
     }
@@ -177,7 +177,6 @@ impl SmartOAuthAuthenticator {
     pub async fn last_auth_url(&self) -> Option<String> {
         self.inner.last_url.read().await.clone()
     }
-
 
     async fn exchange_code_for_tokens(&self, code: String) -> Result<OAuthTokenResponse> {
         let mut client = self.inner.client.lock().await;
@@ -209,7 +208,7 @@ pub async fn authenticate_with_code(
         .set_auth_code(code)
         .await
         .map(|_| ())
-        .map_err(|e| crate::sync::error::SyncError::GeneralError(e.into()))
+        .map_err(|e| crate::sync::error::SyncError::general(e.into()))
 }
 
 #[cfg(test)]
@@ -281,10 +280,9 @@ mod tests {
         };
         let auth = SmartOAuthAuthenticator::new(config);
         let err = auth.set_auth_code("code".into()).await.unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("authenticator is not ready to accept")
-        );
+        assert!(err
+            .to_string()
+            .contains("authenticator is not ready to accept"));
     }
 
     #[tokio::test]

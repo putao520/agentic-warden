@@ -1,30 +1,30 @@
 //! Push progress screen
 
 use super::{Screen, ScreenAction, ScreenType};
+use crate::error::{errors, AgenticWardenError, ErrorCategory, SyncOperation, UserFacingError};
 use crate::sync::config_sync_manager::{ConfigSyncManager, PushProgressEvent, SyncOperationResult};
-use crate::sync::error::SyncError;
 use crate::sync::smart_oauth::AuthState;
 use crate::tui::app_state::{AppState, SyncPhase, TransferKind, TransferProgress};
 use crate::tui::widgets::{DialogResult, DialogWidget, ProgressWidget};
 use anyhow::{Context, Result};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
-    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
+    Frame,
 };
 use std::{
     path::Path,
     sync::{
-        Arc,
         atomic::{AtomicBool, Ordering},
+        Arc,
     },
 };
 use tokio::{
     runtime::Runtime,
-    sync::mpsc::{UnboundedReceiver, UnboundedSender, error::TryRecvError, unbounded_channel},
+    sync::mpsc::{error::TryRecvError, unbounded_channel, UnboundedReceiver, UnboundedSender},
     task::JoinHandle,
 };
 
@@ -62,14 +62,16 @@ enum PushWorkerEvent {
         index: usize,
         total: usize,
     },
-    Error(String),
+    Error {
+        error: Arc<AgenticWardenError>,
+    },
     Cancelled,
 }
 
 enum PushWorkerResult {
     Completed(Vec<SyncOperationResult>),
     Cancelled,
-    Failed(String),
+    Failed(Arc<AgenticWardenError>),
 }
 
 /// Push progress screen
@@ -91,9 +93,10 @@ pub struct PushScreen {
     completed_dirs: usize,
     total_dirs: usize,
     summary: Vec<SyncOperationResult>,
-    error_message: Option<String>,
+    error_detail: Option<UserFacingError>,
     auth_checked: bool,
     started: bool,
+    auto_start_pending: bool,
 }
 
 impl PushScreen {
@@ -120,7 +123,7 @@ impl PushScreen {
             directories: resolved_directories,
             progress_widget,
             mode: PushMode::CheckingAuth,
-            progress: TransferProgress::new(),
+            progress: TransferProgress::for_kind(TransferKind::Push),
             runtime,
             worker_handle: None,
             progress_rx: None,
@@ -133,9 +136,10 @@ impl PushScreen {
             completed_dirs: 0,
             total_dirs,
             summary: Vec::new(),
-            error_message: None,
+            error_detail: None,
             auth_checked: false,
             started: false,
+            auto_start_pending: true,
         };
 
         screen.update_progress(
@@ -210,8 +214,9 @@ impl PushScreen {
         self.cancel_flag = Some(cancel_flag);
         self.cancel_requested = false;
         self.started = true;
+        self.auto_start_pending = false;
         self.summary.clear();
-        self.error_message = None;
+        self.error_detail = None;
         self.total_uploaded_bytes = 0;
         self.completed_dirs = 0;
         self.total_dirs = self.directories.len();
@@ -248,11 +253,14 @@ impl PushScreen {
     /// Reset the state after encountering a failure so the user can retry.
     fn reset_after_failure(&mut self) {
         self.mode = PushMode::Ready;
-        self.error_message = None;
+        self.error_detail = None;
         self.cancel_requested = false;
         self.worker_handle = None;
         self.progress_rx = None;
         self.cancel_flag = None;
+        self.started = false;
+        self.auto_start_pending = false;
+        self.auth_checked = false;
         self.update_progress(SyncPhase::Idle, 0, Some("Ready to retry push".to_string()));
     }
 
@@ -323,10 +331,21 @@ impl PushScreen {
                 }
                 self.summary.push(result);
             }
-            PushWorkerEvent::Error(msg) => {
-                self.error_message = Some(msg.clone());
-                self.mode = PushMode::Failed;
-                self.update_progress(SyncPhase::Failed, self.progress.percent.max(1), Some(msg));
+            PushWorkerEvent::Error { error } => {
+                let detail = error.as_ref().to_user_facing();
+                let needs_auth = error.category() == ErrorCategory::Auth;
+                self.error_detail = Some(detail.clone());
+                if needs_auth {
+                    self.auth_checked = false;
+                    self.mode = PushMode::CheckingAuth;
+                } else {
+                    self.mode = PushMode::Failed;
+                }
+                self.update_progress(
+                    SyncPhase::Failed,
+                    self.progress.percent.max(1),
+                    Some(detail.message.clone()),
+                );
             }
             PushWorkerEvent::Cancelled => {
                 self.mode = PushMode::Cancelled;
@@ -483,13 +502,16 @@ impl PushScreen {
             }
         }
 
-        if let Some(error) = &self.error_message {
+        if let Some(error) = &self.error_detail {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
-                "Error:",
+                format!("Error: {}", error.title),
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             )));
-            lines.push(Line::from(format!("  {}", error)));
+            lines.push(Line::from(format!("  {}", error.message)));
+            if let Some(hint) = &error.hint {
+                lines.push(Line::from(format!("  Hint: {}", hint)));
+            }
         }
 
         lines
@@ -539,9 +561,18 @@ impl Screen for PushScreen {
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> Result<ScreenAction> {
-        if let PushMode::NeedAuth(dialog) = &mut self.mode {
-            return match dialog.handle_key(key) {
-                DialogResult::Confirmed => Ok(ScreenAction::SwitchTo(ScreenType::OAuth)),
+        if matches!(self.mode, PushMode::NeedAuth(_)) {
+            let result = match &mut self.mode {
+                PushMode::NeedAuth(dialog) => dialog.handle_key(key),
+                _ => unreachable!(),
+            };
+            return match result {
+                DialogResult::Confirmed => {
+                    self.auth_checked = false;
+                    self.auto_start_pending = true;
+                    self.mode = PushMode::CheckingAuth;
+                    Ok(ScreenAction::SwitchTo(ScreenType::OAuth))
+                }
                 DialogResult::Cancelled | DialogResult::Closed => Ok(ScreenAction::Back),
                 DialogResult::None => Ok(ScreenAction::None),
             };
@@ -591,6 +622,10 @@ impl Screen for PushScreen {
             self.check_authentication();
         }
 
+        if matches!(self.mode, PushMode::Ready) && self.auto_start_pending && !self.started {
+            self.start_push()?;
+        }
+
         self.poll_worker_events();
 
         if let Some(handle) = self.worker_handle.as_ref() {
@@ -614,23 +649,28 @@ impl Screen for PushScreen {
                             Some("Push cancelled by user".to_string()),
                         );
                     }
-                    Ok(PushWorkerResult::Failed(msg)) => {
-                        self.error_message = Some(msg.clone());
+                    Ok(PushWorkerResult::Failed(error)) => {
+                        let detail = error.as_ref().to_user_facing();
+                        self.error_detail = Some(detail.clone());
                         self.mode = PushMode::Failed;
                         self.update_progress(
                             SyncPhase::Failed,
                             self.progress.percent.max(1),
-                            Some(msg),
+                            Some(detail.message),
                         );
                     }
                     Err(err) => {
-                        let msg = format!("Push worker error: {}", err);
-                        self.error_message = Some(msg.clone());
+                        let raw_error = errors::sync_error(
+                            SyncOperation::Unknown,
+                            format!("Push worker error: {}", err),
+                        );
+                        let detail = raw_error.to_user_facing();
+                        self.error_detail = Some(detail.clone());
                         self.mode = PushMode::Failed;
                         self.update_progress(
                             SyncPhase::Failed,
                             self.progress.percent.max(1),
-                            Some(msg),
+                            Some(detail.message),
                         );
                     }
                 }
@@ -696,8 +736,11 @@ async fn run_push_worker(
         Ok(mgr) => mgr,
         Err(err) => {
             let msg = format!("Failed to initialise sync manager: {}", err);
-            let _ = tx.send(PushWorkerEvent::Error(msg.clone()));
-            return PushWorkerResult::Failed(msg);
+            let error = emit_worker_error(
+                &tx,
+                errors::sync_error(SyncOperation::StateVerification, msg),
+            );
+            return PushWorkerResult::Failed(error);
         }
     };
 
@@ -706,8 +749,9 @@ async fn run_push_worker(
             Ok(list) => list,
             Err(err) => {
                 let msg = format!("Failed to load sync directories: {}", err);
-                let _ = tx.send(PushWorkerEvent::Error(msg.clone()));
-                return PushWorkerResult::Failed(msg);
+                let error =
+                    emit_worker_error(&tx, errors::sync_error(SyncOperation::Discovery, msg));
+                return PushWorkerResult::Failed(error);
             }
         }
     } else {
@@ -724,12 +768,8 @@ async fn run_push_worker(
     }
 
     if let Err(err) = manager.authenticate_google_drive().await {
-        let message = match err {
-            SyncError::AuthenticationRequired => "Google Drive authentication required".to_string(),
-            other => other.to_string(),
-        };
-        let _ = tx.send(PushWorkerEvent::Error(message.clone()));
-        return PushWorkerResult::Failed(message);
+        let error = emit_worker_error(&tx, err);
+        return PushWorkerResult::Failed(error);
     }
 
     let total = dirs.len();
@@ -819,9 +859,14 @@ async fn run_push_worker(
                 results.push(sync_result);
             }
             Err(err) => {
-                let msg = format!("Failed to push {}: {}", label, err);
-                let _ = tx.send(PushWorkerEvent::Error(msg.clone()));
-                return PushWorkerResult::Failed(msg);
+                let mut msg = err.user_message();
+                if !msg.contains(&label) {
+                    msg = format!("{label}: {msg}");
+                }
+                let operation = err.sync_operation().unwrap_or(SyncOperation::Upload);
+                let wrapped = errors::sync_error_with_source(operation, msg, err);
+                let error = emit_worker_error(&tx, wrapped);
+                return PushWorkerResult::Failed(error);
             }
         }
     }
@@ -832,4 +877,97 @@ async fn run_push_worker(
         message: Some("Push completed successfully".to_string()),
     });
     PushWorkerResult::Completed(results)
+}
+
+fn emit_worker_error(
+    tx: &UnboundedSender<PushWorkerEvent>,
+    error: AgenticWardenError,
+) -> Arc<AgenticWardenError> {
+    let shared = Arc::new(error);
+    let _ = tx.send(PushWorkerEvent::Error {
+        error: shared.clone(),
+    });
+    shared
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn buffer_to_string(buffer: &ratatui::buffer::Buffer) -> String {
+        let mut text = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                text.push_str(buffer.get(x, y).symbol());
+            }
+            text.push('\n');
+        }
+        text
+    }
+
+    fn test_screen_with_mode(mode: PushMode) -> PushScreen {
+        PushScreen {
+            app_state: AppState::global(),
+            directories: vec!["/tmp/project".into()],
+            progress_widget: ProgressWidget::new("Push Test".to_string()),
+            mode,
+            progress: TransferProgress::for_kind(TransferKind::Push),
+            runtime: tokio::runtime::Runtime::new().expect("runtime"),
+            worker_handle: None,
+            progress_rx: None,
+            cancel_flag: None,
+            cancel_requested: false,
+            current_directory: Some("/tmp/project".into()),
+            current_file: None,
+            current_file_size: None,
+            total_uploaded_bytes: 0,
+            completed_dirs: 0,
+            total_dirs: 1,
+            summary: Vec::new(),
+            error_detail: None,
+            auth_checked: true,
+            started: false,
+            auto_start_pending: false,
+        }
+    }
+
+    #[test]
+    fn push_screen_renders_progress_information() {
+        let mut screen = test_screen_with_mode(PushMode::Running);
+        screen.progress = TransferProgress::for_kind(TransferKind::Push)
+            .with_phase(SyncPhase::Uploading)
+            .with_percent(55)
+            .with_message(Some("Uploading archive".into()));
+        screen.current_file = Some("archive.tar.gz".into());
+        screen.total_uploaded_bytes = 1024 * 1024;
+
+        let backend = TestBackend::new(90, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| screen.render(frame, frame.size()))
+            .unwrap();
+
+        let rendered = buffer_to_string(terminal.backend().buffer());
+        assert!(
+            rendered.contains("Push Test") || rendered.contains("Pushing to Google Drive"),
+            "rendered output missing push context:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn push_screen_handle_key_respects_mode() {
+        let mut ready = test_screen_with_mode(PushMode::Ready);
+        let back = ready
+            .handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .expect("handle key");
+        assert!(matches!(back, ScreenAction::Back));
+
+        let mut completed = test_screen_with_mode(PushMode::Completed);
+        let back = completed
+            .handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .expect("handle key");
+        assert!(matches!(back, ScreenAction::Back));
+    }
 }

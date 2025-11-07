@@ -17,7 +17,8 @@ impl TuiCommand {
     /// 执行 TUI 命令
     pub async fn execute(&self) -> Result<ExitCode> {
         // 初始化 color-eyre 以获得更好的错误处理
-        color_eyre::install().map_err(|e| anyhow::anyhow!("Failed to install color_eyre: {}", e))?;
+        color_eyre::install()
+            .map_err(|e| anyhow::anyhow!("Failed to install color_eyre: {}", e))?;
 
         match self {
             TuiCommand::Dashboard => {

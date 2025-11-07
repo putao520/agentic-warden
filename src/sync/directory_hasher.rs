@@ -30,13 +30,13 @@ impl DirectoryHasher {
         let dir_path = directory.as_ref();
 
         if !dir_path.exists() {
-            return Err(SyncError::DirectoryNotFound(
+            return Err(SyncError::directory_not_found(
                 dir_path.to_string_lossy().to_string(),
             ));
         }
 
         if !dir_path.is_dir() {
-            return Err(SyncError::DirectoryHashingError(format!(
+            return Err(SyncError::directory_hashing(format!(
                 "Path is not a directory: {}",
                 dir_path.to_string_lossy()
             )));
@@ -58,7 +58,7 @@ impl DirectoryHasher {
         for entry in entries {
             let path = entry.path();
             let relative_path = path.strip_prefix(dir_path).map_err(|e| {
-                SyncError::DirectoryHashingError(format!("Failed to create relative path: {}", e))
+                SyncError::directory_hashing(format!("Failed to create relative path: {}", e))
             })?;
 
             // Add relative path to hash
@@ -66,10 +66,10 @@ impl DirectoryHasher {
             hasher.update(b"\0"); // null separator
 
             // Get file metadata
-            let metadata = fs::metadata(path).map_err(SyncError::IoError)?;
+            let metadata = fs::metadata(path).map_err(SyncError::io)?;
 
             let file_size = metadata.len();
-            let modified_time = metadata.modified().map_err(SyncError::IoError)?;
+            let modified_time = metadata.modified().map_err(SyncError::io)?;
 
             // Add file size and modified time to hash
             hasher.update(file_size.to_le_bytes());
@@ -80,26 +80,26 @@ impl DirectoryHasher {
             // Read and hash file content for small files, for large files use a sampling approach
             if file_size <= 1024 * 1024 {
                 // 1MB threshold
-                let content = fs::read(path).map_err(SyncError::IoError)?;
+                let content = fs::read(path).map_err(SyncError::io)?;
                 hasher.update(&content);
             } else {
                 // For large files, hash first and last 4KB plus file size
-                let mut file = fs::File::open(path).map_err(SyncError::IoError)?;
+                let mut file = fs::File::open(path).map_err(SyncError::io)?;
 
                 let mut buffer = [0u8; 4096];
 
                 // Read first 4KB
                 use std::io::Read;
-                let bytes_read = file.read(&mut buffer).map_err(SyncError::IoError)?;
+                let bytes_read = file.read(&mut buffer).map_err(SyncError::io)?;
                 hasher.update(&buffer[..bytes_read]);
 
                 // Seek to end - 4KB
                 if file_size > 4096 {
                     use std::io::Seek;
                     file.seek(std::io::SeekFrom::End(-4096i64))
-                        .map_err(SyncError::IoError)?;
+                        .map_err(SyncError::io)?;
 
-                    let bytes_read = file.read(&mut buffer).map_err(SyncError::IoError)?;
+                    let bytes_read = file.read(&mut buffer).map_err(SyncError::io)?;
                     hasher.update(&buffer[..bytes_read]);
                 }
             }
@@ -132,7 +132,7 @@ impl DirectoryHasher {
                 .file_name()
                 .and_then(|n| n.to_str())
                 .ok_or_else(|| {
-                    SyncError::DirectoryHashingError(format!(
+                    SyncError::directory_hashing(format!(
                         "Invalid directory name: {}",
                         dir_path.to_string_lossy()
                     ))

@@ -8,13 +8,35 @@
 //! - Windows: Use sysinfo library for cross-platform process information
 
 #[cfg(unix)]
-use psutil::process::{Process, ProcessCollector};
+use psutil::process::Process;
 
+#[cfg(windows)]
+use parking_lot::RwLock;
+#[cfg(windows)]
+use std::cell::RefCell;
+#[cfg(windows)]
+use std::collections::HashMap;
+#[cfg(windows)]
+use std::time::{Duration, Instant};
+#[cfg(windows)]
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+
+use crate::core::models::{AiCliProcessInfo, ProcessTreeInfo};
+use crate::error::{AgenticResult, AgenticWardenError};
+use std::path::PathBuf;
 use std::sync::OnceLock;
 use thiserror::Error;
 
 // Global cache for root parent PID - computed once per process lifetime
 static ROOT_PARENT_PID_CACHE: OnceLock<u32> = OnceLock::new();
+#[cfg(windows)]
+static PROCESS_INFO_CACHE: OnceLock<RwLock<HashMap<u32, CacheEntry>>> = OnceLock::new();
+#[cfg(windows)]
+const PROCESS_CACHE_TTL: Duration = Duration::from_millis(750);
+#[cfg(windows)]
+thread_local! {
+    static THREAD_SYSINFO: RefCell<SysinfoState> = RefCell::new(SysinfoState::new());
+}
 
 #[derive(Error, Debug)]
 pub enum ProcessTreeError {
@@ -34,22 +56,134 @@ pub enum ProcessTreeError {
     #[allow(dead_code)]
     #[error("Unsupported platform")]
     UnsupportedPlatform,
+    #[error("Process tree validation failed: {0}")]
+    Validation(String),
 }
 
-/// Process tree information containing the full process chain
-#[derive(Debug, Clone)]
-pub struct ProcessTreeInfo {
-    /// Chain of PIDs from current process to root parent (inclusive)
-    pub process_chain: Vec<u32>,
-    /// Root parent PID (first element in process_chain)
-    pub root_parent_pid: Option<u32>,
-    /// Depth of the process tree
-    pub depth: usize,
+#[cfg(windows)]
+#[derive(Clone, Debug)]
+struct ProcessInfo {
+    parent: Option<u32>,
+    name: Option<String>,
+    cmdline: Option<Vec<String>>,
+    executable_path: Option<PathBuf>,
+}
+
+#[cfg(windows)]
+#[derive(Clone, Debug)]
+struct CacheEntry {
+    info: ProcessInfo,
+    expires_at: Instant,
+}
+
+#[cfg(windows)]
+#[derive(Debug)]
+struct SysinfoState {
+    system: System,
+}
+
+#[cfg(windows)]
+impl SysinfoState {
+    fn new() -> Self {
+        let mut system = System::new();
+        system.refresh_processes(ProcessesToUpdate::All, true);
+        Self { system }
+    }
+
+    fn snapshot(&mut self, pid: u32, include_cmdline: bool) -> Option<ProcessInfo> {
+        let sys_pid = Pid::from_u32(pid);
+        let pid_list = [sys_pid];
+        let refresh_kind = if include_cmdline {
+            ProcessRefreshKind::everything()
+        } else {
+            ProcessRefreshKind::new()
+        };
+        let _ = self.system.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&pid_list),
+            true,
+            refresh_kind,
+        );
+        if self.system.process(sys_pid).is_none() {
+            self.system.refresh_processes(ProcessesToUpdate::All, true);
+        }
+        self.system.process(sys_pid).map(|process| {
+            let parent = process.parent().map(|p| p.as_u32());
+            let name = Some(process.name().to_string_lossy().into_owned());
+            let cmdline = if include_cmdline {
+                let args: Vec<String> = process
+                    .cmd()
+                    .iter()
+                    .map(|arg| arg.to_string_lossy().into_owned())
+                    .collect();
+                if args.is_empty() {
+                    None
+                } else {
+                    Some(args)
+                }
+            } else {
+                None
+            };
+            let executable_path = process.exe().map(|path| path.to_path_buf());
+            ProcessInfo {
+                parent,
+                name,
+                cmdline,
+                executable_path,
+            }
+        })
+    }
+}
+
+#[cfg(windows)]
+fn process_info_cache() -> &'static RwLock<HashMap<u32, CacheEntry>> {
+    PROCESS_INFO_CACHE.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+#[cfg(windows)]
+fn read_process_info_windows(
+    pid: u32,
+    require_cmdline: bool,
+) -> Result<ProcessInfo, ProcessTreeError> {
+    if pid == 0 {
+        return Ok(ProcessInfo {
+            parent: None,
+            name: Some("System Idle Process".to_string()),
+            cmdline: None,
+            executable_path: None,
+        });
+    }
+
+    let now = Instant::now();
+    {
+        let cache_guard = process_info_cache().read();
+        if let Some(entry) = cache_guard.get(&pid) {
+            if entry.expires_at > now && (!require_cmdline || entry.info.cmdline.is_some()) {
+                return Ok(entry.info.clone());
+            }
+        }
+    }
+
+    let snapshot = THREAD_SYSINFO
+        .with(|state| state.borrow_mut().snapshot(pid, require_cmdline))
+        .ok_or(ProcessTreeError::ProcessNotFound(pid))?;
+
+    {
+        let mut cache_guard = process_info_cache().write();
+        cache_guard.insert(
+            pid,
+            CacheEntry {
+                info: snapshot.clone(),
+                expires_at: now + PROCESS_CACHE_TTL,
+            },
+        );
+    }
+
+    Ok(snapshot)
 }
 
 impl ProcessTreeInfo {
     /// Get the current process tree information
-    pub fn current() -> Result<Self, ProcessTreeError> {
+    pub fn current() -> AgenticResult<Self> {
         get_process_tree(std::process::id())
     }
 }
@@ -57,7 +191,7 @@ impl ProcessTreeInfo {
 /// Get the root parent process ID for the current process (cached)
 /// This function computes the root parent PID only once per process lifetime
 /// It finds the nearest AI CLI process in the process tree, not just any parent
-pub fn get_root_parent_pid_cached() -> Result<u32, ProcessTreeError> {
+pub fn get_root_parent_pid_cached() -> AgenticResult<u32> {
     let current_pid = std::process::id();
 
     // Use a simple caching approach - compute if not set
@@ -73,34 +207,17 @@ pub fn get_root_parent_pid_cached() -> Result<u32, ProcessTreeError> {
 
 /// Find the nearest AI CLI process in the process tree
 /// If no AI CLI process is found, falls back to the traditional root parent
-pub fn find_ai_cli_root_parent(pid: u32) -> Result<u32, ProcessTreeError> {
+pub fn find_ai_cli_root_parent(pid: u32) -> AgenticResult<u32> {
     let process_tree = get_process_tree(pid)?;
 
-    // Iterate through the process chain from current to root (excluding current process)
-    for &process_pid in process_tree.process_chain.iter().skip(1) {
-        // Check if this process is an AI CLI
-        if let Some(process_name) = get_process_name(process_pid) {
-            if is_ai_cli_process(&process_name) {
-                return Ok(process_pid);
-            }
-        }
-    }
-
-    // If no AI CLI process found, use the traditional root parent
     process_tree
-        .root_parent_pid
-        .ok_or(ProcessTreeError::ProcessNotFound(pid))
-}
-
-/// Check if a process name represents an AI CLI process
-/// Supports both Native and NPM versions with cross-platform detection
-fn is_ai_cli_process(process_name: &str) -> bool {
-    get_ai_cli_type(process_name).is_some()
+        .get_ai_cli_root()
+        .ok_or_else(|| ProcessTreeError::ProcessNotFound(pid).into())
 }
 
 /// Get the specific AI CLI type from a process name and command line
 /// Returns: Some("claude"), Some("codex"), Some("gemini"), or None
-fn get_ai_cli_type(process_name: &str) -> Option<String> {
+fn get_ai_cli_type(pid: u32, process_name: &str) -> Option<String> {
     let name_lower = process_name.to_lowercase();
 
     // Remove .exe extension on Windows for comparison
@@ -131,8 +248,7 @@ fn get_ai_cli_type(process_name: &str) -> Option<String> {
 
     // NPM-based AI CLI processes - enhanced detection with command line analysis
     if clean_name == "node" || clean_name == "node.exe" {
-        // Try to get command line arguments to identify the specific AI CLI
-        if let Some(ai_type) = detect_npm_ai_cli_type(clean_name) {
+        if let Some(ai_type) = detect_npm_ai_cli_type(pid) {
             return Some(ai_type);
         }
     }
@@ -140,73 +256,94 @@ fn get_ai_cli_type(process_name: &str) -> Option<String> {
     None
 }
 
-/// Enhanced detection for NPM AI CLI processes
-/// Analyzes process patterns and common command line structures
-pub fn detect_npm_ai_cli_type(process_name: &str) -> Option<String> {
-    // Cross-platform NPM AI CLI detection
-
+/// Enhanced detection for NPM AI CLI processes using command line inspection
+pub fn detect_npm_ai_cli_type(pid: u32) -> Option<String> {
     #[cfg(unix)]
     {
-        // Unix-like systems (Linux, macOS) - we can read /proc/[pid]/cmdline
-        detect_npm_ai_cli_type_unix(process_name)
+        detect_npm_ai_cli_type_unix(pid)
     }
 
     #[cfg(windows)]
     {
-        // Windows - use alternative methods
-        detect_npm_ai_cli_type_windows(process_name)
+        detect_npm_ai_cli_type_windows(pid)
     }
 }
 
 #[cfg(unix)]
-fn detect_npm_ai_cli_type_unix(process_name: &str) -> Option<String> {
-    use std::fs;
-    use std::io::Read;
+fn detect_npm_ai_cli_type_unix(pid: u32) -> Option<String> {
+    get_command_line(pid)
+        .and_then(|cmd| analyze_cmdline_for_ai_cli(&cmd))
+        .or_else(|| Some("node".to_string()))
+}
 
-    // Try to find the Node.js process and examine its command line
-    if let Ok(entries) = fs::read_dir("/proc") {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                if let Some(pid_str) = path.file_name()?.to_str() {
-                    if let Ok(pid) = pid_str.parse::<u32>() {
-                        // Check if this is the Node.js process we're looking for
-                        if let Ok(current_process_name) = get_process_name(pid) {
-                            if current_process_name.to_lowercase() == process_name.to_lowercase() {
-                                // Found matching Node.js process, read its command line
-                                let cmdline_path = path.join("cmdline");
-                                if let Ok(mut file) = fs::File::open(cmdline_path) {
-                                    let mut cmdline = String::new();
-                                    if file.read_to_string(&mut cmdline).is_ok() {
-                                        // Replace null bytes with spaces and analyze
-                                        let cmdline_clean = cmdline.replace('\0', " ");
-                                        return analyze_cmdline_for_ai_cli(&cmdline_clean);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+fn build_ai_cli_process_info(pid: u32) -> Option<AiCliProcessInfo> {
+    let process_name = get_process_name(pid)?;
+    let ai_type = get_ai_cli_type(pid, &process_name)?;
+    let mut info = AiCliProcessInfo::new(pid, ai_type).with_process_name(process_name);
+
+    if let Some(cmdline) = get_command_line(pid) {
+        let npm_flag = is_npm_command_line(&cmdline);
+        info = info
+            .with_command_line(cmdline)
+            .with_is_npm_package(npm_flag);
     }
 
-    // Fallback: return generic Node.js detection
-    Some("node".to_string())
+    if let Some(path) = get_executable_path(pid) {
+        info = info.with_executable_path(Some(path));
+    }
+
+    info.validate().ok()?;
+    Some(info)
+}
+
+fn is_npm_command_line(cmdline: &str) -> bool {
+    let cmd = cmdline.to_lowercase();
+    cmd.contains("npm exec") || cmd.contains("npx ")
+}
+
+#[cfg(unix)]
+fn get_command_line(pid: u32) -> Option<String> {
+    use std::fs::File;
+    use std::io::Read;
+
+    let cmdline_path = format!("/proc/{pid}/cmdline");
+    let mut file = File::open(cmdline_path).ok()?;
+    let mut raw = String::new();
+    file.read_to_string(&mut raw).ok()?;
+    let cleaned = raw.replace('\0', " ").trim().to_string();
+    if cleaned.is_empty() {
+        None
+    } else {
+        Some(cleaned)
+    }
 }
 
 #[cfg(windows)]
-fn detect_npm_ai_cli_type_windows(_process_name: &str) -> Option<String> {
-    // Windows implementation using alternative methods
-    // Since getting command line is complex without additional dependencies,
-    // we'll use heuristics based on process tree and environment
+fn get_command_line(pid: u32) -> Option<String> {
+    read_process_info_windows(pid, true)
+        .ok()
+        .and_then(|info| info.cmdline)
+        .map(|cmd| cmd.join(" "))
+        .filter(|cmd| !cmd.trim().is_empty())
+}
 
-    // Method 1: Check parent process patterns
-    // Method 2: Look for environment variables
-    // Method 3: Use Windows APIs (would require additional crates)
+#[cfg(unix)]
+fn get_executable_path(pid: u32) -> Option<PathBuf> {
+    std::fs::read_link(format!("/proc/{pid}/exe")).ok()
+}
 
-    // For now, return a more descriptive generic detection
-    Some("node".to_string())
+#[cfg(windows)]
+fn get_executable_path(pid: u32) -> Option<PathBuf> {
+    read_process_info_windows(pid, false)
+        .ok()
+        .and_then(|info| info.executable_path)
+}
+
+#[cfg(windows)]
+fn detect_npm_ai_cli_type_windows(pid: u32) -> Option<String> {
+    get_command_line(pid)
+        .and_then(|cmd| analyze_cmdline_for_ai_cli(&cmd))
+        .or_else(|| Some("node".to_string()))
 }
 
 /// Analyze command line string to identify specific AI CLI type
@@ -269,17 +406,17 @@ fn analyze_cmdline_for_ai_cli(cmdline: &str) -> Option<String> {
 }
 
 /// Get the process tree from a given PID up to the root parent
-pub fn get_process_tree(pid: u32) -> Result<ProcessTreeInfo, ProcessTreeError> {
+fn get_process_tree_internal(pid: u32) -> Result<ProcessTreeInfo, ProcessTreeError> {
     let mut chain = Vec::new();
 
     // Start with the current process
     let mut current_pid = pid;
     chain.push(current_pid);
+    let mut ai_cli_info: Option<AiCliProcessInfo> = None;
 
     // Traverse up the process tree
     for _ in 0..50 {
-        // Limit depth to prevent infinite loops
-        match get_parent_pid(current_pid) {
+        match get_parent_pid(current_pid)? {
             Some(parent_pid) => {
                 if parent_pid == current_pid || parent_pid == 0 {
                     // We've reached the root or found a loop
@@ -287,6 +424,9 @@ pub fn get_process_tree(pid: u32) -> Result<ProcessTreeInfo, ProcessTreeError> {
                 }
 
                 chain.push(parent_pid);
+                if ai_cli_info.is_none() {
+                    ai_cli_info = build_ai_cli_process_info(parent_pid);
+                }
                 current_pid = parent_pid;
 
                 // Check if we've reached a known root process
@@ -295,28 +435,23 @@ pub fn get_process_tree(pid: u32) -> Result<ProcessTreeInfo, ProcessTreeError> {
                 }
             }
             None => {
-                // Can't get parent info, stop here
                 break;
             }
         }
     }
 
-    let depth = chain.len();
-    let root_parent_pid = if chain.len() > 1 {
-        chain.last().copied()
-    } else {
-        Some(pid)
-    };
+    let info = ProcessTreeInfo::new(chain).with_ai_cli_process(ai_cli_info);
+    info.validate()
+        .map_err(|err| ProcessTreeError::Validation(err.to_string()))?;
+    Ok(info)
+}
 
-    Ok(ProcessTreeInfo {
-        process_chain: chain,
-        root_parent_pid,
-        depth,
-    })
+pub fn get_process_tree(pid: u32) -> AgenticResult<ProcessTreeInfo> {
+    get_process_tree_internal(pid).map_err(AgenticWardenError::from)
 }
 
 /// Get the parent PID for a given process using platform-specific methods
-fn get_parent_pid(pid: u32) -> Option<u32> {
+fn get_parent_pid(pid: u32) -> Result<Option<u32>, ProcessTreeError> {
     #[cfg(windows)]
     {
         get_parent_pid_windows(pid)
@@ -328,31 +463,26 @@ fn get_parent_pid(pid: u32) -> Option<u32> {
     }
 }
 
-/// Windows-specific implementation using sysinfo library
+/// Windows-specific implementation backed by a cached sysinfo snapshot
 #[cfg(windows)]
-fn get_parent_pid_windows(pid: u32) -> Option<u32> {
-    let mut system = sysinfo::System::new();
-
-    // Refresh all processes to get complete information
-    system.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
-
-    // Find the process with the target PID
-    if let Some(process) = system.processes().get(&(pid as usize).into()) {
-        return process.parent().map(|p| p.as_u32());
+fn get_parent_pid_windows(pid: u32) -> Result<Option<u32>, ProcessTreeError> {
+    if pid == 0 {
+        return Ok(None);
     }
-
-    None
+    match read_process_info_windows(pid, false) {
+        Ok(info) => Ok(info.parent.filter(|parent| *parent != pid)),
+        Err(ProcessTreeError::ProcessNotFound(_)) => Ok(None),
+        Err(err) => Err(err),
+    }
 }
 
 /// Unix-specific implementation using psutil
 #[cfg(unix)]
-fn get_parent_pid_unix(pid: u32) -> Option<u32> {
-    match Process::new(pid.into()) {
-        Ok(process) => match process.ppid() {
-            Ok(parent_pid) => Some(parent_pid as u32),
-            Err(_) => None,
-        },
-        Err(_) => None,
+fn get_parent_pid_unix(pid: u32) -> Result<Option<u32>, ProcessTreeError> {
+    let process = Process::new(pid.into())?;
+    match process.ppid() {
+        Ok(parent_pid) => Ok(Some(parent_pid as u32)),
+        Err(err) => Err(err.into()),
     }
 }
 
@@ -389,17 +519,9 @@ pub fn get_process_name(pid: u32) -> Option<String> {
 #[cfg(windows)]
 #[allow(dead_code)]
 fn get_process_name_windows(pid: u32) -> Option<String> {
-    let mut system = sysinfo::System::new();
-
-    // Refresh all processes to get complete information
-    system.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
-
-    // Find the process with the target PID
-    if let Some(process) = system.processes().get(&(pid as usize).into()) {
-        return Some(process.name().to_string_lossy().into_owned());
-    }
-
-    None
+    read_process_info_windows(pid, false)
+        .ok()
+        .and_then(|info| info.name)
 }
 
 /// Unix process name implementation using psutil
@@ -416,7 +538,7 @@ fn get_process_name_unix(pid: u32) -> Option<String> {
 
 /// Check if two processes have the same root parent
 #[allow(dead_code)]
-pub fn same_root_parent(pid1: u32, pid2: u32) -> Result<bool, ProcessTreeError> {
+pub fn same_root_parent(pid1: u32, pid2: u32) -> AgenticResult<bool> {
     let tree1 = get_process_tree(pid1)?;
     let tree2 = get_process_tree(pid2)?;
 
@@ -429,7 +551,55 @@ pub fn same_root_parent(pid1: u32, pid2: u32) -> Result<bool, ProcessTreeError> 
 /// Get direct parent PID using fallback methods
 #[allow(dead_code)]
 pub fn get_direct_parent_pid_fallback() -> Option<u32> {
-    get_parent_pid(std::process::id())
+    get_parent_pid(std::process::id()).ok().flatten()
+}
+
+fn process_tree_issue(operation: &str, message: impl Into<String>) -> AgenticWardenError {
+    AgenticWardenError::Process {
+        message: message.into(),
+        command: format!("process_tree::{operation}"),
+        source: None,
+    }
+}
+
+fn process_tree_issue_with_source(
+    operation: &str,
+    message: impl Into<String>,
+    source: impl std::error::Error + Send + Sync + 'static,
+) -> AgenticWardenError {
+    AgenticWardenError::Process {
+        message: message.into(),
+        command: format!("process_tree::{operation}"),
+        source: Some(Box::new(source)),
+    }
+}
+
+impl From<ProcessTreeError> for AgenticWardenError {
+    fn from(err: ProcessTreeError) -> Self {
+        match err {
+            #[cfg(unix)]
+            ProcessTreeError::ProcessInfo(source) => {
+                process_tree_issue_with_source("info", "Failed to get process information", source)
+            }
+            #[cfg(windows)]
+            ProcessTreeError::ProcessInfo(message) => process_tree_issue(
+                "info",
+                format!("Failed to get process information: {message}"),
+            ),
+            ProcessTreeError::ProcessNotFound(pid) => {
+                process_tree_issue("lookup", format!("Process {pid} not found"))
+            }
+            ProcessTreeError::PermissionDenied(pid) => process_tree_issue(
+                "permission",
+                format!("Permission denied accessing process {pid}"),
+            ),
+            ProcessTreeError::UnsupportedPlatform => process_tree_issue(
+                "platform",
+                "Unsupported platform for process tree inspection",
+            ),
+            ProcessTreeError::Validation(message) => process_tree_issue("validate", message),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -513,6 +683,36 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_analyze_cmdline_detects_specific_cli() {
+        let claude_cmd = "node ./node_modules/@anthropic-ai/claude-cli/bin/run.js ask";
+        assert_eq!(
+            analyze_cmdline_for_ai_cli(claude_cmd),
+            Some("claude".to_string())
+        );
+
+        let codex_cmd = "npx codex-cli chat --model gpt-4";
+        assert_eq!(
+            analyze_cmdline_for_ai_cli(codex_cmd),
+            Some("codex".to_string())
+        );
+
+        let gemini_cmd = "npm exec @google/generative-ai-cli -- text";
+        assert_eq!(
+            analyze_cmdline_for_ai_cli(gemini_cmd),
+            Some("gemini".to_string())
+        );
+    }
+
+    #[test]
+    fn test_analyze_cmdline_defaults_to_node() {
+        let generic_cmd = "node ./scripts/custom-runner.js";
+        assert_eq!(
+            analyze_cmdline_for_ai_cli(generic_cmd),
+            Some("node".to_string())
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn test_unix_psutil_integration() {
@@ -567,5 +767,18 @@ mod tests {
                 "Process name should not be empty"
             );
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_windows_process_info_cache_roundtrip() {
+        let pid = std::process::id();
+        let info_a =
+            read_process_info_windows(pid, false).expect("Process info should be available");
+        assert!(info_a.name.is_some());
+
+        let info_b = read_process_info_windows(pid, false)
+            .expect("Process info should be cached and still available");
+        assert!(info_b.name.is_some());
     }
 }

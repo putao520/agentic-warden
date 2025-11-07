@@ -5,11 +5,11 @@ use chrono::Utc;
 use copypasta::{ClipboardContext, ClipboardProvider};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
-    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    Frame,
 };
 use std::time::{Duration as StdDuration, Instant};
 use tokio::runtime::Runtime;
@@ -480,7 +480,8 @@ impl OAuthScreen {
                         .next_back()
                         .map(|ch| self.code_cursor - ch.len_utf8())
                         .unwrap_or(0);
-                    self.code_input.replace_range(new_cursor..self.code_cursor, "");
+                    self.code_input
+                        .replace_range(new_cursor..self.code_cursor, "");
                     self.code_cursor = new_cursor;
                 }
                 true
@@ -541,10 +542,7 @@ impl OAuthScreen {
                     self.code_input = trimmed.to_string();
                     self.code_cursor = self.code_input.len();
                     self.code_focused = true;
-                    self.flash_message(
-                        "Authorization code pasted from clipboard",
-                        Color::Cyan,
-                    );
+                    self.flash_message("Authorization code pasted from clipboard", Color::Cyan);
                 }
                 true
             }
@@ -725,4 +723,46 @@ impl Screen for OAuthScreen {
 
         Ok(())
     }
+}
+
+fn render_modal(frame: &mut Frame, area: Rect, title: &str, message: &str, style: Style) {
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(
+            [
+                Constraint::Percentage(35),
+                Constraint::Length(7),
+                Constraint::Percentage(58),
+            ]
+            .as_ref(),
+        )
+        .split(area);
+
+    let horizontal = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(
+            [
+                Constraint::Percentage(15),
+                Constraint::Percentage(70),
+                Constraint::Percentage(15),
+            ]
+            .as_ref(),
+        )
+        .split(vertical[1]);
+
+    let modal_area = horizontal[1];
+    frame.render_widget(Clear, modal_area);
+
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(style);
+    frame.render_widget(block.clone(), modal_area);
+
+    let inner = block.inner(modal_area);
+    let content = Paragraph::new(message)
+        .alignment(Alignment::Center)
+        .wrap(Wrap { trim: true })
+        .style(style);
+    frame.render_widget(content, inner);
 }

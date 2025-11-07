@@ -1,3 +1,4 @@
+use crate::error::{AgenticResult, AgenticWardenError};
 use raw_sync::locks::{LockImpl, LockInit, Mutex};
 use shared_hashmap::{SharedMemoryContents, SharedMemoryHashMap};
 use shared_memory::{Shmem, ShmemConf, ShmemError};
@@ -13,7 +14,7 @@ struct SharedContents<K, V> {
 }
 
 #[derive(Debug, Error)]
-pub enum SharedMapError {
+pub(crate) enum SharedMapError {
     #[error("shared memory region too small for task registry")]
     RegionTooSmall,
     #[error("shared memory error: {0}")]
@@ -34,13 +35,15 @@ struct SharedMapRepr<K, V> {
 pub fn open_or_create(
     namespace: &str,
     size: usize,
-) -> Result<SharedMemoryHashMap<String, String>, SharedMapError> {
+) -> AgenticResult<SharedMemoryHashMap<String, String>> {
     match open_existing(namespace, size) {
         Ok(map) => Ok(map),
         Err(SharedMapError::Shmem(ShmemError::MapOpenFailed(_)))
         | Err(SharedMapError::Shmem(ShmemError::LinkDoesNotExist))
-        | Err(SharedMapError::Shmem(ShmemError::NoLinkOrOsId)) => create_or_retry(namespace, size),
-        Err(e) => Err(e),
+        | Err(SharedMapError::Shmem(ShmemError::NoLinkOrOsId)) => {
+            create_or_retry(namespace, size).map_err(|err| to_agentic(err, namespace))
+        }
+        Err(err) => Err(to_agentic(err, namespace)),
     }
 }
 
@@ -98,9 +101,10 @@ fn map_from_shmem(
                 Err(e) => {
                     retry_count += 1;
                     if retry_count >= max_retries {
-                        return Err(SharedMapError::LockInit(
-                            format!("Failed to create mutex after {} retries: {}", max_retries, e)
-                        ));
+                        return Err(SharedMapError::LockInit(format!(
+                            "Failed to create mutex after {} retries: {}",
+                            max_retries, e
+                        )));
                     }
                     // Small delay before retry
                     std::thread::sleep(std::time::Duration::from_millis(10));
@@ -115,9 +119,10 @@ fn map_from_shmem(
                 match unsafe { Mutex::new(ptr, lock_ptr) } {
                     Ok(mutex) => mutex.0,
                     Err(e2) => {
-                        return Err(SharedMapError::LockInit(
-                            format!("Failed to open or create mutex: from_existing={}, new={}", e, e2)
-                        ));
+                        return Err(SharedMapError::LockInit(format!(
+                            "Failed to open or create mutex: from_existing={}, new={}",
+                            e, e2
+                        )));
                     }
                 }
             }
@@ -151,4 +156,29 @@ fn map_from_shmem(
     }
 
     Ok(map)
+}
+
+fn to_agentic(err: SharedMapError, namespace: &str) -> AgenticWardenError {
+    match err {
+        SharedMapError::RegionTooSmall => AgenticWardenError::Resource {
+            message: "Shared memory region too small for task registry".to_string(),
+            resource_type: format!("shared_memory:{namespace}"),
+            source: None,
+        },
+        SharedMapError::Shmem(source) => AgenticWardenError::Resource {
+            message: format!("Shared memory error ({namespace}): {source}"),
+            resource_type: format!("shared_memory:{namespace}"),
+            source: Some(Box::new(source)),
+        },
+        SharedMapError::LockInit(message) => AgenticWardenError::Concurrency {
+            message,
+            operation: Some("shared_memory_lock::init".to_string()),
+            source: None,
+        },
+        SharedMapError::LockGuard(message) => AgenticWardenError::Concurrency {
+            message,
+            operation: Some("shared_memory_lock::guard".to_string()),
+            source: None,
+        },
+    }
 }

@@ -2,14 +2,26 @@
 
 use anyhow::Result;
 use crossterm::event::KeyEvent;
-use ratatui::{Frame, layout::Rect};
+use ratatui::{layout::Rect, Frame};
 use std::fmt;
 
-// Include only the simplified screens
+// Include the available screens
 pub mod dashboard;
+pub mod oauth;
+pub mod provider;
+pub mod provider_add_wizard;
+pub mod pull;
+pub mod push;
+pub mod status;
 
-// Re-export the simplified screen
+// Re-export key screens
 pub use dashboard::DashboardScreen;
+pub use oauth::OAuthScreen;
+pub use provider::ProviderScreen;
+pub use provider_add_wizard::ProviderAddWizard;
+pub use pull::PullScreen;
+pub use push::PushScreen;
+pub use status::StatusScreen;
 
 // Screen navigation action
 #[derive(Debug, Clone)]
@@ -30,6 +42,7 @@ pub enum ScreenType {
     Dashboard,
     Status,
     Provider,
+    ProviderAddWizard,
     OAuth,
     Push(Vec<String>),
     Pull,
@@ -40,11 +53,12 @@ impl ScreenType {
     pub fn create(&self) -> Result<Box<dyn Screen>> {
         match self {
             ScreenType::Dashboard => Ok(Box::new(DashboardScreen::new()?)),
-            ScreenType::Status => Ok(Box::new(DashboardScreen::new()?)), // Reuse for now
-            ScreenType::Provider => Ok(Box::new(DashboardScreen::new()?)), // Reuse for now
-            ScreenType::OAuth => Ok(Box::new(DashboardScreen::new()?)), // Reuse for now
-            ScreenType::Push(_) => Ok(Box::new(DashboardScreen::new()?)), // Reuse for now
-            ScreenType::Pull => Ok(Box::new(DashboardScreen::new()?)), // Reuse for now
+            ScreenType::Status => Ok(Box::new(StatusScreen::new()?)),
+            ScreenType::Provider => Ok(Box::new(ProviderScreen::new()?)),
+            ScreenType::ProviderAddWizard => Ok(Box::new(ProviderAddWizard::new()?)),
+            ScreenType::OAuth => Ok(Box::new(OAuthScreen::new()?)),
+            ScreenType::Push(dirs) => Ok(Box::new(PushScreen::new(dirs.clone())?)),
+            ScreenType::Pull => Ok(Box::new(PullScreen::new()?)),
         }
     }
 }
@@ -55,6 +69,7 @@ impl fmt::Display for ScreenType {
             ScreenType::Dashboard => write!(f, "Dashboard"),
             ScreenType::Status => write!(f, "System Status"),
             ScreenType::Provider => write!(f, "Provider Management"),
+            ScreenType::ProviderAddWizard => write!(f, "Add Provider"),
             ScreenType::OAuth => write!(f, "OAuth Configuration"),
             ScreenType::Push(dirs) => write!(f, "Push: {} directories", dirs.len()),
             ScreenType::Pull => write!(f, "Pull from Remote"),

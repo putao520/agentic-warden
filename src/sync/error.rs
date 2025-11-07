@@ -1,60 +1,129 @@
-use thiserror::Error;
+use crate::error::{errors, AgenticResult, AgenticWardenError, SyncOperation};
+use anyhow::Error as AnyError;
+use base64::DecodeError;
+use reqwest::Error as ReqwestError;
+use serde_json::Error as SerdeError;
+use std::io;
+use url::ParseError;
 
-#[derive(Error, Debug)]
-pub enum SyncError {
-    #[error("Directory hashing error: {0}")]
-    DirectoryHashingError(String),
+pub type SyncResult<T> = AgenticResult<T>;
 
-    #[error("Config packing error: {0}")]
-    ConfigPackingError(String),
+/// Helper namespace that converts legacy sync failures into AgenticWardenError instances.
+pub struct SyncError;
 
-    #[error("Google Drive client error: {0}")]
-    GoogleDriveError(String),
+impl SyncError {
+    pub fn directory_hashing(reason: impl Into<String>) -> AgenticWardenError {
+        errors::sync_error(SyncOperation::DirectoryHashing, reason)
+    }
 
-    #[error("Sync configuration error: {0}")]
-    SyncConfigError(String),
+    pub fn config_packing(reason: impl Into<String>) -> AgenticWardenError {
+        errors::sync_error(SyncOperation::ConfigPacking, reason)
+    }
 
-    #[error("Config error: {0}")]
-    ConfigError(String),
+    pub fn google_drive(reason: impl Into<String>) -> AgenticWardenError {
+        let message = reason.into();
+        if message.contains("User declined") || message.contains("invalid_grant") {
+            return AgenticWardenError::Auth {
+                message,
+                provider: "google_drive".to_string(),
+                source: None,
+            };
+        }
+        errors::sync_error(SyncOperation::GoogleDriveRequest, message)
+    }
 
-    #[error("IO error: {0}")]
-    IoError(#[from] std::io::Error),
+    pub fn sync_config(reason: impl Into<String>) -> AgenticWardenError {
+        errors::sync_error(SyncOperation::ConfigLoading, reason)
+    }
 
-    #[error("JSON error: {0}")]
-    JsonError(#[from] serde_json::Error),
+    pub fn config(reason: impl Into<String>) -> AgenticWardenError {
+        AgenticWardenError::Config {
+            message: reason.into(),
+            source: None,
+        }
+    }
 
-    #[error("HTTP request error: {0}")]
-    HttpError(#[from] reqwest::Error),
+    pub fn io(err: io::Error) -> AgenticWardenError {
+        AgenticWardenError::Filesystem {
+            message: format!("Filesystem error during sync: {err}"),
+            path: "<sync>".to_string(),
+            source: Some(Box::new(err)),
+        }
+    }
 
-    #[error("Base64 decoding error: {0}")]
-    Base64Error(#[from] base64::DecodeError),
+    pub fn json(err: SerdeError) -> AgenticWardenError {
+        AgenticWardenError::Config {
+            message: format!("Configuration JSON error: {err}"),
+            source: Some(Box::new(err)),
+        }
+    }
 
-    #[error("URL parsing error: {0}")]
-    UrlError(#[from] url::ParseError),
+    pub fn http(err: ReqwestError) -> AgenticWardenError {
+        AgenticWardenError::Network {
+            message: format!("Network request failed while talking to Google Drive: {err}"),
+            url: None,
+            source: Some(Box::new(err)),
+        }
+    }
 
-    #[error("Directory not found: {0}")]
-    DirectoryNotFound(String),
+    pub fn base64(err: DecodeError) -> AgenticWardenError {
+        errors::sync_error(
+            SyncOperation::GoogleDriveRequest,
+            format!("Failed to decode service response: {err}"),
+        )
+    }
 
-    #[error("Authentication required")]
-    AuthenticationRequired,
+    pub fn url(err: ParseError) -> AgenticWardenError {
+        AgenticWardenError::Validation {
+            message: format!("Invalid Google Drive URL: {err}"),
+            field: Some("google_drive_url".to_string()),
+            value: None,
+        }
+    }
 
-    #[allow(dead_code)]
-    #[error("No changes detected")]
-    NoChangesDetected,
+    pub fn directory_not_found(path: impl Into<String>) -> AgenticWardenError {
+        let path = path.into();
+        AgenticWardenError::Filesystem {
+            message: format!("Directory not found: {path}"),
+            path,
+            source: None,
+        }
+    }
 
-    #[allow(dead_code)]
-    #[error("Upload failed: {0}")]
-    UploadFailed(String),
+    pub fn authentication_required() -> AgenticWardenError {
+        AgenticWardenError::Auth {
+            message: "Google Drive authentication required".to_string(),
+            provider: "google_drive".to_string(),
+            source: None,
+        }
+    }
 
-    #[allow(dead_code)]
-    #[error("Download failed: {0}")]
-    DownloadFailed(String),
+    pub fn no_changes_detected() -> AgenticWardenError {
+        errors::sync_error(
+            SyncOperation::Discovery,
+            "No local changes detected; skipping upload",
+        )
+    }
 
-    #[error("General error: {0}")]
-    GeneralError(#[from] anyhow::Error),
+    pub fn upload_failed(reason: impl Into<String>) -> AgenticWardenError {
+        errors::sync_error(SyncOperation::Upload, reason)
+    }
 
-    #[error("Feature not implemented")]
-    NotImplemented,
+    pub fn download_failed(reason: impl Into<String>) -> AgenticWardenError {
+        errors::sync_error(SyncOperation::Download, reason)
+    }
+
+    pub fn general(err: AnyError) -> AgenticWardenError {
+        AgenticWardenError::Unknown {
+            message: format!("Unexpected sync error: {err}"),
+            source: None,
+        }
+    }
+
+    pub fn not_implemented() -> AgenticWardenError {
+        errors::sync_error(
+            SyncOperation::Unknown,
+            "This sync capability has not been implemented yet",
+        )
+    }
 }
-
-pub type SyncResult<T> = Result<T, SyncError>;

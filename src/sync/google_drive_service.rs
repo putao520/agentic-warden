@@ -1,7 +1,7 @@
 // Google Drive Service - Using OAuth with HTTP requests
 // This module provides Google Drive operations using OAuth authentication and HTTP API calls
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
 use mime_guess::from_path;
 use reqwest::multipart::{Form, Part};
@@ -226,7 +226,7 @@ impl GoogleDriveService {
     pub async fn upload_file_content(
         &mut self,
         file_name: &str,
-        content: &str,
+        content: Vec<u8>,
         folder_id: Option<&str>,
     ) -> Result<String> {
         info!("Uploading file: {}", file_name);
@@ -250,7 +250,7 @@ impl GoogleDriveService {
             .file_name("metadata")
             .mime_str("application/json")?;
 
-        let file_part = Part::bytes(content.as_bytes().to_vec())
+        let file_part = Part::bytes(content)
             .file_name(file_name.to_string())
             .mime_str(&mime_type)?;
 
@@ -304,11 +304,11 @@ impl GoogleDriveService {
 
         info!("Uploading file from path: {:?}", file_path);
 
-        // Read file content
-        let content = fs::read_to_string(file_path).context("Failed to read file content")?;
+        // Read file content as bytes to preserve binary archives
+        let content = fs::read(file_path).context("Failed to read file content")?;
 
         let file_id = self
-            .upload_file_content(file_name, &content, folder_id)
+            .upload_file_content(file_name, content, folder_id)
             .await?;
 
         // Get file information
@@ -316,7 +316,7 @@ impl GoogleDriveService {
     }
 
     /// Download file content
-    pub async fn download_file_content(&mut self, file_id: &str) -> Result<String> {
+    pub async fn download_file_content(&mut self, file_id: &str) -> Result<Vec<u8>> {
         info!("Downloading file content: {}", file_id);
 
         let access_token = self.get_access_token().await?;
@@ -342,16 +342,16 @@ impl GoogleDriveService {
             return Err(anyhow!("Failed to download file: {}", error_text));
         }
 
-        let content = response
-            .text()
+        let bytes = response
+            .bytes()
             .await
             .context("Failed to read download response")?;
 
         info!(
             "Successfully downloaded file content: {} bytes",
-            content.len()
+            bytes.len()
         );
-        Ok(content)
+        Ok(bytes.to_vec())
     }
 
     /// Download file to local path

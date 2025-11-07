@@ -6,6 +6,7 @@ use super::oauth_client::OAuthClient;
 use super::smart_oauth::SmartOAuthAuthenticator;
 use super::sync_config_manager::SyncConfigManager;
 use crate::config::{AUTH_DIRECTORY, AUTH_FILE_NAME};
+use crate::error::AgenticWardenError;
 use chrono::{Duration, Utc};
 use dialoguer::Confirm;
 use serde::{Deserialize, Serialize};
@@ -14,7 +15,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use tokio::task::spawn_blocking;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct StoredAuthState {
@@ -140,7 +141,7 @@ impl ConfigSyncManager {
 
         // Ensure Google Drive service is available
         if self.drive_service.is_none() {
-            return Err(SyncError::AuthenticationRequired);
+            return Err(SyncError::authentication_required());
         }
 
         let mut summary = SyncSummary {
@@ -192,7 +193,7 @@ impl ConfigSyncManager {
 
         // Get directory name
         let directory_name = path.file_name().and_then(|n| n.to_str()).ok_or_else(|| {
-            SyncError::DirectoryHashingError(format!("Invalid directory name: {}", directory_path))
+            SyncError::directory_hashing(format!("Invalid directory name: {}", directory_path))
         })?;
 
         observer(PushProgressEvent::StartingDirectory {
@@ -244,7 +245,7 @@ impl ConfigSyncManager {
         let service = self
             .drive_service
             .as_mut()
-            .ok_or(SyncError::AuthenticationRequired)?;
+            .ok_or(SyncError::authentication_required())?;
 
         // Ensure folder exists in Google Drive
         let root_folder_id = service
@@ -260,7 +261,7 @@ impl ConfigSyncManager {
 
         // Create temporary archive
         let temp_dir = TempDir::new().map_err(|e| {
-            SyncError::ConfigPackingError(format!("Failed to create temp directory: {}", e))
+            SyncError::config_packing(format!("Failed to create temp directory: {}", e))
         })?;
 
         let archive_path = temp_dir.path().join(format!("{}.tar.gz", directory_name));
@@ -335,7 +336,7 @@ impl ConfigSyncManager {
 
         // Ensure Google Drive service is available
         if self.drive_service.is_none() {
-            return Err(SyncError::AuthenticationRequired);
+            return Err(SyncError::authentication_required());
         }
 
         let mut summary = SyncSummary {
@@ -383,7 +384,7 @@ impl ConfigSyncManager {
 
         // Get directory name
         let directory_name = path.file_name().and_then(|n| n.to_str()).ok_or_else(|| {
-            SyncError::DirectoryHashingError(format!("Invalid directory name: {}", directory_path))
+            SyncError::directory_hashing(format!("Invalid directory name: {}", directory_path))
         })?;
 
         observer(PullProgressEvent::StartingDirectory {
@@ -404,7 +405,7 @@ impl ConfigSyncManager {
         let service = self
             .drive_service
             .as_mut()
-            .ok_or(SyncError::AuthenticationRequired)?;
+            .ok_or(SyncError::authentication_required())?;
 
         // Locate base folder without creating new backup tree during pull
         let base_folder_id = match service.find_folder("agentic-warden", None).await? {
@@ -494,7 +495,7 @@ impl ConfigSyncManager {
 
         // Create temporary directory for download
         let temp_dir = TempDir::new().map_err(|e| {
-            SyncError::ConfigPackingError(format!("Failed to create temp directory: {}", e))
+            SyncError::config_packing(format!("Failed to create temp directory: {}", e))
         })?;
 
         let local_archive_path = temp_dir.path().join(&backup_file.name);
@@ -516,7 +517,7 @@ impl ConfigSyncManager {
                 directory_path,
                 chrono::Utc::now().timestamp()
             );
-            fs::rename(directory_path, &backup_path).map_err(SyncError::IoError)?;
+            fs::rename(directory_path, &backup_path).map_err(SyncError::io)?;
             sync_result
                 .message
                 .push_str(&format!(" Backed up existing directory to {}", backup_path));
@@ -602,7 +603,7 @@ impl ConfigSyncManager {
                 println!();
                 println!("❌ Authorization cancelled by user.");
                 println!("   Configuration sync features will not be available.");
-                return Err(SyncError::GoogleDriveError(
+                return Err(SyncError::google_drive(
                     "User declined Google Drive authorization".to_string(),
                 ));
             }
@@ -686,16 +687,18 @@ impl ConfigSyncManager {
         self.temp_archive_path = Some(
             std::env::temp_dir()
                 .join("agentic-warden")
-                .join(&archive_name)
+                .join(&archive_name),
         );
 
         // Ensure temp directory exists
         if let Some(parent) = self.temp_archive_path.as_ref().and_then(|p| p.parent()) {
-            fs::create_dir_all(parent).map_err(SyncError::IoError)?;
+            fs::create_dir_all(parent).map_err(SyncError::io)?;
         }
 
         let archive_path = self.temp_archive_path.as_ref().unwrap();
-        let size = self.config_packer.pack_ai_configs(config_name, archive_path.clone())?;
+        let size = self
+            .config_packer
+            .pack_ai_configs(config_name, archive_path.clone())?;
 
         info!(target: "agentic_warden::sync", "Packed configuration '{}' ({} bytes)", config_name, size);
         Ok(size)
@@ -703,29 +706,37 @@ impl ConfigSyncManager {
 
     /// Upload a named configuration to Google Drive
     pub async fn upload_named_config(&mut self, config_name: &str) -> ErrorResult<bool> {
-        let service = self.drive_service.as_mut().ok_or(SyncError::AuthenticationRequired)?;
+        let service = self
+            .drive_service
+            .as_mut()
+            .ok_or(SyncError::authentication_required())?;
 
         // Find or create agentic-warden folder
         let base_folder_id = match service.find_folder("agentic-warden", None).await? {
             Some(id) => id,
-            None => {
-                service.create_folder("agentic-warden").await?
-            }
+            None => service.create_folder("agentic-warden").await?,
         };
 
-        let archive_path = self.temp_archive_path.as_ref()
-            .ok_or_else(|| SyncError::SyncConfigError("No archive file to upload".to_string()))?
+        let archive_path = self
+            .temp_archive_path
+            .as_ref()
+            .ok_or_else(|| SyncError::sync_config("No archive file to upload".to_string()))?
             .as_path();
 
         // Delete existing file if it exists
         let archive_name = format!("{}.tar.gz", config_name);
         let existing_files = service.list_folder_files(&base_folder_id).await?;
-        if let Some(existing) = existing_files.into_iter().find(|file| file.name == archive_name) {
+        if let Some(existing) = existing_files
+            .into_iter()
+            .find(|file| file.name == archive_name)
+        {
             service.delete_file(&existing.id).await?;
         }
 
         // Upload new file
-        service.upload_file(archive_path, Some(&base_folder_id)).await?;
+        service
+            .upload_file(archive_path, Some(&base_folder_id))
+            .await?;
 
         info!(target: "agentic_warden::sync", "Uploaded configuration '{}'", config_name);
         Ok(true)
@@ -733,11 +744,16 @@ impl ConfigSyncManager {
 
     /// Verify a named configuration in Google Drive
     pub async fn verify_named_config(&mut self, config_name: &str) -> ErrorResult<bool> {
-        let service = self.drive_service.as_mut().ok_or(SyncError::AuthenticationRequired)?;
+        let service = self
+            .drive_service
+            .as_mut()
+            .ok_or(SyncError::authentication_required())?;
 
         // Find agentic-warden folder
-        let base_folder_id = service.find_folder("agentic-warden", None).await?
-            .ok_or_else(|| SyncError::SyncConfigError("agentic-warden folder not found".to_string()))?;
+        let base_folder_id = service
+            .find_folder("agentic-warden", None)
+            .await?
+            .ok_or_else(|| SyncError::sync_config("agentic-warden folder not found".to_string()))?;
 
         // List files and check for the named configuration
         let files = service.list_folder_files(&base_folder_id).await?;
@@ -748,11 +764,16 @@ impl ConfigSyncManager {
 
     /// Download a named configuration from Google Drive
     pub async fn download_named_config(&mut self, config_name: &str) -> ErrorResult<bool> {
-        let service = self.drive_service.as_mut().ok_or(SyncError::AuthenticationRequired)?;
+        let service = self
+            .drive_service
+            .as_mut()
+            .ok_or(SyncError::authentication_required())?;
 
         // Find agentic-warden folder
-        let base_folder_id = service.find_folder("agentic-warden", None).await?
-            .ok_or_else(|| SyncError::SyncConfigError("agentic-warden folder not found".to_string()))?;
+        let base_folder_id = service
+            .find_folder("agentic-warden", None)
+            .await?
+            .ok_or_else(|| SyncError::sync_config("agentic-warden folder not found".to_string()))?;
 
         // List files to find the named configuration
         let files = service.list_folder_files(&base_folder_id).await?;
@@ -770,14 +791,17 @@ impl ConfigSyncManager {
             let archive_path = self.temp_archive_path.as_ref().unwrap();
 
             if let Some(parent) = archive_path.parent() {
-                fs::create_dir_all(parent).map_err(SyncError::IoError)?;
+                fs::create_dir_all(parent).map_err(SyncError::io)?;
             }
 
             service.download_file(&file.id, archive_path).await?;
             info!(target: "agentic_warden::sync", "Downloaded configuration '{}'", config_name);
             Ok(true)
         } else {
-            Err(SyncError::SyncConfigError(format!("Configuration '{}' not found", config_name)))
+            Err(SyncError::sync_config(format!(
+                "Configuration '{}' not found",
+                config_name
+            )))
         }
     }
 
@@ -789,14 +813,18 @@ impl ConfigSyncManager {
             .join(&archive_name);
 
         if !archive_path.exists() {
-            return Err(SyncError::SyncConfigError(format!("Archive file not found: {}", archive_name)));
+            return Err(SyncError::sync_config(format!(
+                "Archive file not found: {}",
+                archive_name
+            )));
         }
 
         // Extract to home directory
         let home_dir = dirs::home_dir()
-            .ok_or_else(|| SyncError::SyncConfigError("Could not find home directory".to_string()))?;
+            .ok_or_else(|| SyncError::sync_config("Could not find home directory".to_string()))?;
 
-        self.config_packer.unpack_archive(&archive_path, &home_dir)?;
+        self.config_packer
+            .unpack_archive(&archive_path, &home_dir)?;
 
         info!(target: "agentic_warden::sync", "Extracted configuration '{}'", config_name);
         Ok(true)
@@ -804,7 +832,10 @@ impl ConfigSyncManager {
 
     /// List all available configurations in Google Drive
     pub async fn list_available_configs(&mut self) -> ErrorResult<Vec<String>> {
-        let service = self.drive_service.as_mut().ok_or(SyncError::AuthenticationRequired)?;
+        let service = self
+            .drive_service
+            .as_mut()
+            .ok_or(SyncError::authentication_required())?;
 
         // Find agentic-warden folder
         let base_folder_id = match service.find_folder("agentic-warden", None).await? {
@@ -835,7 +866,13 @@ impl ConfigSyncManager {
         }
 
         // Try to perform a simple operation to verify auth
-        match self.drive_service.as_mut().unwrap().find_folder("agentic-warden", None).await {
+        match self
+            .drive_service
+            .as_mut()
+            .unwrap()
+            .find_folder("agentic-warden", None)
+            .await
+        {
             Ok(_) => Ok(true),
             Err(_) => Ok(false),
         }
@@ -844,7 +881,7 @@ impl ConfigSyncManager {
     /// Verify extraction was successful
     pub async fn verify_extraction(&self, config_name: &str) -> ErrorResult<bool> {
         let home_dir = dirs::home_dir()
-            .ok_or_else(|| SyncError::SyncConfigError("Could not find home directory".to_string()))?;
+            .ok_or_else(|| SyncError::sync_config("Could not find home directory".to_string()))?;
 
         // Check if any AI CLI directories exist after extraction
         let claude_dir = home_dir.join(".claude");
@@ -867,15 +904,15 @@ impl ConfigSyncManager {
 }
 
 impl ConfigSyncManager {
-    fn auth_failed_error() -> SyncError {
-        SyncError::GoogleDriveError("Authentication failed, please retry".to_string())
+    fn auth_failed_error() -> AgenticWardenError {
+        SyncError::google_drive("Authentication failed, please retry".to_string())
     }
 
     fn default_scopes() -> Vec<String> {
         vec!["https://www.googleapis.com/auth/drive.file".to_string()]
     }
 
-    fn auth_file_path() -> Result<PathBuf, SyncError> {
+    fn auth_file_path() -> ErrorResult<PathBuf> {
         let home_dir = dirs::home_dir().ok_or_else(Self::auth_failed_error)?;
         let auth_dir = home_dir.join(AUTH_DIRECTORY);
 
@@ -891,7 +928,7 @@ impl ConfigSyncManager {
         Ok(auth_dir.join(AUTH_FILE_NAME))
     }
 
-    fn load_stored_auth_state() -> Result<Option<StoredAuthState>, SyncError> {
+    fn load_stored_auth_state() -> ErrorResult<Option<StoredAuthState>> {
         let auth_path = Self::auth_file_path()?;
 
         if !auth_path.exists() {
@@ -921,7 +958,7 @@ impl ConfigSyncManager {
         }
     }
 
-    fn save_auth_state(state: &StoredAuthState) -> Result<(), SyncError> {
+    fn save_auth_state(state: &StoredAuthState) -> ErrorResult<()> {
         let auth_path = Self::auth_file_path()?;
         let content = serde_json::to_string_pretty(state).map_err(|err| {
             error!(target: "agentic_warden::sync", "Failed to serialize auth state: {}", err);
@@ -938,7 +975,7 @@ impl ConfigSyncManager {
         })
     }
 
-    async fn ensure_client_credentials(auth: &mut StoredAuthState) -> Result<(), SyncError> {
+    async fn ensure_client_credentials(auth: &mut StoredAuthState) -> ErrorResult<()> {
         if !auth.client_id.trim().is_empty() && !auth.client_secret.trim().is_empty() {
             return Ok(());
         }
@@ -950,7 +987,7 @@ impl ConfigSyncManager {
         let existing_id = auth.client_id.clone();
         let _existing_secret = auth.client_secret.clone();
 
-        let credentials_result = spawn_blocking(move || -> Result<(String, String), SyncError> {
+        let credentials_result = spawn_blocking(move || -> ErrorResult<(String, String)> {
             use dialoguer::{Input, Password};
 
             let client_id = Input::<String>::new()
@@ -1007,7 +1044,7 @@ impl ConfigSyncManager {
         Ok(())
     }
 
-    async fn run_smart_oauth_flow(&self, auth: &mut StoredAuthState) -> Result<(), SyncError> {
+    async fn run_smart_oauth_flow(&self, auth: &mut StoredAuthState) -> ErrorResult<()> {
         let oauth_config = super::oauth_client::OAuthConfig {
             client_id: auth.client_id.clone(),
             client_secret: auth.client_secret.clone(),
@@ -1053,230 +1090,6 @@ impl ConfigSyncManager {
 mod tests {
     use super::*;
 
-    // Note: test_sync_manager_creation removed because it depends on existing sync.json format
-    // which may change over time and makes tests brittle
-
-    // New methods for named configuration support
-
-    /// Pack AI CLI configurations with selective file inclusion
-    pub async fn pack_named_config(&mut self, config_name: &str) -> SyncResult<u64> {
-        use tempfile::TempDir;
-
-        // Create temporary directory for archive
-        let temp_dir = TempDir::new().map_err(|e| {
-            SyncError::ConfigPackingError(format!("Failed to create temp directory: {}", e))
-        })?;
-
-        let archive_path = temp_dir.path().join(format!("{}.tar.gz", config_name));
-
-        // Pack configurations
-        let archive_size = self.config_packer.pack_ai_configs(config_name, &archive_path)?;
-
-        // Store archive path for later upload
-        self.temp_archive_path = Some(archive_path.to_path_buf());
-
-        Ok(archive_size)
-    }
-
-    /// Upload named configuration to Google Drive
-    pub async fn upload_named_config(&mut self, config_name: &str) -> SyncResult<bool> {
-        let service = self
-            .drive_service
-            .as_mut()
-            .ok_or(SyncError::AuthenticationRequired)?;
-
-        // Get archive path
-        let archive_path = self.temp_archive_path.as_ref().ok_or_else(|| {
-            SyncError::ConfigPackingError("No archive found. Call pack_named_config first.".to_string())
-        })?.as_path();
-
-        // Ensure agentic-warden folder exists
-        let root_folder_id = service
-            .create_or_find_folder("agentic-warden", None)
-            .await?;
-
-        // Upload configuration file
-        let uploaded_file = service.upload_file(archive_path, Some(&root_folder_id)).await?;
-
-        // Rename to .zip extension
-        let new_name = format!("{}.zip", config_name);
-        service.rename_file(&uploaded_file.id, &new_name).await?;
-
-        Ok(true)
-    }
-
-    /// Verify named configuration upload
-    pub async fn verify_named_config(&mut self, config_name: &str) -> SyncResult<bool> {
-        let service = self
-            .drive_service
-            .as_mut()
-            .ok_or(SyncError::AuthenticationRequired)?;
-
-        // Find agentic-warden folder
-        let root_folder_id = service.find_folder("agentic-warden", None).await?;
-
-        if let Some(folder_id) = root_folder_id {
-            // Look for the configuration file
-            let expected_name = format!("{}.zip", config_name);
-            let files = service.list_folder_files(&folder_id).await?;
-
-            Ok(files.iter().any(|f| f.name == expected_name))
-        } else {
-            Ok(false)
-        }
-    }
-
-    /// Download named configuration from Google Drive
-    pub async fn download_named_config(&mut self, config_name: &str) -> SyncResult<bool> {
-        use tempfile::TempDir;
-
-        let service = self
-            .drive_service
-            .as_mut()
-            .ok_or(SyncError::AuthenticationRequired)?;
-
-        // Find agentic-warden folder
-        let root_folder_id = service.find_folder("agentic-warden", None).await?;
-
-        if let Some(folder_id) = root_folder_id {
-            // Look for the configuration file
-            let expected_name = format!("{}.zip", config_name);
-            let files = service.list_folder_files(&folder_id).await?;
-
-            if let Some(file) = files.iter().find(|f| f.name == expected_name) {
-                // Create temporary directory
-                let temp_dir = TempDir::new().map_err(|e| {
-                    SyncError::ConfigPackingError(format!("Failed to create temp directory: {}", e))
-                })?;
-
-                let download_path = temp_dir.path().join(&expected_name);
-
-                // Download file
-                service.download_file(&file.id, &download_path).await?;
-
-                // Store path for extraction
-                self.temp_archive_path = Some(download_path);
-
-                Ok(true)
-            } else {
-                Ok(false)
-            }
-        } else {
-            Ok(false)
-        }
-    }
-
-    /// Extract named configuration
-    pub async fn extract_named_config(&mut self, _config_name: &str) -> SyncResult<bool> {
-        use tempfile::TempDir;
-
-        // Get archive path
-        let archive_path = self.temp_archive_path.as_ref().ok_or_else(|| {
-            SyncError::ConfigPackingError("No archive found. Call download_named_config first.".to_string())
-        })?.as_path();
-
-        // Create temporary extraction directory
-        let temp_dir = TempDir::new().map_err(|e| {
-            SyncError::ConfigPackingError(format!("Failed to create temp directory: {}", e))
-        })?;
-
-        // Extract archive
-        self.config_packer.unpack_archive(archive_path, temp_dir.path())?;
-
-        // Copy files to appropriate locations
-        let home_dir = dirs::home_dir()
-            .ok_or_else(|| SyncError::ConfigPackingError("Could not find home directory".to_string()))?;
-
-        // Copy Claude files
-        let claude_source = temp_dir.path().join(".claude");
-        if claude_source.exists() {
-            let claude_dest = home_dir.join(".claude");
-            fs::create_dir_all(&claude_dest).map_err(|e| {
-                SyncError::ConfigPackingError(format!("Failed to create Claude directory: {}", e))
-            })?;
-            copy_dir_contents(&claude_source, &claude_dest)?;
-        }
-
-        // Copy Codex files
-        let codex_source = temp_dir.path().join(".codex");
-        if codex_source.exists() {
-            let codex_dest = home_dir.join(".codex");
-            fs::create_dir_all(&codex_dest).map_err(|e| {
-                SyncError::ConfigPackingError(format!("Failed to create Codex directory: {}", e))
-            })?;
-            copy_dir_contents(&codex_source, &codex_dest)?;
-        }
-
-        // Copy Gemini files
-        let gemini_source = temp_dir.path().join(".gemini");
-        if gemini_source.exists() {
-            let gemini_dest = home_dir.join(".gemini");
-            fs::create_dir_all(&gemini_dest).map_err(|e| {
-                SyncError::ConfigPackingError(format!("Failed to create Gemini directory: {}", e))
-            })?;
-            copy_dir_contents(&gemini_source, &gemini_dest)?;
-        }
-
-        Ok(true)
-    }
-
-    /// Verify extraction
-    pub async fn verify_extraction(&mut self, _config_name: &str) -> SyncResult<bool> {
-        // Check if files were extracted successfully
-        let home_dir = dirs::home_dir()
-            .ok_or_else(|| SyncError::ConfigPackingError("Could not find home directory".to_string()))?;
-
-        let claude_dir = home_dir.join(".claude");
-        let codex_dir = home_dir.join(".codex");
-        let gemini_dir = home_dir.join(".gemini");
-
-        // At least one directory should exist with files
-        let has_files = claude_dir.exists() || codex_dir.exists() || gemini_dir.exists();
-
-        Ok(has_files)
-    }
-
-    /// List available configurations
-    pub async fn list_available_configs(&mut self) -> SyncResult<Vec<String>> {
-        let service = self
-            .drive_service
-            .as_mut()
-            .ok_or(SyncError::AuthenticationRequired)?;
-
-        // Find agentic-warden folder
-        let root_folder_id = service.find_folder("agentic-warden", None).await?;
-
-        if let Some(folder_id) = root_folder_id {
-            let files = service.list_folder_files(&folder_id).await?;
-
-            let mut configs = Vec::new();
-            for file in files {
-                if file.name.ends_with(".zip") {
-                    // Remove .zip extension
-                    let config_name = file.name.trim_end_matches(".zip");
-                    configs.push(config_name.to_string());
-                }
-            }
-
-            Ok(configs)
-        } else {
-            Ok(Vec::new())
-        }
-    }
-
-    /// Check Google Drive authentication
-    pub async fn check_google_drive_auth(&mut self) -> SyncResult<bool> {
-        if self.drive_service.is_none() {
-            return Ok(false);
-        }
-
-        // Try to list files to check authentication
-        match self.drive_service.as_mut().unwrap().list_root_files().await {
-            Ok(_) => Ok(true),
-            Err(_) => Ok(false),
-        }
-    }
-
     #[test]
     fn test_path_handling() {
         let _manager = ConfigSyncManager::new().unwrap();
@@ -1298,9 +1111,8 @@ mod tests {
 /// Copy directory contents recursively
 fn copy_dir_contents(source: &Path, dest: &Path) -> ErrorResult<()> {
     for entry in walkdir::WalkDir::new(source) {
-        let entry = entry.map_err(|e| {
-            SyncError::ConfigPackingError(format!("Failed to walk directory: {}", e))
-        })?;
+        let entry = entry
+            .map_err(|e| SyncError::config_packing(format!("Failed to walk directory: {}", e)))?;
 
         let path = entry.path();
         let relative_path = path.strip_prefix(source).unwrap();
@@ -1309,13 +1121,12 @@ fn copy_dir_contents(source: &Path, dest: &Path) -> ErrorResult<()> {
         if path.is_file() {
             if let Some(parent) = dest_path.parent() {
                 fs::create_dir_all(parent).map_err(|e| {
-                    SyncError::ConfigPackingError(format!("Failed to create directory: {}", e))
+                    SyncError::config_packing(format!("Failed to create directory: {}", e))
                 })?;
             }
 
-            fs::copy(path, &dest_path).map_err(|e| {
-                SyncError::ConfigPackingError(format!("Failed to copy file: {}", e))
-            })?;
+            fs::copy(path, &dest_path)
+                .map_err(|e| SyncError::config_packing(format!("Failed to copy file: {}", e)))?;
         }
     }
 

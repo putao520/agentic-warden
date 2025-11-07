@@ -96,7 +96,7 @@ fn handle_unix_signal(signum: libc::c_int) {
 fn setup_windows_signal_handler() -> io::Result<()> {
     use windows::Win32::Foundation::BOOL;
     use windows::Win32::System::Console::{
-        CTRL_BREAK_EVENT, CTRL_C_EVENT, CTRL_CLOSE_EVENT, SetConsoleCtrlHandler,
+        SetConsoleCtrlHandler, CTRL_BREAK_EVENT, CTRL_CLOSE_EVENT, CTRL_C_EVENT,
     };
 
     unsafe extern "system" fn handler(ctrl_type: u32) -> BOOL {

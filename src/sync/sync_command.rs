@@ -1,9 +1,8 @@
 use super::config_sync_manager::ConfigSyncManager;
 use super::error::{SyncError, SyncResult};
+use crate::error::AgenticWardenError;
 use console::Term;
 use indicatif::{ProgressBar, ProgressStyle};
-use std::path::PathBuf;
-use tempfile::TempDir;
 
 /// Handle sync commands
 pub async fn handle_sync_command(command: &str, config_name: Option<String>) -> SyncResult<i32> {
@@ -19,7 +18,10 @@ pub async fn handle_sync_command(command: &str, config_name: Option<String>) -> 
             eprintln!("Reset command not yet implemented");
             Ok(0)
         }
-        _ => Err(SyncError::SyncConfigError(format!("Unknown sync command: {}", command))),
+        _ => Err(SyncError::sync_config(format!(
+            "Unknown sync command: {}",
+            command
+        ))),
     }
 }
 
@@ -38,7 +40,6 @@ impl SyncCommand {
     pub async fn execute_push(&mut self, config_name: Option<String>) -> SyncResult<i32> {
         let term = Term::stdout();
 
-        // Get configuration name
         let config_name = match config_name {
             Some(name) => name,
             None => "default".to_string(),
@@ -48,10 +49,8 @@ impl SyncCommand {
         term.write_line(&format!("📦 Configuration name: '{}'", config_name))?;
         term.write_line("")?;
 
-        // Check if any AI CLI configurations exist
-        let home_dir = dirs::home_dir().ok_or_else(|| {
-            SyncError::SyncConfigError("Could not find home directory".to_string())
-        })?;
+        let home_dir = dirs::home_dir()
+            .ok_or_else(|| SyncError::sync_config("Could not find home directory".to_string()))?;
 
         let claude_dir = home_dir.join(".claude");
         let codex_dir = home_dir.join(".codex");
@@ -75,23 +74,34 @@ impl SyncCommand {
 
         term.write_line("🔍 Scanning for AI CLI configurations...")?;
         if claude_exists {
-            term.write_line(&format!("  ✓ Found Claude configuration at {}", claude_dir.display()))?;
+            term.write_line(&format!(
+                "  ✓ Found Claude configuration at {}",
+                claude_dir.display()
+            ))?;
         }
         if codex_exists {
-            term.write_line(&format!("  ✓ Found Codex configuration at {}", codex_dir.display()))?;
+            term.write_line(&format!(
+                "  ✓ Found Codex configuration at {}",
+                codex_dir.display()
+            ))?;
         }
         if gemini_exists {
-            term.write_line(&format!("  ✓ Found Gemini configuration at {}", gemini_dir.display()))?;
+            term.write_line(&format!(
+                "  ✓ Found Gemini configuration at {}",
+                gemini_dir.display()
+            ))?;
         }
         term.write_line("")?;
 
-        // Authenticate with Google Drive
         term.write_line("🔐 Authenticating with Google Drive...")?;
         if let Err(e) = self.manager.authenticate_google_drive().await {
-            match e {
-                SyncError::GoogleDriveError(msg) if msg.contains("GOOGLE_CLIENT_ID") => {
-                    term.write_line("❌ Google Drive authentication failed:")?;
-                    term.write_line(&format!("   {}", msg))?;
+            if let AgenticWardenError::Auth {
+                message, provider, ..
+            } = &e
+            {
+                if provider == "google_drive" && message.contains("GOOGLE_CLIENT_ID") {
+                    term.write_line("🚫 Google Drive authentication failed:")?;
+                    term.write_line(&format!("   {}", message))?;
                     term.write_line("")?;
                     term.write_line("To set up Google Drive sync, please set the following environment variables:")?;
                     term.write_line("  export GOOGLE_CLIENT_ID='your_client_id'")?;
@@ -109,24 +119,25 @@ impl SyncCommand {
                     )?;
                     return Ok(1);
                 }
-                _ => return Err(e),
             }
+            return Err(e);
         }
         term.write_line("✅ Authentication successful!")?;
         term.write_line("")?;
 
-        // Check if configuration already exists in Google Drive
         term.write_line("🔍 Checking for existing configuration...")?;
         let existing_config = self.manager.verify_named_config(&config_name).await?;
         if existing_config {
-            term.write_line(&format!("⚠️  Configuration '{}' already exists in Google Drive.", config_name))?;
+            term.write_line(&format!(
+                "⚠️  Configuration '{}' already exists in Google Drive.",
+                config_name
+            ))?;
             term.write_line("")?;
             term.write_line("Do you want to overwrite it?")?;
             term.write_line("  [Y] Yes, overwrite")?;
             term.write_line("  [N] No, cancel")?;
             term.write_line("")?;
 
-            // Wait for user input
             use std::io::{self, Write};
             let mut input = String::new();
             loop {
@@ -140,7 +151,7 @@ impl SyncCommand {
                         break;
                     }
                     "n" | "no" => {
-                        term.write_line("❌ Upload cancelled.")?;
+                        term.write_line("🚫 Upload cancelled.")?;
                         return Ok(0);
                     }
                     _ => {
@@ -154,7 +165,6 @@ impl SyncCommand {
             term.write_line("")?;
         }
 
-        // Create progress bar
         let progress = ProgressBar::new(3);
         progress.set_style(
             ProgressStyle::default_bar()
@@ -163,17 +173,14 @@ impl SyncCommand {
                 .progress_chars("#>-"),
         );
 
-        // Pack configuration
         progress.set_message("Packing configuration");
         let archive_size = self.manager.pack_named_config(&config_name).await?;
         progress.inc(1);
 
-        // Upload to Google Drive
         progress.set_message("Uploading to Google Drive");
         let uploaded = self.manager.upload_named_config(&config_name).await?;
         progress.inc(1);
 
-        // Verify upload
         progress.set_message("Verifying upload");
         let verified = self.manager.verify_named_config(&config_name).await?;
         progress.inc(1);
@@ -181,16 +188,24 @@ impl SyncCommand {
         progress.finish_with_message("Sync complete");
         term.write_line("")?;
 
-        // Summary
         term.write_line("📊 Sync Summary:")?;
         term.write_line(&format!("   Configuration: {}", config_name))?;
         term.write_line(&format!("   Archive size: {} bytes", archive_size))?;
-        term.write_line(&format!("   Upload status: {}", if uploaded { "Success" } else { "Failed" }))?;
-        term.write_line(&format!("   Verification: {}", if verified { "Passed" } else { "Failed" }))?;
+        term.write_line(&format!(
+            "   Upload status: {}",
+            if uploaded { "Success" } else { "Failed" }
+        ))?;
+        term.write_line(&format!(
+            "   Verification: {}",
+            if verified { "Passed" } else { "Failed" }
+        ))?;
         term.write_line("")?;
 
         if uploaded && verified {
-            term.write_line(&format!("🎉 Configuration '{}' successfully synced to Google Drive!", config_name))?;
+            term.write_line(&format!(
+                "🎉 Configuration '{}' successfully synced to Google Drive!",
+                config_name
+            ))?;
             Ok(0)
         } else {
             term.write_line("⚠️  Sync completed with warnings.")?;
@@ -202,7 +217,6 @@ impl SyncCommand {
     pub async fn execute_pull(&mut self, config_name: Option<String>) -> SyncResult<i32> {
         let term = Term::stdout();
 
-        // Get configuration name
         let config_name = match config_name {
             Some(name) => name,
             None => "default".to_string(),
@@ -212,13 +226,15 @@ impl SyncCommand {
         term.write_line(&format!("📦 Configuration name: '{}'", config_name))?;
         term.write_line("")?;
 
-        // Authenticate with Google Drive
         term.write_line("🔐 Authenticating with Google Drive...")?;
         if let Err(e) = self.manager.authenticate_google_drive().await {
-            match e {
-                SyncError::GoogleDriveError(msg) if msg.contains("GOOGLE_CLIENT_ID") => {
-                    term.write_line("❌ Google Drive authentication failed:")?;
-                    term.write_line(&format!("   {}", msg))?;
+            if let AgenticWardenError::Auth {
+                message, provider, ..
+            } = &e
+            {
+                if provider == "google_drive" && message.contains("GOOGLE_CLIENT_ID") {
+                    term.write_line("🚫 Google Drive authentication failed:")?;
+                    term.write_line(&format!("   {}", message))?;
                     term.write_line("")?;
                     term.write_line("To set up Google Drive sync, please set the following environment variables:")?;
                     term.write_line("  export GOOGLE_CLIENT_ID='your_client_id'")?;
@@ -236,13 +252,12 @@ impl SyncCommand {
                     )?;
                     return Ok(1);
                 }
-                _ => return Err(e),
             }
+            return Err(e);
         }
         term.write_line("✅ Authentication successful!")?;
         term.write_line("")?;
 
-        // Create progress bar
         let progress = ProgressBar::new(3);
         progress.set_style(
             ProgressStyle::default_bar()
@@ -251,7 +266,6 @@ impl SyncCommand {
                 .progress_chars("#>-"),
         );
 
-        // Download from Google Drive
         progress.set_message("Downloading from Google Drive");
         let downloaded = self.manager.download_named_config(&config_name).await?;
         progress.inc(1);
@@ -259,10 +273,12 @@ impl SyncCommand {
         if !downloaded {
             progress.finish_with_message("No configuration found");
             term.write_line("")?;
-            term.write_line(&format!("ℹ️  No configuration named '{}' found in Google Drive.", config_name))?;
+            term.write_line(&format!(
+                "ℹ️  No configuration named '{}' found in Google Drive.",
+                config_name
+            ))?;
             term.write_line("Available configurations:")?;
 
-            // List available configurations
             let configs = self.manager.list_available_configs().await?;
             if configs.is_empty() {
                 term.write_line("  (none)")?;
@@ -276,12 +292,10 @@ impl SyncCommand {
             return Ok(1);
         }
 
-        // Extract configuration
         progress.set_message("Extracting configuration");
         let extracted = self.manager.extract_named_config(&config_name).await?;
         progress.inc(1);
 
-        // Verify extraction
         progress.set_message("Verifying extraction");
         let verified = self.manager.verify_extraction(&config_name).await?;
         progress.inc(1);
@@ -289,15 +303,23 @@ impl SyncCommand {
         progress.finish_with_message("Pull complete");
         term.write_line("")?;
 
-        // Summary
         term.write_line("📊 Pull Summary:")?;
         term.write_line(&format!("   Configuration: {}", config_name))?;
-        term.write_line(&format!("   Extracted: {}", if extracted { "Success" } else { "Failed" }))?;
-        term.write_line(&format!("   Verified: {}", if verified { "Success" } else { "Failed" }))?;
+        term.write_line(&format!(
+            "   Extracted: {}",
+            if extracted { "Success" } else { "Failed" }
+        ))?;
+        term.write_line(&format!(
+            "   Verified: {}",
+            if verified { "Success" } else { "Failed" }
+        ))?;
         term.write_line("")?;
 
         if extracted && verified {
-            term.write_line(&format!("🎉 Configuration '{}' successfully pulled from Google Drive!", config_name))?;
+            term.write_line(&format!(
+                "🎉 Configuration '{}' successfully pulled from Google Drive!",
+                config_name
+            ))?;
             Ok(0)
         } else {
             term.write_line("⚠️  Pull completed with warnings.")?;
@@ -309,12 +331,12 @@ impl SyncCommand {
     pub async fn execute_list(&mut self) -> SyncResult<i32> {
         let term = Term::stdout();
 
-        term.write_line("📋 Available configurations:")?;
+        term.write_line("馃搵 Available configurations:")?;
         term.write_line("")?;
 
         // Authenticate with Google Drive
         if let Err(_) = self.manager.authenticate_google_drive().await {
-            term.write_line("❌ Not authenticated with Google Drive.")?;
+            term.write_line("鉂?Not authenticated with Google Drive.")?;
             term.write_line("Please run 'agentic-warden push <config>' to authenticate.")?;
             return Ok(1);
         }
@@ -338,38 +360,58 @@ impl SyncCommand {
     pub async fn execute_status(&mut self) -> SyncResult<i32> {
         let term = Term::stdout();
 
-        term.write_line("📊 Sync Status:")?;
+        term.write_line("馃搳 Sync Status:")?;
         term.write_line("")?;
 
         // Check authentication status
         match self.manager.check_google_drive_auth().await {
             Ok(authenticated) => {
                 if authenticated {
-                    term.write_line("  Google Drive: ✅ Connected")?;
+                    term.write_line("  Google Drive: 鉁?Connected")?;
                 } else {
-                    term.write_line("  Google Drive: ❌ Not authenticated")?;
+                    term.write_line("  Google Drive: 鉂?Not authenticated")?;
                 }
             }
             Err(_) => {
-                term.write_line("  Google Drive: ❓ Unknown (check failed)")?;
+                term.write_line("  Google Drive: 鉂?Unknown (check failed)")?;
             }
         }
 
         term.write_line("")?;
 
         // Check local configurations
-        let home_dir = dirs::home_dir().ok_or_else(|| {
-            SyncError::SyncConfigError("Could not find home directory".to_string())
-        })?;
+        let home_dir = dirs::home_dir()
+            .ok_or_else(|| SyncError::sync_config("Could not find home directory".to_string()))?;
 
         let claude_dir = home_dir.join(".claude");
         let codex_dir = home_dir.join(".codex");
         let gemini_dir = home_dir.join(".gemini");
 
         term.write_line("Local Configurations:")?;
-        term.write_line(&format!("  Claude: {}", if claude_dir.exists() { "✅ Present" } else { "❌ Not found" }))?;
-        term.write_line(&format!("  Codex: {}", if codex_dir.exists() { "✅ Present" } else { "❌ Not found" }))?;
-        term.write_line(&format!("  Gemini: {}", if gemini_dir.exists() { "✅ Present" } else { "❌ Not found" }))?;
+        term.write_line(&format!(
+            "  Claude: {}",
+            if claude_dir.exists() {
+                "鉁?Present"
+            } else {
+                "鉂?Not found"
+            }
+        ))?;
+        term.write_line(&format!(
+            "  Codex: {}",
+            if codex_dir.exists() {
+                "鉁?Present"
+            } else {
+                "鉂?Not found"
+            }
+        ))?;
+        term.write_line(&format!(
+            "  Gemini: {}",
+            if gemini_dir.exists() {
+                "鉁?Present"
+            } else {
+                "鉂?Not found"
+            }
+        ))?;
 
         term.write_line("")?;
         Ok(0)

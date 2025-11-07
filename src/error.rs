@@ -3,7 +3,10 @@
 //! This module provides a comprehensive error handling system with
 //! proper error classification, context, and recovery mechanisms.
 
+use anyhow::Error as AnyhowError;
 use std::collections::HashMap;
+use std::fmt;
+use std::io;
 use thiserror::Error;
 
 /// Main error type for the application
@@ -35,10 +38,10 @@ pub enum AgenticWardenError {
     },
 
     /// Synchronization errors
-    #[error("Sync error: {message}")]
+    #[error("Sync error ({operation}): {message}")]
     Sync {
         message: String,
-        operation: String,
+        operation: SyncOperation,
         source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
 
@@ -129,6 +132,54 @@ pub enum AgenticWardenError {
     },
 }
 
+/// High-level sync operation categories used for user messaging and recovery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncOperation {
+    DirectoryHashing,
+    ConfigPacking,
+    ConfigLoading,
+    ConfigSaving,
+    ArchiveExtraction,
+    Compression,
+    GoogleDriveAuth,
+    GoogleDriveRequest,
+    NetworkProbe,
+    Upload,
+    Download,
+    OAuthCallback,
+    StateVerification,
+    Discovery,
+    Unknown,
+}
+
+impl fmt::Display for SyncOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl SyncOperation {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SyncOperation::DirectoryHashing => "directory_hashing",
+            SyncOperation::ConfigPacking => "config_packing",
+            SyncOperation::ConfigLoading => "config_loading",
+            SyncOperation::ConfigSaving => "config_saving",
+            SyncOperation::ArchiveExtraction => "archive_extraction",
+            SyncOperation::Compression => "compression",
+            SyncOperation::GoogleDriveAuth => "google_drive_auth",
+            SyncOperation::GoogleDriveRequest => "google_drive_request",
+            SyncOperation::NetworkProbe => "network_probe",
+            SyncOperation::Upload => "upload",
+            SyncOperation::Download => "download",
+            SyncOperation::OAuthCallback => "oauth_callback",
+            SyncOperation::StateVerification => "state_verification",
+            SyncOperation::Discovery => "discovery",
+            SyncOperation::Unknown => "unknown",
+        }
+    }
+}
+
 impl AgenticWardenError {
     /// Get error category
     pub fn category(&self) -> ErrorCategory {
@@ -193,22 +244,63 @@ impl AgenticWardenError {
         }
     }
 
+    /// Returns the sync operation associated with the error, if any.
+    pub fn sync_operation(&self) -> Option<SyncOperation> {
+        if let AgenticWardenError::Sync { operation, .. } = self {
+            Some(*operation)
+        } else {
+            None
+        }
+    }
+
     /// Get user-friendly message
     pub fn user_message(&self) -> String {
         match self {
             AgenticWardenError::Config { message, .. } => {
                 format!("Configuration problem: {}", message)
             }
-            AgenticWardenError::Provider { provider, message, .. } => {
+            AgenticWardenError::Provider {
+                provider, message, ..
+            } => {
                 format!("Provider '{}' issue: {}", provider, message)
             }
-            AgenticWardenError::Task { task_id, message, .. } => {
+            AgenticWardenError::Task {
+                task_id, message, ..
+            } => {
                 format!("Task #{} failed: {}", task_id, message)
             }
-            AgenticWardenError::Sync { message, .. } => {
-                format!("Sync problem: {}", message)
-            }
-            AgenticWardenError::Auth { message, provider, .. } => {
+            AgenticWardenError::Sync {
+                message, operation, ..
+            } => match operation {
+                SyncOperation::DirectoryHashing => {
+                    format!("Unable to scan configuration directories: {}", message)
+                }
+                SyncOperation::ConfigPacking | SyncOperation::Compression => {
+                    format!("Failed to prepare configuration archive: {}", message)
+                }
+                SyncOperation::ConfigLoading | SyncOperation::ConfigSaving => {
+                    format!("Configuration file problem: {}", message)
+                }
+                SyncOperation::ArchiveExtraction => {
+                    format!("Unable to unpack configuration archive: {}", message)
+                }
+                SyncOperation::GoogleDriveAuth | SyncOperation::OAuthCallback => {
+                    format!("Google Drive authentication required: {}", message)
+                }
+                SyncOperation::GoogleDriveRequest | SyncOperation::NetworkProbe => {
+                    format!("Google Drive request failed: {}", message)
+                }
+                SyncOperation::Upload => format!("Upload failed: {}", message),
+                SyncOperation::Download => format!("Download failed: {}", message),
+                SyncOperation::StateVerification => {
+                    format!("Could not verify remote state: {}", message)
+                }
+                SyncOperation::Discovery => format!("Discovery issue: {}", message),
+                SyncOperation::Unknown => format!("Sync problem: {}", message),
+            },
+            AgenticWardenError::Auth {
+                message, provider, ..
+            } => {
                 format!("Authentication with {} failed: {}", provider, message)
             }
             AgenticWardenError::Network { message, .. } => {
@@ -254,7 +346,12 @@ impl AgenticWardenError {
                     "Config error - No source".to_string()
                 }
             }
-            AgenticWardenError::Provider { provider, error_code, source, .. } => {
+            AgenticWardenError::Provider {
+                provider,
+                error_code,
+                source,
+                ..
+            } => {
                 let mut details = format!("Provider error - Provider: {}", provider);
                 if let Some(code) = error_code {
                     details.push_str(&format!(", Code: {}", code));
@@ -264,7 +361,12 @@ impl AgenticWardenError {
                 }
                 details
             }
-            AgenticWardenError::Task { task_id, exit_code, source, .. } => {
+            AgenticWardenError::Task {
+                task_id,
+                exit_code,
+                source,
+                ..
+            } => {
                 let mut details = format!("Task error - Task ID: {}", task_id);
                 if let Some(code) = exit_code {
                     details.push_str(&format!(", Exit code: {}", code));
@@ -275,6 +377,26 @@ impl AgenticWardenError {
                 details
             }
             _ => format!("Error details: {}", self),
+        }
+    }
+}
+
+impl From<AnyhowError> for AgenticWardenError {
+    fn from(err: AnyhowError) -> Self {
+        let message = err.to_string();
+        AgenticWardenError::Unknown {
+            message,
+            source: None,
+        }
+    }
+}
+
+impl From<io::Error> for AgenticWardenError {
+    fn from(err: io::Error) -> Self {
+        AgenticWardenError::Filesystem {
+            message: format!("I/O error: {err}"),
+            path: "<io>".to_string(),
+            source: Some(Box::new(err)),
         }
     }
 }
@@ -297,6 +419,28 @@ pub enum ErrorCategory {
     Timeout,
     Concurrency,
     Unknown,
+}
+
+impl ErrorCategory {
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            ErrorCategory::Config => "Configuration",
+            ErrorCategory::Provider => "Provider",
+            ErrorCategory::Task => "Task",
+            ErrorCategory::Sync => "Synchronization",
+            ErrorCategory::Auth => "Authentication",
+            ErrorCategory::Network => "Network",
+            ErrorCategory::Filesystem => "Filesystem",
+            ErrorCategory::Tui => "Interface",
+            ErrorCategory::Process => "Process",
+            ErrorCategory::Validation => "Validation",
+            ErrorCategory::Resource => "Resource",
+            ErrorCategory::Dependency => "Dependency",
+            ErrorCategory::Timeout => "Timeout",
+            ErrorCategory::Concurrency => "Concurrency",
+            ErrorCategory::Unknown => "Unknown",
+        }
+    }
 }
 
 /// Error severity levels
@@ -356,9 +500,12 @@ impl ErrorContext {
         self
     }
 
-    pub fn wrap_error<T>(self, result: Result<T, impl Into<AgenticWardenError>>) -> AgenticResult<T> {
+    pub fn wrap_error<T>(
+        self,
+        result: Result<T, impl Into<AgenticWardenError>>,
+    ) -> AgenticResult<T> {
         result.map_err(|e| {
-            let mut error = e.into();
+            let error = e.into();
 
             // Apply context to the error if possible
             // This would require extending the error types to support context
@@ -430,6 +577,26 @@ pub mod errors {
         }
     }
 
+    pub fn sync_error(operation: SyncOperation, message: impl Into<String>) -> AgenticWardenError {
+        AgenticWardenError::Sync {
+            message: message.into(),
+            operation,
+            source: None,
+        }
+    }
+
+    pub fn sync_error_with_source(
+        operation: SyncOperation,
+        message: impl Into<String>,
+        source: impl std::error::Error + Send + Sync + 'static,
+    ) -> AgenticWardenError {
+        AgenticWardenError::Sync {
+            message: message.into(),
+            operation,
+            source: Some(Box::new(source)),
+        }
+    }
+
     pub fn filesystem_error(
         message: impl Into<String>,
         path: impl Into<String>,
@@ -441,7 +608,10 @@ pub mod errors {
         }
     }
 
-    pub fn tui_error(message: impl Into<String>, component: impl Into<String>) -> AgenticWardenError {
+    pub fn tui_error(
+        message: impl Into<String>,
+        component: impl Into<String>,
+    ) -> AgenticWardenError {
         AgenticWardenError::Tui {
             message: message.into(),
             component: component.into(),
@@ -461,7 +631,10 @@ pub mod errors {
         }
     }
 
-    pub fn dependency_error(message: impl Into<String>, service: Option<String>) -> AgenticWardenError {
+    pub fn dependency_error(
+        message: impl Into<String>,
+        service: Option<String>,
+    ) -> AgenticWardenError {
         AgenticWardenError::Dependency {
             message: message.into(),
             service,
@@ -489,7 +662,10 @@ pub mod errors {
 #[derive(Debug, Clone)]
 pub enum RecoveryStrategy {
     /// Retry the operation with exponential backoff
-    Retry { max_attempts: u32, base_delay_ms: u64 },
+    Retry {
+        max_attempts: u32,
+        base_delay_ms: u64,
+    },
     /// Fall back to an alternative approach
     Fallback { alternative: String },
     /// Ask user for intervention
@@ -500,10 +676,45 @@ pub enum RecoveryStrategy {
     Abort,
 }
 
+/// Rich, user-friendly error information used by the TUI and CLI.
+#[derive(Debug, Clone)]
+pub struct UserFacingError {
+    pub title: String,
+    pub message: String,
+    pub hint: Option<String>,
+    pub recovery: RecoveryStrategy,
+}
+
 impl AgenticWardenError {
     /// Get suggested recovery strategy
     pub fn recovery_strategy(&self) -> RecoveryStrategy {
         match self {
+            AgenticWardenError::Sync { operation, .. } => match operation {
+                SyncOperation::GoogleDriveRequest
+                | SyncOperation::NetworkProbe
+                | SyncOperation::Upload
+                | SyncOperation::Download => RecoveryStrategy::Retry {
+                    max_attempts: 3,
+                    base_delay_ms: 2000,
+                },
+                SyncOperation::GoogleDriveAuth | SyncOperation::OAuthCallback => {
+                    RecoveryStrategy::UserIntervention {
+                        message:
+                            "Open the OAuth screen in the TUI to re-authorize Google Drive access"
+                                .to_string(),
+                    }
+                }
+                SyncOperation::StateVerification | SyncOperation::Discovery => {
+                    RecoveryStrategy::LogAndContinue
+                }
+                SyncOperation::DirectoryHashing
+                | SyncOperation::ConfigPacking
+                | SyncOperation::ConfigLoading
+                | SyncOperation::ConfigSaving
+                | SyncOperation::ArchiveExtraction
+                | SyncOperation::Compression => RecoveryStrategy::Abort,
+                SyncOperation::Unknown => RecoveryStrategy::LogAndContinue,
+            },
             AgenticWardenError::Network { .. } => RecoveryStrategy::Retry {
                 max_attempts: 3,
                 base_delay_ms: 1000,
@@ -526,6 +737,97 @@ impl AgenticWardenError {
                 message: "Please correct the input and try again".to_string(),
             },
             _ => RecoveryStrategy::LogAndContinue,
+        }
+    }
+
+    /// Convert into a user-facing payload with actionable hints.
+    pub fn to_user_facing(&self) -> UserFacingError {
+        let hint = match self {
+            AgenticWardenError::Config { .. } => Some(
+                "Open the Provider screen in the TUI and fix the invalid configuration.".to_string(),
+            ),
+            AgenticWardenError::Provider { .. } => Some(
+                "Switch to another provider or update credentials via `agentic-warden provider`."
+                    .to_string(),
+            ),
+            AgenticWardenError::Task { .. } => Some(
+                "Inspect the generated task log (see the Status screen) for command output."
+                    .to_string(),
+            ),
+            AgenticWardenError::Sync { operation, .. } => match operation {
+                SyncOperation::DirectoryHashing => Some(
+                    "Ensure ~/.claude, ~/.codex or ~/.gemini exist and are readable.".to_string(),
+                ),
+                SyncOperation::ConfigPacking | SyncOperation::Compression => Some(
+                    "Close editors that may lock the files and rerun the push operation."
+                        .to_string(),
+                ),
+                SyncOperation::ConfigLoading | SyncOperation::ConfigSaving => Some(
+                    "Validate JSON files under ~/.agentic-warden/providers and retry.".to_string(),
+                ),
+                SyncOperation::ArchiveExtraction => Some(
+                    "Remove the corrupted archive under ~/.agentic-warden/sync and pull again."
+                        .to_string(),
+                ),
+                SyncOperation::GoogleDriveAuth | SyncOperation::OAuthCallback => Some(
+                    "Open the Push/Pull screen and re-run the Google Drive OAuth flow."
+                        .to_string(),
+                ),
+                SyncOperation::GoogleDriveRequest
+                | SyncOperation::NetworkProbe
+                | SyncOperation::Upload
+                | SyncOperation::Download => Some(
+                    "Check your network connection and confirm the Google Drive API credentials."
+                        .to_string(),
+                ),
+                SyncOperation::StateVerification | SyncOperation::Discovery => Some(
+                    "Refresh the remote state from the Status screen to rebuild local caches."
+                        .to_string(),
+                ),
+                SyncOperation::Unknown => None,
+            },
+            AgenticWardenError::Auth { .. } => Some(
+                "Re-run OAuth from the dashboard or set the provider credentials via env vars."
+                    .to_string(),
+            ),
+            AgenticWardenError::Network { .. } => Some(
+                "Check VPN / proxy settings and retry once the connection stabilizes.".to_string(),
+            ),
+            AgenticWardenError::Filesystem { .. } => Some(
+                "Ensure the path exists and Agentic-Warden has permission to read/write it."
+                    .to_string(),
+            ),
+            AgenticWardenError::Tui { .. } => {
+                Some("Press `r` to refresh the UI or restart the dashboard.".to_string())
+            }
+            AgenticWardenError::Process { .. } => Some(
+                "Confirm the CLI binary is installed and accessible on PATH (set CLAUDE_BIN / CODEX_BIN / GEMINI_BIN if needed).".to_string(),
+            ),
+            AgenticWardenError::Validation { .. } => {
+                Some("Correct the provided value and submit again.".to_string())
+            }
+            AgenticWardenError::Resource { .. } => Some(
+                "Close other Agentic-Warden sessions to free the shared resource.".to_string(),
+            ),
+            AgenticWardenError::Dependency { .. } => Some(
+                "Restart Agentic-Warden to re-initialize background services.".to_string(),
+            ),
+            AgenticWardenError::Timeout { .. } => {
+                Some("Wait a few seconds and retry the operation.".to_string())
+            }
+            AgenticWardenError::Concurrency { .. } => Some(
+                "Let the active operation finish before starting another one.".to_string(),
+            ),
+            AgenticWardenError::Unknown { .. } => Some(
+                "Open ~/.agentic-warden/logs/latest.log for detailed diagnostics.".to_string(),
+            ),
+        };
+
+        UserFacingError {
+            title: format!("{} Error", self.category().display_name()),
+            message: self.user_message(),
+            hint,
+            recovery: self.recovery_strategy(),
         }
     }
 }
@@ -562,7 +864,10 @@ mod tests {
     fn test_recovery_strategies() {
         let network_err = errors::network_error("Connection failed");
         match network_err.recovery_strategy() {
-            RecoveryStrategy::Retry { max_attempts, base_delay_ms } => {
+            RecoveryStrategy::Retry {
+                max_attempts,
+                base_delay_ms,
+            } => {
                 assert_eq!(max_attempts, 3);
                 assert_eq!(base_delay_ms, 1000);
             }
@@ -571,7 +876,7 @@ mod tests {
 
         let config_err = errors::config_error("Invalid syntax");
         match config_err.recovery_strategy() {
-            RecoveryStrategy::Abort => {}, // Expected
+            RecoveryStrategy::Abort => {} // Expected
             _ => panic!("Expected abort strategy"),
         }
     }
@@ -585,6 +890,20 @@ mod tests {
 
         assert_eq!(context.component, Some("test_component".to_string()));
         assert_eq!(context.operation, Some("test_operation".to_string()));
-        assert_eq!(context.user_context.get("user_id"), Some(&"123".to_string()));
+        assert_eq!(
+            context.user_context.get("user_id"),
+            Some(&"123".to_string())
+        );
+    }
+
+    #[test]
+    fn sync_operation_helpers_work() {
+        let err = errors::sync_error(SyncOperation::Upload, "network reset");
+        assert_eq!(err.sync_operation(), Some(SyncOperation::Upload));
+
+        let payload = err.to_user_facing();
+        assert!(payload.message.contains("network reset"));
+        assert!(payload.title.contains("Synchronization"));
+        assert!(payload.hint.unwrap().contains("network"));
     }
 }

@@ -24,8 +24,8 @@ pub struct ConfigPaths {
 impl ConfigPaths {
     /// 创建配置路径
     pub fn new() -> Result<Self> {
-        let home_dir = dirs::home_dir()
-            .ok_or_else(|| anyhow::anyhow!("Cannot find home directory"))?;
+        let home_dir =
+            dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot find home directory"))?;
 
         let config_dir = home_dir.join(".agentic-warden");
 

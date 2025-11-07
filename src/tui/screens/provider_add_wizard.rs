@@ -6,15 +6,15 @@
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
-    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Gauge, List, ListItem, ListState, Paragraph, Wrap},
+    Frame,
 };
 
 use crate::provider::{
-    config::{AiType, ProvidersConfig, Region, SupportMode},
+    config::{AiType, ProvidersConfig, RecommendationScenario, Region, SupportMode},
     manager::ProviderManager,
     recommendation_engine::{RecommendationEngine, RecommendationPreferences},
     token_validator::TokenValidator,
@@ -120,6 +120,9 @@ pub struct ProviderAddWizard {
 impl ProviderAddWizard {
     /// Create new provider add wizard (v2.0)
     pub fn new() -> Result<Self> {
+        let providers_config =
+            ProvidersConfig::load().unwrap_or_else(|_| ProvidersConfig::default());
+
         let mut wizard = Self {
             current_step: WizardStep::CliTypeSelection,
             list_state: ListState::default(),
@@ -138,7 +141,7 @@ impl ProviderAddWizard {
             provider_icon: None,
             show_confirmation: false,
             token_validator: TokenValidator::new(),
-            providers_config: ProvidersConfig::default(),
+            providers_config,
         };
 
         // Initialize list state
@@ -180,7 +183,7 @@ impl ProviderAddWizard {
     /// Load provider recommendations based on selected AI type (v2.0)
     fn load_provider_recommendations_v2(&mut self) -> Result<()> {
         if let Some(ai_type) = &self.selected_ai_type {
-            let preferences = RecommendationPreferences::default();
+            let preferences = Self::build_preferences_for(ai_type);
 
             // Use recommendation engine
             let recommendations =
@@ -198,6 +201,23 @@ impl ProviderAddWizard {
                 .collect();
         }
         Ok(())
+    }
+
+    fn build_preferences_for(ai_type: &AiType) -> RecommendationPreferences {
+        let mut preferences = RecommendationPreferences::default();
+        match ai_type {
+            AiType::Claude => {
+                preferences.scenario = Some(RecommendationScenario::ClaudeCodePreferred);
+                preferences.prefer_official = true;
+            }
+            AiType::Codex => {
+                preferences.scenario = Some(RecommendationScenario::HighPerformance);
+            }
+            AiType::Gemini => {
+                preferences.scenario = Some(RecommendationScenario::International);
+            }
+        }
+        preferences
     }
 
     /// Handle provider selection (v2.0)
@@ -306,15 +326,21 @@ impl ProviderAddWizard {
                 ));
 
             match validation_result {
-                Ok(result) if result.is_valid => {
-                    self.token_validation_message =
-                        "Token validation successful ✓ Connection normal".to_string();
-                    self.token_valid = Some(true);
-                }
                 Ok(result) => {
-                    self.token_validation_message =
-                        format!("Token validation failed: {}", result.message);
-                    self.token_valid = Some(false);
+                    let mut message = result.message.clone();
+                    if let Some(endpoint) = &result.endpoint {
+                        message = format!("{message} · Endpoint: {endpoint}");
+                    }
+                    if !result.warnings.is_empty() {
+                        message = format!("{} [{}]", message, result.warnings.join(" / "));
+                    }
+                    self.token_validation_message = message;
+                    self.token_valid = Some(result.is_valid());
+                    if result.is_valid() {
+                        if let Some(region) = result.region {
+                            self.selected_region = Some(region);
+                        }
+                    }
                 }
                 Err(e) => {
                     self.token_validation_message = format!("Error during validation: {}", e);
@@ -504,8 +530,8 @@ impl ProviderAddWizard {
                     )),
                     Line::from(Span::styled(
                         format!(
-                            "Rating: {} | Token Status: {}",
-                            rec.score,
+                            "Rating: {:.0}% | Token Status: {}",
+                            rec.score * 100.0,
                             if rec.has_token {
                                 "Configured"
                             } else {
@@ -839,7 +865,10 @@ impl Screen for ProviderAddWizard {
             KeyCode::Enter => {
                 self.next_step()?;
             }
-            KeyCode::Esc => {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                if matches!(self.current_step, WizardStep::CliTypeSelection) {
+                    return Ok(ScreenAction::SwitchTo(ScreenType::Provider));
+                }
                 self.prev_step()?;
             }
             KeyCode::Tab => {

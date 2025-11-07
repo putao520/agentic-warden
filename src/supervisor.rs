@@ -1,8 +1,9 @@
 use crate::cli_type::CliType;
+use crate::core::models::ProcessTreeInfo;
+use crate::core::process_tree::ProcessTreeError;
 use crate::logging::debug;
 use crate::logging::warn;
 use crate::platform::{self, ChildResources};
-use crate::core::process_tree::{ProcessTreeError, ProcessTreeInfo};
 use crate::provider::{AiType, EnvInjector, ProviderManager};
 use crate::registry::{RegistryError, TaskRegistry};
 use crate::signal;
@@ -218,13 +219,14 @@ pub fn execute_cli(
 
         // Get process tree information (core functionality)
         match ProcessTreeInfo::current() {
-            Ok(tree_info) => {
-                record = record.with_process_tree(
-                    tree_info.process_chain,
-                    tree_info.root_parent_pid,
-                    tree_info.depth,
-                );
-            }
+            Ok(tree_info) => match record.clone().with_process_tree_info(tree_info) {
+                Ok(updated) => {
+                    record = updated;
+                }
+                Err(err) => {
+                    warn(format!("Failed to attach process tree info: {}", err));
+                }
+            },
             Err(err) => {
                 warn(format!("Failed to get process tree info: {}", err));
                 // Continue with basic record creation
@@ -453,11 +455,13 @@ pub fn start_interactive_cli(
 
     // Get process tree information
     let record = match ProcessTreeInfo::current() {
-        Ok(tree_info) => record.with_process_tree(
-            tree_info.process_chain,
-            tree_info.root_parent_pid,
-            tree_info.depth,
-        ),
+        Ok(tree_info) => match record.clone().with_process_tree_info(tree_info) {
+            Ok(updated) => updated,
+            Err(err) => {
+                warn(format!("Failed to attach process tree info: {}", err));
+                record
+            }
+        },
         Err(err) => {
             warn(format!("Failed to get process tree info: {}", err));
             record
@@ -508,4 +512,3 @@ pub fn execute_multiple_clis(
 
     Ok(exit_codes)
 }
-

@@ -153,7 +153,88 @@ fn default_auth_timeout() -> u64 {
 
 ## 进程树数据模型
 
-### 1. 任务信息模型
+### 1. 进程树结构模型
+
+#### 1.1 ProcessTreeInfo - 进程树信息
+```rust
+use serde::{Deserialize, Serialize};
+
+/// 进程树信息，包含完整的进程链和AI CLI根进程信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessTreeInfo {
+    /// 进程链：从当前进程到根进程的完整PID序列
+    /// [current_pid, parent_pid, grandparent_pid, ..., root_pid]
+    pub process_chain: Vec<u32>,
+
+    /// AI CLI根进程PID（第一个匹配的AI CLI进程）
+    /// 如果没有找到AI CLI，则为传统根父进程
+    pub root_parent_pid: Option<u32>,
+
+    /// 进程树深度（从当前进程到根进程的层级数）
+    pub depth: usize,
+
+    /// 是否找到AI CLI根进程
+    pub has_ai_cli_root: bool,
+
+    /// AI CLI根进程类型（claude/codex/gemini）
+    pub ai_cli_type: Option<String>,
+}
+
+impl ProcessTreeInfo {
+    /// 创建新的进程树信息
+    pub fn new(process_chain: Vec<u32>) -> Self;
+
+    /// 获取AI CLI根进程PID
+    pub fn get_ai_cli_root(&self) -> Option<u32>;
+
+    /// 检查是否包含指定PID
+    pub fn contains_process(&self, pid: u32) -> bool;
+
+    /// 获取当前进程到AI CLI根进程的子链
+    pub fn get_chain_to_ai_cli_root(&self) -> Vec<u32>;
+}
+```
+
+#### 1.2 AiCliProcessInfo - AI CLI进程信息
+```rust
+/// AI CLI进程的详细信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiCliProcessInfo {
+    /// 进程PID
+    pub pid: u32,
+
+    /// AI CLI类型
+    pub ai_type: String,
+
+    /// 进程名称
+    pub process_name: String,
+
+    /// 命令行参数
+    pub command_line: String,
+
+    /// 是否为NPM包形式
+    pub is_npm_package: bool,
+
+    /// 检测到的时间戳
+    pub detected_at: DateTime<Utc>,
+
+    /// 进程路径
+    pub executable_path: Option<PathBuf>,
+}
+
+impl AiCliProcessInfo {
+    /// 创建新的AI CLI进程信息
+    pub fn new(pid: u32, ai_type: String) -> Self;
+
+    /// 检查是否为有效的AI CLI进程
+    pub fn is_valid_ai_cli(&self) -> bool;
+
+    /// 获取进程描述
+    pub fn get_description(&self) -> String;
+}
+```
+
+### 2. 任务信息模型
 
 #### 1.1 任务基本信息（TaskRecord - 实用主义设计）
 ```rust

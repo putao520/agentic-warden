@@ -4,6 +4,7 @@
 //! to both domestic and international services, enabling intelligent
 //! provider URL selection based on actual network conditions.
 
+use crate::sync::sync_config;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -310,6 +311,30 @@ impl NetworkDetector {
 impl Default for NetworkDetector {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Load cached network status from sync configuration if it exists.
+pub fn load_cached_status() -> Option<NetworkStatus> {
+    sync_config::load_sync_data()
+        .ok()
+        .and_then(|data| data.state.network_status)
+}
+
+/// Ensure a recent network status is available, falling back to live detection on demand.
+pub async fn ensure_status(detector: &NetworkDetector) -> NetworkStatus {
+    if let Some(status) = load_cached_status() {
+        return status;
+    }
+
+    match detector.detect().await {
+        Ok(status) => {
+            let _ = sync_config::save_network_status(status.clone());
+            status
+        }
+        Err(_) => NetworkStatus::Unknown {
+            is_china_mainland: false,
+        },
     }
 }
 

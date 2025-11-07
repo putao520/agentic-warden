@@ -130,6 +130,18 @@ indicatif = "0.17"
 # For safety and cleanup mechanisms
 uuid = { version = "1", features = ["v4"] }
 
+# Testing framework dependencies
+mockall = "0.12"  # For mocking external dependencies
+tokio-test = "0.4"  # For async testing
+wiremock = "0.6"  # For HTTP API mocking
+criterion = "0.5"  # For performance testing
+proptest = "1.0"  # For property-based testing
+pretty_assertions = "1.4"  # For better test output
+test-case = "3.3"  # For parameterized tests
+serial_test = "3.0"  # For serial test execution
+assert_cmd = "2.0"  # For CLI testing
+predicates = "3.1"  # For command output assertions
+
 [features]
 default = []
 testing = []

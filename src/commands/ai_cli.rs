@@ -1,15 +1,15 @@
-//! AI CLI 启动命令处理逻辑
+//! AI CLI 鍚姩鍛戒护澶勭悊閫昏緫
 //!
-//! 处理 codex、claude、gemini 等 AI CLI 的启动和管理
+//! 澶勭悊 codex銆乧laude銆乬emini 绛?AI CLI 鐨勫惎鍔ㄥ拰绠＄悊
 
-use crate::cli_type::{parse_cli_selector, CliType};
+use crate::cli_type::{parse_cli_selector_strict, CliType};
 use crate::registry::TaskRegistry;
 use crate::supervisor;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use std::ffi::OsString;
 use std::process::ExitCode;
 
-/// AI CLI 启动参数
+/// AI CLI 鍚姩鍙傛暟
 pub struct AiCliCommand {
     pub ai_types: Vec<CliType>,
     pub provider: Option<String>,
@@ -17,7 +17,7 @@ pub struct AiCliCommand {
 }
 
 impl AiCliCommand {
-    /// 创建新的 AI CLI 命令
+    /// 鍒涘缓鏂扮殑 AI CLI 鍛戒护
     pub fn new(ai_types: Vec<CliType>, provider: Option<String>, prompt: String) -> Self {
         Self {
             ai_types,
@@ -26,34 +26,36 @@ impl AiCliCommand {
         }
     }
 
-    /// 执行 AI CLI 命令
+    /// 鎵ц AI CLI 鍛戒护
     pub async fn execute(&self) -> Result<ExitCode> {
         let registry = TaskRegistry::connect()?;
 
-        // 检查是否是交互模式（无提示词）
+        // 妫€鏌ユ槸鍚︽槸浜や簰妯″紡锛堟棤鎻愮ず璇嶏級
         if self.prompt.is_empty() {
-            // 交互模式仅支持单个 CLI
+            // 浜や簰妯″紡浠呮敮鎸佸崟涓?CLI
             if self.ai_types.len() != 1 {
-                return Err(anyhow::anyhow!(
+                return Err(anyhow!(
                     "Interactive mode only supports single CLI. Please provide a task description for multiple CLI execution."
                 ));
             }
 
             let cli_type = &self.ai_types[0];
-            let exit_code = supervisor::start_interactive_cli(&registry, cli_type, self.provider.clone())?;
+            let exit_code =
+                supervisor::start_interactive_cli(&registry, cli_type, self.provider.clone())?;
             Ok(ExitCode::from((exit_code & 0xFF) as u8))
         } else {
-            // 任务模式
+            // 浠诲姟妯″紡
             if self.ai_types.len() == 1 {
-                // 单个 CLI 执行
+                // 鍗曚釜 CLI 鎵ц
                 let cli_type = &self.ai_types[0];
                 let cli_args = cli_type.build_full_access_args(&self.prompt);
                 let os_args: Vec<OsString> = cli_args.into_iter().map(|s| s.into()).collect();
 
-                let exit_code = supervisor::execute_cli(&registry, cli_type, &os_args, self.provider.clone())?;
+                let exit_code =
+                    supervisor::execute_cli(&registry, cli_type, &os_args, self.provider.clone())?;
                 Ok(ExitCode::from((exit_code & 0xFF) as u8))
             } else {
-                // 多个 CLI 批量执行
+                // 澶氫釜 CLI 鎵归噺鎵ц
                 println!(
                     "Starting tasks for CLI(s): {}",
                     self.ai_types
@@ -74,7 +76,7 @@ impl AiCliCommand {
                     self.provider.clone(),
                 )?;
 
-                // 返回第一个失败的 exit code，或者 0 如果全部成功
+                // 杩斿洖绗竴涓け璐ョ殑 exit code锛屾垨鑰?0 濡傛灉鍏ㄩ儴鎴愬姛
                 let final_exit_code = exit_codes
                     .iter()
                     .find(|&&code| code != 0)
@@ -87,28 +89,8 @@ impl AiCliCommand {
     }
 }
 
-/// 解析 AI 类型字符串
+/// 瑙ｆ瀽 AI 绫诲瀷瀛楃涓?
 pub fn parse_ai_types(input: &str) -> Result<Vec<CliType>> {
-    if input == "all" {
-        // 返回所有可用的 AI 类型
-        Ok(vec![CliType::Codex, CliType::Claude, CliType::Gemini])
-    } else {
-        // 解析复合类型如 "codex|claude"
-        let ai_types: Vec<CliType> = input
-            .split('|')
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .filter_map(|s| {
-                parse_cli_selector(s).and_then(|selector| {
-                    if selector.types.len() == 1 {
-                        Some(selector.types[0].clone())
-                    } else {
-                        eprintln!("Warning: Multiple CLI types detected in '{}', skipping", s);
-                        None
-                    }
-                })
-            })
-            .collect();
-        Ok(ai_types)
-    }
+    let selector = parse_cli_selector_strict(input).map_err(|err| anyhow!(err.to_string()))?;
+    Ok(selector.types)
 }

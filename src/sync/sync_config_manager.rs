@@ -58,15 +58,14 @@ pub struct SyncConfigManager {
 
 impl SyncConfigManager {
     pub fn new() -> SyncResult<Self> {
-        let home_dir = dirs::home_dir().ok_or_else(|| {
-            SyncError::SyncConfigError("Could not find home directory".to_string())
-        })?;
+        let home_dir = dirs::home_dir()
+            .ok_or_else(|| SyncError::sync_config("Could not find home directory".to_string()))?;
 
         let warden_dir = home_dir.join(".agentic-warden");
 
         // Create directory if it doesn't exist
         fs::create_dir_all(&warden_dir).map_err(|e| {
-            SyncError::SyncConfigError(format!("Failed to create warden directory: {}", e))
+            SyncError::sync_config(format!("Failed to create warden directory: {}", e))
         })?;
 
         let sync_path = warden_dir.join("sync.json");
@@ -110,23 +109,20 @@ impl SyncConfigManager {
             return Ok(default_config);
         }
 
-        let content = fs::read_to_string(&self.sync_path).map_err(|e| {
-            SyncError::SyncConfigError(format!("Failed to read config file: {}", e))
-        })?;
+        let content = fs::read_to_string(&self.sync_path)
+            .map_err(|e| SyncError::sync_config(format!("Failed to read config file: {}", e)))?;
 
         serde_json::from_str(&content)
-            .map_err(|e| SyncError::SyncConfigError(format!("Failed to parse config file: {}", e)))
+            .map_err(|e| SyncError::sync_config(format!("Failed to parse config file: {}", e)))
     }
 
     #[allow(dead_code)]
     pub fn save_config(&self, config: &SyncConfig) -> SyncResult<()> {
-        let content = serde_json::to_string_pretty(config).map_err(|e| {
-            SyncError::SyncConfigError(format!("Failed to serialize config: {}", e))
-        })?;
+        let content = serde_json::to_string_pretty(config)
+            .map_err(|e| SyncError::sync_config(format!("Failed to serialize config: {}", e)))?;
 
-        fs::write(&self.sync_path, content).map_err(|e| {
-            SyncError::SyncConfigError(format!("Failed to write config file: {}", e))
-        })?;
+        fs::write(&self.sync_path, content)
+            .map_err(|e| SyncError::sync_config(format!("Failed to write config file: {}", e)))?;
 
         Ok(())
     }
@@ -143,22 +139,21 @@ impl SyncConfigManager {
         }
 
         let content = fs::read_to_string(&self.sync_path)
-            .map_err(|e| SyncError::SyncConfigError(format!("Failed to read sync file: {}", e)))?;
+            .map_err(|e| SyncError::sync_config(format!("Failed to read sync file: {}", e)))?;
 
         let data: SyncData = serde_json::from_str(&content)
-            .map_err(|e| SyncError::SyncConfigError(format!("Failed to parse sync file: {}", e)))?;
+            .map_err(|e| SyncError::sync_config(format!("Failed to parse sync file: {}", e)))?;
 
         Ok(data)
     }
 
     /// Save unified sync data
     pub fn save_sync_data(&self, data: &SyncData) -> SyncResult<()> {
-        let content = serde_json::to_string_pretty(data).map_err(|e| {
-            SyncError::SyncConfigError(format!("Failed to serialize sync data: {}", e))
-        })?;
+        let content = serde_json::to_string_pretty(data)
+            .map_err(|e| SyncError::sync_config(format!("Failed to serialize sync data: {}", e)))?;
 
         fs::write(&self.sync_path, content)
-            .map_err(|e| SyncError::SyncConfigError(format!("Failed to write sync file: {}", e)))?;
+            .map_err(|e| SyncError::sync_config(format!("Failed to write sync file: {}", e)))?;
 
         Ok(())
     }
@@ -224,7 +219,7 @@ impl SyncConfigManager {
     pub fn expand_path(&self, path: &str) -> SyncResult<String> {
         if path.starts_with("~/") {
             let home_dir = dirs::home_dir().ok_or_else(|| {
-                SyncError::SyncConfigError("Could not find home directory".to_string())
+                SyncError::sync_config("Could not find home directory".to_string())
             })?;
             Ok(path.replace("~", &home_dir.to_string_lossy()))
         } else {

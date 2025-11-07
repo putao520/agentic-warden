@@ -15,7 +15,9 @@ impl TuiApp {
     }
 
     /// 启动TUI应用并指定初始屏幕
-    pub fn run_with_screen(initial_screen: Option<crate::tui::ScreenType>) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn run_with_screen(
+        initial_screen: Option<crate::tui::ScreenType>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let mut app = App::new();
         if let Some(screen) = initial_screen {
             app.set_initial_screen(screen);
@@ -43,7 +45,9 @@ pub fn run_tui_app() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// 运行TUI应用并指定初始屏幕
-pub fn run_tui_app_with_screen(initial_screen: Option<crate::tui::ScreenType>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_tui_app_with_screen(
+    initial_screen: Option<crate::tui::ScreenType>,
+) -> Result<(), Box<dyn std::error::Error>> {
     // 初始化
     TuiApp::init()?;
 

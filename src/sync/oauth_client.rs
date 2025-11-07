@@ -72,7 +72,6 @@ impl OAuthClient {
         }
     }
 
-    
     /// Create OAuth client with scopes
     pub fn with_scopes(mut self, scopes: Vec<String>) -> Self {
         self.config.scopes = scopes;

@@ -1,9 +1,10 @@
 use crate::config::{
     LEGACY_WAIT_INTERVAL_ENV, MAX_WAIT_DURATION, WAIT_INTERVAL_DEFAULT, WAIT_INTERVAL_ENV,
 };
+use crate::core::models::ProcessTreeInfo;
+use crate::core::process_tree::ProcessTreeError;
 use crate::logging::warn;
 use crate::platform;
-use crate::core::process_tree::{ProcessTreeError, ProcessTreeInfo};
 use crate::registry::{CleanupReason, RegistryEntry, RegistryError, TaskRegistry};
 use crate::task_record::TaskRecord;
 use crate::task_record::TaskStatus;
@@ -31,7 +32,7 @@ pub fn run() -> Result<(), WaitError> {
 
     // Get current process root parent for task filtering (core functionality)
     let current_root_parent = match ProcessTreeInfo::current() {
-        Ok(tree_info) => tree_info.root_parent_pid,
+        Ok(tree_info) => tree_info.get_ai_cli_root(),
         Err(err) => {
             warn(format!("Failed to get process tree info: {}", err));
             None
@@ -106,7 +107,7 @@ pub fn run() -> Result<(), WaitError> {
 /// Check if a task should be processed based on root parent PID
 pub fn should_process_task(record: &TaskRecord, current_root_parent: Option<u32>) -> bool {
     // If we don't have root parent info, process all tasks
-    let task_root_parent = match record.root_parent_pid {
+    let task_root_parent = match record.resolved_root_parent_pid() {
         Some(pid) => pid,
         None => return true, // Process tasks without root parent info
     };
@@ -214,7 +215,11 @@ impl TaskCompletion {
     }
 
     fn status_icon(&self) -> &'static str {
-        if self.is_success() { "✅" } else { "❌" }
+        if self.is_success() {
+            "✅"
+        } else {
+            "❌"
+        }
     }
 
     fn completed_time_local(&self) -> String {
@@ -530,8 +535,10 @@ mod tests {
             "1001".to_string(),
             "/tmp/1001.log".to_string(),
             Some(1000),
-        )
-        .with_process_tree(vec![1000, 100], Some(100), 2);
+        );
+        let task_with_root = task_with_root
+            .with_process_tree_info(ProcessTreeInfo::new(vec![1000, 100]))
+            .expect("process tree should attach");
 
         // Task without root parent info (backward compatibility)
         let task_without_root = TaskRecord::new(
@@ -547,8 +554,10 @@ mod tests {
             "1003".to_string(),
             "/tmp/1003.log".to_string(),
             Some(1000),
-        )
-        .with_process_tree(vec![2000, 200], Some(200), 2);
+        );
+        let task_different_root = task_different_root
+            .with_process_tree_info(ProcessTreeInfo::new(vec![2000, 200]))
+            .expect("process tree should attach");
 
         // Test filtering by root parent 100
         assert!(should_process_task(&task_with_root, Some(100)));

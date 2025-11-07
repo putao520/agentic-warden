@@ -1,30 +1,30 @@
 //! Pull progress screen
 
 use super::{Screen, ScreenAction, ScreenType};
+use crate::error::AgenticWardenError;
 use crate::sync::config_sync_manager::{ConfigSyncManager, PullProgressEvent, SyncOperationResult};
-use crate::sync::error::SyncError;
 use crate::sync::smart_oauth::AuthState;
 use crate::tui::app_state::{AppState, SyncPhase, TransferKind, TransferProgress};
 use crate::tui::widgets::{DialogResult, DialogWidget, ProgressWidget};
 use anyhow::{Context, Result};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
-    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
+    Frame,
 };
 use std::{
     path::Path,
     sync::{
-        Arc,
         atomic::{AtomicBool, Ordering},
+        Arc,
     },
 };
 use tokio::{
     runtime::Runtime,
-    sync::mpsc::{UnboundedReceiver, UnboundedSender, error::TryRecvError, unbounded_channel},
+    sync::mpsc::{error::TryRecvError, unbounded_channel, UnboundedReceiver, UnboundedSender},
     task::JoinHandle,
 };
 
@@ -66,7 +66,10 @@ enum PullWorkerEvent {
         index: usize,
         total: usize,
     },
-    Error(String),
+    Error {
+        message: String,
+        needs_auth: bool,
+    },
     Cancelled,
 }
 
@@ -99,6 +102,7 @@ pub struct PullScreen {
     error_message: Option<String>,
     auth_checked: bool,
     started: bool,
+    auto_start_pending: bool,
 }
 
 impl PullScreen {
@@ -121,7 +125,7 @@ impl PullScreen {
             directories: resolved_directories,
             progress_widget,
             mode: PullMode::CheckingAuth,
-            progress: TransferProgress::new(),
+            progress: TransferProgress::for_kind(TransferKind::Pull),
             runtime,
             worker_handle: None,
             progress_rx: None,
@@ -138,6 +142,7 @@ impl PullScreen {
             error_message: None,
             auth_checked: false,
             started: false,
+            auto_start_pending: true,
         };
 
         screen.update_progress(
@@ -212,6 +217,7 @@ impl PullScreen {
         self.cancel_flag = Some(cancel_flag);
         self.cancel_requested = false;
         self.started = true;
+        self.auto_start_pending = false;
         self.summary.clear();
         self.error_message = None;
         self.total_downloaded_bytes = 0;
@@ -256,6 +262,9 @@ impl PullScreen {
         self.worker_handle = None;
         self.progress_rx = None;
         self.cancel_flag = None;
+        self.started = false;
+        self.auto_start_pending = false;
+        self.auth_checked = false;
         self.update_progress(SyncPhase::Idle, 0, Some("Ready to retry pull".to_string()));
     }
 
@@ -330,10 +339,22 @@ impl PullScreen {
                 }
                 self.summary.push(result);
             }
-            PullWorkerEvent::Error(msg) => {
-                self.error_message = Some(msg.clone());
-                self.mode = PullMode::Failed;
-                self.update_progress(SyncPhase::Failed, self.progress.percent.max(1), Some(msg));
+            PullWorkerEvent::Error {
+                message,
+                needs_auth,
+            } => {
+                self.error_message = Some(message.clone());
+                if needs_auth {
+                    self.auth_checked = false;
+                    self.mode = PullMode::CheckingAuth;
+                } else {
+                    self.mode = PullMode::Failed;
+                }
+                self.update_progress(
+                    SyncPhase::Failed,
+                    self.progress.percent.max(1),
+                    Some(message),
+                );
             }
             PullWorkerEvent::Cancelled => {
                 self.mode = PullMode::Cancelled;
@@ -552,9 +573,18 @@ impl Screen for PullScreen {
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> Result<ScreenAction> {
-        if let PullMode::NeedAuth(dialog) = &mut self.mode {
-            return match dialog.handle_key(key) {
-                DialogResult::Confirmed => Ok(ScreenAction::SwitchTo(ScreenType::OAuth)),
+        if matches!(self.mode, PullMode::NeedAuth(_)) {
+            let result = match &mut self.mode {
+                PullMode::NeedAuth(dialog) => dialog.handle_key(key),
+                _ => unreachable!(),
+            };
+            return match result {
+                DialogResult::Confirmed => {
+                    self.auth_checked = false;
+                    self.auto_start_pending = true;
+                    self.mode = PullMode::CheckingAuth;
+                    Ok(ScreenAction::SwitchTo(ScreenType::OAuth))
+                }
                 DialogResult::Cancelled | DialogResult::Closed => Ok(ScreenAction::Back),
                 DialogResult::None => Ok(ScreenAction::None),
             };
@@ -602,6 +632,10 @@ impl Screen for PullScreen {
     fn update(&mut self) -> Result<()> {
         if matches!(self.mode, PullMode::CheckingAuth) {
             self.check_authentication();
+        }
+
+        if matches!(self.mode, PullMode::Ready) && self.auto_start_pending && !self.started {
+            self.start_pull()?;
         }
 
         self.poll_worker_events();
@@ -709,7 +743,10 @@ async fn run_pull_worker(
         Ok(mgr) => mgr,
         Err(err) => {
             let msg = format!("Failed to initialise sync manager: {}", err);
-            let _ = tx.send(PullWorkerEvent::Error(msg.clone()));
+            let _ = tx.send(PullWorkerEvent::Error {
+                message: msg.clone(),
+                needs_auth: false,
+            });
             return PullWorkerResult::Failed(msg);
         }
     };
@@ -719,7 +756,10 @@ async fn run_pull_worker(
             Ok(list) => list,
             Err(err) => {
                 let msg = format!("Failed to load sync directories: {}", err);
-                let _ = tx.send(PullWorkerEvent::Error(msg.clone()));
+                let _ = tx.send(PullWorkerEvent::Error {
+                    message: msg.clone(),
+                    needs_auth: false,
+                });
                 return PullWorkerResult::Failed(msg);
             }
         }
@@ -737,11 +777,15 @@ async fn run_pull_worker(
     }
 
     if let Err(err) = manager.authenticate_google_drive().await {
-        let message = match err {
-            SyncError::AuthenticationRequired => "Google Drive authentication required".to_string(),
-            other => other.to_string(),
-        };
-        let _ = tx.send(PullWorkerEvent::Error(message.clone()));
+        let needs_auth = matches!(
+            &err,
+            AgenticWardenError::Auth { provider, .. } if provider == "google_drive"
+        );
+        let message = err.user_message();
+        let _ = tx.send(PullWorkerEvent::Error {
+            message: message.clone(),
+            needs_auth,
+        });
         return PullWorkerResult::Failed(message);
     }
 
@@ -841,8 +885,18 @@ async fn run_pull_worker(
                 results.push(sync_result);
             }
             Err(err) => {
-                let msg = format!("Failed to pull {}: {}", label, err);
-                let _ = tx.send(PullWorkerEvent::Error(msg.clone()));
+                let needs_auth = matches!(
+                    &err,
+                    AgenticWardenError::Auth { provider, .. } if provider == "google_drive"
+                );
+                let mut msg = err.user_message();
+                if !msg.contains(&label) {
+                    msg = format!("{label}: {msg}");
+                }
+                let _ = tx.send(PullWorkerEvent::Error {
+                    message: msg.clone(),
+                    needs_auth,
+                });
                 return PullWorkerResult::Failed(msg);
             }
         }
@@ -854,4 +908,87 @@ async fn run_pull_worker(
         message: Some("pull completed successfully".to_string()),
     });
     PullWorkerResult::Completed(results)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn buffer_to_string(buffer: &ratatui::buffer::Buffer) -> String {
+        let mut text = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                text.push_str(buffer.get(x, y).symbol());
+            }
+            text.push('\n');
+        }
+        text
+    }
+
+    fn test_screen_with_mode(mode: PullMode) -> PullScreen {
+        PullScreen {
+            app_state: AppState::global(),
+            directories: vec!["/tmp/project".into()],
+            progress_widget: ProgressWidget::new("Pull Test".to_string()),
+            mode,
+            progress: TransferProgress::for_kind(TransferKind::Pull),
+            runtime: tokio::runtime::Runtime::new().expect("runtime"),
+            worker_handle: None,
+            progress_rx: None,
+            cancel_flag: None,
+            cancel_requested: false,
+            current_directory: Some("/tmp/project".into()),
+            current_file: None,
+            current_file_size: None,
+            restored_files: None,
+            total_downloaded_bytes: 0,
+            completed_dirs: 0,
+            total_dirs: 1,
+            summary: Vec::new(),
+            error_message: None,
+            auth_checked: true,
+            started: false,
+            auto_start_pending: false,
+        }
+    }
+
+    #[test]
+    fn pull_screen_renders_progress_information() {
+        let mut screen = test_screen_with_mode(PullMode::Running);
+        screen.progress = TransferProgress::for_kind(TransferKind::Pull)
+            .with_phase(SyncPhase::Downloading)
+            .with_percent(40)
+            .with_message(Some("Downloading archive".into()));
+        screen.current_file = Some("archive.tar.gz".into());
+        screen.total_downloaded_bytes = 512 * 1024;
+
+        let backend = TestBackend::new(90, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| screen.render(frame, frame.size()))
+            .unwrap();
+
+        let rendered = buffer_to_string(terminal.backend().buffer());
+        assert!(
+            rendered.contains("Pull Test") || rendered.contains("Pulling from Google Drive"),
+            "rendered output missing pull context:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn pull_screen_handle_key_respects_mode() {
+        let mut ready = test_screen_with_mode(PullMode::Ready);
+        let back = ready
+            .handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .expect("handle key");
+        assert!(matches!(back, ScreenAction::Back));
+
+        let mut completed = test_screen_with_mode(PullMode::Completed);
+        let back = completed
+            .handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .expect("handle key");
+        assert!(matches!(back, ScreenAction::Back));
+    }
 }
