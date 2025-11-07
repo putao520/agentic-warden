@@ -25,12 +25,28 @@ pub(crate) enum SharedMapError {
     LockGuard(String),
 }
 
+/// Internal representation that mirrors SharedMemoryHashMap's structure
+///
+/// # Safety
+/// This struct MUST maintain binary compatibility with SharedMemoryHashMap.
+/// Changes to this structure or the SharedMemoryHashMap dependency may cause
+/// undefined behavior.
 #[repr(C)]
 struct SharedMapRepr<K, V> {
     shm: Shmem,
     lock: Box<dyn LockImpl>,
     phantom: PhantomData<(K, V)>,
 }
+
+// Compile-time size checks to catch layout mismatches early
+const _: () = {
+    // Ensure sizes match at compile time
+    let repr_size = std::mem::size_of::<SharedMapRepr<String, String>>();
+    let map_size = std::mem::size_of::<SharedMemoryHashMap<String, String>>();
+
+    // This will fail to compile if sizes don't match
+    assert!(repr_size == map_size, "SharedMapRepr and SharedMemoryHashMap size mismatch");
+};
 
 pub fn open_or_create(
     namespace: &str,
@@ -135,8 +151,34 @@ fn map_from_shmem(
         phantom: PhantomData,
     };
 
-    // SAFETY: SharedMapRepr mirrors the memory layout of SharedMemoryHashMap in the dependency crate.
-    let map: SharedMemoryHashMap<String, String> = unsafe { std::mem::transmute(repr) };
+    // SAFETY: This transmute is EXTREMELY DANGEROUS and relies on the following invariants:
+    // 1. SharedMapRepr has #[repr(C)] to ensure stable memory layout
+    // 2. Field order and types EXACTLY match SharedMemoryHashMap's internal structure
+    // 3. Both types have the same size (verified by compile-time assertion above)
+    // 4. Both types have the same alignment requirements
+    // 5. The SharedMemoryHashMap implementation doesn't change its internal layout
+    //
+    // RISKS:
+    // - If shared_hashmap crate is updated and changes its internal structure, this will
+    //   cause UNDEFINED BEHAVIOR
+    // - This bypasses Rust's type safety guarantees
+    // - Memory corruption or segfaults may occur if invariants are violated
+    //
+    // ALTERNATIVES CONSIDERED:
+    // - Using SharedMemoryHashMap's public API (if available) would be safer
+    // - Contributing a safe constructor to the shared_hashmap crate would be ideal
+    //
+    // TODO: Consider replacing this with a safe API or contributing to upstream crate
+    let map: SharedMemoryHashMap<String, String> = unsafe {
+        // Add alignment check at runtime
+        debug_assert_eq!(
+            std::mem::align_of_val(&repr),
+            std::mem::align_of::<SharedMemoryHashMap<String, String>>(),
+            "Alignment mismatch between SharedMapRepr and SharedMemoryHashMap"
+        );
+
+        std::mem::transmute(repr)
+    };
 
     if init {
         let contents = SharedContents::<String, String> {
@@ -148,9 +190,27 @@ fn map_from_shmem(
         let guard = map
             .lock()
             .map_err(|e| SharedMapError::LockGuard(e.to_string()))?;
+
+        // SAFETY: This pointer manipulation requires:
+        // 1. The lock guard guarantees exclusive access to the memory
+        // 2. SharedContents must have compatible layout with SharedMemoryContents
+        // 3. The memory region is large enough (verified above)
+        // 4. The pointer is properly aligned (shared memory ensures alignment)
+        //
+        // RISKS:
+        // - Type punning between SharedMemoryContents and SharedContents
+        // - If layouts don't match, this causes undefined behavior
         unsafe {
             let target = *guard as *mut SharedMemoryContents<String, String>
                 as *mut SharedContents<String, String>;
+
+            // Verify alignment before writing
+            debug_assert_eq!(
+                (target as usize) % std::mem::align_of::<SharedContents<String, String>>(),
+                0,
+                "Target pointer is not properly aligned"
+            );
+
             core::ptr::write(target, contents);
         }
     }
