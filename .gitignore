@@ -54,3 +54,26 @@ target/release/
 *.dll
 *.so
 *.dylib
+
+# Compilation artifacts (Rust specific)
+*.o
+*.obj
+*.rcgu.o
+*.a
+*.lib
+
+# Code review and temp files
+codex_review*
+review_request*
+debug_test*.rs
+test_registry*.rs
+test_special_chars.*
+
+# Claude and AI assistant files
+claude*
+ai_*.log
+integration*.log
+
+# Schema and temporary config
+/schema/
+*.schema.json
