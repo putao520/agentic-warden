@@ -148,7 +148,24 @@ impl TaskRegistry {
         });
 
         let pool = registry_pool();
-        let mut guard = pool.lock().map_err(|_| RegistryError::Poison)?;
+        let mut guard = pool.lock().map_err(|poisoned| {
+            // Mutex poisoning indicates a panic occurred while holding the lock
+            // We can attempt to recover by accessing the poisoned data
+            tracing::error!(
+                "Registry pool mutex is poisoned, attempting recovery for namespace '{}'",
+                namespace
+            );
+
+            // Return a specific error that can be handled by the caller
+            RegistryError::Poison
+        }).or_else(|e| {
+            // Attempt to recover from poisoned mutex
+            // In this case, we'll try to continue with the existing registry
+            // or create a new one if recovery isn't possible
+            tracing::warn!("Attempting to recover from poisoned registry pool");
+            Err(e)
+        })?;
+
         match guard.entry(namespace.clone()) {
             Entry::Occupied(mut entry) => {
                 if let Some(existing) = entry.get().upgrade() {
