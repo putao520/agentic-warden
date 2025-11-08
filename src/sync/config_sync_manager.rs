@@ -1113,6 +1113,7 @@ mod tests {
 }
 
 /// Copy directory contents recursively
+#[allow(dead_code)]
 fn copy_dir_contents(source: &Path, dest: &Path) -> ErrorResult<()> {
     for entry in walkdir::WalkDir::new(source) {
         let entry = entry

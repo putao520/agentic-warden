@@ -30,6 +30,7 @@ pub enum DialogResult {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 enum DialogKind {
     Info,
     Error,
@@ -47,6 +48,7 @@ pub struct DialogState {
 }
 
 impl DialogState {
+    #[allow(dead_code)]
     pub fn info(title: String, message: String) -> Self {
         Self {
             title,
@@ -57,6 +59,7 @@ impl DialogState {
         }
     }
 
+    #[allow(dead_code)]
     pub fn error(title: String, message: String) -> Self {
         Self {
             title,
@@ -199,6 +202,7 @@ impl DialogState {
 
 /// Input state - renders using ONLY ratatui standard components
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct InputState {
     label: String,
     value: String,

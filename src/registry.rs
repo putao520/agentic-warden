@@ -39,6 +39,7 @@ pub struct TaskRegistry {
 
 #[derive(Debug)]
 struct RegistryInner {
+    #[allow(dead_code)]
     namespace: String,
     map: ParkingMutex<SharedMemoryHashMap<String, String>>,
 }
@@ -148,7 +149,7 @@ impl TaskRegistry {
         });
 
         let pool = registry_pool();
-        let mut guard = pool.lock().map_err(|poisoned| {
+        let mut guard = pool.lock().map_err(|_poisoned| {
             // Mutex poisoning indicates a panic occurred while holding the lock
             // We can attempt to recover by accessing the poisoned data
             tracing::error!(

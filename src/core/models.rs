@@ -42,24 +42,10 @@ impl TaskId {
     }
 }
 
-/// 任务状态
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum TaskStatus {
-    /// 等待启动
-    Pending,
-    /// 正在运行
-    Running,
-    /// 已完成
-    Completed,
-    /// 失败
-    Failed,
-    /// 被终止
-    Terminated,
-    /// 超时
-    Timeout,
-    /// 暂停
-    Paused,
-}
+// Note: TaskStatus is now defined in task_record.rs to follow SPEC design principles
+// SPEC: "简洁实用的TaskRecord结构" - only Running and CompletedButUnread states
+// Re-export from task_record for compatibility
+pub use crate::task_record::TaskStatus;
 
 /// 进程树信息，包含完整进程链与AI CLI元数据
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -333,31 +319,8 @@ pub struct TaskInfo {
     pub child_pid: Option<u32>,
     /// 工作目录
     pub working_directory: PathBuf,
-    /// 环境变量快照
-    pub environment: HashMap<String, String>,
-    /// 命令行参数
-    pub command_line: Vec<String>,
-    /// 输出文件路径（如果有）
-    pub output_file: Option<PathBuf>,
     /// 错误信息
     pub error_message: Option<String>,
-    /// 资源使用情况
-    pub resource_usage: Option<ResourceUsage>,
-}
-
-/// 资源使用情况
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResourceUsage {
-    /// CPU 使用率 (0-100)
-    pub cpu_percent: f64,
-    /// 内存使用量（字节）
-    pub memory_usage: u64,
-    /// 运行时间
-    pub duration: std::time::Duration,
-    /// 网络使用量（字节）
-    pub network_bytes: Option<u64>,
-    /// 磁盘 I/O（字节）
-    pub disk_io: Option<u64>,
 }
 
 /// Provider 配置

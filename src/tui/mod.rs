@@ -34,6 +34,7 @@ pub struct App {
     current_screen: ScreenType,
     screens: HashMap<ScreenType, Box<dyn screens::Screen>>,
     history: Vec<ScreenType>,
+    #[allow(dead_code)]
     data_binding: DataBindingController,
 }
 
