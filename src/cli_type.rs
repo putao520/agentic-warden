@@ -1,3 +1,5 @@
+#![allow(dead_code)] // CLI类型定义，部分类型是API的一部分
+
 use crate::cli_manager::CliToolDetector;
 use crate::config::{CLAUDE_BIN, CODEX_BIN, GEMINI_BIN};
 use crate::error::{errors, AgenticResult, AgenticWardenError};

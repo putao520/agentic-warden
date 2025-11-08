@@ -249,49 +249,32 @@ impl App {
 - **性能优化**: 使用缓存避免重复的进程树遍历
 - **跨平台支持**: 优化Windows下的进程查找，避免explorer.exe问题
 
-**AI CLI识别规则**:
-```rust
-/// 支持的AI CLI类型
-/// Native: claude, claude-cli, codex, codex-cli, gemini, gemini-cli
-/// NPM包: @anthropic-ai/claude-cli, codex-cli, @google/generative-ai-cli
-fn is_ai_cli_process(process_name: &str) -> bool {
-    // 1. 精确匹配Native进程
-    // 2. 部分匹配（排除混淆进程如claude-desktop）
-    // 3. NPM进程检测 + 命令行参数分析
-}
-```
+**设计原则**: 使用简洁的独立函数，遵循KISS原则，避免不必要的Manager结构
 
-**主要结构**:
+**主要函数和结构**:
 ```rust
 /// 进程树信息，包含完整的进程链
 pub struct ProcessTreeInfo {
     pub process_chain: Vec<u32>,      // 从当前到根的PID链
     pub root_parent_pid: Option<u32>, // AI CLI根进程PID
     pub depth: usize,                 // 进程树深度
+    pub ai_cli_process: Option<AiCliProcessInfo>, // AI CLI进程信息
 }
 
-/// 进程树管理器
-pub struct ProcessTreeManager {
-    registry: Arc<TaskRegistry>,
-    root_process_cache: OnceLock<u32>, // 性能优化缓存
-}
+/// 获取AI CLI根进程（带全局缓存）
+pub fn get_root_parent_pid_cached() -> Result<u32>;
 
-impl ProcessTreeManager {
-    /// 获取AI CLI根进程（带缓存）
-    pub fn get_root_parent_cached() -> Result<u32, ProcessTreeError>;
+/// 查找最近的AI CLI进程作为根进程
+pub fn find_ai_cli_root_parent(pid: u32) -> Result<u32>;
 
-    /// 查找最近的AI CLI进程作为根进程
-    pub fn find_ai_cli_root_parent(pid: u32) -> Result<u32, ProcessTreeError>;
+/// 获取完整进程树信息
+pub fn get_process_tree(pid: u32) -> Result<ProcessTreeInfo>;
 
-    /// 获取特定AI CLI类型的进程
-    pub fn get_ai_cli_process(ai_type: &str) -> Option<ProcessInfo>;
+/// 检查两个进程是否属于同一AI CLI根进程
+pub fn same_root_parent(pid1: u32, pid2: u32) -> Result<bool>;
 
-    /// 检查两个进程是否属于同一AI CLI根进程
-    pub fn same_ai_cli_root(pid1: u32, pid2: u32) -> Result<bool, ProcessTreeError>;
-
-    /// 获取完整进程树信息
-    pub fn get_process_tree(pid: u32) -> Result<ProcessTreeInfo, ProcessTreeError>;
-}
+/// 获取进程名称（跨平台）
+pub fn get_process_name(pid: u32) -> Option<String>;
 ```
 
 #### 3.2 core/task_tracker.rs

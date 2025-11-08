@@ -6,9 +6,10 @@ pub mod config_paths;
 pub mod logger;
 pub mod version;
 
-pub use config_paths::ConfigPaths;
-pub use logger::init_logger;
-pub use version::BuildInfo;
+// Re-exports removed - not used in current implementation
+// pub use config_paths::ConfigPaths;
+// pub use logger::init_logger;
+// pub use version::BuildInfo;
 
 /// 获取实例ID
 pub fn get_instance_id() -> u32 {

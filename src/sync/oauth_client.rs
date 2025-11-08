@@ -43,7 +43,7 @@ pub struct OAuthTokenResponse {
 #[derive(Debug, Clone)]
 pub struct OAuthClient {
     config: OAuthConfig,
-    #[allow(dead_code)]
+    /// Path to the file where OAuth tokens are persisted
     auth_file_path: PathBuf,
 }
 
@@ -120,6 +120,12 @@ impl OAuthClient {
             }
             self.config.expires_in = token_response.expires_in;
 
+            // Persist tokens to disk for future use
+            if let Err(e) = self.save() {
+                // Log error but don't fail the operation
+                debug!("Warning: Failed to save OAuth tokens to disk: {}", e);
+            }
+
             Ok(token_response)
         } else {
             let error_text = response.text().await?;
@@ -178,6 +184,12 @@ impl OAuthClient {
             }
             self.config.expires_in = token_response.expires_in;
 
+            // Persist refreshed tokens to disk
+            if let Err(e) = self.save() {
+                // Log error but don't fail the operation
+                debug!("Warning: Failed to save refreshed OAuth tokens to disk: {}", e);
+            }
+
             Ok(token_response)
         } else {
             let error_text = response.text().await?;
@@ -193,6 +205,79 @@ impl OAuthClient {
     /// Check if client is authenticated
     pub fn is_authenticated(&self) -> bool {
         self.config.access_token.is_some() || self.config.refresh_token.is_some()
+    }
+
+    /// Save OAuth configuration to disk
+    ///
+    /// Persists the OAuth tokens and configuration to a JSON file in the user's
+    /// config directory. This allows tokens to be reused across application restarts.
+    pub fn save(&self) -> Result<()> {
+        debug!("Saving OAuth configuration to {:?}", self.auth_file_path);
+
+        // Ensure the parent directory exists
+        if let Some(parent) = self.auth_file_path.parent() {
+            std::fs::create_dir_all(parent)?;
+
+            // Set restrictive permissions on Unix systems (only user can access)
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = std::fs::metadata(parent)?.permissions();
+                perms.set_mode(0o700); // rwx------
+                std::fs::set_permissions(parent, perms)?;
+            }
+        }
+
+        // Serialize configuration to JSON
+        let json = serde_json::to_string_pretty(&self.config)?;
+
+        // Write to file
+        std::fs::write(&self.auth_file_path, json)?;
+
+        // Set restrictive permissions on the file (only user can read/write)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&self.auth_file_path)?.permissions();
+            perms.set_mode(0o600); // rw-------
+            std::fs::set_permissions(&self.auth_file_path, perms)?;
+        }
+
+        info!("OAuth configuration saved successfully");
+        Ok(())
+    }
+
+    /// Load OAuth configuration from disk
+    ///
+    /// Attempts to load previously saved OAuth tokens from disk. Returns None if
+    /// the file doesn't exist or cannot be read.
+    pub fn load(client_id: String, client_secret: String) -> Result<Option<Self>> {
+        let auth_file_path = dirs::config_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("agentic-warden")
+            .join("auth.json");
+
+        debug!("Attempting to load OAuth configuration from {:?}", auth_file_path);
+
+        // Check if file exists
+        if !auth_file_path.exists() {
+            debug!("OAuth configuration file does not exist");
+            return Ok(None);
+        }
+
+        // Read and parse the file
+        let json = std::fs::read_to_string(&auth_file_path)?;
+        let mut config: OAuthConfig = serde_json::from_str(&json)?;
+
+        // Update client credentials (they may have changed)
+        config.client_id = client_id;
+        config.client_secret = client_secret;
+
+        info!("OAuth configuration loaded successfully");
+        Ok(Some(Self {
+            config,
+            auth_file_path,
+        }))
     }
 
     /// Validate configuration

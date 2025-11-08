@@ -1,3 +1,5 @@
+#![allow(dead_code)] // 环境变量注入，部分API当前未使用
+
 //! Environment variable injection for AI CLI processes
 
 use std::collections::HashMap;

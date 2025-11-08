@@ -237,44 +237,43 @@ fn is_ai_cli_process(process_name: &str) -> bool {
 }
 ```
 
-##### 核心结构设计
+##### 核心设计
+
+**进程树管理** (src/core/process_tree.rs):
+采用简洁的独立函数设计，避免不必要的Manager结构（KISS原则）
 
 ```rust
-pub struct ProcessTreeManager {
-    registry: Arc<TaskRegistry>,
-    // 使用缓存优化性能
-    root_process_cache: OnceLock<u32>,
-}
+/// 获取AI CLI根进程（带全局缓存）
+pub fn get_root_parent_pid_cached() -> Result<u32>;
 
-impl ProcessTreeManager {
-    /// 获取当前进程的AI CLI根进程（带缓存）
-    pub fn get_root_parent_cached(&self) -> Result<u32, ProcessTreeError>;
+/// 查找最近的AI CLI进程作为根进程
+pub fn find_ai_cli_root_parent(pid: u32) -> Result<u32>;
 
-    /// 追踪新的AI CLI进程
-    pub fn track_ai_cli_process(&mut self, cmd: &AiCliCommand) -> Result<TaskId>;
+/// 检查两个进程是否属于同一AI CLI根进程
+pub fn same_root_parent(pid1: u32, pid2: u32) -> Result<bool>;
 
-    /// 获取所有任务，按AI CLI根进程分组
-    pub fn get_tasks_by_ai_cli_root(&self) -> HashMap<u32, Vec<TaskInfo>>;
-
-    /// 检查两个进程是否属于同一个AI CLI根进程
-    pub fn same_ai_cli_root(&self, pid1: u32, pid2: u32) -> Result<bool, ProcessTreeError>;
-}
+/// 获取完整进程树信息
+pub fn get_process_tree(pid: u32) -> Result<ProcessTreeInfo>;
 ```
 
-pub struct TaskInfo {
-    pub id: TaskId,
-    pub parent_process: ProcessInfo,
-    pub ai_type: AiType,
-    pub prompt_preview: String,
-    pub status: TaskStatus,
-    pub start_time: SystemTime,
-}
+**任务模型** (src/task_record.rs):
+统一使用TaskRecord作为唯一的任务数据结构
 
+```rust
 pub enum TaskStatus {
     Running,
-    Completed,
-    Failed,
-    Terminated,
+    CompletedButUnread,
+}
+
+pub struct TaskRecord {
+    pub started_at: DateTime<Utc>,
+    pub log_id: String,
+    pub log_path: String,
+    pub status: TaskStatus,
+    pub exit_code: Option<i32>,
+    pub process_chain: Vec<u32>,
+    pub root_parent_pid: Option<u32>,
+    // ... 其他字段见src/task_record.rs
 }
 ```
 

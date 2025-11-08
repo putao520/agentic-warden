@@ -2,6 +2,8 @@
 //!
 //! 定义系统中使用的所有核心数据结构
 
+#![allow(dead_code)] // 数据模型定义，部分结构和函数是公共API
+
 use crate::error::{AgenticResult, AgenticWardenError};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -31,29 +33,15 @@ impl TaskId {
         Self(
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_else(|_| {
+                    // Fallback: Use a pseudo-random value if system time is before UNIX_EPOCH
+                    // This should never happen on properly configured systems
+                    use std::time::Duration;
+                    Duration::from_nanos(std::process::id() as u64)
+                })
                 .as_nanos() as u64,
         )
     }
-}
-
-/// 任务状态
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum TaskStatus {
-    /// 等待启动
-    Pending,
-    /// 正在运行
-    Running,
-    /// 已完成
-    Completed,
-    /// 失败
-    Failed,
-    /// 被终止
-    Terminated,
-    /// 超时
-    Timeout,
-    /// 暂停
-    Paused,
 }
 
 /// 进程树信息，包含完整进程链与AI CLI元数据
@@ -299,60 +287,6 @@ pub struct ProcessInfo {
     pub is_root: bool,
     /// 进程树深度
     pub depth: u32,
-}
-
-/// 任务信息
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TaskInfo {
-    /// 任务唯一标识符
-    pub id: TaskId,
-    /// AI CLI 类型
-    pub ai_type: AiType,
-    /// 使用的 Provider
-    pub provider: Option<String>,
-    /// 提示词预览（前 50 个字符）
-    pub prompt_preview: String,
-    /// 完整提示词长度
-    pub prompt_length: usize,
-    /// 任务状态
-    pub status: TaskStatus,
-    /// 创建时间
-    pub created_at: SystemTime,
-    /// 开始时间
-    pub started_at: Option<SystemTime>,
-    /// 结束时间
-    pub completed_at: Option<SystemTime>,
-    /// 父进程信息
-    pub parent_process: ProcessInfo,
-    /// 子进程 PID
-    pub child_pid: Option<u32>,
-    /// 工作目录
-    pub working_directory: PathBuf,
-    /// 环境变量快照
-    pub environment: HashMap<String, String>,
-    /// 命令行参数
-    pub command_line: Vec<String>,
-    /// 输出文件路径（如果有）
-    pub output_file: Option<PathBuf>,
-    /// 错误信息
-    pub error_message: Option<String>,
-    /// 资源使用情况
-    pub resource_usage: Option<ResourceUsage>,
-}
-
-/// 资源使用情况
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResourceUsage {
-    /// CPU 使用率 (0-100)
-    pub cpu_percent: f64,
-    /// 内存使用量（字节）
-    pub memory_usage: u64,
-    /// 运行时间
-    pub duration: std::time::Duration,
-    /// 网络使用量（字节）
-    pub network_bytes: Option<u64>,
-    /// 磁盘 I/O（字节）
-    pub disk_io: Option<u64>,
 }
 
 /// Provider 配置

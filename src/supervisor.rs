@@ -280,9 +280,39 @@ pub fn execute_cli(
     Ok(extract_exit_code(status))
 }
 
+/// Generate a secure log file path in a user-specific directory
+///
+/// Security considerations:
+/// - Uses user-specific directory (~/.agentic-warden/logs/) instead of shared /tmp
+/// - Creates directory with restrictive permissions (0700 on Unix)
+/// - Ensures logs are only accessible by the current user
 fn generate_log_path(pid: u32) -> io::Result<PathBuf> {
-    let tmp = std::env::temp_dir();
-    Ok(tmp.join(format!("{pid}.log")))
+    // Use user-specific directory instead of shared temp directory
+    let log_dir = if let Some(config_dir) = dirs::config_dir() {
+        config_dir.join("agentic-warden").join("logs")
+    } else {
+        // Fallback to home directory if config_dir is not available
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_else(|_| ".".to_string());
+        PathBuf::from(home).join(".agentic-warden").join("logs")
+    };
+
+    // Create the logs directory if it doesn't exist
+    if !log_dir.exists() {
+        std::fs::create_dir_all(&log_dir)?;
+
+        // Set restrictive permissions on Unix systems (only user can read/write/execute)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&log_dir)?.permissions();
+            perms.set_mode(0o700); // rwx------
+            std::fs::set_permissions(&log_dir, perms)?;
+        }
+    }
+
+    Ok(log_dir.join(format!("{pid}.log")))
 }
 
 #[derive(Copy, Clone)]

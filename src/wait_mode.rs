@@ -480,49 +480,60 @@ mod tests {
     use super::*;
     use crate::task_record::TaskRecord;
     use chrono::Utc;
+    use serial_test::serial;
     use std::env;
-    use std::sync::Mutex;
 
-    static ENV_GUARD: Mutex<()> = Mutex::new(());
+    /// Helper to safely set environment variable for testing
+    ///
+    /// Note: Environment variables are process-global, so these tests must run serially
+    /// using the #[serial] attribute from serial_test crate.
+    fn set_test_env(key: &str, value: &str) {
+        env::set_var(key, value);
+    }
 
-    fn clear_env() {
-        unsafe {
-            env::remove_var(WAIT_INTERVAL_ENV);
-            env::remove_var(LEGACY_WAIT_INTERVAL_ENV);
+    /// Helper to safely clear test environment variables
+    fn clear_test_env() {
+        env::remove_var(WAIT_INTERVAL_ENV);
+        env::remove_var(LEGACY_WAIT_INTERVAL_ENV);
+    }
+
+    /// Cleanup guard that ensures environment variables are cleared after test
+    struct EnvCleanup;
+
+    impl Drop for EnvCleanup {
+        fn drop(&mut self) {
+            clear_test_env();
         }
     }
 
     #[test]
+    #[serial] // Ensure tests run one at a time to avoid env var conflicts
     fn prefers_primary_interval_env() {
-        let _lock = ENV_GUARD.lock().unwrap();
-        clear_env();
-        unsafe {
-            env::set_var(WAIT_INTERVAL_ENV, "45");
-        }
+        let _cleanup = EnvCleanup;
+        clear_test_env();
+
+        set_test_env(WAIT_INTERVAL_ENV, "45");
         assert_eq!(read_interval(), Duration::from_secs(45));
-        clear_env();
     }
 
     #[test]
+    #[serial] // Ensure tests run one at a time to avoid env var conflicts
     fn falls_back_to_legacy_env() {
-        let _lock = ENV_GUARD.lock().unwrap();
-        clear_env();
-        unsafe {
-            env::set_var(LEGACY_WAIT_INTERVAL_ENV, "90");
-        }
+        let _cleanup = EnvCleanup;
+        clear_test_env();
+
+        set_test_env(LEGACY_WAIT_INTERVAL_ENV, "90");
         assert_eq!(read_interval(), Duration::from_secs(90));
-        clear_env();
     }
 
     #[test]
+    #[serial] // Ensure tests run one at a time to avoid env var conflicts
     fn returns_default_on_invalid_values() {
-        let _lock = ENV_GUARD.lock().unwrap();
-        clear_env();
-        unsafe {
-            env::set_var(WAIT_INTERVAL_ENV, "not-a-number");
-        }
+        let _cleanup = EnvCleanup;
+        clear_test_env();
+
+        set_test_env(WAIT_INTERVAL_ENV, "not-a-number");
         assert_eq!(read_interval(), WAIT_INTERVAL_DEFAULT);
-        clear_env();
     }
 
     #[test]

@@ -3,6 +3,8 @@
 //! This module provides a comprehensive error handling system with
 //! proper error classification, context, and recovery mechanisms.
 
+#![allow(dead_code)] // 错误处理模块，部分辅助函数是公共API
+
 use anyhow::Error as AnyhowError;
 use std::collections::HashMap;
 use std::fmt;

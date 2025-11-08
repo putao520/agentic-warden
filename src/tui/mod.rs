@@ -22,7 +22,6 @@ mod data_binding;
 pub mod app;
 pub mod app_state;
 pub mod screens;
-pub mod widgets;
 
 use self::data_binding::DataBindingController;
 
@@ -35,6 +34,7 @@ pub struct App {
     current_screen: ScreenType,
     screens: HashMap<ScreenType, Box<dyn screens::Screen>>,
     history: Vec<ScreenType>,
+    #[allow(dead_code)]
     data_binding: DataBindingController,
 }
 
@@ -143,7 +143,11 @@ impl App {
             ScreenAction::Back => {
                 if self.history.len() > 1 {
                     self.history.pop();
-                    self.current_screen = self.history.last().unwrap().clone();
+                    // Safe: We just checked that len > 1, so after pop there's at least 1 element
+                    self.current_screen = self.history
+                        .last()
+                        .expect("history should have at least one screen after pop")
+                        .clone();
                 }
             }
             ScreenAction::Quit => {

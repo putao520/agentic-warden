@@ -1,4 +1,5 @@
 use crate::provider::network_detector::NetworkStatus;
+use crate::sync::directory_hasher::DirectoryHash;
 use crate::sync::error::{SyncError, SyncResult};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -66,13 +67,6 @@ impl Default for SyncState {
             network_last_checked: Utc::now(),
         }
     }
-}
-
-/// Hash and metadata for a directory snapshot.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct DirectoryHash {
-    pub hash: String,
-    pub last_modified: Option<DateTime<Utc>>,
 }
 
 /// Resolve the default sync file path within the agentic-warden directory.
@@ -180,7 +174,9 @@ mod tests {
             "test".to_string(),
             DirectoryHash {
                 hash: "abc123".to_string(),
-                last_modified: None,
+                file_count: 0,
+                total_size: 0,
+                timestamp: Utc::now(),
             },
         );
 

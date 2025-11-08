@@ -53,13 +53,69 @@ impl ProviderManager {
     }
 
     fn validate_provider(&self, provider_id: &str, provider: &Provider) -> ProviderResult<()> {
+        // Validate provider ID
+        const MAX_ID_LENGTH: usize = 100;
+        if provider_id.trim().is_empty() {
+            return Err(ProviderError::InvalidConfig(
+                "Provider ID cannot be empty".to_string()
+            ));
+        }
+        if provider_id.len() > MAX_ID_LENGTH {
+            return Err(ProviderError::InvalidConfig(format!(
+                "Provider ID '{}' exceeds maximum length of {} characters",
+                provider_id, MAX_ID_LENGTH
+            )));
+        }
+        // Prevent path traversal in provider IDs
+        if provider_id.contains("..") || provider_id.contains('/') || provider_id.contains('\\') {
+            return Err(ProviderError::InvalidConfig(format!(
+                "Provider ID '{}' contains invalid characters (.. / \\)",
+                provider_id
+            )));
+        }
+
+        // Validate provider name
+        const MAX_NAME_LENGTH: usize = 200;
         if provider.name.trim().is_empty() {
             return Err(ProviderError::InvalidConfig(format!(
                 "Display name for provider '{}' cannot be empty",
                 provider_id
             )));
         }
+        if provider.name.len() > MAX_NAME_LENGTH {
+            return Err(ProviderError::InvalidConfig(format!(
+                "Display name for provider '{}' exceeds maximum length of {} characters",
+                provider_id, MAX_NAME_LENGTH
+            )));
+        }
 
+        // Validate description length
+        const MAX_DESC_LENGTH: usize = 1000;
+        if provider.description.len() > MAX_DESC_LENGTH {
+            return Err(ProviderError::InvalidConfig(format!(
+                "Description for provider '{}' exceeds maximum length of {} characters",
+                provider_id, MAX_DESC_LENGTH
+            )));
+        }
+
+        // Validate website URL format
+        if let Some(website) = &provider.website {
+            if !website.starts_with("http://") && !website.starts_with("https://") {
+                return Err(ProviderError::InvalidConfig(format!(
+                    "Website URL for provider '{}' must start with http:// or https://",
+                    provider_id
+                )));
+            }
+            // Basic URL validation - check for suspicious patterns
+            if website.contains("..") || website.contains("javascript:") || website.contains("data:") {
+                return Err(ProviderError::InvalidConfig(format!(
+                    "Website URL for provider '{}' contains suspicious patterns",
+                    provider_id
+                )));
+            }
+        }
+
+        // Validate AI type compatibility
         if provider.compatible_with.is_empty() {
             return Err(ProviderError::InvalidConfig(format!(
                 "Provider '{}' must be compatible with at least one AI type",
@@ -67,6 +123,7 @@ impl ProviderManager {
             )));
         }
 
+        // Check for duplicate AI types
         let mut seen = Vec::new();
         for ai_type in &provider.compatible_with {
             if seen.contains(ai_type) {
@@ -77,6 +134,7 @@ impl ProviderManager {
             }
             seen.push(ai_type.clone());
 
+            // Validate required environment variables
             let required_vars = get_env_vars_for_ai_type(ai_type.clone());
             for mapping in required_vars.into_iter().filter(|m| m.required) {
                 let value = provider.env.get(mapping.key).map(|s| s.trim());
@@ -86,6 +144,52 @@ impl ProviderManager {
                         provider_id, mapping.key, ai_type
                     )));
                 }
+
+                // Validate environment variable values
+                if let Some(val) = value {
+                    const MAX_ENV_VAR_LENGTH: usize = 10000;
+                    if val.len() > MAX_ENV_VAR_LENGTH {
+                        return Err(ProviderError::InvalidConfig(format!(
+                            "Environment variable '{}' for provider '{}' exceeds maximum length",
+                            mapping.key, provider_id
+                        )));
+                    }
+
+                    // Check for null bytes (security issue)
+                    if val.contains('\0') {
+                        return Err(ProviderError::InvalidConfig(format!(
+                            "Environment variable '{}' for provider '{}' contains null bytes",
+                            mapping.key, provider_id
+                        )));
+                    }
+                }
+            }
+        }
+
+        // Validate environment variable keys
+        for (key, value) in &provider.env {
+            // Check for valid environment variable names
+            if key.is_empty() || key.starts_with(char::is_numeric) {
+                return Err(ProviderError::InvalidConfig(format!(
+                    "Invalid environment variable name '{}' for provider '{}'",
+                    key, provider_id
+                )));
+            }
+
+            // Check for shell injection attempts in keys
+            if key.contains(&[';', '|', '&', '`', '$', '(', ')'][..]) {
+                return Err(ProviderError::InvalidConfig(format!(
+                    "Environment variable name '{}' contains shell metacharacters",
+                    key
+                )));
+            }
+
+            // Validate value doesn't contain null bytes
+            if value.contains('\0') {
+                return Err(ProviderError::InvalidConfig(format!(
+                    "Environment variable '{}' value contains null bytes",
+                    key
+                )));
             }
         }
 

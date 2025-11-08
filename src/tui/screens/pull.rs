@@ -5,7 +5,7 @@ use crate::error::AgenticWardenError;
 use crate::sync::config_sync_manager::{ConfigSyncManager, PullProgressEvent, SyncOperationResult};
 use crate::sync::smart_oauth::AuthState;
 use crate::tui::app_state::{AppState, SyncPhase, TransferKind, TransferProgress};
-use crate::tui::widgets::{DialogResult, DialogWidget, ProgressWidget};
+use super::render_helpers::{DialogResult, DialogState, ProgressState};
 use anyhow::{Context, Result};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
@@ -33,7 +33,7 @@ const PROVIDER_GOOGLE_DRIVE: &str = "google-drive";
 /// pull screen mode
 enum PullMode {
     CheckingAuth,
-    NeedAuth(DialogWidget),
+    NeedAuth(DialogState),
     Ready,
     Running,
     Completed,
@@ -83,7 +83,7 @@ enum PullWorkerResult {
 pub struct PullScreen {
     app_state: &'static AppState,
     directories: Vec<String>,
-    progress_widget: ProgressWidget,
+    progress_widget: ProgressState,
     mode: PullMode,
     progress: TransferProgress,
     runtime: Runtime,
@@ -114,7 +114,7 @@ impl PullScreen {
             .context("failed to load sync directories")?;
 
         let runtime = Runtime::new().context("failed to create async runtime")?;
-        let progress_widget = ProgressWidget::new("Pulling from Google Drive".to_string());
+        let progress_widget = ProgressState::new("Pulling from Google Drive".to_string());
         let app_state = AppState::global();
         app_state.clear_sync_progress(TransferKind::Pull);
 
@@ -175,7 +175,7 @@ impl PullScreen {
                         );
                     }
                     _ => {
-                        let dialog = DialogWidget::confirm(
+                        let dialog = DialogState::confirm(
                             "Authentication Required".to_string(),
                             "Google Drive authentication is required to pull configurations.\n\nOpen OAuth screen now?"
                                 .to_string(),
@@ -185,7 +185,7 @@ impl PullScreen {
                 }
             }
             Err(err) => {
-                let dialog = DialogWidget::confirm(
+                let dialog = DialogState::confirm(
                     "Authentication Required".to_string(),
                     format!(
                         "Unable to load Google Drive credentials:\n{}\n\nOpen OAuth screen now?",
@@ -931,7 +931,7 @@ mod tests {
         PullScreen {
             app_state: AppState::global(),
             directories: vec!["/tmp/project".into()],
-            progress_widget: ProgressWidget::new("Pull Test".to_string()),
+            progress_widget: ProgressState::new("Pull Test".to_string()),
             mode,
             progress: TransferProgress::for_kind(TransferKind::Pull),
             runtime: tokio::runtime::Runtime::new().expect("runtime"),

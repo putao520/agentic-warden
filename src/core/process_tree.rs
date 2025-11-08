@@ -60,6 +60,16 @@ pub enum ProcessTreeError {
     Validation(String),
 }
 
+// Add support for psutil::process::ProcessError conversion
+#[cfg(unix)]
+impl From<psutil::process::ProcessError> for ProcessTreeError {
+    fn from(err: psutil::process::ProcessError) -> Self {
+        // Convert ProcessError to ProcessTreeError using Debug formatting
+        use std::io;
+        ProcessTreeError::ProcessInfo(psutil::Error::from(io::Error::other(format!("{:?}", err))))
+    }
+}
+
 #[cfg(windows)]
 #[derive(Clone, Debug)]
 struct ProcessInfo {
@@ -481,7 +491,10 @@ fn get_parent_pid_windows(pid: u32) -> Result<Option<u32>, ProcessTreeError> {
 fn get_parent_pid_unix(pid: u32) -> Result<Option<u32>, ProcessTreeError> {
     let process = Process::new(pid.into())?;
     match process.ppid() {
-        Ok(parent_pid) => Ok(Some(parent_pid as u32)),
+        Ok(parent_pid_opt) => {
+            // ppid() returns Option<u32>, already the correct type
+            Ok(parent_pid_opt)
+        },
         Err(err) => Err(err.into()),
     }
 }

@@ -5,6 +5,9 @@ use crossterm::event::KeyEvent;
 use ratatui::{layout::Rect, Frame};
 use std::fmt;
 
+// Screen-local rendering helpers using ONLY ratatui standard components
+mod render_helpers;
+
 // Include the available screens
 pub mod dashboard;
 pub mod oauth;

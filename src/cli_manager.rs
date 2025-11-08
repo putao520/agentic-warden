@@ -4,6 +4,8 @@
 //! (Claude, Codex, Gemini). It focuses on core functionality without
 //! interactive UI components.
 
+#![allow(dead_code)] // CLI管理模块，部分功能当前未使用
+
 use anyhow::Result;
 use std::path::PathBuf;
 use std::process::Command;
