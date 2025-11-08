@@ -541,8 +541,9 @@ chmod 700 ~/.agentic-warden
 chmod 600 ~/.agentic-warden/provider.json
 chmod 600 ~/.agentic-warden/auth.json
 
-# 设置日志权限
-chmod 644 ~/.agentic-warden/agentic-warden.log
+# 注意：日志文件保存在系统临时目录，不需要设置权限
+# Linux/macOS: /tmp/.agentic-warden/logs/
+# Windows: %TEMP%\.agentic-warden\logs\
 ```
 
 ## 监控和维护
@@ -565,15 +566,29 @@ ipcs -m | grep agentic-warden
 ```
 
 #### 1.2 日志监控
+
+日志文件保存在系统临时目录：
+- Linux/macOS: `/tmp/.agentic-warden/logs/<PID>.log`
+- Windows: `%TEMP%\.agentic-warden\logs\<PID>.log`
+
 ```bash
-# 实时查看日志
-tail -f ~/.agentic-warden/agentic-warden.log
+# 实时查看日志（Linux/macOS）
+tail -f /tmp/.agentic-warden/logs/*.log
 
 # 查看错误日志
-grep ERROR ~/.agentic-warden/agentic-warden.log
+grep ERROR /tmp/.agentic-warden/logs/*.log
 
 # 查看性能日志
-grep "perf" ~/.agentic-warden/agentic-warden.log
+grep "perf" /tmp/.agentic-warden/logs/*.log
+```
+
+**Windows PowerShell**:
+```powershell
+# 实时查看日志
+Get-Content "$env:TEMP\.agentic-warden\logs\*.log" -Wait -Tail 50
+
+# 查看错误日志
+Select-String -Path "$env:TEMP\.agentic-warden\logs\*.log" -Pattern "ERROR"
 ```
 
 ### 2. 备份和恢复

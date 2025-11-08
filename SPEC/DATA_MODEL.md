@@ -759,14 +759,20 @@ impl ConfigPaths {
         let home_dir = dirs::home_dir()
             .ok_or_else(|| anyhow::anyhow!("Cannot find home directory"))?;
 
+        // 持久化配置目录：~/.agentic-warden/
         let config_dir = home_dir.join(".agentic-warden");
+
+        // 运行时数据目录：使用系统临时目录（跨平台）
+        let runtime_dir = std::env::temp_dir().join(".agentic-warden");
 
         Ok(Self {
             provider_config: config_dir.join("provider.json"),
             auth_file: config_dir.join("auth.json"),
-            log_file: config_dir.join("agentic-warden.log"),
-            temp_dir: config_dir.join("temp"),
+            config_file: config_dir.join("config.json"),
+            log_file: runtime_dir.join("agentic-warden.log"),
+            temp_dir: runtime_dir.join("temp"),
             config_dir,
+            runtime_dir,
         })
     }
 }
