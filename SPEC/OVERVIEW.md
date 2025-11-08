@@ -30,6 +30,13 @@ Agentic-Warden 是一个 AI CLI 工具的统一管理和进程监控平台，专
 - **进程归属识别**: 明确标识每个任务属于哪个AI CLI会话
 - **共享内存隔离**: 按AI CLI根进程进行计算和任务隔离
 
+### 🔌 MCP (Model Context Protocol) 服务器
+- **外部集成**: 通过 MCP 协议为外部 AI 助手提供 Agentic-Warden 功能访问
+- **进程管理工具**: `monitor_processes`, `get_process_tree`, `terminate_process`
+- **Provider 状态工具**: `get_provider_status` 获取配置信息
+- **AI CLI 启动工具**: `start_ai_cli` 通过外部方式启动 AI CLI
+- **标准传输**: 支持 stdio 传输协议，兼容 Claude Code 等 MCP 客户端
+
 ### 📁 Google Drive 集成
 - **集成式授权**: Google Drive 授权仅作为 push/pull 命令的集成步骤
 - **智能检测**: 自动检测环境（桌面/服务器/无头）并选择最佳授权方式
@@ -45,6 +52,8 @@ Agentic-Warden 是一个 AI CLI 工具的统一管理和进程监控平台，专
 
 - **语言**: Rust
 - **TUI 框架**: ratatui (0.24+) + crossterm (0.27+)
+- **MCP 协议**: Model Context Protocol v1.0，支持 stdio 传输
+- **进程监控**: 跨平台进程树遍历和 AI CLI 进程识别
 - **组件**: 使用 ratatui 组件库的现成组件
 - **授权**: Google OAuth 2.0 OOB 流程
 - **配置**: JSON 格式配置文件
@@ -80,6 +89,7 @@ Agentic-Warden 是一个 AI CLI 工具的统一管理和进程监控平台，专
 - AI CLI 统一启动和管理
 - 第三方 Provider 配置管理
 - 进程树监控和任务状态显示
+- MCP (Model Context Protocol) 服务器集成
 - Google Drive 集成（push/pull）
 - 统一 TUI 界面
 
