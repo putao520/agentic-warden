@@ -80,9 +80,10 @@ impl CliType {
             }
             CliType::Gemini => {
                 vec![
+                    "-p".to_string(),
+                    prompt.to_string(),
                     "--approval-mode".to_string(),
                     "yolo".to_string(),
-                    prompt.to_string(),
                 ]
             }
         }
