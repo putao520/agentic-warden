@@ -496,6 +496,11 @@ pub async fn start_interactive_cli(
 
     // Interactive mode: launch CLI with stdin/stdout/stderr inherited
     let mut command = Command::new(&cli_command);
+
+    // Add interactive args (e.g., "exec" for Codex, "-p" for Claude)
+    let interactive_args = cli_type.build_interactive_args();
+    command.args(&interactive_args);
+
     command.stdin(Stdio::inherit());
     command.stdout(Stdio::inherit());
     command.stderr(Stdio::inherit());
