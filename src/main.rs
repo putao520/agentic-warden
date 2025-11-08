@@ -18,7 +18,7 @@ mod tui;
 mod utils;
 mod wait_mode;
 
-use crate::cli_type::parse_cli_selector_strict;
+use crate::cli_type::{parse_cli_selector_strict, parse_cli_type};
 use crate::commands::ai_cli::AiCliCommand;
 use crate::commands::{parse_external_as_ai_cli, Cli, Commands, parser::McpAction};
 use crate::error::ErrorCategory;
@@ -62,28 +62,32 @@ async fn main() -> ExitCode {
 }
 
 async fn handle_external_ai_cli(args: &[String]) -> Result<ExitCode, String> {
-    let ai_type = &args[0];
-    let prompt: String = args[1..].join(" ");
+    // args[0] 是程序名 "agentic-warden"
+    // args[1] 是 CLI type "codex"/"claude"/"gemini"
+    // args[2..] 是实际的 prompt
+
+    if args.len() < 3 {
+        return Err("Please provide a task description".to_string());
+    }
+
+    let cli_type_str = &args[1];
+    let prompt: String = args[2..].join(" ");
 
     if prompt.trim().is_empty() {
         return Err("Please provide a task description".to_string());
     }
 
-    println!("🚀 Starting {} with task: {}", ai_type, prompt);
+    // 解析 CLI 类型
+    let cli_type = match parse_cli_type(cli_type_str) {
+        Some(t) => t,
+        None => return Err(format!("Unsupported AI CLI type: {}", cli_type_str)),
+    };
 
-    // 使用tokio::process::Command - 异步命令执行，共享运行时
-    let status = tokio::process::Command::new(ai_type)
-        .arg("exec")
-        .arg(&prompt)
-        .status()
-        .await
-        .map_err(|e| format!("Failed to execute {}: {}", ai_type, e))?;
+    println!("🚀 Starting {} with task: {}", cli_type_str, prompt);
 
-    if status.success() {
-        Ok(ExitCode::from(0))
-    } else {
-        Ok(ExitCode::from(status.code().unwrap_or(1) as u8))
-    }
+    // 使用 AiCliCommand 来执行，而不是递归调用 agentic-warden
+    let command = AiCliCommand::new(vec![cli_type], None, prompt);
+    command.execute().await.map_err(|e| e.to_string())
 }
 
 async fn main_impl(command: Commands) -> Result<ExitCode, String> {
