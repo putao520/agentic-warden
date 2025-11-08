@@ -191,6 +191,54 @@ fn read_process_info_windows(
     Ok(snapshot)
 }
 
+/// ProcessTreeManager - 进程树管理器（符合SPEC ARCHITECTURE.md:242-262）
+///
+/// 提供进程树管理和AI CLI归属追踪功能
+/// 注意：不包含registry字段以避免循环依赖，registry相关操作在TaskRegistry中实现
+pub struct ProcessTreeManager {
+    /// AI CLI根进程缓存（性能优化）
+    root_process_cache: OnceLock<u32>,
+}
+
+impl ProcessTreeManager {
+    /// 创建新的进程树管理器
+    pub fn new() -> Self {
+        Self {
+            root_process_cache: OnceLock::new(),
+        }
+    }
+
+    /// 获取AI CLI根进程（带缓存）- 符合SPEC
+    pub fn get_root_parent_cached(&self) -> Result<u32, ProcessTreeError> {
+        if let Some(&cached_pid) = self.root_process_cache.get() {
+            Ok(cached_pid)
+        } else {
+            let current_pid = std::process::id();
+            let ai_root_pid = find_ai_cli_root_parent(current_pid)
+                .map_err(|e| ProcessTreeError::Validation(e.to_string()))?;
+            let _ = self.root_process_cache.set(ai_root_pid);
+            Ok(ai_root_pid)
+        }
+    }
+
+    /// 检查两个进程是否属于同一个AI CLI根进程 - 符合SPEC
+    pub fn same_ai_cli_root(&self, pid1: u32, pid2: u32) -> Result<bool, ProcessTreeError> {
+        same_root_parent(pid1, pid2)
+            .map_err(|e| ProcessTreeError::Validation(e.to_string()))
+    }
+
+    /// 获取完整进程树信息
+    pub fn get_process_tree(&self, pid: u32) -> Result<ProcessTreeInfo, ProcessTreeError> {
+        get_process_tree_internal(pid)
+    }
+}
+
+impl Default for ProcessTreeManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ProcessTreeInfo {
     /// Get the current process tree information
     pub fn current() -> AgenticResult<Self> {

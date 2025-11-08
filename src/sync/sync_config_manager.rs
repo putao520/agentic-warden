@@ -1,56 +1,10 @@
+// 导入sync_config.rs中的数据结构定义，避免重复定义
 use super::directory_hasher::DirectoryHash;
 use super::error::{SyncError, SyncResult};
-use serde::{Deserialize, Serialize};
+use super::sync_config::{SyncConfig, SyncData, SyncState};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-
-/// Unified sync data structure containing configuration and status information
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SyncData {
-    pub config: SyncConfig,
-    pub state: SyncState,
-}
-
-/// Configuration information
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SyncConfig {
-    pub directories: Vec<String>,
-    pub auto_sync_enabled: bool,
-    pub sync_interval_minutes: u64,
-}
-
-/// Status information
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SyncState {
-    pub directories: HashMap<String, DirectoryHash>,
-    pub last_sync: chrono::DateTime<chrono::Utc>,
-    pub version: u32,
-}
-
-impl Default for SyncState {
-    fn default() -> Self {
-        Self {
-            directories: HashMap::new(),
-            last_sync: chrono::Utc::now(),
-            version: 1,
-        }
-    }
-}
-
-impl Default for SyncConfig {
-    fn default() -> Self {
-        Self {
-            directories: vec![
-                "~/.claude".to_string(),
-                "~/.codex".to_string(),
-                "~/.gemini".to_string(),
-            ],
-            auto_sync_enabled: false,
-            sync_interval_minutes: 60,
-        }
-    }
-}
 
 pub struct SyncConfigManager {
     sync_path: String,
