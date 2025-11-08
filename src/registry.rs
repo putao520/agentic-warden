@@ -1,3 +1,5 @@
+#![allow(dead_code)] // 任务注册表，部分API函数当前未使用
+
 use crate::config::{MAX_RECORD_AGE, SHARED_MEMORY_SIZE, SHARED_NAMESPACE};
 use crate::core::process_tree::get_root_parent_pid_cached;
 use crate::core::shared_map::{open_or_create, SharedMapError};

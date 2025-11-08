@@ -13,7 +13,7 @@ pub mod network_detector;
 pub mod recommendation_engine;
 pub mod token_validator;
 
-// Re-export commonly used types
-pub use config::{AiType, Provider};
+// Re-export commonly used types (some removed as unused)
+pub use config::AiType;
 pub use env_injector::EnvInjector;
 pub use manager::ProviderManager;

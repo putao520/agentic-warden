@@ -6,6 +6,5 @@ pub mod ai_cli;
 pub mod parser;
 pub mod tui_commands;
 
-pub use ai_cli::*;
+// Re-exports (used by main.rs)
 pub use parser::*;
-pub use tui_commands::*;

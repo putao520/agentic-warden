@@ -1,3 +1,5 @@
+#![allow(dead_code)] // TUI状态管理，部分枚举变体当前未使用
+
 //! Shared TUI application state with global access.
 //!
 //! Exposes a lightweight singleton that coordinates OAuth flows and sync

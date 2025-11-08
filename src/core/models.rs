@@ -2,6 +2,8 @@
 //!
 //! 定义系统中使用的所有核心数据结构
 
+#![allow(dead_code)] // 数据模型定义，部分结构和函数是公共API
+
 use crate::error::{AgenticResult, AgenticWardenError};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};

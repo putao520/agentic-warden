@@ -1,3 +1,5 @@
+#![allow(dead_code)] // 同步错误模块，部分API函数当前未使用
+
 use crate::error::{errors, AgenticResult, AgenticWardenError, SyncOperation};
 use anyhow::Error as AnyError;
 use base64::DecodeError;

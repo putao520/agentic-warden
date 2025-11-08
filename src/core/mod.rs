@@ -6,6 +6,6 @@ pub mod models;
 pub mod process_tree;
 pub mod shared_map;
 
-pub use models::*;
+// Re-exports (used by lib.rs)
+pub use models::ProcessTreeInfo;
 pub use process_tree::*;
-pub use shared_map::*;
