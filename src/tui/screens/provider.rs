@@ -1172,7 +1172,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "TUI test hangs due to CLI detection (which::which) - run with --ignored"]
     fn provider_screen_renders_provider_list() {
         let _home = TempHome::new();
         let mut screen = ProviderScreen::new().expect("screen should initialise");
@@ -1193,7 +1192,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "TUI test hangs due to CLI detection (which::which) - run with --ignored"]
     fn provider_screen_handles_list_shortcuts() {
         let _home = TempHome::new();
         let mut screen = ProviderScreen::new().expect("screen should initialise");

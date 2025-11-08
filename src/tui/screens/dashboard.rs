@@ -87,6 +87,17 @@ impl DashboardScreen {
         Ok(screen)
     }
 
+    /// Create a new dashboard screen for testing without CLI detection
+    #[cfg(test)]
+    fn new_for_test() -> Result<Self> {
+        Ok(Self {
+            state: DashboardState::default(),
+            last_refresh: None,
+            last_error: None,
+            app_state: AppState::global(),
+        })
+    }
+
     fn refresh_cli_state(&mut self) {
         match Self::fetch_cli_status() {
             Ok(cli_status) => {
@@ -565,10 +576,9 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "TUI test hangs due to CLI detection (which::which) - run with --ignored"]
     fn dashboard_screen_renders_sections() {
         let _home = TempHome::new();
-        let mut screen = DashboardScreen::new().expect("screen should initialise");
+        let mut screen = DashboardScreen::new_for_test().expect("screen should initialise");
 
         screen.state = DashboardState {
             cli_status: vec![AiCliStatus {
@@ -608,10 +618,9 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "TUI test hangs due to CLI detection (which::which) - run with --ignored"]
     fn dashboard_key_handling_switches_screens_and_quits() {
         let _home = TempHome::new();
-        let mut screen = DashboardScreen::new().expect("screen should initialise");
+        let mut screen = DashboardScreen::new_for_test().expect("screen should initialise");
 
         let provider = screen
             .handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE))

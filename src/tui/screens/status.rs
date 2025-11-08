@@ -497,7 +497,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "TUI test hangs due to CLI detection (which::which) - run with --ignored"]
     fn groups_tasks_by_manager_and_root_pid() {
         let tasks = vec![
             sample_task(10, Some(1), None),
@@ -514,7 +513,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "TUI test hangs due to CLI detection (which::which) - run with --ignored"]
     fn status_screen_handle_key_updates_selection_and_refreshes() {
         let mut screen = StatusScreen::new().expect("screen should initialise");
         screen.groups = vec![TaskGroup {
@@ -540,7 +538,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "TUI test hangs due to CLI detection (which::which) - run with --ignored"]
     fn status_screen_render_includes_task_details() {
         let mut screen = StatusScreen::new().expect("screen should initialise");
         screen.groups = vec![TaskGroup {

@@ -955,7 +955,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "TUI test hangs due to CLI detection (which::which) - run with --ignored"]
     fn pull_screen_renders_progress_information() {
         let mut screen = test_screen_with_mode(PullMode::Running);
         screen.progress = TransferProgress::for_kind(TransferKind::Pull)
@@ -979,7 +978,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "TUI test hangs due to CLI detection (which::which) - run with --ignored"]
     fn pull_screen_handle_key_respects_mode() {
         let mut ready = test_screen_with_mode(PullMode::Ready);
         let back = ready
