@@ -28,7 +28,11 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    match std::panic::catch_unwind(|| main_impl()) {
+    match std::panic::catch_unwind(|| {
+        let runtime = tokio::runtime::Runtime::new()
+            .expect("Failed to create async runtime");
+        runtime.block_on(main_impl())
+    }) {
         Ok(Ok(code)) => code,
         Ok(Err(err)) => {
             eprintln!("{}", err);
@@ -41,7 +45,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn main_impl() -> Result<ExitCode, String> {
+async fn main_impl() -> Result<ExitCode, String> {
     let command = Cli::parse_command();
 
     match command {
@@ -195,3 +199,4 @@ async fn perform_background_network_detection() -> anyhow::Result<()> {
 
     Ok(())
 }
+
