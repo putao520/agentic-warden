@@ -6,7 +6,7 @@ repository = "https://github.com/putao520/agentic-warden"
 readme = "README.md"
 keywords = ["ai", "agents", "cli", "supervisor", "automation"]
 categories = ["command-line-utilities", "development-tools"]
-version = "0.4.4"
+version = "0.4.5"
 edition = "2021"
 
 [dependencies]
