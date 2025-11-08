@@ -460,3 +460,297 @@ fn registry_pool_lookup(namespace: &str) -> Option<Arc<RegistryInner>> {
         Err(_) => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    /// 生成唯一的测试命名空间
+    fn test_namespace() -> String {
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        format!(
+            "test-registry-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::SeqCst)
+        )
+    }
+
+    /// 创建测试用的TaskRecord
+    fn create_test_task(log_id: &str) -> TaskRecord {
+        TaskRecord::new(
+            Utc::now(),
+            log_id.to_string(),
+            format!("/tmp/{}.log", log_id),
+            Some(std::process::id()),
+        )
+    }
+
+    #[test]
+    fn test_register_task() {
+        let namespace = test_namespace();
+        let registry = TaskRegistry::connect_test(&namespace).expect("connect failed");
+
+        let task = create_test_task("task-001");
+        let pid = 12345;
+
+        registry.register(pid, &task).expect("register failed");
+
+        // 验证任务已注册
+        let entries = registry.entries().expect("entries failed");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].pid, pid);
+        assert_eq!(entries[0].record.log_id, "task-001");
+    }
+
+    #[test]
+    fn test_register_multiple_tasks() {
+        let namespace = test_namespace();
+        let registry = TaskRegistry::connect_test(&namespace).expect("connect failed");
+
+        // 注册多个任务
+        for i in 1..=5 {
+            let task = create_test_task(&format!("task-{:03}", i));
+            registry
+                .register(10000 + i, &task)
+                .expect("register failed");
+        }
+
+        // 验证所有任务
+        let entries = registry.entries().expect("entries failed");
+        assert_eq!(entries.len(), 5);
+
+        // 验证PID范围
+        let pids: Vec<u32> = entries.iter().map(|e| e.pid).collect();
+        assert!(pids.contains(&10001));
+        assert!(pids.contains(&10005));
+    }
+
+    #[test]
+    fn test_mark_completed() {
+        let namespace = test_namespace();
+        let registry = TaskRegistry::connect_test(&namespace).expect("connect failed");
+
+        let task = create_test_task("task-complete");
+        let pid = 20000;
+        registry.register(pid, &task).expect("register failed");
+
+        // 标记完成
+        let result = Some("Success".to_string());
+        let exit_code = Some(0);
+        let completed_at = Utc::now();
+
+        registry
+            .mark_completed(pid, result.clone(), exit_code, completed_at)
+            .expect("mark_completed failed");
+
+        // 验证状态已更新
+        let entries = registry.entries().expect("entries failed");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].record.status, TaskStatus::CompletedButUnread);
+        assert_eq!(entries[0].record.result, result);
+        assert_eq!(entries[0].record.exit_code, exit_code);
+        assert!(entries[0].record.completed_at.is_some());
+    }
+
+    #[test]
+    fn test_mark_completed_nonexistent() {
+        let namespace = test_namespace();
+        let registry = TaskRegistry::connect_test(&namespace).expect("connect failed");
+
+        // 尝试标记不存在的任务
+        let result = registry.mark_completed(99999, None, None, Utc::now());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_remove_task() {
+        let namespace = test_namespace();
+        let registry = TaskRegistry::connect_test(&namespace).expect("connect failed");
+
+        let task = create_test_task("task-remove");
+        let pid = 30000;
+        registry.register(pid, &task).expect("register failed");
+
+        // 验证任务存在
+        let entries = registry.entries().expect("entries failed");
+        assert_eq!(entries.len(), 1);
+
+        // 删除任务
+        let removed = registry.remove(pid).expect("remove failed");
+        assert!(removed.is_some());
+        assert_eq!(removed.unwrap().log_id, "task-remove");
+
+        // 验证任务已删除
+        let entries = registry.entries().expect("entries failed");
+        assert_eq!(entries.len(), 0);
+    }
+
+    #[test]
+    fn test_remove_nonexistent() {
+        let namespace = test_namespace();
+        let registry = TaskRegistry::connect_test(&namespace).expect("connect failed");
+
+        // 删除不存在的任务
+        let removed = registry.remove(99999).expect("remove failed");
+        assert!(removed.is_none());
+    }
+
+    #[test]
+    fn test_get_completed_unread_tasks() {
+        let namespace = test_namespace();
+        let registry = TaskRegistry::connect_test(&namespace).expect("connect failed");
+
+        // 注册3个任务
+        for i in 1..=3 {
+            let task = create_test_task(&format!("task-{}", i));
+            registry.register(40000 + i, &task).expect("register failed");
+        }
+
+        // 标记2个任务为完成
+        registry
+            .mark_completed(40001, Some("Done".to_string()), Some(0), Utc::now())
+            .expect("mark_completed failed");
+        registry
+            .mark_completed(40002, Some("Done".to_string()), Some(0), Utc::now())
+            .expect("mark_completed failed");
+
+        // 获取已完成但未读的任务
+        let completed = registry
+            .get_completed_unread_tasks()
+            .expect("get_completed_unread_tasks failed");
+
+        assert_eq!(completed.len(), 2);
+        assert!(completed.iter().any(|(pid, _)| *pid == 40001));
+        assert!(completed.iter().any(|(pid, _)| *pid == 40002));
+    }
+
+    #[test]
+    fn test_sweep_stale_entries() {
+        let namespace = test_namespace();
+        let registry = TaskRegistry::connect_test(&namespace).expect("connect failed");
+
+        // 注册一个任务
+        let task = create_test_task("task-stale");
+        let pid = 50000;
+        registry.register(pid, &task).expect("register failed");
+
+        // 清理陈旧任务（假设进程不存在）
+        let process_alive = |check_pid: u32| -> bool {
+            // 模拟进程50000已经不存在
+            check_pid != 50000
+        };
+
+        // 空的terminate函数（测试中不需要真正终止进程）
+        let terminate = |_pid: u32| {};
+
+        let events = registry
+            .sweep_stale_entries(Utc::now(), process_alive, &terminate)
+            .expect("sweep_stale_entries failed");
+
+        // 验证清理事件
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].reason, CleanupReason::ProcessExited);
+
+        // 验证任务已删除
+        let entries = registry.entries().expect("entries failed");
+        assert_eq!(entries.len(), 0);
+    }
+
+    #[test]
+    fn test_sweep_keeps_active_tasks() {
+        let namespace = test_namespace();
+        let registry = TaskRegistry::connect_test(&namespace).expect("connect failed");
+
+        // 注册2个任务
+        registry
+            .register(60001, &create_test_task("active-1"))
+            .expect("register failed");
+        registry
+            .register(60002, &create_test_task("active-2"))
+            .expect("register failed");
+
+        // 所有进程都存活
+        let process_alive = |_pid: u32| -> bool { true };
+        let terminate = |_pid: u32| {};
+
+        let events = registry
+            .sweep_stale_entries(Utc::now(), process_alive, &terminate)
+            .expect("sweep_stale_entries failed");
+
+        // 验证没有清理事件
+        assert_eq!(events.len(), 0);
+
+        // 验证所有任务仍存在
+        let entries = registry.entries().expect("entries failed");
+        assert_eq!(entries.len(), 2);
+    }
+
+    #[test]
+    fn test_concurrent_access() {
+        use std::thread;
+
+        let namespace = test_namespace();
+
+        // 创建多个线程同时访问registry
+        let handles: Vec<_> = (0..5)
+            .map(|i| {
+                let ns = namespace.clone();
+                thread::spawn(move || {
+                    let registry = TaskRegistry::connect_test(&ns).expect("connect failed");
+                    let task = create_test_task(&format!("concurrent-{}", i));
+                    registry.register(70000 + i, &task).expect("register failed");
+                })
+            })
+            .collect();
+
+        // 等待所有线程完成
+        for handle in handles {
+            handle.join().expect("thread panicked");
+        }
+
+        // 验证所有任务都已注册
+        let registry = TaskRegistry::connect_test(&namespace).expect("connect failed");
+        let entries = registry.entries().expect("entries failed");
+        assert_eq!(entries.len(), 5);
+    }
+
+    #[test]
+    fn test_registry_reuse() {
+        let namespace = test_namespace();
+
+        // 第一次连接
+        let registry1 = TaskRegistry::connect_test(&namespace).expect("connect failed");
+        registry1
+            .register(80000, &create_test_task("reuse-test"))
+            .expect("register failed");
+
+        // 第二次连接到相同namespace
+        let registry2 = TaskRegistry::connect_test(&namespace).expect("connect failed");
+
+        // 验证可以访问之前注册的任务
+        let entries = registry2.entries().expect("entries failed");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].pid, 80000);
+    }
+
+    #[test]
+    fn test_remove_by_pid() {
+        let namespace = test_namespace();
+        let registry = TaskRegistry::connect_test(&namespace).expect("connect failed");
+
+        let task = create_test_task("remove-by-pid");
+        let pid = 90000;
+        registry.register(pid, &task).expect("register failed");
+
+        // 使用remove_by_pid删除
+        let removed = registry.remove_by_pid(pid).expect("remove_by_pid failed");
+        assert!(removed.is_some());
+        assert_eq!(removed.unwrap().log_id, "remove-by-pid");
+
+        // 验证已删除
+        let entries = registry.entries().expect("entries failed");
+        assert_eq!(entries.len(), 0);
+    }
+}
