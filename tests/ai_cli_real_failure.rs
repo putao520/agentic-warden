@@ -10,7 +10,6 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use tempfile::TempDir;
-use tokio::runtime::Runtime;
 use which::which;
 
 /// Scenario: Overriding `CODEX_BIN` with a non-existent path should trigger the same IO error a real user would hit.
@@ -18,9 +17,9 @@ use which::which;
 /// Action: Point `CODEX_BIN` to an invalid drive location and invoke `supervisor::execute_cli` with real arguments.
 ///
 /// Expectation: The launcher surfaces `ProcessError::Io` with `io::ErrorKind::NotFound`, proving a real spawn was attempted.
-#[test]
+#[tokio::test]
 #[serial]
-fn codex_env_override_to_missing_binary_returns_os_error() {
+async fn codex_env_override_to_missing_binary_returns_os_error() {
     ensure_cli_available("codex");
     let _home = TempHome::new();
     let _guard = EnvGuard::set(
@@ -29,9 +28,9 @@ fn codex_env_override_to_missing_binary_returns_os_error() {
     );
 
     let registry = TaskRegistry::connect().expect("task registry should connect");
-    let args = vec![OsString::from("--version")];
+    let args = prompt_args(&CliType::Codex, "test");
 
-    let err = supervisor::execute_cli(&registry, &CliType::Codex, &args, None)
+    let err = supervisor::execute_cli(&registry, &CliType::Codex, &args, None).await
         .expect_err("missing binary must surface as IO error");
 
     match err {
@@ -45,17 +44,17 @@ fn codex_env_override_to_missing_binary_returns_os_error() {
 /// Action: Set `CLAUDE_BIN` to an empty string and call `supervisor::execute_cli`.
 ///
 /// Expectation: The supervisor returns `ProcessError::CliNotFound` with a clear message.
-#[test]
+#[tokio::test]
 #[serial]
-fn claude_empty_env_path_is_rejected_before_spawn() {
+async fn claude_empty_env_path_is_rejected_before_spawn() {
     ensure_cli_available("claude");
     let _home = TempHome::new();
     let _guard = EnvGuard::set("CLAUDE_BIN", OsStr::new(""));
 
     let registry = TaskRegistry::connect().expect("task registry should connect");
-    let args = vec![OsString::from("--version")];
+    let args = prompt_args(&CliType::Claude, "test");
 
-    let err = supervisor::execute_cli(&registry, &CliType::Claude, &args, None)
+    let err = supervisor::execute_cli(&registry, &CliType::Claude, &args, None).await
         .expect_err("empty path must be rejected");
 
     match err {
@@ -74,9 +73,9 @@ fn claude_empty_env_path_is_rejected_before_spawn() {
 /// Action: Remove `GEMINI_BIN`, shrink PATH to the bare system directory, and attempt to execute Gemini.
 ///
 /// Expectation: `ProcessError::CliNotFound` reports that `gemini` is not present in PATH.
-#[test]
+#[tokio::test]
 #[serial]
-fn gemini_removed_from_path_reports_not_found() {
+async fn gemini_removed_from_path_reports_not_found() {
     ensure_cli_available("gemini");
     let _home = TempHome::new();
     let _bin_guard = EnvGuard::unset("GEMINI_BIN");
@@ -84,9 +83,9 @@ fn gemini_removed_from_path_reports_not_found() {
     let _path_guard = EnvGuard::set("PATH", system_path.as_os_str());
 
     let registry = TaskRegistry::connect().expect("task registry should connect");
-    let args = vec![OsString::from("--version")];
+    let args = prompt_args(&CliType::Gemini, "test");
 
-    let err = supervisor::execute_cli(&registry, &CliType::Gemini, &args, None)
+    let err = supervisor::execute_cli(&registry, &CliType::Gemini, &args, None).await
         .expect_err("missing binary on PATH must be reported");
 
     match err {
@@ -106,16 +105,16 @@ fn gemini_removed_from_path_reports_not_found() {
 /// Action: Launch Codex with `provider=ghost` using the real supervisor logic.
 ///
 /// Expectation: The call fails with `ProcessError::Other` mentioning the missing provider.
-#[test]
+#[tokio::test]
 #[serial]
-fn execute_cli_with_unknown_provider_surfaces_error() {
+async fn execute_cli_with_unknown_provider_surfaces_error() {
     ensure_cli_available("codex");
     let _home = TempHome::new();
 
     let registry = TaskRegistry::connect().expect("task registry should connect");
-    let args = vec![OsString::from("--version")];
+    let args = prompt_args(&CliType::Codex, "test");
 
-    let err = supervisor::execute_cli(&registry, &CliType::Codex, &args, Some("ghost".to_string()))
+    let err = supervisor::execute_cli(&registry, &CliType::Codex, &args, Some("ghost".to_string())).await
         .expect_err("unknown provider must fail");
 
     match err {
@@ -134,9 +133,9 @@ fn execute_cli_with_unknown_provider_surfaces_error() {
 /// Action: Point `TMP`/`TEMP` to a non-existent drive and attempt to launch Codex.
 ///
 /// Expectation: `supervisor::execute_cli` returns `ProcessError::Io` due to log path creation failure.
-#[test]
+#[tokio::test]
 #[serial]
-fn execute_cli_returns_error_when_tmp_dir_is_unusable() {
+async fn execute_cli_returns_error_when_tmp_dir_is_unusable() {
     ensure_cli_available("codex");
     let _home = TempHome::new();
     let registry = TaskRegistry::connect().expect("task registry should connect");
@@ -145,9 +144,9 @@ fn execute_cli_returns_error_when_tmp_dir_is_unusable() {
     fs::write(&file_path, b"x").expect("create fake temp file");
     let _tmp_guard = EnvGuard::set("TMP", file_path.as_os_str());
     let _temp_guard = EnvGuard::set("TEMP", file_path.as_os_str());
-    let args = vec![OsString::from("--version")];
+    let args = prompt_args(&CliType::Codex, "test");
 
-    let err = supervisor::execute_cli(&registry, &CliType::Codex, &args, None)
+    let err = supervisor::execute_cli(&registry, &CliType::Codex, &args, None).await
         .expect_err("invalid temp dir should cause IO error");
 
     match err {
@@ -167,16 +166,16 @@ fn execute_cli_returns_error_when_tmp_dir_is_unusable() {
 /// Action: Use an invalid flag to make Codex fail immediately, then test the batching logic.
 ///
 /// Expectation: The combined command exits with the same non-zero code as the first CLI failure.
-#[test]
+#[tokio::test]
 #[serial]
-fn multi_cli_mode_returns_first_non_zero_exit_code() {
+async fn multi_cli_mode_returns_first_non_zero_exit_code() {
     ensure_cli_available("codex");
     let _home = TempHome::new();
 
     // Test with invalid flag that causes immediate failure
     let registry = TaskRegistry::connect().expect("task registry should connect");
-    let invalid_args = vec![OsString::from("--definitely-invalid-flag")];
-    let codex_exit = supervisor::execute_cli(&registry, &CliType::Codex, &invalid_args, None)
+    let invalid_args = prompt_args(&CliType::Codex, "--definitely-invalid-flag");
+    let codex_exit = supervisor::execute_cli(&registry, &CliType::Codex, &invalid_args, None).await
         .expect("codex should execute and return exit status");
     assert_ne!(
         codex_exit, 0,
@@ -189,9 +188,7 @@ fn multi_cli_mode_returns_first_non_zero_exit_code() {
         None,
         "--definitely-invalid-flag".to_string(),
     );
-    let runtime = Runtime::new().expect("tokio runtime");
-    let exit_code = runtime
-        .block_on(command.execute())
+    let exit_code = command.execute().await
         .expect("ai cli execution should finish");
 
     assert_eq!(exit_code, ExitCode::from((codex_exit & 0xFF) as u8));
@@ -202,13 +199,11 @@ fn multi_cli_mode_returns_first_non_zero_exit_code() {
 /// Action: Build an `AiCliCommand` with two CLI types and an empty prompt, then execute it.
 ///
 /// Expectation: The call returns an error explaining that interactive mode only supports a single CLI.
-#[test]
+#[tokio::test]
 #[serial]
-fn interactive_mode_rejects_multiple_cli_without_prompt() {
+async fn interactive_mode_rejects_multiple_cli_without_prompt() {
     let command = AiCliCommand::new(vec![CliType::Codex, CliType::Gemini], None, String::new());
-    let runtime = Runtime::new().expect("tokio runtime");
-    let err = runtime
-        .block_on(command.execute())
+    let err = command.execute().await
         .expect_err("interactive multi CLI should be rejected");
 
     assert!(
@@ -223,16 +218,16 @@ fn interactive_mode_rejects_multiple_cli_without_prompt() {
 /// Action: Execute Gemini through the supervisor with a bogus flag that the CLI rejects.
 ///
 /// Expectation: `supervisor::execute_cli` returns `Ok(exit_code)` and the exit code is non-zero.
-#[test]
+#[tokio::test]
 #[serial]
-fn execute_cli_propagates_real_gemini_exit_status() {
+async fn execute_cli_propagates_real_gemini_exit_status() {
     ensure_cli_available("gemini");
     let _home = TempHome::new();
 
     let registry = TaskRegistry::connect().expect("task registry should connect");
-    let args = vec![OsString::from("--definitely-invalid-flag")];
+    let args = prompt_args(&CliType::Gemini, "--definitely-invalid-flag");
 
-    let exit_code = supervisor::execute_cli(&registry, &CliType::Gemini, &args, None)
+    let exit_code = supervisor::execute_cli(&registry, &CliType::Gemini, &args, None).await
         .expect("gemini command should execute and return exit status");
 
     assert_ne!(
