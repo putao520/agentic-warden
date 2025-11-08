@@ -160,7 +160,9 @@ pub async fn execute_cli(
 
     let mut command = Command::new(&cli_command);
     command.args(args);
-    command.stdin(Stdio::inherit());
+    // Close stdin to prevent CLI from waiting for more input
+    // This allows one-shot execution with positional arguments
+    command.stdin(Stdio::null());
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
 
