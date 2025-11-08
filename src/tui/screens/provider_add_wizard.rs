@@ -185,13 +185,16 @@ impl ProviderAddWizard {
         if let Some(ai_type) = &self.selected_ai_type {
             let preferences = Self::build_preferences_for(ai_type);
 
-            // Use recommendation engine
-            let recommendations =
-                futures::executor::block_on(self.recommendation_engine.get_recommendations(
-                    &self.providers_config,
-                    ai_type,
-                    &preferences,
-                ))?;
+            // Use recommendation engine with Tokio runtime
+            let recommendations = tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(
+                    self.recommendation_engine.get_recommendations(
+                        &self.providers_config,
+                        ai_type,
+                        &preferences,
+                    )
+                )
+            })?;
 
             self.current_recommendations = recommendations;
             self.available_providers = self
@@ -317,13 +320,16 @@ impl ProviderAddWizard {
             &self.selected_support_mode,
         ) {
             let _provider = self.providers_config.get_provider(provider_id).unwrap();
-            let validation_result =
-                futures::executor::block_on(self.token_validator.validate_with_network(
-                    &self.providers_config,
-                    &self.selected_provider_id.as_ref().unwrap(),
-                    &support_mode.mode_type,
-                    &self.input_buffer,
-                ));
+            let validation_result = tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(
+                    self.token_validator.validate_with_network(
+                        &self.providers_config,
+                        &self.selected_provider_id.as_ref().unwrap(),
+                        &support_mode.mode_type,
+                        &self.input_buffer,
+                    )
+                )
+            });
 
             match validation_result {
                 Ok(result) => {

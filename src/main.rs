@@ -30,41 +30,78 @@ use crate::sync::sync_config::save_network_status;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-fn main() -> ExitCode {
-    match std::panic::catch_unwind(|| {
-        let runtime = tokio::runtime::Runtime::new()
-            .expect("Failed to create async runtime");
-        runtime.block_on(main_impl())
-    }) {
-        Ok(Ok(code)) => code,
-        Ok(Err(err)) => {
-            eprintln!("{}", err);
-            ExitCode::from(1)
+#[tokio::main]
+async fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().collect();
+
+    // 处理外部AI CLI命令 (codex, claude, gemini)
+    if args.len() >= 2 {
+        match args[1].as_str() {
+            "codex" | "claude" | "gemini" => {
+                return match handle_external_ai_cli(&args).await {
+                    Ok(code) => code,
+                    Err(err) => {
+                        eprintln!("{}", err);
+                        ExitCode::from(1)
+                    }
+                };
+            }
+            _ => {}
         }
-        Err(_) => {
-            eprintln!("A fatal error occurred");
+    }
+
+    // 处理其他命令
+    let command = Cli::parse_command();
+    match main_impl(command).await {
+        Ok(code) => code,
+        Err(err) => {
+            eprintln!("{}", err);
             ExitCode::from(1)
         }
     }
 }
 
-async fn main_impl() -> Result<ExitCode, String> {
-    let command = Cli::parse_command();
+async fn handle_external_ai_cli(args: &[String]) -> Result<ExitCode, String> {
+    let ai_type = &args[0];
+    let prompt: String = args[1..].join(" ");
+
+    if prompt.trim().is_empty() {
+        return Err("Please provide a task description".to_string());
+    }
+
+    println!("🚀 Starting {} with task: {}", ai_type, prompt);
+
+    // 使用tokio::process::Command - 异步命令执行，共享运行时
+    let status = tokio::process::Command::new(ai_type)
+        .arg("exec")
+        .arg(&prompt)
+        .status()
+        .await
+        .map_err(|e| format!("Failed to execute {}: {}", ai_type, e))?;
+
+    if status.success() {
+        Ok(ExitCode::from(0))
+    } else {
+        Ok(ExitCode::from(status.code().unwrap_or(1) as u8))
+    }
+}
+
+async fn main_impl(command: Commands) -> Result<ExitCode, String> {
 
     match command {
-        Commands::Dashboard => launch_tui(None),
-        Commands::Status => launch_tui(Some(crate::tui::ScreenType::Status)),
-        Commands::Provider => launch_tui(Some(crate::tui::ScreenType::Provider)),
+        Commands::Dashboard => launch_tui(None).await,
+        Commands::Status => launch_tui(Some(crate::tui::ScreenType::Status)).await,
+        Commands::Provider => launch_tui(Some(crate::tui::ScreenType::Provider)).await,
         Commands::Push { dirs } => {
             let directories = dirs
                 .into_iter()
                 .map(|dir| dir.to_string_lossy().to_string())
                 .collect();
-            launch_tui(Some(crate::tui::ScreenType::Push(directories)))
+            launch_tui(Some(crate::tui::ScreenType::Push(directories))).await
         }
-        Commands::Pull => launch_tui(Some(crate::tui::ScreenType::Pull)),
-        Commands::Reset => handle_sync_command("reset", None),
-        Commands::List => handle_sync_command("list", None),
+        Commands::Pull => launch_tui(Some(crate::tui::ScreenType::Pull)).await,
+        Commands::Reset => handle_sync_command("reset", None).await,
+        Commands::List => handle_sync_command("list", None).await,
         Commands::Wait => {
             wait_mode::run().map_err(|e| e.to_string())?;
             Ok(ExitCode::from(0))
@@ -86,35 +123,30 @@ async fn main_impl() -> Result<ExitCode, String> {
             Ok(ExitCode::from(0))
         }
         Commands::Mcp(action) => handle_mcp_command(action).await,
-        Commands::External(tokens) => handle_external_command(tokens),
+        Commands::External(tokens) => handle_external_command(tokens).await,
     }
 }
 
-fn launch_tui(initial_screen: Option<crate::tui::ScreenType>) -> Result<ExitCode, String> {
+async fn launch_tui(initial_screen: Option<crate::tui::ScreenType>) -> Result<ExitCode, String> {
     color_eyre::install().map_err(|e| format!("Failed to install error handler: {}", e))?;
 
-    let runtime = tokio::runtime::Runtime::new()
-        .map_err(|e| format!("Failed to create async runtime: {}", e))?;
+    tokio::spawn(async {
+        if let Err(e) = perform_background_network_detection().await {
+            eprintln!("Warning: Background network detection failed: {}", e);
+        }
+    });
 
-    runtime.block_on(async {
-        tokio::spawn(async {
-            if let Err(e) = perform_background_network_detection().await {
-                eprintln!("Warning: Background network detection failed: {}", e);
-            }
-        });
+    let tui_result = match initial_screen {
+        Some(screen) => crate::tui::app::run_tui_app_with_screen(Some(screen)),
+        None => crate::tui::app::run_tui_app(),
+    };
 
-        let tui_result = match initial_screen {
-            Some(screen) => crate::tui::app::run_tui_app_with_screen(Some(screen)),
-            None => crate::tui::app::run_tui_app(),
-        };
+    tui_result.map_err(|e| format!("TUI error: {}", e))?;
 
-        tui_result.map_err(|e| format!("TUI error: {}", e))?;
-
-        Ok::<ExitCode, String>(ExitCode::from(0))
-    })
+    Ok(ExitCode::from(0))
 }
 
-fn handle_sync_command(command: &str, args: Option<Vec<PathBuf>>) -> Result<ExitCode, String> {
+async fn handle_sync_command(command: &str, args: Option<Vec<PathBuf>>) -> Result<ExitCode, String> {
     let config_name = match (command, args) {
         ("push", Some(dirs)) => dirs
             .into_iter()
@@ -125,18 +157,13 @@ fn handle_sync_command(command: &str, args: Option<Vec<PathBuf>>) -> Result<Exit
         _ => None,
     };
 
-    let runtime = tokio::runtime::Runtime::new()
-        .map_err(|e| format!("Failed to create async runtime: {}", e))?;
-
-    runtime.block_on(async {
-        match sync::sync_command::handle_sync_command(command, config_name).await {
-            Ok(code) => Ok(ExitCode::from((code & 0xFF) as u8)),
-            Err(e) => Err(format!("Sync command failed: {}", e)),
-        }
-    })
+    match sync::sync_command::handle_sync_command(command, config_name).await {
+        Ok(code) => Ok(ExitCode::from((code & 0xFF) as u8)),
+        Err(e) => Err(format!("Sync command failed: {}", e)),
+    }
 }
 
-fn handle_external_command(tokens: Vec<String>) -> Result<ExitCode, String> {
+async fn handle_external_command(tokens: Vec<String>) -> Result<ExitCode, String> {
     if tokens.is_empty() {
         return Err("No command provided".to_string());
     }
@@ -173,10 +200,8 @@ fn handle_external_command(tokens: Vec<String>) -> Result<ExitCode, String> {
     let ai_types = selector.types.clone();
     let ai_command = AiCliCommand::new(ai_types, ai_args.provider.clone(), ai_args.prompt_text());
 
-    let runtime = tokio::runtime::Runtime::new()
-        .map_err(|e| format!("Failed to create async runtime: {}", e))?;
-
-    runtime.block_on(async { ai_command.execute().await.map_err(|e| e.to_string()) })
+    // 使用当前的异步运行时执行命令
+    ai_command.execute().await.map_err(|e| e.to_string())
 }
 
 fn handle_help_command(topic: Option<String>) -> Result<ExitCode, String> {

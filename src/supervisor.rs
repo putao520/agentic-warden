@@ -3,21 +3,23 @@ use crate::core::models::ProcessTreeInfo;
 use crate::core::process_tree::ProcessTreeError;
 use crate::logging::debug;
 use crate::logging::warn;
-use crate::platform::{self, ChildResources};
-use crate::provider::{AiType, EnvInjector, ProviderManager};
+use crate::platform;
+use crate::provider::{AiType, ProviderManager};
 use crate::registry::{RegistryError, TaskRegistry};
 use crate::signal;
 use crate::task_record::TaskRecord;
 use chrono::{DateTime, Utc};
 use std::env;
 use std::ffi::OsString;
-use std::fs::OpenOptions;
-use std::io::{self, BufWriter, Read, Write};
+use std::io;
 use std::path::PathBuf;
-use std::process::{Command, ExitStatus, Stdio};
-use std::sync::{Arc, Mutex};
-use std::thread;
+use std::process::{ExitStatus, Stdio};
+use std::sync::Arc;
 use thiserror::Error;
+use tokio::fs::OpenOptions;
+use tokio::io::{AsyncRead, AsyncWriteExt, BufWriter};
+use tokio::process::Command;
+use tokio::sync::Mutex;
 
 #[derive(Debug, Error)]
 pub enum ProcessError {
@@ -33,7 +35,7 @@ pub enum ProcessError {
     Other(String),
 }
 
-fn get_cli_command(cli_type: &CliType) -> Result<String, ProcessError> {
+async fn get_cli_command(cli_type: &CliType) -> Result<String, ProcessError> {
     // First try environment variable
     if let Ok(custom_path) = env::var(cli_type.env_var_name()) {
         if custom_path.is_empty() {
@@ -53,6 +55,7 @@ fn get_cli_command(cli_type: &CliType) -> Result<String, ProcessError> {
         let output = Command::new("where")
             .arg(default_cmd)
             .output()
+            .await
             .map_err(|_| {
                 ProcessError::CliNotFound(format!(
                     "Failed to check if '{}' exists in PATH",
@@ -83,6 +86,7 @@ fn get_cli_command(cli_type: &CliType) -> Result<String, ProcessError> {
         let output = Command::new("which")
             .arg(default_cmd)
             .output()
+            .await
             .map_err(|_| {
                 ProcessError::CliNotFound(format!(
                     "Failed to check if '{}' exists in PATH",
@@ -102,7 +106,7 @@ fn get_cli_command(cli_type: &CliType) -> Result<String, ProcessError> {
     Ok(default_cmd.to_string())
 }
 
-pub fn execute_cli(
+pub async fn execute_cli(
     registry: &TaskRegistry,
     cli_type: &CliType,
     args: &[OsString],
@@ -152,20 +156,45 @@ pub fn execute_cli(
         );
     }
 
-    let cli_command = get_cli_command(cli_type)?;
+    let cli_command = get_cli_command(cli_type).await?;
 
     let mut command = Command::new(&cli_command);
     command.args(args);
     command.stdin(Stdio::inherit());
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
-    platform::prepare_command(&mut command)?;
 
-    // Inject environment variables to child process
-    EnvInjector::inject_to_command(&mut command, &provider_config.env);
+    // Platform-specific command preparation (Unix: set process group and death signal)
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        unsafe {
+            command.pre_exec(|| {
+                // Set process group ID
+                let result = libc::setpgid(0, 0);
+                if result != 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                // Set parent death signal on Linux
+                #[cfg(target_os = "linux")]
+                {
+                    let result = libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+                    if result != 0 {
+                        return Err(io::Error::last_os_error());
+                    }
+                }
+                Ok(())
+            });
+        }
+    }
+
+    // Inject environment variables
+    for (key, value) in &provider_config.env {
+        command.env(key, value);
+    }
 
     let mut child = command.spawn()?;
-    let child_pid = child.id();
+    let child_pid = child.id().ok_or_else(|| io::Error::other("Failed to get child PID"))?;
 
     let log_path = match generate_log_path(child_pid) {
         Ok(path) => path,
@@ -181,11 +210,12 @@ pub fn execute_cli(
         .write(true)
         .truncate(true)
         .open(&log_path)
+        .await
     {
         Ok(file) => file,
         Err(err) => {
             platform::terminate_process(child_pid);
-            let _ = child.wait();
+            let _ = child.wait().await;
             return Err(err.into());
         }
     };
@@ -196,17 +226,23 @@ pub fn execute_cli(
         log_path.display()
     ));
 
-    let _resources: ChildResources = platform::after_spawn(&child)?;
+    // Note: ChildResources not needed with tokio::process::Child
+    // It's only used on Windows for job object management
+    #[cfg(windows)]
+    {
+        let _resources = ChildResources::new();
+    }
+
     let signal_guard = signal::install(child_pid)?;
 
     let log_writer = Arc::new(Mutex::new(BufWriter::new(log_file)));
     let mut copy_handles = Vec::new();
 
     if let Some(stdout) = child.stdout.take() {
-        copy_handles.push(spawn_copy(stdout, log_writer.clone(), StreamMirror::Stdout));
+        copy_handles.push(tokio::spawn(spawn_copy(stdout, log_writer.clone(), StreamMirror::Stdout)));
     }
     if let Some(stderr) = child.stderr.take() {
-        copy_handles.push(spawn_copy(stderr, log_writer.clone(), StreamMirror::Stderr));
+        copy_handles.push(tokio::spawn(spawn_copy(stderr, log_writer.clone(), StreamMirror::Stderr)));
     }
 
     let registration_guard = if true {
@@ -235,7 +271,7 @@ pub fn execute_cli(
 
         if let Err(err) = registry.register(child_pid, &record) {
             platform::terminate_process(child_pid);
-            let _ = child.wait();
+            let _ = child.wait().await;
             return Err(err.into());
         }
         Some(RegistrationGuard::new(registry, child_pid))
@@ -243,24 +279,22 @@ pub fn execute_cli(
         None
     };
 
-    let status = child.wait()?;
+    let status = child.wait().await?;
     drop(signal_guard);
 
     for handle in copy_handles {
-        match handle.join() {
+        match handle.await {
             Ok(result) => result?,
             Err(_) => {
-                return Err(io::Error::other("Log writer thread failed").into());
+                return Err(io::Error::other("Log writer task failed").into());
             }
         }
     }
 
     {
-        let mut writer = log_writer
-            .lock()
-            .map_err(|_| io::Error::other("Log writer lock poisoned"))?;
-        writer.flush()?;
-        writer.get_ref().sync_all()?;
+        let mut writer = log_writer.lock().await;
+        writer.flush().await?;
+        writer.get_ref().sync_all().await?;
     }
 
     // Display log file path to user
@@ -322,49 +356,48 @@ enum StreamMirror {
 }
 
 impl StreamMirror {
-    fn write(self, data: &[u8]) -> io::Result<()> {
+    async fn write(self, data: &[u8]) -> io::Result<()> {
+        use tokio::io::AsyncWriteExt;
         match self {
             StreamMirror::Stdout => {
-                let mut handle = io::stdout().lock();
-                handle.write_all(data)?;
-                handle.flush()
+                let mut handle = tokio::io::stdout();
+                handle.write_all(data).await?;
+                handle.flush().await
             }
             StreamMirror::Stderr => {
-                let mut handle = io::stderr().lock();
-                handle.write_all(data)?;
-                handle.flush()
+                let mut handle = tokio::io::stderr();
+                handle.write_all(data).await?;
+                handle.flush().await
             }
         }
     }
 }
 
-fn spawn_copy<R>(
+async fn spawn_copy<R>(
     mut reader: R,
-    writer: Arc<Mutex<BufWriter<std::fs::File>>>,
+    writer: Arc<Mutex<BufWriter<tokio::fs::File>>>,
     mirror: StreamMirror,
-) -> thread::JoinHandle<io::Result<()>>
+) -> io::Result<()>
 where
-    R: Read + Send + 'static,
+    R: AsyncRead + Unpin + Send + 'static,
 {
-    thread::spawn(move || {
-        let mut buffer = [0u8; 8192];
-        loop {
-            let read = reader.read(&mut buffer)?;
-            if read == 0 {
-                break;
-            }
-            let chunk = &buffer[..read];
-            {
-                let mut guard = writer
-                    .lock()
-                    .map_err(|_| io::Error::other("Log writer lock poisoned"))?;
-                guard.write_all(chunk)?;
-                guard.flush()?;
-            }
-            mirror.write(chunk)?;
+    use tokio::io::AsyncReadExt;
+
+    let mut buffer = [0u8; 8192];
+    loop {
+        let read = reader.read(&mut buffer).await?;
+        if read == 0 {
+            break;
         }
-        Ok(())
-    })
+        let chunk = &buffer[..read];
+        {
+            let mut guard = writer.lock().await;
+            guard.write_all(chunk).await?;
+            guard.flush().await?;
+        }
+        mirror.write(chunk).await?;
+    }
+    Ok(())
 }
 
 fn extract_exit_code(status: ExitStatus) -> i32 {
@@ -410,7 +443,7 @@ impl Drop for RegistrationGuard<'_> {
 }
 
 /// Start interactive CLI mode (directly launch AI CLI without task prompt)
-pub fn start_interactive_cli(
+pub async fn start_interactive_cli(
     registry: &TaskRegistry,
     cli_type: &CliType,
     provider: Option<String>,
@@ -459,20 +492,45 @@ pub fn start_interactive_cli(
         );
     }
 
-    let cli_command = get_cli_command(cli_type)?;
+    let cli_command = get_cli_command(cli_type).await?;
 
     // Interactive mode: launch CLI with stdin/stdout/stderr inherited
     let mut command = Command::new(&cli_command);
     command.stdin(Stdio::inherit());
     command.stdout(Stdio::inherit());
     command.stderr(Stdio::inherit());
-    platform::prepare_command(&mut command)?;
 
-    // Inject environment variables to child process
-    EnvInjector::inject_to_command(&mut command, &provider_config.env);
+    // Platform-specific command preparation (Unix: set process group and death signal)
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        unsafe {
+            command.pre_exec(|| {
+                // Set process group ID
+                let result = libc::setpgid(0, 0);
+                if result != 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                // Set parent death signal on Linux
+                #[cfg(target_os = "linux")]
+                {
+                    let result = libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+                    if result != 0 {
+                        return Err(io::Error::last_os_error());
+                    }
+                }
+                Ok(())
+            });
+        }
+    }
+
+    // Inject environment variables
+    for (key, value) in &provider_config.env {
+        command.env(key, value);
+    }
 
     let mut child = command.spawn()?;
-    let child_pid = child.id();
+    let child_pid = child.id().ok_or_else(|| io::Error::other("Failed to get child PID"))?;
 
     // Register the interactive CLI process
     let log_path = generate_log_path(child_pid)?;
@@ -500,14 +558,14 @@ pub fn start_interactive_cli(
 
     if let Err(err) = registry.register(child_pid, &record) {
         platform::terminate_process(child_pid);
-        let _ = child.wait();
+        let _ = child.wait().await;
         return Err(err.into());
     }
 
     let registration_guard = RegistrationGuard::new(registry, child_pid);
     let signal_guard = signal::install(child_pid)?;
 
-    let status = child.wait()?;
+    let status = child.wait().await?;
     drop(signal_guard);
 
     // Mark as completed
@@ -524,7 +582,7 @@ pub fn start_interactive_cli(
 }
 
 /// Execute multiple CLI processes (for codex|claude|gemini syntax)
-pub fn execute_multiple_clis(
+pub async fn execute_multiple_clis(
     registry: &TaskRegistry,
     cli_selector: &crate::cli_type::CliSelector,
     task_prompt: &str,
@@ -536,7 +594,7 @@ pub fn execute_multiple_clis(
         let cli_args = cli_type.build_full_access_args(task_prompt);
         let os_args: Vec<OsString> = cli_args.into_iter().map(|s| s.into()).collect();
 
-        let exit_code = execute_cli(registry, cli_type, &os_args, provider.clone())?;
+        let exit_code = execute_cli(registry, cli_type, &os_args, provider.clone()).await?;
         exit_codes.push(exit_code);
     }
 

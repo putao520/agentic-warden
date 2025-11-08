@@ -12,7 +12,6 @@ use ratatui::{
     Frame,
 };
 use std::time::{Duration as StdDuration, Instant};
-use tokio::runtime::Runtime;
 
 use super::{Screen, ScreenAction};
 use crate::sync::smart_oauth::{AuthState, SmartOAuthAuthenticator};
@@ -35,7 +34,6 @@ pub struct OAuthScreen {
     app_state: &'static AppState,
     provider: String,
     mode: OAuthMode,
-    runtime: Option<Runtime>,
     authenticator: Option<SmartOAuthAuthenticator>,
     flow_id: Option<String>,
     auth_url: Option<String>,
@@ -53,7 +51,6 @@ impl OAuthScreen {
             app_state: AppState::global(),
             provider: PROVIDER_GOOGLE_DRIVE.to_string(),
             mode: OAuthMode::Intro,
-            runtime: None,
             authenticator: None,
             flow_id: None,
             auth_url: None,
@@ -68,15 +65,6 @@ impl OAuthScreen {
 
     /// Start a new OAuth authorisation flow.
     fn begin_oauth_flow(&mut self) -> Result<()> {
-        if self.runtime.is_none() {
-            self.runtime = Some(Runtime::new().context("failed to create async runtime")?);
-        }
-
-        let runtime = self
-            .runtime
-            .as_mut()
-            .expect("runtime must be available after initialisation");
-
         let authenticator = self
             .app_state
             .ensure_authenticator(&self.provider)
@@ -87,13 +75,17 @@ impl OAuthScreen {
         self.app_state
             .create_oauth_flow(&self.provider, flow_id.clone(), None, None);
 
-        let auth_url = runtime
-            .block_on(authenticator.generate_auth_url_for_tui())
-            .context("failed to generate authorization URL")?;
+        let auth_url = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(authenticator.generate_auth_url_for_tui())
+        })
+        .context("failed to generate authorization URL")?;
 
         self.app_state.set_oauth_url(&flow_id, &auth_url).ok();
 
-        let state = runtime.block_on(authenticator.get_state());
+        let state = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(authenticator.get_state())
+        });
         self.last_state = Some(state.clone());
         self.app_state.update_oauth_state(&flow_id, state).ok();
 
@@ -127,14 +119,6 @@ impl OAuthScreen {
             return Ok(());
         }
 
-        let runtime = match self.runtime.as_mut() {
-            Some(rt) => rt,
-            None => {
-                self.flash_message("Runtime not initialised; restart the flow.", Color::Red);
-                return Ok(());
-            }
-        };
-
         let authenticator = match &self.authenticator {
             Some(auth) => auth.clone(),
             None => {
@@ -147,8 +131,10 @@ impl OAuthScreen {
         self.spinner_index = 0;
         self.code_focused = false;
 
-        let exchange_result =
-            runtime.block_on(authenticator.set_auth_code(code.trim().to_string()));
+        let exchange_result = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(authenticator.set_auth_code(code.trim().to_string()))
+        });
         match exchange_result {
             Ok(response) => {
                 if let Err(err) = self
@@ -171,7 +157,9 @@ impl OAuthScreen {
                 }
 
                 if let Some(flow_id) = &self.flow_id {
-                    let state = runtime.block_on(authenticator.get_state());
+                    let state = tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current().block_on(authenticator.get_state())
+                    });
                     self.last_state = Some(state.clone());
                     self.app_state.update_oauth_state(flow_id, state).ok();
                 }
@@ -695,12 +683,13 @@ impl Screen for OAuthScreen {
             }
         }
 
-        if let (Some(runtime), Some(authenticator), Some(flow_id)) = (
-            self.runtime.as_mut(),
+        if let (Some(authenticator), Some(flow_id)) = (
             self.authenticator.clone(),
             self.flow_id.clone(),
         ) {
-            let state = runtime.block_on(authenticator.get_state());
+            let state = tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(authenticator.get_state())
+            });
             if self.last_state.as_ref() != Some(&state) {
                 self.last_state = Some(state.clone());
                 self.app_state

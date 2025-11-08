@@ -23,7 +23,6 @@ use std::{
     },
 };
 use tokio::{
-    runtime::Runtime,
     sync::mpsc::{error::TryRecvError, unbounded_channel, UnboundedReceiver, UnboundedSender},
     task::JoinHandle,
 };
@@ -81,7 +80,6 @@ pub struct PushScreen {
     progress_widget: ProgressState,
     mode: PushMode,
     progress: TransferProgress,
-    runtime: Runtime,
     worker_handle: Option<JoinHandle<PushWorkerResult>>,
     progress_rx: Option<UnboundedReceiver<PushWorkerEvent>>,
     cancel_flag: Option<Arc<AtomicBool>>,
@@ -111,7 +109,6 @@ impl PushScreen {
             directories
         };
 
-        let runtime = Runtime::new().context("failed to create async runtime")?;
         let progress_widget = ProgressState::new("Pushing to Google Drive".to_string());
         let app_state = AppState::global();
         app_state.clear_sync_progress(TransferKind::Push);
@@ -124,7 +121,6 @@ impl PushScreen {
             progress_widget,
             mode: PushMode::CheckingAuth,
             progress: TransferProgress::for_kind(TransferKind::Push),
-            runtime,
             worker_handle: None,
             progress_rx: None,
             cancel_flag: None,
@@ -161,7 +157,9 @@ impl PushScreen {
 
         match self.app_state.ensure_authenticator(PROVIDER_GOOGLE_DRIVE) {
             Ok(authenticator) => {
-                let state = self.runtime.block_on(authenticator.get_state());
+                let state = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(authenticator.get_state())
+                });
                 match state {
                     AuthState::Authenticated { .. } => {
                         self.mode = PushMode::Ready;
@@ -205,9 +203,9 @@ impl PushScreen {
 
         let directories = self.directories.clone();
         let flag_clone = cancel_flag.clone();
-        let handle = self
-            .runtime
-            .spawn(async move { run_push_worker(directories, tx, flag_clone).await });
+        let handle = tokio::spawn(async move {
+            run_push_worker(directories, tx, flag_clone).await
+        });
 
         self.worker_handle = Some(handle);
         self.progress_rx = Some(rx);
@@ -631,7 +629,9 @@ impl Screen for PushScreen {
         if let Some(handle) = self.worker_handle.as_ref() {
             if handle.is_finished() {
                 let handle = self.worker_handle.take().unwrap();
-                match self.runtime.block_on(handle) {
+                match tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(handle)
+                }) {
                     Ok(PushWorkerResult::Completed(results)) => {
                         self.summary = results;
                         self.mode = PushMode::Completed;
@@ -914,7 +914,6 @@ mod tests {
             progress_widget: ProgressState::new("Push Test".to_string()),
             mode,
             progress: TransferProgress::for_kind(TransferKind::Push),
-            runtime: tokio::runtime::Runtime::new().expect("runtime"),
             worker_handle: None,
             progress_rx: None,
             cancel_flag: None,
