@@ -5,7 +5,7 @@ license = "MIT"
 repository = "https://github.com/putao520/agentic-warden"
 readme = "README.md"
 keywords = ["ai", "agents", "cli", "supervisor", "automation"]
-categories = ["command-line-utilities", "development-tools", "ai-tools"]
+categories = ["command-line-utilities", "development-tools"]
 version = "0.3.0"
 edition = "2021"
 
