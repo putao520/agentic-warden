@@ -314,23 +314,20 @@ pub async fn execute_cli(
     Ok(extract_exit_code(status))
 }
 
-/// Generate a secure log file path in a user-specific directory
+/// Generate a secure log file path in runtime directory
 ///
 /// Security considerations:
-/// - Uses user-specific directory (~/.agentic-warden/logs/) instead of shared /tmp
+/// - Uses system temp directory (cross-platform)
 /// - Creates directory with restrictive permissions (0700 on Unix)
 /// - Ensures logs are only accessible by the current user
+/// - Logs are automatically cleaned up on system reboot
 fn generate_log_path(pid: u32) -> io::Result<PathBuf> {
-    // Use user-specific directory instead of shared temp directory
-    let log_dir = if let Some(config_dir) = dirs::config_dir() {
-        config_dir.join("agentic-warden").join("logs")
-    } else {
-        // Fallback to home directory if config_dir is not available
-        let home = std::env::var("HOME")
-            .or_else(|_| std::env::var("USERPROFILE"))
-            .unwrap_or_else(|_| ".".to_string());
-        PathBuf::from(home).join(".agentic-warden").join("logs")
-    };
+    // Use system temp directory as per SPEC design (cross-platform)
+    // Linux/macOS: /tmp/.agentic-warden/logs/
+    // Windows: %TEMP%\.agentic-warden\logs\
+    // Runtime data (logs, temp files) → temp_dir()/.agentic-warden/
+    // Persistent config → ~/.agentic-warden/
+    let log_dir = std::env::temp_dir().join(".agentic-warden").join("logs");
 
     // Create the logs directory if it doesn't exist
     if !log_dir.exists() {
