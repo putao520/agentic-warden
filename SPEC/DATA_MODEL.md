@@ -296,6 +296,14 @@ pub struct TaskRecord {
     /// 进程树深度
     #[serde(default)]
     pub process_tree_depth: usize,
+
+    /// 完整进程树信息（可选）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_tree: Option<ProcessTreeInfo>,
+
+    /// AI CLI进程信息（可选）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_cli_process: Option<AiCliProcessInfo>,
 }
 
 // 注意：TaskRecord 设计原则

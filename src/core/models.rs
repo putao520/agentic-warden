@@ -44,11 +44,6 @@ impl TaskId {
     }
 }
 
-// Note: TaskStatus is now defined in task_record.rs to follow SPEC design principles
-// SPEC: "简洁实用的TaskRecord结构" - only Running and CompletedButUnread states
-// Re-export from task_record for compatibility
-pub use crate::task_record::TaskStatus;
-
 /// 进程树信息，包含完整进程链与AI CLI元数据
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProcessTreeInfo {
@@ -293,11 +288,6 @@ pub struct ProcessInfo {
     /// 进程树深度
     pub depth: u32,
 }
-
-// 任务信息统一使用TaskRecord
-// TaskRecord是实际使用的任务模型，包含完整的字段和功能
-// 详细定义见 src/task_record.rs
-pub use crate::task_record::TaskRecord;
 
 /// Provider 配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
