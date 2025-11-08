@@ -181,6 +181,234 @@ export GOOGLE_DRIVE_CLIENT_SECRET="your-client-secret"
 - **Responsiveness**: TUI operation response < 100ms
 - **Concurrent Support**: Monitor 100+ AI CLI processes simultaneously
 
+## 🤖 Claude Code Integration
+
+### MCP Server Installation
+
+Agentic-Warden provides an MCP (Model Context Protocol) server for seamless integration with Claude Code, enabling you to manage AI CLI processes and providers directly from your Claude Code conversations.
+
+#### Prerequisites
+- Claude Code CLI (v1.0+)
+- Rust toolchain (for building from source)
+
+#### Installation Steps
+
+**Step 1: Install Agentic-Warden**
+```bash
+# Clone and build
+git clone https://github.com/putao520/agentic-warden.git
+cd agentic-warden
+cargo build --release
+cargo install --path .
+
+# Verify installation
+agentic-warden --version
+```
+
+**Step 2: Add MCP Server to Claude Code (Recommended Method)**
+
+Use Claude Code's built-in MCP management commands:
+
+```bash
+# Method 1: Add MCP server using Claude Code command (Recommended)
+/mcp add agentic-warden "agentic-warden mcp server"
+
+# Method 2: Add with custom configuration
+/mcp add agentic-warden "agentic-warden mcp server" \
+  --env RUST_LOG=info \
+  --description "AI CLI process management and monitoring"
+
+# Method 3: Manual configuration (alternative)
+/mcp edit
+```
+
+The `/mcp add` command will automatically:
+- Update your `~/.claude/mcp_servers.json` configuration
+- Validate the command path and arguments
+- Set up proper environment variables
+- Test the connection
+
+**Step 3: Verify MCP Server Installation**
+```bash
+# List all configured MCP servers
+/mcp list
+
+# Test Agentic-Warden MCP server specifically
+/mcp test agentic-warden
+
+# Restart Claude Code to ensure server is loaded
+/reload
+```
+
+#### Available MCP Tools
+
+Once configured, you'll have access to these tools in Claude Code:
+
+**Process Management Tools:**
+- `mcp__agentic_warden__monitor_processes` - Monitor running AI CLI processes
+- `mcp__agentic_warden__get_process_tree` - Get detailed process tree information
+- `mcp__agentic_warden__terminate_process` - Safely terminate AI CLI processes
+
+**Provider Management Tools:**
+- `mcp__context7__resolve-library-id` - Resolve library/package names to documentation
+- `mcp__context7__get-library-docs` - Fetch up-to-date documentation for any library
+
+**Task Registry Tools:**
+- Access to shared memory task tracking
+- Real-time process monitoring
+- Task status management
+
+#### Usage Examples in Claude Code
+
+**Example 1: Monitor AI CLI Processes**
+```bash
+# Claude Code will automatically detect running AI processes
+"Show me all currently running AI CLI processes and their status"
+```
+
+**Example 2: Library Documentation Lookup**
+```bash
+# Get documentation for any library
+"Can you fetch the latest React documentation for hooks?"
+"Get me the Rust tokio documentation for async runtime"
+```
+
+**Example 3: Process Management**
+```bash
+"Terminate all idle Claude processes"
+"Show me the process tree for the current codex session"
+```
+
+#### Configuration Options
+
+**Environment Variables:**
+```bash
+# Agentic-Warden configuration
+export AGENTIC_WARDEN_LOG_LEVEL="info"
+export AGENTIC_WARDEN_CONFIG_DIR="$HOME/.agentic-warden"
+
+# Optional: Custom AI CLI paths
+export CLAUDE_BIN="/path/to/claude"
+export CODEX_BIN="/path/to/codex"
+export GEMINI_BIN="/path/to/gemini"
+```
+
+**Advanced MCP Configuration:**
+For advanced users, you can customize the MCP server behavior:
+
+```json
+{
+  "mcpServers": {
+    "agentic-warden": {
+      "command": "agentic-warden",
+      "args": [
+        "mcp",
+        "server",
+        "--log-level", "debug",
+        "--config-dir", "/custom/config/path"
+      ],
+      "env": {
+        "RUST_LOG": "debug",
+        "AGENTIC_WARDEN_CACHE_TTL": "3600"
+      }
+    }
+  }
+}
+```
+
+#### MCP Server Management Commands
+
+Claude Code provides built-in commands for managing MCP servers:
+
+```bash
+# Add a new MCP server
+/mcp add <name> "<command>" [options]
+
+# List all configured MCP servers
+/mcp list
+
+# Test a specific MCP server
+/mcp test <name>
+
+# Edit MCP server configuration
+/mcp edit
+
+# Remove an MCP server
+/mcp remove <name>
+
+# Reload all MCP servers
+/mcp reload
+
+# Show MCP server help
+/mcp --help
+```
+
+#### Troubleshooting MCP Integration
+
+**Common Issues:**
+
+**Q: MCP server not starting?**
+```bash
+# Check if agentic-warden is in PATH
+which agentic-warden
+
+# Test MCP server directly
+agentic-warden mcp server --test
+
+# Check Claude Code MCP status
+/mcp list
+
+# Check Claude Code logs
+tail -f ~/.claude/logs/claude.log
+```
+
+**Q: Tools not appearing in Claude Code?**
+```bash
+# Restart Claude Code completely
+exit
+claude
+
+# Verify MCP configuration
+/mcp list
+
+# Test specific server
+/mcp test agentic-warden
+
+# Reload MCP servers
+/mcp reload
+```
+
+**Q: `/mcp add` command not found?**
+```bash
+# Update Claude Code to latest version
+claude --update
+
+# Check if MCP commands are available
+/help | grep mcp
+```
+
+**Q: Permission errors?**
+```bash
+# Ensure proper permissions
+chmod +x $(which agentic-warden)
+
+# Check config directory permissions
+ls -la ~/.agentic-warden/
+
+# Test MCP server permissions
+agentic-warden mcp server --test
+```
+
+#### Benefits of MCP Integration
+
+- **Seamless Workflow**: Manage AI CLI processes without leaving Claude Code
+- **Real-time Monitoring**: Get instant visibility into running AI processes
+- **Documentation Access**: Fetch library docs on-demand during development
+- **Process Automation**: Automate repetitive AI CLI management tasks
+- **Enhanced Debugging**: Better visibility into AI agent interactions
+
+For more advanced usage and configuration options, see the [MCP Configuration Guide](SPEC/MCP-CONFIGURATION.md).
+
 ## 🤝 Contributing
 
 We welcome community contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
