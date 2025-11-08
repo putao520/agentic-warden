@@ -270,12 +270,9 @@ pub struct TaskInfo {
     pub start_time: SystemTime,
 }
 
-pub enum TaskStatus {
-    Running,
-    Completed,
-    Failed,
-    Terminated,
-}
+// TaskInfo使用与TaskRecord相同的TaskStatus定义（定义在DATA_MODEL.md）
+// 注意：TaskInfo和TaskRecord共用同一个TaskStatus枚举，确保一致性
+pub use task_record::TaskStatus;
 ```
 
 #### 3.2 Google Drive 服务

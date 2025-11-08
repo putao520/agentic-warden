@@ -337,35 +337,14 @@ pub struct ProcessInfo {
 }
 ```
 
-#### 1.3 任务状态枚举
-```rust
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum TaskStatus {
-    /// 等待启动
-    Pending,
+#### 1.3 TaskStatus定义说明
 
-    /// 正在运行
-    Running,
+**注意**: TaskStatus枚举定义在本文档第240-250行的TaskRecord结构体中。
+系统采用简洁的2状态设计（Running, CompletedButUnread），符合"简洁实用"的设计原则。
 
-    /// 已完成
-    Completed,
-
-    /// 失败
-    Failed,
-
-    /// 被终止
-    Terminated,
-
-    /// 超时
-    Timeout,
-
-    /// 暂停
-    Paused,
-}
-
-// 注意：移除了 ResourceUsage 结构体
-// 原因：对于简单的任务管理器来说，资源监控属于过度设计
-// 如需资源监控，可以使用外部工具如 htop、top 等
+**已移除的过度设计**:
+- ResourceUsage 结构体 - 资源监控属于过度设计，可使用外部工具如htop、top
+- 多余的任务状态（Pending, Failed, Terminated, Timeout, Paused）- 不符合简洁实用原则
 
 ### 2. 共享内存模型
 
