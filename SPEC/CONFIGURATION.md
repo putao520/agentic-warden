@@ -3,19 +3,31 @@
 ## 配置文件体系
 
 ### 1. 配置目录结构
+
+#### 持久化配置目录（~/.agentic-warden/）
 ```
 ~/.agentic-warden/
 ├── provider.json              # Provider 配置文件
 ├── auth.json                  # Google Drive 认证信息
 ├── config.json                # 主配置文件
-├── agentic-warden.log         # 日志文件
-├── temp/                      # 临时文件目录
-│   ├── oauth_callback.html    # OAuth 回调页面
-│   └── download_cache/        # 下载缓存
 └── schema/                    # JSON Schema 文件
     ├── provider.json.schema   # Provider 配置 Schema
     └── config.json.schema     # 主配置 Schema
 ```
+
+#### 运行时目录（/tmp/.agentic-warden/）
+```
+/tmp/.agentic-warden/
+├── agentic-warden.log         # 日志文件
+└── temp/                      # 临时文件目录
+    ├── oauth_callback.html    # OAuth 回调页面
+    └── download_cache/        # 下载缓存
+```
+
+**设计原则**：
+- 持久化配置（provider、auth、config）保存在用户主目录，系统重启后保留
+- 运行时数据（日志、临时文件）保存在 /tmp/，系统重启后自动清理
+- 日志文件可在每次启动时重新创建，不需要长期保留
 
 ### 2. 配置文件优先级
 1. 命令行参数 (最高优先级)
