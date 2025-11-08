@@ -294,23 +294,10 @@ pub struct ProcessInfo {
     pub depth: u32,
 }
 
-/// 任务信息 (严格符合SPEC ARCHITECTURE.md:264定义)
-/// 注意：当前系统实际使用TaskRecord进行任务管理，TaskInfo保留作为公共API定义
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TaskInfo {
-    /// 任务唯一标识符
-    pub id: TaskId,
-    /// 父进程信息
-    pub parent_process: ProcessInfo,
-    /// AI CLI 类型
-    pub ai_type: AiType,
-    /// 提示词预览
-    pub prompt_preview: String,
-    /// 任务状态
-    pub status: TaskStatus,
-    /// 启动时间
-    pub start_time: SystemTime,
-}
+// 任务信息统一使用TaskRecord
+// TaskRecord是实际使用的任务模型，包含完整的字段和功能
+// 详细定义见 src/task_record.rs
+pub use crate::task_record::TaskRecord;
 
 /// Provider 配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
