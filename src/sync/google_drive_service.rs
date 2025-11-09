@@ -1,5 +1,7 @@
-// Google Drive Service - Using OAuth with HTTP requests
-// This module provides Google Drive operations using OAuth authentication and HTTP API calls
+// Google Drive Service - Using Device Flow with HTTP requests
+// This module provides Google Drive operations using Device Flow authentication and HTTP API calls
+//
+// 对应SPEC/ARCHITECTURE.md:280-303
 
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
@@ -7,10 +9,11 @@ use mime_guess::from_path;
 use reqwest::multipart::{Form, Part};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::Path;
-use tracing::{debug, info};
+use std::path::{Path, PathBuf};
+use tracing::{debug, info, warn};
 
-use super::oauth_client::OAuthClient;
+use super::device_flow_client::AuthConfig;
+use super::smart_device_flow::SmartDeviceFlowAuthenticator;
 
 /// Google Drive File Information
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,33 +79,77 @@ struct DriveFileListResponse {
     next_page_token: Option<String>,
 }
 
-/// Google Drive Service using OAuth and HTTP requests
-#[derive(Debug, Clone)]
+/// Google Drive Service using Device Flow and HTTP requests
+///
+/// 对应SPEC/ARCHITECTURE.md:283-303
+#[derive(Clone)]
 pub struct GoogleDriveService {
-    oauth_client: OAuthClient,
+    authenticator: SmartDeviceFlowAuthenticator,
     http_client: reqwest::Client,
+    /// Base folder name in Google Drive (default: ".agentic-warden")
+    base_folder_name: String,
 }
 
 #[allow(dead_code)]
 impl GoogleDriveService {
     const DRIVE_API_BASE: &'static str = "https://www.googleapis.com/drive/v3";
 
-    /// Create new Google Drive service
-    pub async fn new(oauth_client: OAuthClient) -> Result<Self> {
-        info!("Initializing Google Drive service with OAuth");
+    /// Create new Google Drive service with Device Flow authenticator
+    ///
+    /// 对应SPEC/ARCHITECTURE.md:289
+    pub async fn new(authenticator: SmartDeviceFlowAuthenticator) -> Result<Self> {
+        info!("Initializing Google Drive service with Device Flow");
 
         Ok(Self {
-            oauth_client,
+            authenticator,
             http_client: reqwest::Client::new(),
+            base_folder_name: ".agentic-warden".to_string(),
         })
+    }
+
+    /// Create new Google Drive service from config
+    pub async fn from_config(config: AuthConfig, auth_file_path: PathBuf) -> Result<Self> {
+        let authenticator = SmartDeviceFlowAuthenticator::new(config, auth_file_path);
+        Self::new(authenticator).await
     }
 
     /// Get access token for authenticated requests
     async fn get_access_token(&mut self) -> Result<String> {
-        self.oauth_client
-            .access_token()
+        self.authenticator
+            .get_access_token()
             .await
-            .context("Failed to get access token")
+            .ok_or_else(|| anyhow!("Not authenticated. Please authenticate first."))
+    }
+
+    /// Ensure authorized, trigger Device Flow if needed
+    ///
+    /// 对应SPEC/ARCHITECTURE.md:289
+    pub async fn ensure_authorized(&mut self) -> Result<bool> {
+        if self.authenticator.is_authenticated().await {
+            debug!("Already authenticated");
+            return Ok(true);
+        }
+
+        info!("Not authenticated, starting Device Flow");
+        let device_response = self.authenticator.start_device_flow().await?;
+
+        println!("\n=== Google Drive Authorization Required ===");
+        println!("Please visit: {}", device_response.verification_url);
+        println!("And enter code: {}", device_response.user_code);
+        println!("Waiting for authorization...\n");
+
+        // Poll for authorization
+        let _token_info = self
+            .authenticator
+            .poll_until_authorized(
+                &device_response.device_code,
+                device_response.interval,
+                device_response.expires_in,
+            )
+            .await?;
+
+        info!("Authorization successful");
+        Ok(true)
     }
 
     /// Create or find folder
@@ -742,6 +789,159 @@ impl GoogleDriveService {
             .context("Failed to parse file metadata response")?;
 
         Ok(DriveFile::from(file_response))
+    }
+
+    // ========================================================================
+    // High-level Configuration Sync API
+    // 对应SPEC/ARCHITECTURE.md:291-301
+    // ========================================================================
+
+    /// 推送AI CLI配置到Google Drive
+    ///
+    /// config_name: 配置名称（如 "dev", "prod"，默认 "default"）
+    /// 对应SPEC/ARCHITECTURE.md:293
+    pub async fn push_config(&mut self, config_name: &str, config_zip_path: &Path) -> Result<String> {
+        info!("Pushing config '{}' to Google Drive", config_name);
+
+        // Ensure authenticated
+        self.ensure_authorized().await?;
+
+        // Get or create base folder
+        let base_folder_id = self
+            .create_or_find_folder(&self.base_folder_name.clone(), None)
+            .await?;
+
+        // Check if config already exists
+        let existing_file = self.find_config_file(config_name, &base_folder_id).await?;
+
+        if let Some(file_id) = existing_file {
+            warn!("Config '{}' already exists, will be overwritten", config_name);
+            // Delete existing file
+            self.delete_file(&file_id).await?;
+        }
+
+        // Upload new config
+        let drive_file = self
+            .upload_file(config_zip_path, Some(&base_folder_id))
+            .await?;
+
+        info!(
+            "Successfully pushed config '{}' (file_id: {})",
+            config_name, drive_file.id
+        );
+
+        Ok(drive_file.id)
+    }
+
+    /// 从Google Drive拉取AI CLI配置
+    ///
+    /// config_name: 配置名称（如 "dev", "prod"，默认 "default"）
+    /// 对应SPEC/ARCHITECTURE.md:297
+    pub async fn pull_config(&mut self, config_name: &str, output_path: &Path) -> Result<()> {
+        info!("Pulling config '{}' from Google Drive", config_name);
+
+        // Ensure authenticated
+        self.ensure_authorized().await?;
+
+        // Get base folder
+        let base_folder_id = self
+            .find_folder(&self.base_folder_name.clone(), None)
+            .await?
+            .ok_or_else(|| anyhow!("Base folder '{}' not found in Google Drive", self.base_folder_name))?;
+
+        // Find config file
+        let file_id = self
+            .find_config_file(config_name, &base_folder_id)
+            .await?
+            .ok_or_else(|| anyhow!("Config '{}' not found in Google Drive", config_name))?;
+
+        // Download config
+        self.download_file(&file_id, output_path).await?;
+
+        info!(
+            "Successfully pulled config '{}' to {:?}",
+            config_name, output_path
+        );
+
+        Ok(())
+    }
+
+    /// 列出Google Drive中所有可用的配置
+    ///
+    /// 对应SPEC/ARCHITECTURE.md:300
+    pub async fn list_configs(&mut self) -> Result<Vec<String>> {
+        info!("Listing configs from Google Drive");
+
+        // Ensure authenticated
+        self.ensure_authorized().await?;
+
+        // Get base folder
+        let base_folder_id = match self.find_folder(&self.base_folder_name.clone(), None).await? {
+            Some(id) => id,
+            None => {
+                info!("Base folder not found, no configs available");
+                return Ok(Vec::new());
+            }
+        };
+
+        // List all .zip files in base folder
+        let files = self.list_folder_files(&base_folder_id).await?;
+
+        let configs: Vec<String> = files
+            .into_iter()
+            .filter(|f| f.name.ends_with(".zip"))
+            .map(|f| {
+                // Remove .zip extension
+                f.name.trim_end_matches(".zip").to_string()
+            })
+            .collect();
+
+        info!("Found {} configs", configs.len());
+
+        Ok(configs)
+    }
+
+    /// 删除指定配置
+    ///
+    /// config_name: 配置名称
+    pub async fn delete_config(&mut self, config_name: &str) -> Result<()> {
+        info!("Deleting config '{}' from Google Drive", config_name);
+
+        // Ensure authenticated
+        self.ensure_authorized().await?;
+
+        // Get base folder
+        let base_folder_id = self
+            .find_folder(&self.base_folder_name.clone(), None)
+            .await?
+            .ok_or_else(|| anyhow!("Base folder '{}' not found", self.base_folder_name))?;
+
+        // Find and delete config file
+        let file_id = self
+            .find_config_file(config_name, &base_folder_id)
+            .await?
+            .ok_or_else(|| anyhow!("Config '{}' not found", config_name))?;
+
+        self.delete_file(&file_id).await?;
+
+        info!("Successfully deleted config '{}'", config_name);
+
+        Ok(())
+    }
+
+    /// Find config file by name in folder
+    async fn find_config_file(&mut self, config_name: &str, folder_id: &str) -> Result<Option<String>> {
+        let filename = format!("{}.zip", config_name);
+
+        let files = self.list_folder_files(folder_id).await?;
+
+        for file in files {
+            if file.name == filename {
+                return Ok(Some(file.id));
+            }
+        }
+
+        Ok(None)
     }
 }
 

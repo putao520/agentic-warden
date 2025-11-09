@@ -2,8 +2,8 @@ use super::config_packer::ConfigPacker;
 use super::directory_hasher::{DirectoryHash, DirectoryHasher};
 use super::error::{SyncError, SyncResult as ErrorResult};
 use super::google_drive_service::GoogleDriveService;
-use super::oauth_client::OAuthClient;
-use super::smart_oauth::SmartOAuthAuthenticator;
+use super::device_flow_client::{AuthConfig, TokenInfo};
+use super::smart_device_flow::SmartDeviceFlowAuthenticator;
 use super::sync_config_manager::SyncConfigManager;
 use crate::config::{AUTH_DIRECTORY, AUTH_FILE_NAME};
 use crate::error::AgenticWardenError;
@@ -582,7 +582,7 @@ impl ConfigSyncManager {
             println!();
             println!("🔒 Privacy:");
             println!("   • Only you can access your Google Drive files");
-            println!("   • We use OAuth 2.0 for secure authentication");
+            println!("   • We use OAuth 2.0 Device Flow for secure authentication");
             println!("   • Credentials are stored locally and encrypted");
             println!();
 
@@ -610,15 +610,14 @@ impl ConfigSyncManager {
 
             println!();
             println!("{}", "═".repeat(70));
-            println!("🔐 Google Drive OAuth Setup");
+            println!("🔐 Google Drive OAuth Setup (Device Flow)");
             println!("{}", "═".repeat(70));
             println!();
             println!("To continue, you need OAuth 2.0 credentials from Google Cloud Console:");
             println!("1. Visit: https://console.cloud.google.com/");
             println!("2. Create a project or select existing one");
             println!("3. Enable Google Drive API");
-            println!("4. Create OAuth 2.0 Client ID credentials");
-            println!("5. Add urn:ietf:wg:oauth:2.0:oob to authorized redirect URIs");
+            println!("4. Create OAuth 2.0 Client ID credentials (type: Desktop app or TVs and Limited Input devices)");
             println!();
             println!("We'll store these credentials securely in ~/.agentic-warden/auth.json");
             println!();
@@ -626,44 +625,55 @@ impl ConfigSyncManager {
 
         Self::ensure_client_credentials(&mut stored_auth).await?;
 
-        if stored_auth.refresh_token.is_none() {
-            self.run_smart_oauth_flow(&mut stored_auth).await?;
-        }
+        // Create auth config for Device Flow
+        let auth_config = AuthConfig {
+            client_id: stored_auth.client_id.clone(),
+            client_secret: stored_auth.client_secret.clone(),
+            scopes: Self::default_scopes(),
+            auth_timeout: 300, // 5 minutes
+            poll_interval: 5,  // 5 seconds
+        };
 
-        let mut oauth_client = OAuthClient::new(
-            stored_auth.client_id.clone(),
-            stored_auth.client_secret.clone(),
-            stored_auth.refresh_token.clone(),
-        )
-        .with_scopes(Self::default_scopes());
+        let auth_file_path = Self::auth_file_path()?;
 
-        if let Err(err) = oauth_client.validate_config() {
-            error!(target: "agentic_warden::sync", "OAuth configuration validation failed: {}", err);
-            return Err(Self::auth_failed_error());
-        }
+        // Create or load authenticator
+        let authenticator = if let Some(ref refresh_token) = stored_auth.refresh_token {
+            // Try to use existing token
+            let token_info = TokenInfo {
+                access_token: stored_auth.access_token.clone().unwrap_or_default(),
+                refresh_token: Some(refresh_token.clone()),
+                token_type: stored_auth.token_type.clone().unwrap_or_else(|| "Bearer".to_string()),
+                expires_in: if let Some(expires_at) = stored_auth.expires_at {
+                    let now = Utc::now().timestamp();
+                    if expires_at > now {
+                        (expires_at - now).max(0) as u64
+                    } else {
+                        0
+                    }
+                } else {
+                    0
+                },
+                scope: stored_auth.scope.clone(),
+            };
 
-        if !oauth_client.is_authenticated() {
-            warn!(target: "agentic_warden::sync", "OAuth client missing authentication tokens, re-running SmartOAuth");
-            self.run_smart_oauth_flow(&mut stored_auth).await?;
-            oauth_client = OAuthClient::new(
-                stored_auth.client_id.clone(),
-                stored_auth.client_secret.clone(),
-                stored_auth.refresh_token.clone(),
+            SmartDeviceFlowAuthenticator::with_existing_tokens(
+                auth_config.clone(),
+                token_info,
+                auth_file_path.clone(),
             )
-            .with_scopes(Self::default_scopes());
+        } else {
+            // No existing token, will need to authenticate
+            SmartDeviceFlowAuthenticator::new(auth_config.clone(), auth_file_path.clone())
+        };
 
-            if let Err(err) = oauth_client.validate_config() {
-                error!(target: "agentic_warden::sync", "OAuth configuration validation failed after SmartOAuth: {}", err);
-                return Err(Self::auth_failed_error());
-            }
-
-            if !oauth_client.is_authenticated() {
-                error!(target: "agentic_warden::sync", "SmartOAuth completed without providing usable tokens");
-                return Err(Self::auth_failed_error());
-            }
+        // Check if we need to authenticate
+        if !authenticator.is_authenticated().await {
+            info!(target: "agentic_warden::sync", "No valid authentication, starting Device Flow");
+            self.run_device_flow(&authenticator, &mut stored_auth).await?;
         }
 
-        let drive_service = GoogleDriveService::new(oauth_client)
+        // Create Google Drive service with authenticator
+        let drive_service = GoogleDriveService::new(authenticator)
             .await
             .map_err(|err| {
                 error!(target: "agentic_warden::sync", "Failed to initialize Google Drive service: {}", err);
@@ -1048,44 +1058,79 @@ impl ConfigSyncManager {
         Ok(())
     }
 
-    async fn run_smart_oauth_flow(&self, auth: &mut StoredAuthState) -> ErrorResult<()> {
-        let oauth_config = super::oauth_client::OAuthConfig {
-            client_id: auth.client_id.clone(),
-            client_secret: auth.client_secret.clone(),
-            refresh_token: None,
-            access_token: None,
-            expires_in: 0,
-            token_type: "Bearer".to_string(),
-            scopes: Self::default_scopes(),
-        };
+    async fn run_device_flow(
+        &self,
+        authenticator: &SmartDeviceFlowAuthenticator,
+        auth: &mut StoredAuthState,
+    ) -> ErrorResult<()> {
+        println!();
+        println!("{}", "═".repeat(70));
+        println!("🔐 Starting Device Flow Authorization");
+        println!("{}", "═".repeat(70));
+        println!();
 
-        let authenticator = SmartOAuthAuthenticator::new(oauth_config);
-        let token_response = authenticator.authenticate().await.map_err(|err| {
+        // Start Device Flow
+        let device_response = authenticator.start_device_flow().await.map_err(|err| {
             error!(
                 target: "agentic_warden::sync",
-                "SmartOAuth authentication failed: {}",
+                "Failed to start Device Flow: {}",
                 err
             );
             Self::auth_failed_error()
         })?;
 
-        auth.access_token = Some(token_response.access_token.clone());
-        auth.token_type = Some(token_response.token_type.clone());
-        auth.scope = token_response.scope.clone();
-        let expires_at = Utc::now() + Duration::seconds(token_response.expires_in as i64);
+        // Display instructions to user
+        println!("Please visit the following URL in your browser:");
+        println!();
+        println!("    {}", device_response.verification_url);
+        println!();
+        println!("And enter this code:");
+        println!();
+        println!("    {}", device_response.user_code);
+        println!();
+        println!("Waiting for authorization (expires in {} seconds)...", device_response.expires_in);
+        println!();
+
+        // Poll for authorization
+        let token_info = authenticator
+            .poll_until_authorized(
+                &device_response.device_code,
+                device_response.interval,
+                device_response.expires_in,
+            )
+            .await
+            .map_err(|err| {
+                error!(
+                    target: "agentic_warden::sync",
+                    "Device Flow authorization failed: {}",
+                    err
+                );
+                Self::auth_failed_error()
+            })?;
+
+        println!("✅ Authorization successful!");
+        println!();
+
+        // Update stored auth state
+        auth.access_token = Some(token_info.access_token.clone());
+        auth.token_type = Some(token_info.token_type.clone());
+        auth.scope = token_info.scope.clone();
+
+        let expires_at = Utc::now() + Duration::seconds(token_info.expires_in as i64);
         auth.expires_at = Some(expires_at.timestamp());
 
-        if let Some(refresh_token) = token_response.refresh_token.clone() {
+        if let Some(refresh_token) = token_info.refresh_token.clone() {
             auth.refresh_token = Some(refresh_token);
         } else if auth.refresh_token.is_none() {
             error!(
                 target: "agentic_warden::sync",
-                "SmartOAuth did not return a refresh token"
+                "Device Flow did not return a refresh token"
             );
             return Err(Self::auth_failed_error());
         }
 
         Self::save_auth_state(auth)?;
+        info!(target: "agentic_warden::sync", "Device Flow authentication completed and saved");
         Ok(())
     }
 }
