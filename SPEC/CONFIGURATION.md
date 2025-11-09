@@ -10,7 +10,6 @@
 ├── config.json                # 主配置文件
 ├── agentic-warden.log         # 日志文件
 ├── temp/                      # 临时文件目录
-│   ├── oauth_callback.html    # OAuth 回调页面
 │   └── download_cache/        # 下载缓存
 └── schema/                    # JSON Schema 文件
     ├── provider.json.schema   # Provider 配置 Schema

@@ -54,9 +54,11 @@ pub mod tui_commands {
     pub struct DashboardCommand;
     pub struct StatusCommand;
     pub struct PushCommand {
-        pub dirs: Vec<PathBuf>,
+        pub config_name: Option<String>,
     }
-    pub struct PullCommand;
+    pub struct PullCommand {
+        pub config_name: Option<String>,
+    }
 }
 ```
 
@@ -424,7 +426,7 @@ TUI 启动 → 事件循环 → 屏幕渲染 → 用户交互 → 状态更新 �
 
 ### 3. Google Drive 集成流程
 ```
-Push/Pull 命令 → 授权检查 → OOB 流程(如需要) → 文件操作 → 进度显示
+Push/Pull 命令 → 授权检查 → Device Flow 授权流程(如需要) → 文件操作 → 进度显示
 ```
 
 ## 模块依赖关系

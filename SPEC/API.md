@@ -225,18 +225,24 @@ pub enum EditField {
 
 **数据模型**：
 ```rust
-pub struct AuthDialog {
+pub struct AuthDialogState {
     /// 验证 URL (如 https://google.com/device)
     pub verification_url: String,
+
+    /// 当前授权状态
+    pub auth_status: AuthStatus,
 
     /// 用户代码 (如 ABCD-EFGH)
     pub user_code: String,
 
-    /// 过期时间（秒）
+    /// 过期倒计时（秒）
     pub expires_in: u64,
 
-    /// 授权状态
-    pub status: AuthStatus,
+    /// 轮询间隔（秒）
+    pub poll_interval: u64,
+
+    /// 错误信息
+    pub error_message: Option<String>,
 }
 
 pub enum AuthStatus {

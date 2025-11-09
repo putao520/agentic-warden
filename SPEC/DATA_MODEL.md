@@ -148,6 +148,32 @@ fn default_poll_interval() -> u64 {
 }
 ```
 
+#### 2.3 Device Flow 响应
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceCodeResponse {
+    /// 内部使用的设备代码（用于轮询）
+    pub device_code: String,
+
+    /// 用户输入的代码 (如 ABCD-EFGH)
+    pub user_code: String,
+
+    /// 验证 URL (如 https://google.com/device)
+    pub verification_url: String,
+
+    /// 过期时间（秒）
+    pub expires_in: u64,
+
+    /// 轮询间隔（秒）
+    pub interval: u64,
+}
+```
+
+**使用场景**:
+- Device Flow 授权流程的初始响应
+- TUI 显示验证 URL 和用户代码
+- 后台轮询任务使用 device_code 检查授权状态
+
 ## 进程树数据模型
 
 ### 1. 进程树结构模型

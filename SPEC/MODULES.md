@@ -133,8 +133,8 @@ fn spawn_ai_cli_process(ai_type: AiType, provider: &str, prompt: &str) -> Result
 ```rust
 pub async fn execute_dashboard_command() -> Result<()>
 pub async fn execute_status_command() -> Result<()>
-pub async fn execute_push_command(dirs: Vec<PathBuf>) -> Result<()>
-pub async fn execute_pull_command() -> Result<()>
+pub async fn execute_push_command(config_name: Option<String>) -> Result<()>
+pub async fn execute_pull_command(config_name: Option<String>) -> Result<()>
 ```
 
 #### 1.4 commands/parser.rs
@@ -230,11 +230,13 @@ impl App {
 - `status.rs`: 任务状态监控界面
 - `push.rs`: Push 进度显示界面
 - `pull.rs`: Pull 进度显示界面
-- `auth_dialog.rs`: Google Drive 授权对话框
+- `auth_dialog.rs`: Google Drive 授权对话框（**注意**: 这是渲染函数模块，不是自定义Dialog组件类）
 
 # 注意：关于 TUI 事件处理和组件
 # - 事件处理：直接使用 ratatui + crossterm 内置的事件处理机制
 # - UI 组件：直接使用 ratatui 提供的组件，不单独封装
+# - auth_dialog.rs 等模块提供的是渲染函数（如 `render_auth_dialog(frame, state, area)`），
+#   而不是自定义组件类（禁止创建 AuthDialog::new() 这样的组件）
 # - 这种设计更简洁，减少了不必要的抽象层
 
 ### 3. core/ - 核心业务逻辑

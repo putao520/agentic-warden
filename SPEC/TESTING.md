@@ -396,8 +396,7 @@ mod tests {
         let sync_service = create_test_sync_service(&env).await?;
 
         // 模拟 push 命令
-        let test_dirs = vec![env.temp_dir.path().to_path_buf()];
-        let push_result = sync_service.push_directories(&test_dirs).await?;
+        let push_result = sync_service.push_config("test").await?;
 
         assert!(push_result.success);
         assert!(push_result.uploaded_files > 0);
