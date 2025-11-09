@@ -390,25 +390,18 @@ struct StoredOAuthState {
 
 impl StoredOAuthState {
     fn into_oauth_config(self) -> OAuthConfig {
-        let mut config = OAuthConfig::default();
-        config.client_id = self.client_id;
-        config.client_secret = self.client_secret;
-        config.refresh_token = self.refresh_token;
-        config.access_token = self.access_token;
-        config.token_type = self.token_type.unwrap_or_else(|| "Bearer".to_string());
-        config.scopes = self
-            .scope
-            .map(|scope| scope.split_whitespace().map(|s| s.to_string()).collect())
-            .unwrap_or_else(default_scopes);
-
-        if let Some(expires_at) = self.expires_at {
-            if let Some(expires) = Utc.timestamp_opt(expires_at, 0).single() {
-                let remaining = expires - Utc::now();
-                config.expires_in = remaining.num_seconds().max(0) as u64;
-            }
+        // AuthConfig only stores client credentials and flow settings
+        // Token information (access_token, refresh_token) is stored separately in TokenInfo
+        AuthConfig {
+            client_id: self.client_id,
+            client_secret: self.client_secret,
+            scopes: self
+                .scope
+                .map(|scope| scope.split_whitespace().map(|s| s.to_string()).collect())
+                .unwrap_or_else(default_scopes),
+            auth_timeout: 300, // 5 minutes default
+            poll_interval: 5,  // 5 seconds default
         }
-
-        config
     }
 }
 
