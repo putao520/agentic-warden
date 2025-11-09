@@ -47,8 +47,8 @@ pub enum ScreenType {
     Provider,
     ProviderAddWizard,
     OAuth,
-    Push(Vec<String>),
-    Pull,
+    Push(Option<String>),
+    Pull(Option<String>),
 }
 
 impl ScreenType {
@@ -60,8 +60,16 @@ impl ScreenType {
             ScreenType::Provider => Ok(Box::new(ProviderScreen::new()?)),
             ScreenType::ProviderAddWizard => Ok(Box::new(ProviderAddWizard::new()?)),
             ScreenType::OAuth => Ok(Box::new(OAuthScreen::new()?)),
-            ScreenType::Push(dirs) => Ok(Box::new(PushScreen::new(dirs.clone())?)),
-            ScreenType::Pull => Ok(Box::new(PullScreen::new()?)),
+            ScreenType::Push(_config_name) => {
+                // TODO: Refactor PushScreen to accept config_name directly
+                // Temporarily convert to empty vec for backward compatibility
+                let dirs = vec![];
+                Ok(Box::new(PushScreen::new(dirs)?))
+            }
+            ScreenType::Pull(_config_name) => {
+                // TODO: Refactor PullScreen to accept config_name directly
+                Ok(Box::new(PullScreen::new()?))
+            },
         }
     }
 }
@@ -74,8 +82,12 @@ impl fmt::Display for ScreenType {
             ScreenType::Provider => write!(f, "Provider Management"),
             ScreenType::ProviderAddWizard => write!(f, "Add Provider"),
             ScreenType::OAuth => write!(f, "OAuth Configuration"),
-            ScreenType::Push(dirs) => write!(f, "Push: {} directories", dirs.len()),
-            ScreenType::Pull => write!(f, "Pull from Remote"),
+            ScreenType::Push(config_name) => {
+                write!(f, "Push: {}", config_name.as_deref().unwrap_or("default"))
+            }
+            ScreenType::Pull(config_name) => {
+                write!(f, "Pull: {}", config_name.as_deref().unwrap_or("default"))
+            },
         }
     }
 }

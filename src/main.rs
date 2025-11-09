@@ -48,14 +48,12 @@ fn main_impl() -> Result<ExitCode, String> {
         Commands::Dashboard => launch_tui(None),
         Commands::Status => launch_tui(Some(crate::tui::ScreenType::Status)),
         Commands::Provider => launch_tui(Some(crate::tui::ScreenType::Provider)),
-        Commands::Push { dirs } => {
-            let directories = dirs
-                .into_iter()
-                .map(|dir| dir.to_string_lossy().to_string())
-                .collect();
-            launch_tui(Some(crate::tui::ScreenType::Push(directories)))
+        Commands::Push { config_name } => {
+            launch_tui(Some(crate::tui::ScreenType::Push(config_name)))
         }
-        Commands::Pull => launch_tui(Some(crate::tui::ScreenType::Pull)),
+        Commands::Pull { config_name } => {
+            launch_tui(Some(crate::tui::ScreenType::Pull(config_name)))
+        },
         Commands::Reset => handle_sync_command("reset", None),
         Commands::List => handle_sync_command("list", None),
         Commands::Wait => {

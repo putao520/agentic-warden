@@ -3,7 +3,7 @@
 //! 使用 clap 定义命令行接口并进行参数解析
 
 use clap::{Parser, Subcommand};
-use std::{ffi::OsString, path::PathBuf};
+use std::ffi::OsString;
 
 /// Agentic-Warden - AI CLI 工具的统一管理和进程监控平台
 #[derive(Parser, Debug, Clone)]
@@ -29,20 +29,19 @@ pub enum Commands {
     /// 启动 Provider 管理 TUI
     Provider,
 
-    /// 推送目录到 Google Drive
+    /// 推送AI CLI配置到 Google Drive
     Push {
-        /// 需要推送的目录（缺省为当前目录）
-        #[arg(
-            value_name = "DIR",
-            value_parser = clap::value_parser!(PathBuf),
-            num_args = 0..,
-            trailing_var_arg = true
-        )]
-        dirs: Vec<PathBuf>,
+        /// 配置名称（如 "dev", "prod"，默认 "default"）
+        #[arg(value_name = "CONFIG_NAME")]
+        config_name: Option<String>,
     },
 
-    /// 从 Google Drive 拉取文件
-    Pull,
+    /// 从 Google Drive 恢复AI CLI配置
+    Pull {
+        /// 配置名称（如 "dev", "prod"，默认 "default"）
+        #[arg(value_name = "CONFIG_NAME")]
+        config_name: Option<String>,
+    },
 
     /// 重置同步状态
     Reset,

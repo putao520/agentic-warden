@@ -1,10 +1,12 @@
 pub mod compressor;
 pub mod config_packer;
 pub mod config_sync_manager;
+pub mod device_flow_client;
 pub mod directory_hasher;
 pub mod error;
 pub mod google_drive_service;
 pub mod oauth_client;
+pub mod smart_device_flow;
 pub mod smart_oauth;
 pub mod sync_command;
 pub mod sync_config;
