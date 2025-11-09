@@ -11,11 +11,26 @@ use crate::{
     provider::config::Provider as ProviderConfig,
     registry::RegistryEntry,
     sync::{
-        oauth_client::{OAuthConfig, OAuthTokenResponse},
-        smart_oauth::{AuthState, SmartOAuthAuthenticator},
+        smart_device_flow::{AuthState, SmartDeviceFlowAuthenticator},
+        device_flow_client::{TokenInfo, AuthConfig},
     },
     task_record::{TaskRecord, TaskStatus},
 };
+
+// Temporary stub types for backward compatibility
+// TODO: Refactor app_state.rs to fully use Device Flow types
+#[deprecated(note = "Use TokenInfo from device_flow_client instead")]
+#[derive(Debug, Clone, Default)]
+struct OAuthTokenResponse {
+    access_token: String,
+    refresh_token: Option<String>,
+    expires_in: u64,
+    token_type: String,
+    scope: Option<String>,
+}
+
+#[deprecated(note = "Use AuthConfig from device_flow_client instead")]
+type OAuthConfig = AuthConfig;
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use parking_lot::RwLock;
@@ -36,7 +51,7 @@ pub struct AppState {
     default_provider: RwLock<Option<String>>,
     tasks: RwLock<HashMap<u32, TaskSnapshot>>,
     sync_progress: RwLock<HashMap<TransferKind, TransferProgress>>,
-    authenticators: RwLock<HashMap<String, SmartOAuthAuthenticator>>,
+    authenticators: RwLock<HashMap<String, SmartDeviceFlowAuthenticator>>,
     oauth_flows: RwLock<HashMap<String, OAuthFlow>>,
 }
 
@@ -180,14 +195,15 @@ impl AppState {
         snapshot
     }
 
-    /// Ensure a [`SmartOAuthAuthenticator`] exists for the requested provider.
-    pub fn ensure_authenticator(&self, provider: &str) -> Result<SmartOAuthAuthenticator> {
+    /// Ensure a [`SmartDeviceFlowAuthenticator`] exists for the requested provider.
+    pub fn ensure_authenticator(&self, provider: &str) -> Result<SmartDeviceFlowAuthenticator> {
         if let Some(existing) = self.authenticators.read().get(provider) {
             return Ok(existing.clone());
         }
 
         let config = self.load_oauth_config(provider)?;
-        let authenticator = SmartOAuthAuthenticator::new(config.clone());
+        let auth_file_path = Self::auth_file_path()?;
+        let authenticator = SmartDeviceFlowAuthenticator::new(config.clone(), auth_file_path);
         self.authenticators
             .write()
             .insert(provider.to_string(), authenticator.clone());
@@ -216,7 +232,8 @@ impl AppState {
         // Replace cached authenticator so future calls see fresh credentials.
         self.authenticators.write().remove(provider);
         let config = self.load_oauth_config(provider)?;
-        let authenticator = SmartOAuthAuthenticator::new(config.clone());
+        let auth_file_path = Self::auth_file_path()?;
+        let authenticator = SmartDeviceFlowAuthenticator::new(config.clone(), auth_file_path);
         self.authenticators
             .write()
             .insert(provider.to_string(), authenticator);
@@ -285,11 +302,8 @@ impl AppState {
             .ok_or_else(|| anyhow!("OAuth flow '{flow_id}' not found"))?;
 
         flow.auth_state = state.clone();
-        if let AuthState::WaitingForCode { url } = &state {
-            if !url.is_empty() {
-                flow.dialog.auth_url = url.clone();
-            }
-        }
+        // TODO: Update for Device Flow - WaitingForCode no longer exists
+        // Device Flow uses WaitingForUser with verification_url instead
         flow.dialog.status = AuthStatus::from_auth_state(&state);
         flow.updated_at = Instant::now();
         Ok(())
@@ -580,9 +594,12 @@ impl AuthStatus {
     fn from_auth_state(state: &AuthState) -> Self {
         match state {
             AuthState::Initializing => AuthStatus::Waiting,
-            AuthState::WaitingForCode { .. } => AuthStatus::Waiting,
+            AuthState::WaitingForUser { .. } => AuthStatus::Waiting,
+            AuthState::Polling { .. } => AuthStatus::Waiting,
             AuthState::Authenticated { .. } => AuthStatus::Authorized,
-            AuthState::Error { message } => AuthStatus::Failed(message.clone()),
+            AuthState::Failed { message } => AuthStatus::Failed(message.clone()),
+            AuthState::Expired => AuthStatus::Failed("Device code expired".to_string()),
+            AuthState::AccessDenied => AuthStatus::Failed("Access denied".to_string()),
         }
     }
 }

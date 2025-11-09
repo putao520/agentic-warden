@@ -3,7 +3,7 @@
 use super::{Screen, ScreenAction, ScreenType};
 use crate::error::AgenticWardenError;
 use crate::sync::config_sync_manager::{ConfigSyncManager, PullProgressEvent, SyncOperationResult};
-use crate::sync::smart_oauth::AuthState;
+use crate::sync::smart_device_flow::AuthState;
 use crate::tui::app_state::{AppState, SyncPhase, TransferKind, TransferProgress};
 use super::render_helpers::{DialogResult, DialogState, ProgressState};
 use anyhow::{Context, Result};
