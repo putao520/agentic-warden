@@ -63,16 +63,29 @@ agentic-warden status
 
 #### 2.3 Push 命令
 ```bash
-agentic-warden push [dirs...]  # 推送指定目录到 Google Drive
-agentic-warden push            # 推送当前目录
+agentic-warden push [CONFIG_NAME]  # 推送AI CLI配置到 Google Drive
+agentic-warden push                # 推送到默认配置 (default)
+agentic-warden push dev            # 推送到开发配置
+agentic-warden push prod           # 推送到生产配置
 ```
-**功能**: 推送文件到 Google Drive，自动检测授权并显示进度 TUI
+**功能**: 将AI CLI配置文件备份到 Google Drive，自动检测授权并显示进度 TUI
+
+**配置扫描**:
+- 自动扫描 `~/.claude/`, `~/.codex/`, `~/.gemini/` 目录
+- 打包为 `.agentic-warden/<CONFIG_NAME>.zip` 上传到 Google Drive
+- 如果配置已存在，显示TUI确认对话框
 
 #### 2.4 Pull 命令
 ```bash
-agentic-warden pull            # 从 Google Drive 拉取所有文件
+agentic-warden pull [CONFIG_NAME]  # 从 Google Drive 恢复指定配置
+agentic-warden pull                # 恢复默认配置 (default)
+agentic-warden pull dev            # 恢复开发配置
 ```
-**功能**: 从 Google Drive 拉取文件，自动检测授权并显示进度 TUI
+**功能**: 从 Google Drive 恢复AI CLI配置，自动检测授权并显示进度 TUI
+
+**恢复策略**:
+- 下载 `.agentic-warden/<CONFIG_NAME>.zip` 并解压
+- 覆盖本地 `~/.claude/`, `~/.codex/`, `~/.gemini/` 配置文件
 
 #### 2.5 Provider 管理
 ```bash

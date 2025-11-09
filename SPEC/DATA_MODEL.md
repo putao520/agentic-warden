@@ -459,16 +459,20 @@ pub struct SharedData {
    - 上传到 Google Drive: `.agentic-warden/<CONFIG_NAME>.zip`
 3. **覆盖保护机制**:
    - 系统在上传前自动检查云端是否已存在同名配置
-   - 如果发现重复，显示确认提示：
+   - 如果发现重复，显示TUI确认对话框：
      ```
-     ⚠️  Configuration 'xxx' already exists in Google Drive.
-     Do you want to overwrite it?
-       [Y] Yes, overwrite
-       [N] No, cancel
-     Your choice [Y/N]:
+     ┌────────────────────────────────────────┐
+     │       ⚠️  配置已存在                   │
+     ├────────────────────────────────────────┤
+     │ 配置 'dev' 已存在于 Google Drive       │
+     │                                        │
+     │ 是否覆盖现有配置？                     │
+     │                                        │
+     │   [覆盖]        [取消]                 │
+     └────────────────────────────────────────┘
      ```
-   - 用户选择 'N' 或 'No' 则取消上传操作
-   - 用户选择 'Y' 或 'Yes' 则继续上传并覆盖
+   - 用户选择"取消"则返回主界面
+   - 用户选择"覆盖"则继续上传并覆盖现有配置
 4. **包含的文件类型**:
 
 **重要说明**: 所有的 AI CLI 根目录（~/.claude、~/.codex、~/.gemini）都是可选的。

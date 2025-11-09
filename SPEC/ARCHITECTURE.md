@@ -287,8 +287,18 @@ pub struct GoogleDriveService {
 
 impl GoogleDriveService {
     pub async fn ensure_authorized(&mut self) -> Result<bool>;
-    pub async fn push_directories(&self, dirs: &[PathBuf]) -> Result<PushResult>;
-    pub async fn pull_all(&self) -> Result<PullResult>;
+
+    /// 推送AI CLI配置到Google Drive
+    /// config_name: 配置名称（如 "dev", "prod"，默认 "default"）
+    pub async fn push_config(&self, config_name: &str) -> Result<PushResult>;
+
+    /// 从Google Drive拉取AI CLI配置
+    /// config_name: 配置名称（如 "dev", "prod"，默认 "default"）
+    pub async fn pull_config(&self, config_name: &str) -> Result<PullResult>;
+
+    /// 列出Google Drive中所有可用的配置
+    pub async fn list_configs(&self) -> Result<Vec<String>>;
+
     pub async fn refresh_token(&mut self) -> Result<()>;
 }
 
