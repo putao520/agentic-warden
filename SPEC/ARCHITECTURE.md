@@ -281,7 +281,7 @@ pub struct TaskRecord {
 ```rust
 // src/sync/google_drive_service.rs
 pub struct GoogleDriveService {
-    oauth_client: OAuthClient,
+    device_flow_client: DeviceFlowClient,
     auth_config: AuthConfig,
 }
 
@@ -292,17 +292,39 @@ impl GoogleDriveService {
     pub async fn refresh_token(&mut self) -> Result<()>;
 }
 
-// OOB 授权流程
-pub struct OAuthClient {
+// Device Flow 授权流程 (RFC 8628)
+pub struct DeviceFlowClient {
     client_id: String,
     client_secret: String,
-    redirect_uri: String,
 }
 
-impl OAuthClient {
-    pub async fn start_oob_flow(&self) -> Result<String>; // 返回授权URL
-    pub async fn exchange_code_for_token(&self, code: &str) -> Result<TokenInfo>;
-    pub fn start_callback_server(&self) -> Result<()>;
+impl DeviceFlowClient {
+    /// 启动 Device Flow，返回设备代码和验证 URL
+    pub async fn start_device_flow(&self) -> Result<DeviceCodeResponse>;
+
+    /// 轮询检查授权状态
+    pub async fn poll_for_token(&self, device_code: &str) -> Result<TokenInfo>;
+
+    /// 刷新访问令牌
+    pub async fn refresh_access_token(&self, refresh_token: &str) -> Result<TokenInfo>;
+}
+
+/// Device Flow 响应
+pub struct DeviceCodeResponse {
+    /// 内部使用的设备代码
+    pub device_code: String,
+
+    /// 用户输入的代码 (如 ABCD-EFGH)
+    pub user_code: String,
+
+    /// 验证 URL
+    pub verification_url: String,
+
+    /// 过期时间（秒）
+    pub expires_in: u64,
+
+    /// 轮询间隔（秒）
+    pub interval: u64,
 }
 ```
 

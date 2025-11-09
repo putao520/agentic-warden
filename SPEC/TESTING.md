@@ -190,37 +190,52 @@ mod tests {
 
 #### 2.4 sync/ 模块测试
 ```rust
-// tests/unit/sync/test_oauth_client.rs
+// tests/unit/sync/test_device_flow_client.rs
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sync::oauth_client::*;
+    use crate::sync::device_flow_client::*;
 
-    #[test]
-    fn test_oauth_url_generation() {
-        let client = OAuthClient::new(
+    #[tokio::test]
+    async fn test_device_code_request() {
+        let client = DeviceFlowClient::new(
             "test-client-id".to_string(),
             "test-client-secret".to_string(),
-            "http://localhost:8080".to_string(),
         );
 
-        let auth_url = client.start_oob_flow().unwrap();
-        assert!(auth_url.contains("accounts.google.com"));
-        assert!(auth_url.contains("client_id=test-client-id"));
+        let response = client.start_device_flow().await.unwrap();
+
+        assert!(!response.device_code.is_empty());
+        assert!(!response.user_code.is_empty());
+        assert!(response.verification_url.contains("google.com"));
+        assert!(response.expires_in > 0);
+        assert!(response.interval > 0);
     }
 
     #[tokio::test]
-    async fn test_token_exchange() {
-        let client = create_test_oauth_client();
+    async fn test_polling_authorization_pending() {
+        let client = create_test_device_flow_client();
+        let device_code = "test-device-code";
 
-        // 模拟授权码交换
-        let token_info = client.exchange_code_for_token("test-auth-code").await;
+        // 模拟授权未完成状态
+        let result = client.poll_for_token(device_code).await;
 
-        // 由于这是测试，我们模拟成功和失败两种情况
-        match token_info {
-            Ok(token) => {
-                assert!(!token.access_token.is_empty());
-                assert!(!token.refresh_token.is_empty());
+        // 应该返回 authorization_pending 错误
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_polling_success() {
+        let client = create_test_device_flow_client();
+        let device_code = "test-device-code-success";
+
+        // 模拟授权成功
+        let token = client.poll_for_token(device_code).await;
+
+        match token {
+            Ok(token_info) => {
+                assert!(!token_info.access_token.is_empty());
+                assert!(token_info.refresh_token.is_some());
             }
             Err(_) => {
                 // 测试错误处理
@@ -228,13 +243,33 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_callback_server() {
-        let client = create_test_oauth_client();
-        let server_result = client.start_callback_server();
+    #[tokio::test]
+    async fn test_device_code_expired() {
+        let client = create_test_device_flow_client();
+        let device_code = "expired-device-code";
 
-        assert!(server_result.is_ok());
-        // 服务器应该在后台启动
+        // 模拟设备代码过期
+        let result = client.poll_for_token(device_code).await;
+
+        assert!(result.is_err());
+        // 应该返回 expired_token 错误
+    }
+
+    #[tokio::test]
+    async fn test_refresh_token() {
+        let client = create_test_device_flow_client();
+        let refresh_token = "test-refresh-token";
+
+        let result = client.refresh_access_token(refresh_token).await;
+
+        match result {
+            Ok(token_info) => {
+                assert!(!token_info.access_token.is_empty());
+            }
+            Err(_) => {
+                // 测试错误处理
+            }
+        }
     }
 }
 ```
@@ -379,25 +414,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_auth_flow_integration() -> Result<()> {
+    async fn test_device_flow_integration() -> Result<()> {
         let env = TestEnvironment::new()?;
 
         // 模拟未授权状态
         assert!(!is_authorized(&env.auth_path)?);
 
-        // 初始化 OAuth 客户端
-        let oauth_client = create_test_oauth_client();
+        // 初始化 Device Flow 客户端
+        let device_flow_client = create_test_device_flow_client();
 
-        // 模拟授权流程
-        let auth_url = oauth_client.start_oob_flow()?;
-        assert!(auth_url.starts_with("https://accounts.google.com"));
+        // 启动 Device Flow
+        let device_response = device_flow_client.start_device_flow().await?;
+        assert!(!device_response.user_code.is_empty());
+        assert!(device_response.verification_url.contains("google.com"));
 
-        // 模拟用户授权完成
+        // 模拟后台轮询（在实际场景中会轮询直到授权完成）
+        // 这里直接模拟授权成功
         let mock_token = create_mock_token();
         save_token(&env.auth_path, &mock_token)?;
 
         // 验证授权状态
         assert!(is_authorized(&env.auth_path)?);
+
+        // 测试 token 刷新
+        let new_token = device_flow_client
+            .refresh_access_token(&mock_token.refresh_token)
+            .await?;
+        assert!(!new_token.access_token.is_empty());
 
         Ok(())
     }

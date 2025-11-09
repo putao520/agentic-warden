@@ -46,7 +46,7 @@ Agentic-Warden 是一个 AI CLI 工具的统一管理和进程监控平台，专
 - **语言**: Rust
 - **TUI 框架**: ratatui (0.24+) + crossterm (0.27+)
 - **组件**: 使用 ratatui 组件库的现成组件
-- **授权**: Google OAuth 2.0 OOB 流程
+- **授权**: Google OAuth 2.0 Device Flow (RFC 8628)
 - **配置**: JSON 格式配置文件
 
 ## 目标用户
@@ -61,7 +61,7 @@ Agentic-Warden 是一个 AI CLI 工具的统一管理和进程监控平台，专
 ### 简洁性
 - 命令行优先：AI CLI 启动命令保持命令行模式（直接输出结果）
 - TUI 用于管理：Provider 管理、任务状态、进度显示等使用 TUI
-- 集成式授权：push/pull 命令自动检测并触发 OOB 流程
+- 集成式授权：push/pull 命令自动检测并触发 Device Flow 授权流程
 
 ### 一致性
 - 统一 TUI 设计：所有交互使用 TUI，统一使用 ratatui 框架

@@ -169,10 +169,11 @@ pub enum EditField {
 ```bash
 # 执行 push 命令时的流程
 1. 检查 Google Drive 授权状态
-2. 如果未授权 → 显示授权对话框
-3. 用户同意 → 启动 OOB 流程
-4. 授权成功 → 自动开始 push 操作
-5. 显示进度 TUI
+2. 如果未授权 → 显示 Device Flow 授权对话框（设备代码和URL）
+3. TUI 显示验证 URL 和用户代码
+4. 后台自动轮询授权状态
+5. 授权成功 → 自动开始 push 操作
+6. 显示进度 TUI
 ```
 
 #### 4.2 进度显示格式
@@ -189,17 +190,60 @@ pub enum EditField {
 ```
 
 #### 4.3 授权对话框
+
+**Device Flow TUI 界面**：
+```
+┌────────────────────────────────────────┐
+│       🔐 Google Drive 授权             │
+├────────────────────────────────────────┤
+│ 请在浏览器访问以下地址：                │
+│                                        │
+│ https://google.com/device              │
+│                                        │
+│ 并输入以下代码：                       │
+│                                        │
+│        ABCD-EFGH                       │
+│                                        │
+│ ⏱️  等待授权中... (180秒)              │
+│                                        │
+│   [取消]                               │
+└────────────────────────────────────────┘
+```
+
+**数据模型**：
 ```rust
 pub struct AuthDialog {
-    pub auth_url: String,
+    /// 验证 URL (如 https://google.com/device)
+    pub verification_url: String,
+
+    /// 用户代码 (如 ABCD-EFGH)
+    pub user_code: String,
+
+    /// 过期时间（秒）
+    pub expires_in: u64,
+
+    /// 授权状态
     pub status: AuthStatus,
 }
 
 pub enum AuthStatus {
-    Waiting,        // 等待用户操作
-    CallbackStarted, // 回调服务器启动
-    Authorized,     // 授权成功
-    Failed(String), // 授权失败
+    /// 显示设备代码，等待用户访问 URL 并授权
+    WaitingForUser,
+
+    /// 后台轮询检查授权状态
+    Polling,
+
+    /// 授权成功
+    Authorized,
+
+    /// 授权失败
+    Failed(String),
+
+    /// 设备代码过期
+    Expired,
+
+    /// 用户拒绝授权
+    AccessDenied,
 }
 ```
 

@@ -47,8 +47,8 @@ src/
 │   ├── directory_hasher.rs    # 目录哈希
 │   ├── error.rs               # 同步错误
 │   ├── google_drive_service.rs # Google Drive 服务
-│   ├── oauth_client.rs        # OAuth 客户端
-│   ├── smart_oauth.rs         # 智能 OAuth
+│   ├── device_flow_client.rs  # Device Flow 客户端
+│   ├── smart_device_flow.rs   # 智能 Device Flow
 │   ├── sync_command.rs        # 同步命令
 │   └── sync_config.rs         # 同步配置
 ├── task_record.rs             # 任务记录（使用 TaskRecord）
@@ -416,12 +416,12 @@ pub struct CliToolDetector {
 ```rust
 pub struct GoogleDriveService {
     client: DriveClient,
-    auth_client: OAuthClient,
+    auth_client: DeviceFlowClient,
     config: SyncConfig,
 }
 
 impl GoogleDriveService {
-    pub async fn new(auth_client: OAuthClient) -> Result<Self>;
+    pub async fn new(auth_client: DeviceFlowClient) -> Result<Self>;
     pub async fn ensure_authorized(&mut self) -> Result<bool>;
     pub async fn push_directories(&self, dirs: &[PathBuf]) -> Result<PushResult>;
     pub async fn pull_all(&self) -> Result<PullResult>;
@@ -430,18 +430,20 @@ impl GoogleDriveService {
 }
 ```
 
-#### 5.3 sync/oauth_client.rs
-**职责**: OAuth 2.0 流程处理
-- OOB 授权流程
+#### 5.3 sync/device_flow_client.rs
+**职责**: Google OAuth 2.0 Device Flow 处理 (RFC 8628)
+- Device Flow 授权流程
+- 设备代码请求
+- 授权状态轮询
 - Token 管理和刷新
-- 回调服务器
 - 授权状态管理
 
-#### 5.4 sync/smart_oauth.rs
-**职责**: 智能 OAuth 流程
-- 环境检测（桌面/服务器/无头）
-- 自动选择最佳授权方式
-- 并发处理（本地回调 + 手动输入）
+#### 5.4 sync/smart_device_flow.rs
+**职责**: 智能 Device Flow 封装
+- TUI 状态管理
+- 后台轮询处理
+- 错误重试机制
+- Token 缓存和刷新
 - 授权缓存管理
 
 #### 5.5 sync/sync_command.rs

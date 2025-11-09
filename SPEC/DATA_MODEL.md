@@ -127,27 +127,24 @@ pub struct AuthConfig {
     /// Google OAuth 客户端密钥
     pub client_secret: String,
 
-    /// 重定向 URI
-    pub redirect_uri: String,
-
     /// OAuth 作用域
     pub scopes: Vec<String>,
-
-    /// OOB 流程端口
-    #[serde(default = "default_oob_port")]
-    pub oob_port: u16,
 
     /// 授权超时时间（秒）
     #[serde(default = "default_auth_timeout")]
     pub auth_timeout: u64,
-}
 
-fn default_oob_port() -> u16 {
-    8080
+    /// Device Flow 轮询间隔（秒）
+    #[serde(default = "default_poll_interval")]
+    pub poll_interval: u64,
 }
 
 fn default_auth_timeout() -> u64 {
     300 // 5 分钟
+}
+
+fn default_poll_interval() -> u64 {
+    5 // Google 建议 5 秒间隔
 }
 ```
 
@@ -695,17 +692,20 @@ pub struct PullProgressState {
 ```rust
 #[derive(Debug, Clone)]
 pub struct AuthDialogState {
-    /// 授权 URL
-    pub auth_url: String,
+    /// 验证 URL (https://google.com/device)
+    pub verification_url: String,
 
     /// 当前授权状态
     pub auth_status: AuthStatus,
 
-    /// 用户代码（如果需要）
-    pub user_code: Option<String>,
+    /// 用户代码 (必需，如 ABCD-EFGH)
+    pub user_code: String,
 
-    /// 倒计时（秒）
-    pub countdown: Option<u64>,
+    /// 过期倒计时（秒）
+    pub expires_in: u64,
+
+    /// 轮询间隔（秒）
+    pub poll_interval: u64,
 
     /// 错误信息
     pub error_message: Option<String>,
@@ -713,14 +713,11 @@ pub struct AuthDialogState {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AuthStatus {
-    /// 等待用户访问授权 URL
+    /// 显示设备代码，等待用户访问 URL 并授权
     WaitingForUser,
 
-    /// 等待用户输入授权码
-    WaitingForCode,
-
-    /// 正在交换令牌
-    ExchangingToken,
+    /// 轮询检查授权状态
+    Polling,
 
     /// 授权成功
     Authorized,
@@ -728,8 +725,11 @@ pub enum AuthStatus {
     /// 授权失败
     Failed(String),
 
-    /// 用户取消
-    Cancelled,
+    /// 设备代码过期
+    Expired,
+
+    /// 用户拒绝授权
+    AccessDenied,
 }
 ```
 
