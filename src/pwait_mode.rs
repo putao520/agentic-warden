@@ -259,6 +259,7 @@ pub async fn wait_async(registry: &McpRegistry) -> Result<WaitReport, PWaitError
 mod tests {
     use super::*;
     use crate::task_record::TaskRecord;
+    use crate::unified_registry::InProcessRegistry;
     use chrono::Utc;
 
     #[test]

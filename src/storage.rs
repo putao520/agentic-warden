@@ -511,6 +511,6 @@ mod tests {
             .unwrap();
 
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].pid, 789);
+        assert_eq!(events[0]._pid, 789);
     }
 }

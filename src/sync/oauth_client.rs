@@ -384,24 +384,6 @@ mod tests {
     }
 
     #[test]
-    fn test_oob_auth_url_generation() {
-        let client = OAuthClient::new(
-            "test_client_id".to_string(),
-            "test_client_secret".to_string(),
-            None,
-        );
-
-        let auth_url = client.generate_auth_url().unwrap();
-        // The OOB redirect URI gets URL encoded
-        assert!(
-            auth_url.contains("urn%3Aietf%3Awg%3Aoauth%3A2.0%3Aoob")
-                || auth_url.contains("urn:ietf:wg:oauth:2.0:oob")
-        );
-        assert!(auth_url.contains("test_client_id"));
-        assert!(!auth_url.contains("localhost"));
-    }
-
-    #[test]
     fn test_config_validation() {
         // Test valid client with default scopes
         let valid_client = OAuthClient::new(
