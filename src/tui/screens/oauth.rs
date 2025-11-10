@@ -228,32 +228,68 @@ impl OAuthScreen {
         self.mode = OAuthMode::Intro;
     }
 
-    /// Copy the authorisation URL to the system clipboard.
+    /// Copy the authorisation URL or user code to the system clipboard.
     fn copy_auth_url(&mut self) {
-        if let Some(url) = &self.auth_url {
-            match ClipboardContext::new().and_then(|mut ctx| ctx.set_contents(url.clone())) {
-                Ok(_) => self.flash_message("Authorization URL copied to clipboard", Color::Green),
+        // Check if we're in Device Flow mode
+        if let Some(AuthState::WaitingForDeviceAuth { user_code, .. }) = &self.last_state {
+            // Copy user code for Device Flow
+            match ClipboardContext::new()
+                .and_then(|mut ctx| ctx.set_contents(user_code.clone()))
+            {
+                Ok(_) => self.flash_message("User code copied to clipboard", Color::Green),
                 Err(err) => {
                     self.flash_message(format!("Clipboard unavailable: {}", err), Color::Red)
                 }
             }
         } else {
-            self.flash_message("Authorization URL not available yet", Color::Yellow);
+            // Copy URL for OOB flow
+            if let Some(url) = &self.auth_url {
+                match ClipboardContext::new().and_then(|mut ctx| ctx.set_contents(url.clone())) {
+                    Ok(_) => {
+                        self.flash_message("Authorization URL copied to clipboard", Color::Green)
+                    }
+                    Err(err) => {
+                        self.flash_message(format!("Clipboard unavailable: {}", err), Color::Red)
+                    }
+                }
+            } else {
+                self.flash_message("Authorization URL not available yet", Color::Yellow);
+            }
         }
     }
 
-    /// Re-open the authorisation URL in the default browser.
+    /// Re-open the authorisation URL or verification URL in the default browser.
     fn reopen_auth_url(&mut self) {
-        if let Some(url) = &self.auth_url {
-            match open::that(url) {
-                Ok(_) => self.flash_message("Authorization URL opened in browser", Color::Cyan),
+        // Check if we're in Device Flow mode
+        if let Some(AuthState::WaitingForDeviceAuth {
+            verification_url, ..
+        }) = &self.last_state
+        {
+            // Open verification URL for Device Flow
+            match open::that(verification_url) {
+                Ok(_) => {
+                    self.flash_message("Verification URL opened in browser", Color::Cyan)
+                }
                 Err(err) => self.flash_message(
                     format!("Failed to open browser automatically: {}", err),
                     Color::Yellow,
                 ),
             }
         } else {
-            self.flash_message("Authorization URL not available yet", Color::Yellow);
+            // Open auth URL for OOB flow
+            if let Some(url) = &self.auth_url {
+                match open::that(url) {
+                    Ok(_) => {
+                        self.flash_message("Authorization URL opened in browser", Color::Cyan)
+                    }
+                    Err(err) => self.flash_message(
+                        format!("Failed to open browser automatically: {}", err),
+                        Color::Yellow,
+                    ),
+                }
+            } else {
+                self.flash_message("Authorization URL not available yet", Color::Yellow);
+            }
         }
     }
 
@@ -334,6 +370,128 @@ impl OAuthScreen {
     }
 
     fn render_awaiting(&self, frame: &mut Frame, area: Rect) {
+        // Check if we're in Device Flow mode
+        if let Some(AuthState::WaitingForDeviceAuth {
+            user_code,
+            verification_url,
+            expires_at,
+        }) = &self.last_state
+        {
+            self.render_device_flow(frame, area, user_code, verification_url, expires_at);
+        } else {
+            // OOB flow rendering
+            self.render_oob_flow(frame, area);
+        }
+    }
+
+    fn render_device_flow(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        user_code: &str,
+        verification_url: &str,
+        expires_at: &chrono::DateTime<chrono::Utc>,
+    ) {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Length(8),
+                Constraint::Length(8),
+                Constraint::Min(5),
+                Constraint::Length(3),
+            ])
+            .split(area);
+
+        let title = Paragraph::new("Device Authorization (RFC 8628)")
+            .style(
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .alignment(Alignment::Center)
+            .block(Block::default().borders(Borders::ALL));
+        frame.render_widget(title, chunks[0]);
+
+        // Status with spinner
+        let mut status_lines = Vec::new();
+        if let Some((message, color, _)) = &self.status_flash {
+            status_lines.push(Line::from(Span::styled(
+                message.clone(),
+                Style::default().fg(*color).add_modifier(Modifier::BOLD),
+            )));
+            status_lines.push(Line::from(""));
+        }
+
+        status_lines.push(Line::from(vec![
+            Span::styled(
+                format!("{} ", self.spinner_char()),
+                Style::default().fg(Color::Cyan),
+            ),
+            Span::raw("Waiting for authorization..."),
+        ]));
+        status_lines.push(Line::from(""));
+
+        let remaining = (*expires_at - chrono::Utc::now()).num_seconds();
+        status_lines.push(Line::from(format!("Code expires in {} seconds", remaining.max(0))));
+
+        let status = Paragraph::new(status_lines)
+            .wrap(Wrap { trim: true })
+            .block(Block::default().borders(Borders::ALL).title("Status"));
+        frame.render_widget(status, chunks[1]);
+
+        // User code display (large and prominent)
+        let code_lines = vec![
+            Line::from(""),
+            Line::from(vec![
+                Span::raw("Visit: "),
+                Span::styled(
+                    verification_url,
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::UNDERLINED),
+                ),
+            ]),
+            Line::from(""),
+            Line::from("And enter this code:"),
+            Line::from(""),
+            Line::from(Span::styled(
+                format!("    {}    ", user_code),
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD)
+                    .bg(Color::Black),
+            )),
+        ];
+
+        let code_paragraph = Paragraph::new(code_lines)
+            .alignment(Alignment::Center)
+            .block(Block::default().borders(Borders::ALL).title("User Code"));
+        frame.render_widget(code_paragraph, chunks[2]);
+
+        // Instructions
+        let instructions = vec![
+            Line::from(""),
+            Line::from("Device Flow Instructions:"),
+            Line::from("  1. Open the verification URL in any browser (phone/computer)"),
+            Line::from("  2. Sign in to your Google account if needed"),
+            Line::from("  3. Enter the user code shown above"),
+            Line::from("  4. Grant permissions to Agentic Warden"),
+            Line::from(""),
+            Line::from("This window will automatically continue once you authorize."),
+            Line::from("No need to copy/paste anything back here!"),
+        ];
+
+        let instructions_paragraph = Paragraph::new(instructions)
+            .wrap(Wrap { trim: true })
+            .block(Block::default().borders(Borders::ALL).title("Instructions"));
+        frame.render_widget(instructions_paragraph, chunks[3]);
+
+        let help = Paragraph::new("[Alt+O] Open URL  [Alt+C] Copy Code  [ESC] Cancel")
+            .alignment(Alignment::Center)
+            .block(Block::default().borders(Borders::ALL));
+        frame.render_widget(help, chunks[4]);
+    }
+
+    fn render_oob_flow(&self, frame: &mut Frame, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
