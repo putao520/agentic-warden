@@ -9,7 +9,7 @@
 use crate::{
     config::{AUTH_DIRECTORY, AUTH_FILE_NAME},
     provider::config::Provider as ProviderConfig,
-    registry::RegistryEntry,
+    storage::RegistryEntry,
     sync::{
         oauth_client::{OAuthConfig, OAuthTokenResponse},
         smart_oauth::{AuthState, SmartOAuthAuthenticator},
@@ -285,11 +285,6 @@ impl AppState {
             .ok_or_else(|| anyhow!("OAuth flow '{flow_id}' not found"))?;
 
         flow.auth_state = state.clone();
-        if let AuthState::WaitingForCode { url } = &state {
-            if !url.is_empty() {
-                flow.dialog.auth_url = url.clone();
-            }
-        }
         flow.dialog.status = AuthStatus::from_auth_state(&state);
         flow.updated_at = Instant::now();
         Ok(())
@@ -580,7 +575,7 @@ impl AuthStatus {
     fn from_auth_state(state: &AuthState) -> Self {
         match state {
             AuthState::Initializing => AuthStatus::Waiting,
-            AuthState::WaitingForCode { .. } => AuthStatus::Waiting,
+            AuthState::WaitingForDeviceAuth { .. } => AuthStatus::Waiting,
             AuthState::Authenticated { .. } => AuthStatus::Authorized,
             AuthState::Error { message } => AuthStatus::Failed(message.clone()),
         }

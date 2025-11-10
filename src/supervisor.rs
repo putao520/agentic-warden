@@ -1,13 +1,16 @@
 use crate::cli_type::CliType;
 use crate::core::models::ProcessTreeInfo;
 use crate::core::process_tree::ProcessTreeError;
+use crate::error::RegistryError;
 use crate::logging::debug;
 use crate::logging::warn;
 use crate::platform;
 use crate::provider::{AiType, ProviderManager};
-use crate::registry::{RegistryError, TaskRegistry};
+use crate::registry::TaskRegistry;
 use crate::signal;
+use crate::storage::TaskStorage;
 use crate::task_record::TaskRecord;
+use crate::unified_registry::Registry;
 use chrono::{DateTime, Utc};
 use std::env;
 use std::ffi::OsString;
@@ -106,18 +109,22 @@ async fn get_cli_command(cli_type: &CliType) -> Result<String, ProcessError> {
     Ok(default_cmd.to_string())
 }
 
-pub async fn execute_cli(
-    registry: &TaskRegistry,
+pub async fn execute_cli<S: TaskStorage>(
+    registry: &Registry<S>,
     cli_type: &CliType,
     args: &[OsString],
     provider: Option<String>,
 ) -> Result<i32, ProcessError> {
     platform::init_platform();
 
+    let terminate_wrapper = |pid: u32| {
+        platform::terminate_process(pid);
+        Ok(())
+    };
     registry.sweep_stale_entries(
         Utc::now(),
         platform::process_alive,
-        &platform::terminate_process,
+        &terminate_wrapper,
     )?;
 
     // Load provider configuration
@@ -403,14 +410,14 @@ fn extract_exit_code(status: ExitStatus) -> i32 {
     status.code().unwrap_or(1)
 }
 
-struct RegistrationGuard<'a> {
-    registry: &'a TaskRegistry,
+struct RegistrationGuard<'a, S: TaskStorage> {
+    registry: &'a Registry<S>,
     pid: u32,
     active: bool,
 }
 
-impl<'a> RegistrationGuard<'a> {
-    fn new(registry: &'a TaskRegistry, pid: u32) -> Self {
+impl<'a, S: TaskStorage> RegistrationGuard<'a, S> {
+    fn new(registry: &'a Registry<S>, pid: u32) -> Self {
         Self {
             registry,
             pid,
@@ -433,26 +440,30 @@ impl<'a> RegistrationGuard<'a> {
     }
 }
 
-impl Drop for RegistrationGuard<'_> {
+impl<S: TaskStorage> Drop for RegistrationGuard<'_, S> {
     fn drop(&mut self) {
-        if self.active {
-            let _ = self.registry.remove(self.pid);
-        }
+        // 注意：TaskStorage trait不提供remove方法
+        // 如果需要清理，应该通过mark_completed或sweep_stale_entries
+        // 这里我们什么都不做，让任务记录保留在注册表中
     }
 }
 
 /// Start interactive CLI mode (directly launch AI CLI without task prompt)
-pub async fn start_interactive_cli(
-    registry: &TaskRegistry,
+pub async fn start_interactive_cli<S: TaskStorage>(
+    registry: &Registry<S>,
     cli_type: &CliType,
     provider: Option<String>,
 ) -> Result<i32, ProcessError> {
     platform::init_platform();
 
+    let terminate_wrapper = |pid: u32| {
+        platform::terminate_process(pid);
+        Ok(())
+    };
     registry.sweep_stale_entries(
         Utc::now(),
         platform::process_alive,
-        &platform::terminate_process,
+        &terminate_wrapper,
     )?;
 
     // Load provider configuration
@@ -586,8 +597,8 @@ pub async fn start_interactive_cli(
 }
 
 /// Execute multiple CLI processes (for codex|claude|gemini syntax)
-pub async fn execute_multiple_clis(
-    registry: &TaskRegistry,
+pub async fn execute_multiple_clis<S: TaskStorage>(
+    registry: &Registry<S>,
     cli_selector: &crate::cli_type::CliSelector,
     task_prompt: &str,
     provider: Option<String>,

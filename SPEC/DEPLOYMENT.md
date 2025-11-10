@@ -772,28 +772,20 @@ sudo apt update && sudo apt upgrade agentic-warden
 docker pull ghcr.io/your-org/agentic-warden:latest
 ```
 
-### 2. 配置迁移
+### 2. 配置更新
 
-#### 2.1 版本兼容性
-- 配置文件格式向后兼容
-- 自动迁移旧配置格式
-- 备份原配置文件
+#### 2.1 配置文件管理
+- 配置文件格式错误时提供清晰的错误提示
+- 用户手动修正配置文件
+- 不提供自动迁移功能，保持简洁性
 
-#### 2.2 迁移脚本
+#### 2.2 配置备份建议
 ```bash
 #!/bin/bash
-# migrate.sh
+# backup.sh
 
-OLD_VERSION="0.1.0"
-NEW_VERSION="0.2.0"
-
-echo "Migrating from $OLD_VERSION to $NEW_VERSION..."
-
-# 备份配置
+# 手动备份配置
 cp ~/.agentic-warden/provider.json ~/.agentic-warden/provider.json.backup
 
-# 执行迁移
-agentic-warden config migrate --from $OLD_VERSION --to $NEW_VERSION
-
-echo "Migration completed. Please review the changes."
+echo "Configuration backed up."
 ```

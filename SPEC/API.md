@@ -170,7 +170,7 @@ pub enum EditField {
 # 执行 push 命令时的流程
 1. 检查 Google Drive 授权状态
 2. 如果未授权 → 显示授权对话框
-3. 用户同意 → 启动 OOB 流程
+3. 用户同意 → 启动 Device Flow 认证
 4. 授权成功 → 自动开始 push 操作
 5. 显示进度 TUI
 ```

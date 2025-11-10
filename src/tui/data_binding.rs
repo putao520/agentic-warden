@@ -9,7 +9,10 @@ use std::{
 
 use anyhow::{Context, Error, Result};
 
-use crate::{logging::debug, provider::manager::ProviderManager, registry::TaskRegistry};
+use crate::{
+    logging::debug, provider::manager::ProviderManager, registry_factory::CliRegistry,
+    registry_factory::RegistryFactory,
+};
 
 use super::app_state::AppState;
 
@@ -30,7 +33,7 @@ impl DataBindingController {
             .name("tui-data-binding".into())
             .spawn(move || {
                 let app_state = AppState::global();
-                let mut registry: Option<TaskRegistry> = None;
+                let mut registry: Option<CliRegistry> = None;
                 let mut last_provider_refresh = Instant::now()
                     .checked_sub(Duration::from_secs(PROVIDER_REFRESH_INTERVAL_SECS))
                     .unwrap_or_else(Instant::now);
@@ -71,13 +74,13 @@ impl DataBindingController {
 
     fn refresh_tasks(
         app_state: &'static AppState,
-        registry: &mut Option<TaskRegistry>,
+        registry: &mut Option<CliRegistry>,
     ) -> Result<()> {
         if registry.is_none() {
-            match TaskRegistry::connect() {
+            match RegistryFactory::instance().get_cli_registry() {
                 Ok(connected) => *registry = Some(connected),
                 Err(err) => {
-                    return Err(Error::new(err).context("failed to connect TaskRegistry"));
+                    return Err(Error::new(err).context("failed to connect CliRegistry"));
                 }
             }
         }

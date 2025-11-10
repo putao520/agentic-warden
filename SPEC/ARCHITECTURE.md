@@ -292,17 +292,17 @@ impl GoogleDriveService {
     pub async fn refresh_token(&mut self) -> Result<()>;
 }
 
-// OOB 授权流程
+// Device Flow 授权 (RFC 8628)
 pub struct OAuthClient {
     client_id: String,
     client_secret: String,
-    redirect_uri: String,
+    scopes: Vec<String>,
 }
 
 impl OAuthClient {
-    pub async fn start_oob_flow(&self) -> Result<String>; // 返回授权URL
-    pub async fn exchange_code_for_token(&self, code: &str) -> Result<TokenInfo>;
-    pub fn start_callback_server(&self) -> Result<()>;
+    pub async fn start_device_flow(&self) -> Result<DeviceCodeResponse>; // 返回设备码和用户码
+    pub async fn poll_for_tokens(&mut self, device_code: &str) -> Result<Option<OAuthTokenResponse>>;
+    pub async fn refresh_access_token(&mut self) -> Result<OAuthTokenResponse>;
 }
 ```
 
@@ -392,7 +392,7 @@ TUI 启动 → 事件循环 → 屏幕渲染 → 用户交互 → 状态更新 �
 
 ### 3. Google Drive 集成流程
 ```
-Push/Pull 命令 → 授权检查 → OOB 流程(如需要) → 文件操作 → 进度显示
+Push/Pull 命令 → 授权检查 → Device Flow认证(如需要) → 文件操作 → 进度显示
 ```
 
 ## 模块依赖关系

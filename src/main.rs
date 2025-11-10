@@ -1,32 +1,21 @@
-mod cli_manager;
-mod cli_type;
-mod commands;
-mod config;
-mod core;
-mod error;
+// Binary-specific modules
 mod help;
-mod logging;
 mod mcp;
-mod platform;
-mod provider;
-mod registry;
-mod signal;
-mod supervisor;
-mod sync;
-mod task_record;
-mod tui;
-mod utils;
-mod wait_mode;
 
-use crate::cli_type::{parse_cli_selector_strict, parse_cli_type};
-use crate::commands::ai_cli::AiCliCommand;
-use crate::commands::{parse_external_as_ai_cli, Cli, Commands, parser::McpAction};
-use crate::error::ErrorCategory;
-use crate::help::{print_command_help, print_general_help, print_quick_examples};
-use crate::mcp::AgenticWardenMcpServer;
-use crate::provider::network_detector::NetworkDetector;
-use crate::provider::manager::ProviderManager;
-use crate::sync::sync_config::save_network_status;
+use agentic_warden::cli_type::{parse_cli_selector_strict, parse_cli_type};
+use agentic_warden::commands::ai_cli::AiCliCommand;
+use agentic_warden::commands::{parse_external_as_ai_cli, Cli, Commands, parser::McpAction};
+use agentic_warden::error::ErrorCategory;
+use help::{print_command_help, print_general_help, print_quick_examples};
+use mcp::AgenticWardenMcpServer;
+use agentic_warden::provider::network_detector::NetworkDetector;
+use agentic_warden::provider::manager::ProviderManager;
+use agentic_warden::sync;
+use agentic_warden::sync::sync_config::save_network_status;
+use agentic_warden::tui;
+use agentic_warden::wait_mode;
+use agentic_warden::pwait_mode;
+use agentic_warden::registry_factory::RegistryFactory;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -94,21 +83,44 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
 
     match command {
         Commands::Dashboard => launch_tui(None).await,
-        Commands::Status => launch_tui(Some(crate::tui::ScreenType::Status)).await,
-        Commands::Provider => launch_tui(Some(crate::tui::ScreenType::Provider)).await,
+        Commands::Status => launch_tui(Some(tui::ScreenType::Status)).await,
+        Commands::Provider => launch_tui(Some(tui::ScreenType::Provider)).await,
         Commands::Push { dirs } => {
             let directories = dirs
                 .into_iter()
                 .map(|dir| dir.to_string_lossy().to_string())
                 .collect();
-            launch_tui(Some(crate::tui::ScreenType::Push(directories))).await
+            launch_tui(Some(tui::ScreenType::Push(directories))).await
         }
-        Commands::Pull => launch_tui(Some(crate::tui::ScreenType::Pull)).await,
+        Commands::Pull => launch_tui(Some(tui::ScreenType::Pull)).await,
         Commands::Reset => handle_sync_command("reset", None).await,
         Commands::List => handle_sync_command("list", None).await,
-        Commands::Wait => {
+        Commands::Wait { timeout, verbose } => {
+            // TODO: 实现timeout和verbose参数的支持
+            // 当前使用现有的wait_mode实现
+            if verbose {
+                eprintln!("Waiting for all concurrent AI CLI tasks to complete (timeout: {})...", timeout);
+            }
             wait_mode::run().map_err(|e| e.to_string())?;
             Ok(ExitCode::from(0))
+        }
+        Commands::PWait => {
+            // 等待MCP进程内任务完成
+            let registry = RegistryFactory::instance().get_mcp_registry();
+            match pwait_mode::run_with_registry(&registry) {
+                Ok(report) => {
+                    report.print();
+                    Ok(ExitCode::from(0))
+                }
+                Err(pwait_mode::PWaitError::NoTasks) => {
+                    eprintln!("No MCP tasks to wait for");
+                    Ok(ExitCode::from(0))
+                }
+                Err(e) => {
+                    eprintln!("Error waiting for MCP tasks: {}", e);
+                    Ok(ExitCode::from(1))
+                }
+            }
         }
         Commands::Examples => {
             print_quick_examples().map_err(|e| format!("Failed to print examples: {}", e))?;
@@ -131,7 +143,7 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
     }
 }
 
-async fn launch_tui(initial_screen: Option<crate::tui::ScreenType>) -> Result<ExitCode, String> {
+async fn launch_tui(initial_screen: Option<tui::ScreenType>) -> Result<ExitCode, String> {
     color_eyre::install().map_err(|e| format!("Failed to install error handler: {}", e))?;
 
     tokio::spawn(async {
@@ -141,8 +153,8 @@ async fn launch_tui(initial_screen: Option<crate::tui::ScreenType>) -> Result<Ex
     });
 
     let tui_result = match initial_screen {
-        Some(screen) => crate::tui::app::run_tui_app_with_screen(Some(screen)),
-        None => crate::tui::app::run_tui_app(),
+        Some(screen) => tui::app::run_tui_app_with_screen(Some(screen)),
+        None => tui::app::run_tui_app(),
     };
 
     tui_result.map_err(|e| format!("TUI error: {}", e))?;
@@ -242,7 +254,7 @@ async fn handle_mcp_command(action: McpAction) -> Result<ExitCode, String> {
             let provider_manager = ProviderManager::new()
                 .map_err(|e| format!("Failed to initialize provider manager: {}", e))?;
 
-            // 创建MCP服务器
+            // 创建MCP服务器（使用InProcessRegistry）
             let mcp_server = AgenticWardenMcpServer::new(provider_manager);
 
             match transport.as_str() {

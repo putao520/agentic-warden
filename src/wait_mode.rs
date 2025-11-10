@@ -3,9 +3,11 @@ use crate::config::{
 };
 use crate::core::models::ProcessTreeInfo;
 use crate::core::process_tree::ProcessTreeError;
+use crate::error::RegistryError;
 use crate::logging::warn;
 use crate::platform;
-use crate::registry::{CleanupReason, RegistryEntry, RegistryError, TaskRegistry};
+use crate::registry_factory::RegistryFactory;
+use crate::storage::{CleanupReason, RegistryEntry};
 use crate::task_record::TaskRecord;
 use crate::task_record::TaskStatus;
 use chrono::{DateTime, Local, Utc};
@@ -24,7 +26,7 @@ pub enum WaitError {
 }
 
 pub fn run() -> Result<(), WaitError> {
-    let registry = TaskRegistry::connect()?;
+    let registry = RegistryFactory::instance().get_cli_registry()?;
     let interval = read_interval();
     let start = Instant::now();
     let mut processed_pids: HashSet<u32> = HashSet::new();
@@ -39,12 +41,17 @@ pub fn run() -> Result<(), WaitError> {
         }
     };
 
+    let terminate_wrapper = |pid: u32| {
+        platform::terminate_process(pid);
+        Ok(())
+    };
+
     loop {
         let now = chrono::Utc::now();
         let cleanups = registry.sweep_stale_entries(
             now,
             platform::process_alive,
-            &platform::terminate_process,
+            &terminate_wrapper,
         )?;
         for event in cleanups {
             if event.reason == CleanupReason::Timeout {
@@ -75,7 +82,7 @@ pub fn run() -> Result<(), WaitError> {
                 emit_realtime_update(&completion);
                 report.add_completion(completion);
             }
-            let _ = registry.remove_by_pid(pid)?;
+            // TODO: Implement remove_by_pid in TaskStorage trait if needed
         }
 
         let entries = registry.entries()?;

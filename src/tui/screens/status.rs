@@ -19,14 +19,14 @@ use ratatui::{
 
 use super::{Screen, ScreenAction};
 use crate::platform;
-use crate::registry::TaskRegistry;
+use crate::registry_factory::{CliRegistry, RegistryFactory};
 use crate::task_record::{TaskRecord, TaskStatus};
 use crate::tui::app_state::{AppState, TaskSnapshot};
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 
 pub struct StatusScreen {
-    registry: TaskRegistry,
+    registry: CliRegistry,
     app_state: &'static AppState,
     groups: Vec<TaskGroup>,
     flat_entries: Vec<FlatEntry>,
@@ -63,7 +63,7 @@ enum GroupKey {
 
 impl StatusScreen {
     pub fn new() -> Result<Self> {
-        let registry = TaskRegistry::connect()?;
+        let registry = RegistryFactory::instance().get_cli_registry()?;
         let mut screen = Self {
             registry,
             app_state: AppState::global(),

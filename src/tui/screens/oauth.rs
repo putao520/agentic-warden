@@ -36,10 +36,6 @@ pub struct OAuthScreen {
     mode: OAuthMode,
     authenticator: Option<SmartOAuthAuthenticator>,
     flow_id: Option<String>,
-    auth_url: Option<String>,
-    code_input: String,
-    code_cursor: usize,
-    code_focused: bool,
     last_state: Option<AuthState>,
     status_flash: Option<(String, Color, Instant)>,
     spinner_index: usize,
@@ -53,17 +49,13 @@ impl OAuthScreen {
             mode: OAuthMode::Intro,
             authenticator: None,
             flow_id: None,
-            auth_url: None,
-            code_input: String::new(),
-            code_cursor: 0,
-            code_focused: false,
             last_state: None,
             status_flash: None,
             spinner_index: 0,
         })
     }
 
-    /// Start a new OAuth authorisation flow.
+    /// Start Device Flow (RFC 8628) authorization
     fn begin_oauth_flow(&mut self) -> Result<()> {
         let authenticator = self
             .app_state
@@ -75,13 +67,12 @@ impl OAuthScreen {
         self.app_state
             .create_oauth_flow(&self.provider, flow_id.clone(), None, None);
 
-        let auth_url = tokio::task::block_in_place(|| {
+        // Start Device Flow
+        let device_response = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current()
-                .block_on(authenticator.generate_auth_url_for_tui())
+                .block_on(authenticator.start_device_flow())
         })
-        .context("failed to generate authorization URL")?;
-
-        self.app_state.set_oauth_url(&flow_id, &auth_url).ok();
+        .context("failed to start device flow")?;
 
         let state = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(authenticator.get_state())
@@ -89,98 +80,21 @@ impl OAuthScreen {
         self.last_state = Some(state.clone());
         self.app_state.update_oauth_state(&flow_id, state).ok();
 
-        self.auth_url = Some(auth_url.clone());
         self.flow_id = Some(flow_id);
         self.mode = OAuthMode::AwaitingCode;
         self.spinner_index = 0;
-        self.code_input.clear();
-        self.code_cursor = 0;
-        self.code_focused = true;
 
-        match open::that(&auth_url) {
+        // Try to open browser automatically
+        match open::that(&device_response.verification_url) {
             Ok(_) => {
-                self.flash_message("Opened browser to Google's authorization page", Color::Cyan)
+                self.flash_message("Opened verification URL in browser", Color::Cyan)
             }
             Err(err) => self.flash_message(
                 format!(
-                    "Browser could not be opened automatically ({err}); copy the URL manually."
+                    "Browser could not be opened automatically ({err}); open URL manually."
                 ),
                 Color::Yellow,
             ),
-        }
-
-        Ok(())
-    }
-
-    /// Submit the user supplied authorisation code.
-    fn submit_code(&mut self, code: String) -> Result<()> {
-        if code.trim().is_empty() {
-            self.flash_message("Authorization code cannot be empty", Color::Yellow);
-            return Ok(());
-        }
-
-        let authenticator = match &self.authenticator {
-            Some(auth) => auth.clone(),
-            None => {
-                self.flash_message("Authenticator not ready; restart the flow.", Color::Red);
-                return Ok(());
-            }
-        };
-
-        self.mode = OAuthMode::Processing;
-        self.spinner_index = 0;
-        self.code_focused = false;
-
-        let exchange_result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current()
-                .block_on(authenticator.set_auth_code(code.trim().to_string()))
-        });
-        match exchange_result {
-            Ok(response) => {
-                if let Err(err) = self
-                    .app_state
-                    .persist_oauth_success(&self.provider, &response)
-                {
-                    let message = format!("Failed to persist credentials: {}", err);
-                    if let Some(flow_id) = &self.flow_id {
-                        self.app_state
-                            .update_oauth_state(
-                                flow_id,
-                                AuthState::Error {
-                                    message: message.clone(),
-                                },
-                            )
-                            .ok();
-                    }
-                    self.mode = OAuthMode::Error(message);
-                    return Ok(());
-                }
-
-                if let Some(flow_id) = &self.flow_id {
-                    let state = tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current().block_on(authenticator.get_state())
-                    });
-                    self.last_state = Some(state.clone());
-                    self.app_state.update_oauth_state(flow_id, state).ok();
-                }
-
-                self.flash_message("Google Drive authenticated.", Color::Green);
-                self.mode = OAuthMode::Success;
-            }
-            Err(err) => {
-                let message = format!("Failed to exchange authorization code: {}", err);
-                if let Some(flow_id) = &self.flow_id {
-                    self.app_state
-                        .update_oauth_state(
-                            flow_id,
-                            AuthState::Error {
-                                message: message.clone(),
-                            },
-                        )
-                        .ok();
-                }
-                self.mode = OAuthMode::Error(message);
-            }
         }
 
         Ok(())
@@ -205,12 +119,8 @@ impl OAuthScreen {
 
     /// Remove any per-flow cached data without altering stored credentials.
     fn clear_flow_state(&mut self) {
-        self.auth_url = None;
         self.flow_id = None;
         self.last_state = None;
-        self.code_input.clear();
-        self.code_cursor = 0;
-        self.code_focused = false;
         self.status_flash = None;
         self.spinner_index = 0;
     }
@@ -228,32 +138,39 @@ impl OAuthScreen {
         self.mode = OAuthMode::Intro;
     }
 
-    /// Copy the authorisation URL to the system clipboard.
+    /// Copy the user code to the system clipboard.
     fn copy_auth_url(&mut self) {
-        if let Some(url) = &self.auth_url {
-            match ClipboardContext::new().and_then(|mut ctx| ctx.set_contents(url.clone())) {
-                Ok(_) => self.flash_message("Authorization URL copied to clipboard", Color::Green),
+        if let Some(AuthState::WaitingForDeviceAuth { user_code, .. }) = &self.last_state {
+            match ClipboardContext::new()
+                .and_then(|mut ctx| ctx.set_contents(user_code.clone()))
+            {
+                Ok(_) => self.flash_message("User code copied to clipboard", Color::Green),
                 Err(err) => {
                     self.flash_message(format!("Clipboard unavailable: {}", err), Color::Red)
                 }
             }
         } else {
-            self.flash_message("Authorization URL not available yet", Color::Yellow);
+            self.flash_message("User code not available yet", Color::Yellow);
         }
     }
 
-    /// Re-open the authorisation URL in the default browser.
+    /// Re-open the verification URL in the default browser.
     fn reopen_auth_url(&mut self) {
-        if let Some(url) = &self.auth_url {
-            match open::that(url) {
-                Ok(_) => self.flash_message("Authorization URL opened in browser", Color::Cyan),
+        if let Some(AuthState::WaitingForDeviceAuth {
+            verification_url, ..
+        }) = &self.last_state
+        {
+            match open::that(verification_url) {
+                Ok(_) => {
+                    self.flash_message("Verification URL opened in browser", Color::Cyan)
+                }
                 Err(err) => self.flash_message(
                     format!("Failed to open browser automatically: {}", err),
                     Color::Yellow,
                 ),
             }
         } else {
-            self.flash_message("Authorization URL not available yet", Color::Yellow);
+            self.flash_message("Verification URL not available yet", Color::Yellow);
         }
     }
 
@@ -266,8 +183,8 @@ impl OAuthScreen {
     fn status_text(&self) -> String {
         match &self.last_state {
             Some(AuthState::Initializing) => "Initialising authentication flow...".to_string(),
-            Some(AuthState::WaitingForCode { .. }) => {
-                "Waiting for approval in the browser...".to_string()
+            Some(AuthState::WaitingForDeviceAuth { user_code, verification_url, .. }) => {
+                format!("Visit {} and enter code: {}", verification_url, user_code)
             }
             Some(AuthState::Authenticated { .. }) => {
                 "Authentication completed successfully.".to_string()
@@ -331,18 +248,41 @@ impl OAuthScreen {
     }
 
     fn render_awaiting(&self, frame: &mut Frame, area: Rect) {
+        if let Some(AuthState::WaitingForDeviceAuth {
+            user_code,
+            verification_url,
+            expires_at,
+        }) = &self.last_state
+        {
+            self.render_device_flow(frame, area, user_code, verification_url, expires_at);
+        } else {
+            // Fallback if state is not Device Flow
+            let text = Paragraph::new("Initializing Device Flow...")
+                .alignment(Alignment::Center);
+            frame.render_widget(text, area);
+        }
+    }
+
+    fn render_device_flow(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        user_code: &str,
+        verification_url: &str,
+        expires_at: &chrono::DateTime<chrono::Utc>,
+    ) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(3),
-                Constraint::Length(6),
-                Constraint::Length(6),
+                Constraint::Length(8),
+                Constraint::Length(8),
                 Constraint::Min(5),
                 Constraint::Length(3),
             ])
             .split(area);
 
-        let title = Paragraph::new("Authorize Agentic Warden")
+        let title = Paragraph::new("Device Authorization (RFC 8628)")
             .style(
                 Style::default()
                     .fg(Color::Cyan)
@@ -352,6 +292,7 @@ impl OAuthScreen {
             .block(Block::default().borders(Borders::ALL));
         frame.render_widget(title, chunks[0]);
 
+        // Status with spinner
         let mut status_lines = Vec::new();
         if let Some((message, color, _)) = &self.status_flash {
             status_lines.push(Line::from(Span::styled(
@@ -366,180 +307,69 @@ impl OAuthScreen {
                 format!("{} ", self.spinner_char()),
                 Style::default().fg(Color::Cyan),
             ),
-            Span::raw(self.status_text()),
+            Span::raw("Waiting for authorization..."),
         ]));
         status_lines.push(Line::from(""));
-        status_lines.push(Line::from(
-            "Authorise the request in your browser, then paste the code below.",
-        ));
-        status_lines.push(Line::from(
-            "If nothing happened, press Alt+O to reopen the URL.",
-        ));
+
+        let remaining = (*expires_at - chrono::Utc::now()).num_seconds();
+        status_lines.push(Line::from(format!("Code expires in {} seconds", remaining.max(0))));
 
         let status = Paragraph::new(status_lines)
             .wrap(Wrap { trim: true })
             .block(Block::default().borders(Borders::ALL).title("Status"));
         frame.render_widget(status, chunks[1]);
 
-        let url_text = if let Some(url) = &self.auth_url {
-            vec![Line::from(Span::styled(
-                url.clone(),
-                Style::default().fg(Color::Yellow),
-            ))]
-        } else {
-            vec![Line::from("Authorisation URL is being generated...")]
-        };
+        // User code display (large and prominent)
+        let code_lines = vec![
+            Line::from(""),
+            Line::from(vec![
+                Span::raw("Visit: "),
+                Span::styled(
+                    verification_url,
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::UNDERLINED),
+                ),
+            ]),
+            Line::from(""),
+            Line::from("And enter this code:"),
+            Line::from(""),
+            Line::from(Span::styled(
+                format!("    {}    ", user_code),
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD)
+                    .bg(Color::Black),
+            )),
+        ];
 
-        let url_paragraph = Paragraph::new(url_text).wrap(Wrap { trim: true }).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Authorization URL (Alt+C to copy)"),
-        );
-        frame.render_widget(url_paragraph, chunks[2]);
+        let code_paragraph = Paragraph::new(code_lines)
+            .alignment(Alignment::Center)
+            .block(Block::default().borders(Borders::ALL).title("User Code"));
+        frame.render_widget(code_paragraph, chunks[2]);
 
-        self.render_code_input(frame, chunks[3]);
+        // Instructions
+        let instructions = vec![
+            Line::from(""),
+            Line::from("Device Flow Instructions:"),
+            Line::from("  1. Open the verification URL in any browser (phone/computer)"),
+            Line::from("  2. Sign in to your Google account if needed"),
+            Line::from("  3. Enter the user code shown above"),
+            Line::from("  4. Grant permissions to Agentic Warden"),
+            Line::from(""),
+            Line::from("This window will automatically continue once you authorize."),
+            Line::from("No need to copy/paste anything back here!"),
+        ];
 
-        let help = Paragraph::new(
-            "[Enter] Submit  [Alt+C] Copy URL  [Alt+O] Open URL  [Alt+R] Restart  [ESC] Cancel",
-        )
-        .alignment(Alignment::Center)
-        .block(Block::default().borders(Borders::ALL));
+        let instructions_paragraph = Paragraph::new(instructions)
+            .wrap(Wrap { trim: true })
+            .block(Block::default().borders(Borders::ALL).title("Instructions"));
+        frame.render_widget(instructions_paragraph, chunks[3]);
+
+        let help = Paragraph::new("[Alt+O] Open URL  [Alt+C] Copy Code  [ESC] Cancel")
+            .alignment(Alignment::Center)
+            .block(Block::default().borders(Borders::ALL));
         frame.render_widget(help, chunks[4]);
     }
 
-    fn render_code_input(&self, frame: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title("Authorization Code");
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-
-        let line = if self.code_input.is_empty() {
-            Line::from(Span::styled(
-                "Paste the code from your browser prompt here",
-                Style::default().fg(Color::DarkGray),
-            ))
-        } else {
-            Line::from(self.code_input.clone())
-        };
-
-        let paragraph = Paragraph::new(line).wrap(Wrap { trim: true });
-        frame.render_widget(paragraph, inner);
-
-        if self.code_focused {
-            let (cursor_x, cursor_y) = self.code_cursor_position(inner);
-            frame.set_cursor(cursor_x, cursor_y);
-        }
-    }
-
-    fn code_cursor_position(&self, inner: Rect) -> (u16, u16) {
-        let width = inner.width.max(1) as usize;
-        let offset_chars = self.code_input[..self.code_cursor].chars().count();
-        let row = (offset_chars / width) as u16;
-        let col = (offset_chars % width) as u16;
-        (
-            inner.x + col.min(inner.width.saturating_sub(1)),
-            inner.y + row.min(inner.height.saturating_sub(1)),
-        )
-    }
-
-    fn handle_code_input(&mut self, key: KeyEvent) -> bool {
-        if !self.code_focused {
-            return false;
-        }
-
-        match key.code {
-            KeyCode::Char(c) => {
-                if key
-                    .modifiers
-                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-                {
-                    return false;
-                }
-                let insert_pos = self.code_cursor.min(self.code_input.len());
-                self.code_input.insert(insert_pos, c);
-                self.code_cursor = insert_pos + c.len_utf8();
-                true
-            }
-            KeyCode::Backspace => {
-                if self.code_cursor > 0 {
-                    let new_cursor = self.code_input[..self.code_cursor]
-                        .chars()
-                        .next_back()
-                        .map(|ch| self.code_cursor - ch.len_utf8())
-                        .unwrap_or(0);
-                    self.code_input
-                        .replace_range(new_cursor..self.code_cursor, "");
-                    self.code_cursor = new_cursor;
-                }
-                true
-            }
-            KeyCode::Delete => {
-                if self.code_cursor < self.code_input.len() {
-                    let delete_len = self.code_input[self.code_cursor..]
-                        .chars()
-                        .next()
-                        .map(|ch| ch.len_utf8())
-                        .unwrap_or(1);
-                    self.code_input
-                        .replace_range(self.code_cursor..self.code_cursor + delete_len, "");
-                }
-                true
-            }
-            KeyCode::Left => {
-                if self.code_cursor > 0 {
-                    let new_cursor = self.code_input[..self.code_cursor]
-                        .chars()
-                        .next_back()
-                        .map(|ch| self.code_cursor - ch.len_utf8())
-                        .unwrap_or(0);
-                    self.code_cursor = new_cursor;
-                }
-                true
-            }
-            KeyCode::Right => {
-                if self.code_cursor < self.code_input.len() {
-                    let advance = self.code_input[self.code_cursor..]
-                        .chars()
-                        .next()
-                        .map(|ch| ch.len_utf8())
-                        .unwrap_or(1);
-                    self.code_cursor += advance;
-                }
-                true
-            }
-            KeyCode::Home => {
-                self.code_cursor = 0;
-                true
-            }
-            KeyCode::End => {
-                self.code_cursor = self.code_input.len();
-                true
-            }
-            _ => false,
-        }
-    }
-
-    fn paste_code_from_clipboard(&mut self) -> bool {
-        match ClipboardContext::new().and_then(|mut ctx| ctx.get_contents()) {
-            Ok(contents) => {
-                let trimmed = contents.trim();
-                if trimmed.is_empty() {
-                    self.flash_message("Clipboard does not contain a code", Color::Yellow);
-                } else {
-                    self.code_input = trimmed.to_string();
-                    self.code_cursor = self.code_input.len();
-                    self.code_focused = true;
-                    self.flash_message("Authorization code pasted from clipboard", Color::Cyan);
-                }
-                true
-            }
-            Err(err) => {
-                self.flash_message(format!("Clipboard unavailable: {}", err), Color::Red);
-                true
-            }
-        }
-    }
 
     fn render_processing(&self, frame: &mut Frame, area: Rect) {
         let message = format!(
@@ -623,18 +453,6 @@ impl Screen for OAuthScreen {
                         }
                         _ => {}
                     }
-                }
-
-                if key.code == KeyCode::Enter {
-                    let code = self.code_input.clone();
-                    if let Err(err) = self.submit_code(code) {
-                        self.mode = OAuthMode::Error(err.to_string());
-                    }
-                    return Ok(ScreenAction::None);
-                }
-
-                if self.handle_code_input(key) {
-                    return Ok(ScreenAction::None);
                 }
 
                 Ok(ScreenAction::None)
