@@ -16,8 +16,7 @@ use crate::provider::manager::ProviderManager;
 use crate::supervisor;
 
 // 使用工厂模式获取注册表
-use agentic_warden::registry_factory::{RegistryFactory, TaskSource};
-use agentic_warden::process_registry::InProcessRegistry;
+use agentic_warden::registry_factory::{McpRegistry, RegistryFactory};
 
 /// Agentic-Warden MCP服务器
 /// 使用工厂模式获取进程内任务注册表，确保全局唯一实例
@@ -38,7 +37,7 @@ impl AgenticWardenMcpServer {
     }
 
     /// 获取MCP任务注册表（从工厂获取全局单例）
-    pub fn registry(&self) -> Arc<InProcessRegistry> {
+    pub fn registry(&self) -> Arc<McpRegistry> {
         RegistryFactory::instance().get_mcp_registry()
     }
 

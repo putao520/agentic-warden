@@ -4,8 +4,8 @@
 
 use crate::{
     error::RegistryError,
-    process_registry::InProcessRegistry,
-    registry::TaskRegistry,
+    storage::{InProcessStorage, SharedMemoryStorage},
+    unified_registry::Registry,
 };
 use parking_lot::Mutex;
 use std::sync::{Arc, OnceLock};
@@ -19,6 +19,10 @@ pub enum TaskSource {
     Mcp,
 }
 
+/// 类型别名，提高可读性
+pub type CliRegistry = Registry<SharedMemoryStorage>;
+pub type McpRegistry = Registry<InProcessStorage>;
+
 /// 注册表工厂 - 管理进程内的两个独立任务注册表
 ///
 /// # 架构
@@ -28,11 +32,10 @@ pub enum TaskSource {
 /// │       RegistryFactory (Singleton)       │
 /// ├─────────────────────────────────────────┤
 /// │                                         │
-/// │  ┌─────────────┐    ┌────────────────┐ │
-/// │  │TaskRegistry │    │InProcessRegistry│ │
-/// │  │(SharedMem)  │    │  (HashMap)     │ │
-/// │  │跨进程共享    │    │  进程内独享    │ │
-/// │  └─────────────┘    └────────────────┘ │
+/// │  ┌──────────────────┐  ┌─────────────┐ │
+/// │  │Registry<SharedMem>  Registry<InProc>│ │
+/// │  │  (跨进程共享)   │  │ (进程内独享) │ │
+/// │  └──────────────────┘  └─────────────┘ │
 /// │       ↑                    ↑           │
 /// │       │                    │           │
 /// │  CLI任务                 MCP任务       │
@@ -40,78 +43,40 @@ pub enum TaskSource {
 /// ```
 pub struct RegistryFactory {
     /// CLI任务注册表（跨进程共享内存）
-    cli_registry: Mutex<Option<TaskRegistry>>,
+    cli_registry: Mutex<Option<CliRegistry>>,
     /// MCP任务注册表（进程内HashMap）
-    mcp_registry: Arc<InProcessRegistry>,
+    mcp_registry: Arc<McpRegistry>,
 }
 
 impl RegistryFactory {
     /// 获取全局单例实例
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use agentic_warden::registry_factory::{RegistryFactory, TaskSource};
-    ///
-    /// let factory = RegistryFactory::instance();
-    /// let cli_registry = factory.get_cli_registry().unwrap();
-    /// let mcp_registry = factory.get_mcp_registry();
-    /// ```
     pub fn instance() -> &'static Self {
         static INSTANCE: OnceLock<RegistryFactory> = OnceLock::new();
         INSTANCE.get_or_init(|| Self {
             cli_registry: Mutex::new(None),
-            mcp_registry: Arc::new(InProcessRegistry::new()),
+            mcp_registry: Arc::new(Registry::in_process()),
         })
     }
 
     /// 获取CLI任务注册表（跨进程共享）
     ///
     /// 延迟初始化：第一次调用时连接到共享内存
-    pub fn get_cli_registry(&self) -> Result<TaskRegistry, RegistryError> {
+    pub fn get_cli_registry(&self) -> Result<CliRegistry, RegistryError> {
         let mut guard = self.cli_registry.lock();
         if guard.is_none() {
-            *guard = Some(TaskRegistry::connect()?);
+            *guard = Some(Registry::shared_memory()?);
         }
         Ok(guard.as_ref().unwrap().clone())
     }
 
     /// 获取MCP任务注册表（进程内独享）
     ///
-    /// 总是返回同一个InProcessRegistry实例
-    pub fn get_mcp_registry(&self) -> Arc<InProcessRegistry> {
+    /// 总是返回同一个Registry实例
+    pub fn get_mcp_registry(&self) -> Arc<McpRegistry> {
         Arc::clone(&self.mcp_registry)
     }
 
     /// 根据任务来源获取对应的注册表
-    ///
-    /// # Arguments
-    ///
-    /// * `source` - 任务来源（CLI或MCP）
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use agentic_warden::registry_factory::{RegistryFactory, TaskSource};
-    ///
-    /// let factory = RegistryFactory::instance();
-    ///
-    /// // CLI任务
-    /// match factory.get_registry_for(TaskSource::Cli) {
-    ///     RegistryType::Cli(registry) => {
-    ///         // 使用TaskRegistry
-    ///     }
-    ///     _ => {}
-    /// }
-    ///
-    /// // MCP任务
-    /// match factory.get_registry_for(TaskSource::Mcp) {
-    ///     RegistryType::Mcp(registry) => {
-    ///         // 使用InProcessRegistry
-    ///     }
-    ///     _ => {}
-    /// }
-    /// ```
     pub fn get_registry_for(&self, source: TaskSource) -> Result<RegistryType, RegistryError> {
         match source {
             TaskSource::Cli => Ok(RegistryType::Cli(self.get_cli_registry()?)),
@@ -140,9 +105,9 @@ impl RegistryFactory {
 /// 包装不同的注册表实现，提供统一的接口
 pub enum RegistryType {
     /// CLI任务注册表
-    Cli(TaskRegistry),
+    Cli(CliRegistry),
     /// MCP任务注册表
-    Mcp(Arc<InProcessRegistry>),
+    Mcp(Arc<McpRegistry>),
 }
 
 impl RegistryType {
@@ -154,16 +119,16 @@ impl RegistryType {
         }
     }
 
-    /// 转换为TaskRegistry引用（如果是CLI类型）
-    pub fn as_cli(&self) -> Option<&TaskRegistry> {
+    /// 转换为CliRegistry引用（如果是CLI类型）
+    pub fn as_cli(&self) -> Option<&CliRegistry> {
         match self {
             RegistryType::Cli(r) => Some(r),
             _ => None,
         }
     }
 
-    /// 转换为InProcessRegistry引用（如果是MCP类型）
-    pub fn as_mcp(&self) -> Option<&Arc<InProcessRegistry>> {
+    /// 转换为McpRegistry引用（如果是MCP类型）
+    pub fn as_mcp(&self) -> Option<&Arc<McpRegistry>> {
         match self {
             RegistryType::Mcp(r) => Some(r),
             _ => None,
@@ -254,3 +219,4 @@ mod tests {
         }
     }
 }
+
