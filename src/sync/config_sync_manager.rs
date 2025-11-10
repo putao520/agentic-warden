@@ -1060,10 +1060,10 @@ impl ConfigSyncManager {
         };
 
         let authenticator = SmartOAuthAuthenticator::new(oauth_config);
-        let token_response = authenticator.authenticate().await.map_err(|err| {
+        let token_response = authenticator.authenticate_with_device_flow().await.map_err(|err| {
             error!(
                 target: "agentic_warden::sync",
-                "SmartOAuth authentication failed: {}",
+                "Device Flow authentication failed: {}",
                 err
             );
             Self::auth_failed_error()
