@@ -2,8 +2,8 @@
 
 use crate::config::{MAX_RECORD_AGE, SHARED_MEMORY_SIZE, SHARED_NAMESPACE};
 use crate::core::process_tree::get_root_parent_pid_cached;
-use crate::core::shared_map::{open_or_create, SharedMapError};
-use crate::error::AgenticWardenError;
+use crate::core::shared_map::open_or_create;
+use crate::error::RegistryError;
 use crate::logging::{debug, warn};
 use crate::task_record::{TaskRecord, TaskStatus};
 use crate::utils::get_instance_id;
@@ -13,7 +13,6 @@ use shared_hashmap::SharedMemoryHashMap;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex, OnceLock, Weak};
-use thiserror::Error;
 
 /// Represents a connected task registry with metadata
 #[derive(Debug)]
@@ -67,41 +66,7 @@ pub enum CleanupReason {
     ManagerMissing,
 }
 
-#[derive(Debug, Error)]
-pub enum RegistryError {
-    #[error("shared task map init failed: {0}")]
-    Shared(String),
-    #[error("shared hashmap operation failed: {0}")]
-    Map(String),
-    #[error("registry mutex poisoned")]
-    Poison,
-    #[error("record serialization failed: {0}")]
-    Serialize(#[from] serde_json::Error),
-}
-
-impl From<shared_hashmap::Error> for RegistryError {
-    fn from(value: shared_hashmap::Error) -> Self {
-        RegistryError::Map(value.to_string())
-    }
-}
-
-impl From<crate::core::process_tree::ProcessTreeError> for RegistryError {
-    fn from(value: crate::core::process_tree::ProcessTreeError) -> Self {
-        RegistryError::Map(format!("Process tree error: {}", value))
-    }
-}
-
-impl From<AgenticWardenError> for RegistryError {
-    fn from(value: AgenticWardenError) -> Self {
-        RegistryError::Map(format!("Agentic error: {}", value))
-    }
-}
-
-impl From<SharedMapError> for RegistryError {
-    fn from(value: SharedMapError) -> Self {
-        RegistryError::Shared(value.to_string())
-    }
-}
+// RegistryError is now defined in error.rs and re-exported
 
 /// Get current process PID
 #[allow(dead_code)]

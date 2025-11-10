@@ -3,9 +3,10 @@ use crate::config::{
 };
 use crate::core::models::ProcessTreeInfo;
 use crate::core::process_tree::ProcessTreeError;
+use crate::error::RegistryError;
 use crate::logging::warn;
 use crate::platform;
-use crate::registry::{CleanupReason, RegistryEntry, RegistryError, TaskRegistry};
+use crate::registry::{CleanupReason, RegistryEntry, TaskRegistry};
 use crate::task_record::TaskRecord;
 use crate::task_record::TaskStatus;
 use chrono::{DateTime, Local, Utc};

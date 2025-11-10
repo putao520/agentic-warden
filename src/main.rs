@@ -248,12 +248,8 @@ async fn handle_mcp_command(action: McpAction) -> Result<ExitCode, String> {
             let provider_manager = ProviderManager::new()
                 .map_err(|e| format!("Failed to initialize provider manager: {}", e))?;
 
-            // 连接TaskRegistry
-            let registry = TaskRegistry::connect()
-                .map_err(|e| format!("Failed to connect to TaskRegistry: {}", e))?;
-
-            // 创建MCP服务器
-            let mcp_server = AgenticWardenMcpServer::new(provider_manager, registry);
+            // 创建MCP服务器（使用InProcessRegistry）
+            let mcp_server = AgenticWardenMcpServer::new(provider_manager);
 
             match transport.as_str() {
                 "stdio" => {

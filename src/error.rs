@@ -457,6 +457,47 @@ pub enum ErrorSeverity {
 /// Result type alias for convenience
 pub type AgenticResult<T> = Result<T, AgenticWardenError>;
 
+/// Registry-specific errors
+#[derive(Debug, Error)]
+pub enum RegistryError {
+    #[error("shared task map init failed: {0}")]
+    Shared(String),
+    #[error("shared hashmap operation failed: {0}")]
+    Map(String),
+    #[error("registry mutex poisoned")]
+    Poison,
+    #[error("record serialization failed: {0}")]
+    Serialize(#[from] serde_json::Error),
+    #[error("task not found: {0}")]
+    TaskNotFound(u32),
+    #[error("process tree error: {0}")]
+    ProcessTree(String),
+}
+
+impl From<shared_hashmap::Error> for RegistryError {
+    fn from(value: shared_hashmap::Error) -> Self {
+        RegistryError::Map(value.to_string())
+    }
+}
+
+impl From<crate::core::process_tree::ProcessTreeError> for RegistryError {
+    fn from(value: crate::core::process_tree::ProcessTreeError) -> Self {
+        RegistryError::ProcessTree(value.to_string())
+    }
+}
+
+impl From<AgenticWardenError> for RegistryError {
+    fn from(value: AgenticWardenError) -> Self {
+        RegistryError::Map(format!("Agentic error: {}", value))
+    }
+}
+
+impl From<crate::core::shared_map::SharedMapError> for RegistryError {
+    fn from(value: crate::core::shared_map::SharedMapError) -> Self {
+        RegistryError::Shared(value.to_string())
+    }
+}
+
 /// Error context builder
 pub struct ErrorContext {
     category: Option<ErrorCategory>,

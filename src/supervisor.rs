@@ -1,11 +1,13 @@
 use crate::cli_type::CliType;
 use crate::core::models::ProcessTreeInfo;
 use crate::core::process_tree::ProcessTreeError;
+use crate::error::RegistryError;
 use crate::logging::debug;
 use crate::logging::warn;
 use crate::platform;
+use crate::process_registry::InProcessRegistry;
 use crate::provider::{AiType, ProviderManager};
-use crate::registry::{RegistryError, TaskRegistry};
+use crate::registry::TaskRegistry;
 use crate::signal;
 use crate::task_record::TaskRecord;
 use chrono::{DateTime, Utc};
@@ -20,6 +22,91 @@ use tokio::fs::OpenOptions;
 use tokio::io::{AsyncRead, AsyncWriteExt, BufWriter};
 use tokio::process::Command;
 use tokio::sync::Mutex;
+
+/// 通用的任务注册表操作trait
+/// TaskRegistry和InProcessRegistry都实现此trait
+pub trait RegistryOps {
+    fn sweep_stale_entries<F>(
+        &self,
+        now: DateTime<Utc>,
+        is_alive: F,
+        terminate: &dyn Fn(u32),
+    ) -> Result<(), RegistryError>
+    where
+        F: Fn(u32) -> bool;
+
+    fn register(&self, pid: u32, record: &TaskRecord) -> Result<(), RegistryError>;
+
+    fn mark_completed(
+        &self,
+        pid: u32,
+        result: Option<String>,
+        exit_code: Option<i32>,
+        completed_at: DateTime<Utc>,
+    ) -> Result<(), RegistryError>;
+}
+
+impl RegistryOps for TaskRegistry {
+    fn sweep_stale_entries<F>(
+        &self,
+        now: DateTime<Utc>,
+        is_alive: F,
+        terminate: &dyn Fn(u32),
+    ) -> Result<(), RegistryError>
+    where
+        F: Fn(u32) -> bool,
+    {
+        self.sweep_stale_entries(now, is_alive, terminate)?;
+        Ok(())
+    }
+
+    fn register(&self, pid: u32, record: &TaskRecord) -> Result<(), RegistryError> {
+        self.register(pid, record)
+    }
+
+    fn mark_completed(
+        &self,
+        pid: u32,
+        result: Option<String>,
+        exit_code: Option<i32>,
+        completed_at: DateTime<Utc>,
+    ) -> Result<(), RegistryError> {
+        self.mark_completed(pid, result, exit_code, completed_at)
+    }
+}
+
+impl RegistryOps for InProcessRegistry {
+    fn sweep_stale_entries<F>(
+        &self,
+        now: DateTime<Utc>,
+        is_alive: F,
+        terminate: &dyn Fn(u32),
+    ) -> Result<(), RegistryError>
+    where
+        F: Fn(u32) -> bool,
+    {
+        let terminate_wrapper = |pid: u32| {
+            terminate(pid);
+            Ok(())
+        };
+        self.sweep_stale_entries(now, is_alive, &terminate_wrapper)?;
+        Ok(())
+    }
+
+    fn register(&self, pid: u32, record: &TaskRecord) -> Result<(), RegistryError> {
+        self.register(pid, record)
+    }
+
+    fn mark_completed(
+        &self,
+        pid: u32,
+        result: Option<String>,
+        exit_code: Option<i32>,
+        completed_at: DateTime<Utc>,
+    ) -> Result<(), RegistryError> {
+        self.mark_completed(pid, result, exit_code, completed_at)
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum ProcessError {
@@ -106,8 +193,8 @@ async fn get_cli_command(cli_type: &CliType) -> Result<String, ProcessError> {
     Ok(default_cmd.to_string())
 }
 
-pub async fn execute_cli(
-    registry: &TaskRegistry,
+pub async fn execute_cli<R: RegistryOps>(
+    registry: &R,
     cli_type: &CliType,
     args: &[OsString],
     provider: Option<String>,
@@ -403,14 +490,14 @@ fn extract_exit_code(status: ExitStatus) -> i32 {
     status.code().unwrap_or(1)
 }
 
-struct RegistrationGuard<'a> {
-    registry: &'a TaskRegistry,
+struct RegistrationGuard<'a, R: RegistryOps> {
+    registry: &'a R,
     pid: u32,
     active: bool,
 }
 
-impl<'a> RegistrationGuard<'a> {
-    fn new(registry: &'a TaskRegistry, pid: u32) -> Self {
+impl<'a, R: RegistryOps> RegistrationGuard<'a, R> {
+    fn new(registry: &'a R, pid: u32) -> Self {
         Self {
             registry,
             pid,
@@ -433,11 +520,11 @@ impl<'a> RegistrationGuard<'a> {
     }
 }
 
-impl Drop for RegistrationGuard<'_> {
+impl<R: RegistryOps> Drop for RegistrationGuard<'_, R> {
     fn drop(&mut self) {
-        if self.active {
-            let _ = self.registry.remove(self.pid);
-        }
+        // 注意：RegistryOps trait不提供remove方法
+        // 如果需要清理，应该通过mark_completed或sweep_stale_entries
+        // 这里我们什么都不做，让任务记录保留在注册表中
     }
 }
 

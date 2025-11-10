@@ -6,25 +6,34 @@ use std::sync::Arc;
 use std::ffi::OsString;
 use tokio::sync::Mutex;
 use crate::provider::manager::ProviderManager;
-use crate::registry::TaskRegistry;
 use crate::supervisor;
 
+// 注意：由于mcp是main.rs的子模块，而process_registry在lib.rs中
+// 我们需要使用agentic_warden前缀来访问它
+use agentic_warden::process_registry::InProcessRegistry;
+
 /// Agentic-Warden MCP服务器
+/// 使用InProcessRegistry管理本进程启动的任务，不跨进程共享
 #[derive(Clone)]
 pub struct AgenticWardenMcpServer {
     /// Provider管理器
     provider_manager: Arc<Mutex<ProviderManager>>,
-    /// 任务注册表
-    registry: TaskRegistry,
+    /// 进程内任务注册表
+    registry: Arc<InProcessRegistry>,
 }
 
 impl AgenticWardenMcpServer {
     /// 创建新的MCP服务器实例
-    pub fn new(provider_manager: ProviderManager, registry: TaskRegistry) -> Self {
+    pub fn new(provider_manager: ProviderManager) -> Self {
         Self {
             provider_manager: Arc::new(Mutex::new(provider_manager)),
-            registry,
+            registry: Arc::new(InProcessRegistry::new()),
         }
+    }
+
+    /// 获取进程内注册表的引用（用于测试或高级用法）
+    pub fn registry(&self) -> Arc<InProcessRegistry> {
+        Arc::clone(&self.registry)
     }
 
     /// 运行MCP服务器
