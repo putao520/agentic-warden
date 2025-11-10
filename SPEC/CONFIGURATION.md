@@ -299,44 +299,21 @@ impl ProviderValidator {
 ```json
 {
   "version": "1.0.0",
-  "general": {
-    "default_ai_cli": "claude",
-    "log_level": "info"
-  },
-  "process_tracking": {
-    "scan_interval": 1,
-    "max_instances": 100,
-    "cleanup_dead_processes": true
-  },
-  "sync": {
-    "google_drive": {
-      "auto_sync": false,
-      "exclude_patterns": [
-        "*.tmp",
-        "*.log",
-        ".git/",
-        "target/",
-        "node_modules/"
-      ]
-    }
-  }
+  "default_ai_cli": "claude",
+  "log_level": "info"
 }
 ```
 
 #### 3.2 配置字段说明
 
-##### General (通用设置)
+- **version**: 配置文件版本号（用于未来兼容性）
 - **default_ai_cli**: 默认 AI CLI 工具 (claude, codex, gemini)
-- **log_level**: 日志级别 (info, warn, error)
+- **log_level**: 日志级别 (trace, debug, info, warn, error)
 
-##### Process Tracking (进程跟踪)
-- **scan_interval**: 扫描间隔（秒）
-- **max_instances**: 最大实例数
-- **cleanup_dead_processes**: 是否清理死亡进程
-
-##### Sync (同步设置)
-- **auto_sync**: 是否自动同步到Google Drive
-- **exclude_patterns**: 排除文件模式列表
+**设计原则**：
+- 保持配置极简，只包含必要的全局设置
+- 进程管理相关逻辑硬编码在代码中，不需要配置
+- Google Drive 同步按需触发（push/pull命令），不需要配置自动同步
 
 ### 4. 环境变量配置
 

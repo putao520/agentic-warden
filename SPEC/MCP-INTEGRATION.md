@@ -241,21 +241,55 @@ pwait_mode
 
 ### 核心组件
 
+#### MCP 服务器实现要求
+
+**使用 rmcp 库**：
+- **依赖**: `rmcp = { version = "0.5", features = ["server", "transport-io"] }`
+- **原因**: rmcp 是 Rust 的标准 MCP 实现库，提供完整的 JSON-RPC 2.0 支持
+- **禁止**: 不允许自己实现 JSON-RPC 协议，必须使用 rmcp 库
+
 #### MCP 服务器 (`AgenticWardenMcpServer`)
+
+**实现方式**：
+```rust
+use rmcp::prelude::*;
+
+#[derive(Server)]
+pub struct AgenticWardenMcpServer {
+    // 服务器状态
+}
+
+impl AgenticWardenMcpServer {
+    /// 启动 MCP 服务器
+    pub async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
+        // 使用 rmcp 的标准 stdio 传输
+        self.serve_stdio().await?;
+        Ok(())
+    }
+}
+```
+
 - **职责**: 处理 MCP 请求和响应
-- **功能**: JSON-RPC 请求解析、工具路由、错误处理
-- **传输**: stdio 异步 I/O
+- **功能**: 使用 rmcp 提供的 JSON-RPC 解析、工具路由、错误处理
+- **传输**: 使用 rmcp 的 stdio 异步 I/O
 
 #### 工具接口
-每个工具都遵循 MCP 工具规范：
+每个工具使用 rmcp 的 `#[tool]` 宏定义：
 
 ```rust
-#[tool(description = "Tool description")]
-pub async fn tool_name(
+#[tool(description = "Monitor all AI CLI processes")]
+pub async fn monitor_processes(
     &self,
-    #[arg] params: ToolParams,
-) -> Result<CallToolResult, McpError>
+    #[arg(description = "Optional filter by AI type")] ai_type: Option<String>,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    // 工具实现
+}
 ```
+
+**rmcp 工具定义要求**：
+- 使用 `#[tool]` 宏标注工具函数
+- 使用 `#[arg]` 宏定义参数（包含 description）
+- 返回类型为 `Result<T, E>`，其中 T 实现 `Serialize`
 
 #### 进程管理模块
 - **进程识别**: 智能 AI CLI 进程识别算法
