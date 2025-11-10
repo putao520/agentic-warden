@@ -15,6 +15,13 @@
     └── config.json.schema     # 主配置 Schema
 ```
 
+**注意**: Agentic-Warden **不管理** AI CLI 的原生配置文件：
+- `~/.claude/config` - Claude CLI 原生配置
+- `~/.codex/config` - Codex CLI 原生配置
+- `~/.gemini/config` - Gemini CLI 原生配置
+
+这些配置文件由各AI CLI自己管理，Agentic-Warden只通过环境变量注入来动态切换Provider。
+
 #### 运行时目录（系统临时目录/.agentic-warden/）
 ```
 <TEMP>/.agentic-warden/         # <TEMP> 由 std::env::temp_dir() 动态获取
@@ -42,6 +49,31 @@
 5. 默认配置 (最低优先级)
 
 ## Provider 配置管理
+
+### Provider vs AI CLI 配置关系
+
+**Provider配置** (`provider.json`):
+- 管理第三方API提供商的配置（OpenRouter、LiteLLM等）
+- 定义环境变量映射（API密钥、Base URL等）
+- 启动AI CLI时通过 `-p` 参数选择，自动注入环境变量
+
+**AI CLI原生配置** (各CLI自己的配置文件):
+- Agentic-Warden **不修改、不管理** 这些配置
+- AI CLI的模型选择、超时设置等保持原生配置方式
+- 用户直接使用各CLI的原生配置命令（如 `claude config set model ...`）
+
+**示例对比**:
+```bash
+# ❌ Agentic-Warden 不做这些
+agentic-warden config set claude.model "claude-3-opus"
+
+# ✅ 正确做法：使用原生CLI配置
+claude config set model "claude-3-opus"
+
+# ✅ Agentic-Warden 只管理Provider切换
+agentic-warden agent claude -p openrouter "task"  # 使用openrouter
+agentic-warden agent claude -p official "task"     # 使用官方API
+```
 
 ### 1. Provider 配置文件格式
 

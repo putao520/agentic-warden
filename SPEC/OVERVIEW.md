@@ -8,8 +8,25 @@ Agentic-Warden 是一个 AI CLI 工具的统一启动和管理工具，专为多
 
 ### 🎯 统一管理入口
 - **多 AI 支持**: 统一管理 codex、claude、gemini 等 AI CLI 工具
-- **Provider 管理**: 支持第三方 API 提供商（OpenRouter、LiteLLM、Cloudflare AI Gateway）
+- **Provider 管理**: 支持第三方 API 提供商（OpenRouter、LiteLLM）
 - **配置统一**: 通过 `~/.agentic-warden/provider.json` 集中管理配置
+
+#### AI CLI 配置管理方式
+Agentic-Warden **不修改**各AI CLI的原生配置文件（如 `~/.claude/config`），而是通过以下方式管理配置：
+
+1. **Provider配置集中管理**:
+   - 在 `provider.json` 中配置不同的API提供商和环境变量
+   - 启动AI CLI时通过 `-p` 参数选择Provider
+   - 自动注入对应的环境变量（API密钥、Base URL等）到AI CLI进程
+
+2. **默认AI CLI配置**:
+   - 在 `config.json` 中设置 `default_ai_cli`（默认使用哪个AI CLI）
+   - 不涉及各AI CLI的原生配置（模型选择、超时等保持原生配置）
+
+3. **设计原则**:
+   - **不侵入**: 不修改AI CLI的原生配置文件
+   - **环境变量注入**: 通过环境变量动态切换Provider，不污染全局配置
+   - **保持原生体验**: AI CLI的其他配置（如模型选择）使用各自的原生配置方式
 
 ### 🚀 智能进程树追踪
 
