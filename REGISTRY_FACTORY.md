@@ -63,7 +63,7 @@ let mcp_registry = factory.get_mcp_registry();
 mcp_registry.register(pid, &task_record)?;
 
 // 等待任务
-// 使用: agentic-warden pwait (未来实现)
+// 使用: agentic-warden pwait
 ```
 
 ### 4. 根据任务来源自动选择
@@ -158,6 +158,208 @@ let stats = factory.get_stats();
 println!("CLI Registry initialized: {}", stats.cli_initialized);
 println!("MCP Registry initialized: {}", stats.mcp_initialized);
 ```
+
+## MCP + pwait 完整工作流程
+
+### 架构说明
+
+MCP服务器通过工厂模式使用 `InProcessRegistry` 来管理所有MCP启动的任务。这些任务与CLI启动的任务完全隔离，使用独立的存储和等待命令。
+
+### 工作流程图
+
+```text
+┌─────────────────────────────────────────────────────────────┐
+│                     Claude Code (MCP客户端)                  │
+└────────────────────┬────────────────────────────────────────┘
+                     │ MCP请求：启动多个并发任务
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Agentic-Warden MCP Server                       │
+│                                                              │
+│  ┌──────────────────────────────────────────────┐           │
+│  │  AgenticWardenMcpServer                      │           │
+│  │                                              │           │
+│  │  fn registry() -> Arc<McpRegistry> {         │           │
+│  │      RegistryFactory::instance()             │───────┐   │
+│  │          .get_mcp_registry()                 │       │   │
+│  │  }                                           │       │   │
+│  └──────────────────────────────────────────────┘       │   │
+│                     │                                   │   │
+│                     │ 逐个启动任务                      │   │
+│                     ▼                                   │   │
+│  ┌──────────────────────────────────────────────┐       │   │
+│  │  supervisor::execute_cli(                    │       │   │
+│  │      &registry,  // McpRegistry              │◄──────┘   │
+│  │      &cli_type,                              │           │
+│  │      &args,                                  │           │
+│  │      provider                                │           │
+│  │  )                                           │           │
+│  └──────────────────────────────────────────────┘           │
+│                     │                                       │
+│                     │ 所有任务注册到                         │
+│                     ▼                                       │
+│  ┌──────────────────────────────────────────────┐           │
+│  │      InProcessRegistry (HashMap)             │           │
+│  │  ┌────────┐  ┌────────┐  ┌────────┐         │           │
+│  │  │Task 1  │  │Task 2  │  │Task 3  │         │           │
+│  │  └────────┘  └────────┘  └────────┘         │           │
+│  └──────────────────────────────────────────────┘           │
+│                                                              │
+│  返回task JSON:                                              │
+│  {                                                          │
+│    "tool": "bash",                                         │
+│    "command": "agentic-warden pwait --timeout 12h"         │
+│  }                                                         │
+└────────────────────┬─────────────────────────────────────────┘
+                     │ 返回等待任务
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   Claude Code (MCP客户端)                    │
+│                                                              │
+│  解析task JSON，使用Bash工具执行:                             │
+│  $ agentic-warden pwait --timeout 12h                       │
+└────────────────────┬─────────────────────────────────────────┘
+                     │ 阻塞等待
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│              pwait_mode::run()                               │
+│                                                              │
+│  1. 从工厂获取MCP注册表:                                      │
+│     let registry = RegistryFactory::instance()              │
+│                        .get_mcp_registry();                 │
+│                                                              │
+│  2. 轮询InProcessRegistry中的所有MCP任务                      │
+│                                                              │
+│  3. 等待所有任务完成                                          │
+│                                                              │
+│  4. 返回执行报告                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 核心代码示例
+
+#### 1. MCP Server 获取注册表
+
+```rust
+// src/mcp.rs
+use agentic_warden::registry_factory::{McpRegistry, RegistryFactory};
+
+pub struct AgenticWardenMcpServer {
+    provider_manager: Arc<Mutex<ProviderManager>>,
+}
+
+impl AgenticWardenMcpServer {
+    pub fn registry(&self) -> Arc<McpRegistry> {
+        // 从全局工厂获取MCP注册表（单例）
+        RegistryFactory::instance().get_mcp_registry()
+    }
+}
+```
+
+#### 2. MCP 启动并发任务
+
+```rust
+// src/mcp.rs - start_concurrent_tasks方法
+pub async fn start_concurrent_tasks(&self, tasks: Vec<TaskRequest>) -> Result<Value> {
+    let registry = self.registry();  // 获取MCP注册表
+
+    for task in tasks {
+        // 使用supervisor启动每个任务（后台）
+        tokio::spawn(async move {
+            supervisor::execute_cli(
+                &*registry,      // 使用MCP注册表
+                &cli_type,
+                &args,
+                provider
+            ).await
+        });
+    }
+
+    // 返回pwait任务
+    Ok(json!({
+        "task": {
+            "tool": "bash",
+            "command": "agentic-warden pwait --timeout 12h",
+            "timeout_ms": 43200000
+        },
+        "note": "Use 'pwait' to wait for MCP tasks (InProcessRegistry)"
+    }))
+}
+```
+
+#### 3. pwait 等待MCP任务
+
+```rust
+// src/pwait_mode.rs
+use agentic_warden::registry_factory::RegistryFactory;
+
+pub fn run() -> Result<WaitReport, PWaitError> {
+    // 从工厂获取MCP注册表
+    let registry = RegistryFactory::instance().get_mcp_registry();
+
+    // 使用MCP注册表等待任务
+    run_with_registry(&registry)
+}
+
+pub fn run_with_registry(registry: &McpRegistry) -> Result<WaitReport, PWaitError> {
+    loop {
+        // 从InProcessRegistry读取所有MCP任务
+        let entries = registry.list_entries()?;
+
+        if entries.is_empty() {
+            break;  // 所有任务完成
+        }
+
+        // 检查任务状态，清理完成的任务
+        thread::sleep(Duration::from_secs(1));
+    }
+
+    // 返回执行报告
+    Ok(WaitReport { /* ... */ })
+}
+```
+
+### 关键设计点
+
+#### 1. 存储隔离
+
+```rust
+// CLI任务：跨进程共享内存
+let cli_registry = RegistryFactory::instance().get_cli_registry()?;
+// 存储位置：SharedMemoryStorage（操作系统共享内存）
+
+// MCP任务：进程内HashMap
+let mcp_registry = RegistryFactory::instance().get_mcp_registry();
+// 存储位置：InProcessStorage（进程内HashMap）
+```
+
+**完全隔离**：
+- CLI任务和MCP任务存储在不同的物理位置
+- `wait` 命令读取 SharedMemoryStorage
+- `pwait` 命令读取 InProcessStorage
+- **不可混用**：使用 `wait` 无法看到MCP任务！
+
+#### 2. 工厂单例保证
+
+```rust
+// 无论在代码的任何位置调用，都返回同一个实例
+let registry1 = RegistryFactory::instance().get_mcp_registry();
+let registry2 = RegistryFactory::instance().get_mcp_registry();
+
+assert!(Arc::ptr_eq(&registry1, &registry2));  // ✅ 指向同一对象
+```
+
+#### 3. 命令对应关系
+
+| 命令 | 读取存储 | 适用场景 |
+|------|----------|----------|
+| `agentic-warden wait` | SharedMemoryStorage | CLI启动的任务 |
+| `agentic-warden pwait` | InProcessStorage | MCP启动的任务 |
+
+⚠️ **重要警告**：
+- 如果MCP返回 `wait` 命令，Claude Code执行后会发现"没有任务"（因为读取了错误的存储）
+- 如果CLI任务使用 `pwait` 命令，也会发现"没有任务"
+- 必须确保命令与任务来源匹配！
 
 ## 对比：两套系统的差异
 
