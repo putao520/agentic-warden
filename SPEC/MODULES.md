@@ -104,7 +104,7 @@ pub use parser::*;
 - 多 AI 语法解析（`codex|claude|gemini`, `all`）
 - Provider 参数处理（`-p`, `--provider`）
 - 环境变量注入
-- 子进程启动和监控
+- 子进程启动和管理
 - 进程树注册
 
 **主要函数**:
@@ -227,7 +227,7 @@ impl App {
 - `dashboard.rs`: 主界面，显示 AI 状态和任务概要
 - `provider.rs`: Provider 列表管理界面
 - `provider_edit.rs`: Provider 编辑界面
-- `status.rs`: 任务状态监控界面
+- `status.rs`: 任务状态界面
 - `push.rs`: Push 进度显示界面
 - `pull.rs`: Pull 进度显示界面
 - `auth_dialog.rs`: Google Drive 授权对话框
@@ -281,7 +281,6 @@ pub fn get_process_name(pid: u32) -> Option<String>;
 **职责**: 任务跟踪和状态管理
 - 任务生命周期管理
 - 状态更新和通知
-- 资源使用监控
 - 任务历史记录
 
 **主要结构**:
@@ -526,8 +525,3 @@ core/ ←→ utils/
 - 模块间集成测试
 - 端到端功能测试
 - 错误场景测试
-
-### 3. 性能测试 (tests/performance.rs)
-- 大量任务处理性能
-- 内存使用优化
-- 并发安全性测试

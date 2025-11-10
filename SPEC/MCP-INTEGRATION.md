@@ -84,7 +84,7 @@ pwait_mode
 - **外部集成**: 为外部 AI 助手提供 Agentic-Warden 功能的编程接口
 - **标准协议**: 使用 MCP 标准协议，确保与各种 AI 助手的兼容性
 - **安全访问**: 通过进程安全检查，只允许操作 AI CLI 相关进程
-- **实时监控**: 提供实时的进程状态和配置信息查询
+- **实时查询**: 提供实时的进程状态和配置信息查询
 
 ### 📋 功能范围
 
@@ -241,23 +241,57 @@ pwait_mode
 
 ### 核心组件
 
+#### MCP 服务器实现要求
+
+**使用 rmcp 库**：
+- **依赖**: `rmcp = { version = "0.5", features = ["server", "transport-io"] }`
+- **原因**: rmcp 是 Rust 的标准 MCP 实现库，提供完整的 JSON-RPC 2.0 支持
+- **禁止**: 不允许自己实现 JSON-RPC 协议，必须使用 rmcp 库
+
 #### MCP 服务器 (`AgenticWardenMcpServer`)
-- **职责**: 处理 MCP 请求和响应
-- **功能**: JSON-RPC 请求解析、工具路由、错误处理
-- **传输**: stdio 异步 I/O
 
-#### 工具接口
-每个工具都遵循 MCP 工具规范：
-
+**实现方式**：
 ```rust
-#[tool(description = "Tool description")]
-pub async fn tool_name(
-    &self,
-    #[arg] params: ToolParams,
-) -> Result<CallToolResult, McpError>
+use rmcp::prelude::*;
+
+#[derive(Server)]
+pub struct AgenticWardenMcpServer {
+    // 服务器状态
+}
+
+impl AgenticWardenMcpServer {
+    /// 启动 MCP 服务器
+    pub async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
+        // 使用 rmcp 的标准 stdio 传输
+        self.serve_stdio().await?;
+        Ok(())
+    }
+}
 ```
 
-#### 进程监控模块
+- **职责**: 处理 MCP 请求和响应
+- **功能**: 使用 rmcp 提供的 JSON-RPC 解析、工具路由、错误处理
+- **传输**: 使用 rmcp 的 stdio 异步 I/O
+
+#### 工具接口
+每个工具使用 rmcp 的 `#[tool]` 宏定义：
+
+```rust
+#[tool(description = "Monitor all AI CLI processes")]
+pub async fn monitor_processes(
+    &self,
+    #[arg(description = "Optional filter by AI type")] ai_type: Option<String>,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    // 工具实现
+}
+```
+
+**rmcp 工具定义要求**：
+- 使用 `#[tool]` 宏标注工具函数
+- 使用 `#[arg]` 宏定义参数（包含 description）
+- 返回类型为 `Result<T, E>`，其中 T 实现 `Serialize`
+
+#### 进程管理模块
 - **进程识别**: 智能 AI CLI 进程识别算法
 - **状态查询**: 跨平台进程状态获取
 - **安全检查**: 防止误操作非 AI CLI 进程
@@ -270,7 +304,7 @@ pub async fn tool_name(
 claude --mcp-add agentic-warden "agentic-warden mcp server"
 
 # 在 Claude Code 中使用
-# "监控当前运行的 AI CLI 进程"
+# "查询当前运行的 AI CLI 进程"
 # "获取所有 claude 进程的进程树"
 # "安全终止空闲的 codex 进程"
 ```
@@ -362,13 +396,6 @@ agentic-warden mcp status
 
 ### 新工具支持
 - **任务管理**: 创建、查询、删除 AI CLI 任务
-- **性能监控**: CPU、内存使用情况查询
-- **日志管理**: AI CLI 进程日志访问
-
-### 高级传输
-- **HTTP/WebSocket**: 支持 Web 传输协议
-- **IPC**: 进程间通信支持
-- **网络**: 远程 MCP 服务器支持
 
 ### 配置管理
 - **动态配置**: 运行时修改部分配置
@@ -378,6 +405,6 @@ agentic-warden mcp status
 ## 相关文档
 
 - [API 设计规范](./API.md)
-- [进程监控设计](../core/process_tree.md)
+- [进程树追踪设计](../core/process_tree.md)
 - [Provider 管理设计](../provider/manager.md)
 - [部署指南](./DEPLOYMENT.md)

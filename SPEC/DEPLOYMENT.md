@@ -530,7 +530,6 @@ eval "$(agentic-warden --completion)"
 - [ ] 配置文件权限设置正确 (600 或 640)
 - [ ] 认证令牌加密存储
 - [ ] 日志轮转配置
-- [ ] 监控和告警设置
 - [ ] 备份策略制定
 - [ ] 安全更新机制
 
@@ -546,26 +545,9 @@ chmod 600 ~/.agentic-warden/auth.json
 # Windows: %TEMP%\.agentic-warden\logs\
 ```
 
-## 监控和维护
+## 日志和维护
 
-### 1. 健康检查
-
-#### 1.1 系统健康检查
-```bash
-# 检查进程状态
-ps aux | grep agentic-warden
-
-# 检查配置文件
-agentic-warden config validate
-
-# 检查连接
-agentic-warden health-check
-
-# 检查共享内存
-ipcs -m | grep agentic-warden
-```
-
-#### 1.2 日志监控
+### 1. 日志查看
 
 日志文件保存在系统临时目录：
 - Linux/macOS: `/tmp/.agentic-warden/logs/<PID>.log`
@@ -577,9 +559,6 @@ tail -f /tmp/.agentic-warden/logs/*.log
 
 # 查看错误日志
 grep ERROR /tmp/.agentic-warden/logs/*.log
-
-# 查看性能日志
-grep "perf" /tmp/.agentic-warden/logs/*.log
 ```
 
 **Windows PowerShell**:
@@ -639,38 +618,6 @@ tar xzf "$BACKUP_FILE" -C ~/
 systemctl --user start agentic-warden 2>/dev/null || true
 
 echo "Configuration restored from $BACKUP_FILE"
-```
-
-### 3. 性能优化
-
-#### 3.1 系统优化
-```bash
-# 增加共享内存限制
-echo 'kernel.shmmax = 2147483648' | sudo tee -a /etc/sysctl.conf
-echo 'kernel.shmall = 524288' | sudo tee -a /etc/sysctl.conf
-sudo sysctl -p
-
-# 优化文件描述符限制
-echo 'fs.file-max = 65536' | sudo tee -a /etc/sysctl.conf
-```
-
-#### 3.2 应用优化
-```json
-{
-  "process_tracking": {
-    "scan_interval": 1,
-    "max_instances": 50,
-    "cleanup_dead_processes": true
-  },
-  "tui": {
-    "auto_refresh_interval": 2,
-    "max_displayed_tasks": 20
-  },
-  "network": {
-    "connection_timeout": 15,
-    "max_retries": 2
-  }
-}
 ```
 
 ## 故障排除

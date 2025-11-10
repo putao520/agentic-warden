@@ -15,6 +15,13 @@
     └── config.json.schema     # 主配置 Schema
 ```
 
+**注意**: Agentic-Warden **不管理** AI CLI 的原生配置文件：
+- `~/.claude/config` - Claude CLI 原生配置
+- `~/.codex/config` - Codex CLI 原生配置
+- `~/.gemini/config` - Gemini CLI 原生配置
+
+这些配置文件由各AI CLI自己管理，Agentic-Warden只通过环境变量注入来动态切换Provider。
+
 #### 运行时目录（系统临时目录/.agentic-warden/）
 ```
 <TEMP>/.agentic-warden/         # <TEMP> 由 std::env::temp_dir() 动态获取
@@ -42,6 +49,31 @@
 5. 默认配置 (最低优先级)
 
 ## Provider 配置管理
+
+### Provider vs AI CLI 配置关系
+
+**Provider配置** (`provider.json`):
+- 管理第三方API提供商的配置（OpenRouter、LiteLLM等）
+- 定义环境变量映射（API密钥、Base URL等）
+- 启动AI CLI时通过 `-p` 参数选择，自动注入环境变量
+
+**AI CLI原生配置** (各CLI自己的配置文件):
+- Agentic-Warden **不修改、不管理** 这些配置
+- AI CLI的模型选择、超时设置等保持原生配置方式
+- 用户直接使用各CLI的原生配置命令（如 `claude config set model ...`）
+
+**示例对比**:
+```bash
+# ❌ Agentic-Warden 不做这些
+agentic-warden config set claude.model "claude-3-opus"
+
+# ✅ 正确做法：使用原生CLI配置
+claude config set model "claude-3-opus"
+
+# ✅ Agentic-Warden 只管理Provider切换
+agentic-warden agent claude -p openrouter "task"  # 使用openrouter
+agentic-warden agent claude -p official "task"     # 使用官方API
+```
 
 ### 1. Provider 配置文件格式
 
@@ -85,24 +117,6 @@
         "server_address": "http://localhost:4000",
         "health_check_url": "http://localhost:4000/health",
         "timeout": 30
-      },
-      "builtin": false,
-      "created_at": "2025-11-04T10:00:00Z",
-      "updated_at": "2025-11-04T10:00:00Z"
-    },
-    "cloudflare": {
-      "name": "cloudflare",
-      "description": "Cloudflare AI Gateway，提供企业级 AI 服务",
-      "compatible_with": ["codex", "claude", "gemini"],
-      "env": {
-        "CLOUDFLARE_API_TOKEN": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-        "CLOUDFLARE_ACCOUNT_ID": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-        "OPENAI_BASE_URL": "https://gateway.ai.cloudflare.com/v1/xxxxxxxxxxxxxx"
-      },
-      "metadata": {
-        "account_type": "enterprise",
-        "gateway_id": "xxxxxxxxxxxxxx",
-        "rate_limit": 1000
       },
       "builtin": false,
       "created_at": "2025-11-04T10:00:00Z",
@@ -285,44 +299,21 @@ impl ProviderValidator {
 ```json
 {
   "version": "1.0.0",
-  "general": {
-    "default_ai_cli": "claude",
-    "log_level": "info"
-  },
-  "process_tracking": {
-    "scan_interval": 1,
-    "max_instances": 100,
-    "cleanup_dead_processes": true
-  },
-  "sync": {
-    "google_drive": {
-      "auto_sync": false,
-      "exclude_patterns": [
-        "*.tmp",
-        "*.log",
-        ".git/",
-        "target/",
-        "node_modules/"
-      ]
-    }
-  }
+  "default_ai_cli": "claude",
+  "log_level": "info"
 }
 ```
 
 #### 3.2 配置字段说明
 
-##### General (通用设置)
+- **version**: 配置文件版本号（用于未来兼容性）
 - **default_ai_cli**: 默认 AI CLI 工具 (claude, codex, gemini)
-- **log_level**: 日志级别 (info, warn, error)
+- **log_level**: 日志级别 (trace, debug, info, warn, error)
 
-##### Process Tracking (进程跟踪)
-- **scan_interval**: 扫描间隔（秒）
-- **max_instances**: 最大实例数
-- **cleanup_dead_processes**: 是否清理死亡进程
-
-##### Sync (同步设置)
-- **auto_sync**: 是否自动同步到Google Drive
-- **exclude_patterns**: 排除文件模式列表
+**设计原则**：
+- 保持配置极简，只包含必要的全局设置
+- 进程管理相关逻辑硬编码在代码中，不需要配置
+- Google Drive 同步按需触发（push/pull命令），不需要配置自动同步
 
 ### 4. 环境变量配置
 

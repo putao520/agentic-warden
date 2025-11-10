@@ -305,7 +305,7 @@ async fn handle_mcp_command(action: McpAction) -> Result<ExitCode, String> {
 
 /// 运行stdio传输的MCP服务器
 async fn run_mcp_server_stdio(server: AgenticWardenMcpServer) -> Result<(), Box<dyn std::error::Error>> {
-    server.run_stdio_server().await
+    server.run().await
 }
 
 /// Perform background network detection to update cached network status (non-blocking)
