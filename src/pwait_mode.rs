@@ -264,14 +264,14 @@ mod tests {
 
     #[test]
     fn test_wait_with_no_tasks() {
-        let registry = InProcessRegistry::new();
+        let registry = InProcessRegistry::new(crate::storage::InProcessStorage::new());
         let result = run_with_registry(&registry);
         assert!(matches!(result, Err(PWaitError::NoTasks)));
     }
 
     #[test]
     fn test_wait_with_completed_tasks() {
-        let registry = InProcessRegistry::new();
+        let registry = InProcessRegistry::new(crate::storage::InProcessStorage::new());
 
         // 注册一个任务
         let task = TaskRecord::new(
