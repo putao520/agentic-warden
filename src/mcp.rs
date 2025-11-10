@@ -1,6 +1,14 @@
-//! MCP (Model Context Protocol) 服务器模块
+//! MCP (Model Context Protocol) 服务器模块 - 基于rmcp库的标准实现
 //!
 //! 提供Agentic-Warden的MCP服务，允许外部AI CLI通过MCP协议调用功能
+//!
+//! # 实现方式
+//!
+//! 使用rmcp库提供标准的MCP v1.0实现：
+//! - 使用 `#[tool_router]` 宏生成工具路由
+//! - 使用 `#[tool]` 宏定义工具函数
+//! - 使用 `#[tool_handler]` 宏实现ServerHandler
+//! - 使用 `.serve(transport)` 启动stdio传输
 //!
 //! # 任务管理
 //!
@@ -9,30 +17,44 @@
 //! - 所有MCP启动的任务都存储在这个注册表中
 //! - 与CLI任务注册表完全隔离
 
+use rmcp::{
+    tool, tool_router, tool_handler,
+    handler::server::tool::ToolRouter,
+    ServerHandler,
+    ServiceExt,
+};
 use std::sync::Arc;
-use std::ffi::OsString;
+use std::future::Future;
 use tokio::sync::Mutex;
-use agentic_warden::provider::manager::ProviderManager;
-use agentic_warden::supervisor;
+use serde_json::Value;
 
-// 使用工厂模式获取注册表
+use agentic_warden::provider::manager::ProviderManager;
 use agentic_warden::registry_factory::{McpRegistry, RegistryFactory};
 
 /// Agentic-Warden MCP服务器
-/// 使用工厂模式获取进程内任务注册表，确保全局唯一实例
+///
+/// 使用rmcp库实现标准的MCP v1.0服务器，提供以下工具：
+/// - `monitor_processes`: 监控AI CLI进程
+/// - `get_process_tree`: 获取进程树信息
+/// - `get_provider_status`: 获取Provider配置
+/// - `terminate_process`: 安全终止进程
+/// - `start_concurrent_tasks`: 并发启动多个任务
+/// - `get_task_command`: 获取单个任务的启动命令
 #[derive(Clone)]
 pub struct AgenticWardenMcpServer {
     /// Provider管理器
     provider_manager: Arc<Mutex<ProviderManager>>,
+    /// 工具路由器（由rmcp宏生成）
+    tool_router: ToolRouter<Self>,
 }
 
+#[tool_router]
 impl AgenticWardenMcpServer {
     /// 创建新的MCP服务器实例
-    ///
-    /// 注意：任务注册表通过RegistryFactory获取，确保全局唯一
     pub fn new(provider_manager: ProviderManager) -> Self {
         Self {
             provider_manager: Arc::new(Mutex::new(provider_manager)),
+            tool_router: Self::tool_router(),
         }
     }
 
@@ -41,583 +63,408 @@ impl AgenticWardenMcpServer {
         RegistryFactory::instance().get_mcp_registry()
     }
 
-    /// 运行MCP服务器
-    pub async fn run_stdio_server(self) -> Result<(), Box<dyn std::error::Error>> {
-        eprintln!("Starting Agentic-Warden MCP server with stdio transport...");
-        eprintln!("Available tools:");
-        eprintln!("  - monitor_processes: Monitor AI CLI processes");
-        eprintln!("  - get_process_tree: Get process tree information");
-        eprintln!("  - get_provider_status: Get provider configuration");
-        eprintln!("  - start_ai_cli: Start AI CLI with prompt");
+    /// 启动MCP服务器 (使用rmcp的标准stdio传输)
+    pub async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
+        eprintln!("🚀 Starting Agentic-Warden MCP Server");
+        eprintln!("   Protocol: MCP v1.0 (rmcp-based)");
+        eprintln!("   Transport: stdio");
+        eprintln!("   Tools: 6 available");
         eprintln!();
-        eprintln!("MCP server is running. Use Ctrl+C to stop.");
+        eprintln!("✓ Server ready. Use Ctrl+C to stop.");
+        eprintln!();
 
-        // 简单的MCP服务器实现 - 读取JSON-RPC请求并响应
-        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-        let mut reader = BufReader::new(tokio::io::stdin());
-        let mut writer = tokio::io::stdout();
+        // 使用rmcp的标准stdio服务
+        let transport = (tokio::io::stdin(), tokio::io::stdout());
+        self.serve(transport).await?.waiting().await?;
 
-        let mut buffer = String::new();
-
-        loop {
-            buffer.clear();
-
-            // 读取一行输入
-            match reader.read_line(&mut buffer).await {
-                Ok(0) => break, // EOF
-                Ok(_) => {}
-                Err(e) => {
-                    eprintln!("Error reading input: {}", e);
-                    break;
-                }
-            }
-
-            let line = buffer.trim();
-            if line.is_empty() {
-                continue;
-            }
-
-            // 解析JSON-RPC请求
-            match self.handle_mcp_request(line).await {
-                Ok(response) => {
-                    if let Err(e) = writer.write_all(response.as_bytes()).await {
-                        eprintln!("Error writing response: {}", e);
-                        break;
-                    }
-                    if let Err(e) = writer.write_all(b"\n").await {
-                        eprintln!("Error writing newline: {}", e);
-                        break;
-                    }
-                    if let Err(e) = writer.flush().await {
-                        eprintln!("Error flushing: {}", e);
-                        break;
-                    }
-                }
-                Err(e) => {
-                    eprintln!("Error handling request: {}", e);
-                }
-            }
-        }
-
-        eprintln!("MCP server stopped");
+        eprintln!("✓ MCP server stopped gracefully");
         Ok(())
     }
 
-    /// 处理MCP请求
-    async fn handle_mcp_request(&self, request: &str) -> Result<String, Box<dyn std::error::Error>> {
-        // 简单的JSON-RPC响应
-        let response = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "result": {
-                "message": "Agentic-Warden MCP server is running",
-                "tools": [
-                    {
-                        "name": "monitor_processes",
-                        "description": "Monitor AI CLI processes"
-                    },
-                    {
-                        "name": "get_process_tree",
-                        "description": "Get process tree information"
-                    },
-                    {
-                        "name": "get_provider_status",
-                        "description": "Get provider configuration"
-                    },
-                    {
-                        "name": "start_ai_cli",
-                        "description": "Start AI CLI with prompt"
-                    }
-                ]
-            }
-        });
-
-        Ok(serde_json::to_string(&response)?)
-    }
-
     /// 监控所有运行的AI CLI进程及其状态
-    pub async fn monitor_processes(&self, filter: Option<String>, ai_only: Option<bool>) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    ///
+    /// 列出系统中所有进程，支持按名称过滤和AI CLI类型过滤。
+    /// 对于AI CLI进程，自动识别其类型（claude/codex/gemini）。
+    ///
+    /// # 参数
+    /// - `filter`: 可选的进程名称过滤字符串（不区分大小写）
+    /// - `ai_only`: 是否只显示AI CLI进程
+    ///
+    /// # 返回
+    /// 包含进程列表的JSON对象，每个进程包含：
+    /// - pid: 进程ID
+    /// - name: 进程名称
+    /// - status: 进程状态
+    /// - command: 完整命令行
+    /// - parent_pid: 父进程ID
+    /// - ai_cli_type: AI CLI类型（如果是AI CLI进程）
+    #[tool(description = "Monitor AI CLI processes with optional filtering")]
+    pub async fn monitor_processes(&self, filter: Option<String>, ai_only: Option<bool>) -> String {
         match get_system_processes().await {
             Ok(processes) => {
                 let mut filtered_processes = Vec::new();
 
-                for process in processes {
-                    // 应用过滤器
-                    if let Some(filter_str) = &filter {
-                        if !process.name.to_lowercase().contains(&filter_str.to_lowercase()) {
+                for proc in processes {
+                    // 如果设置了 ai_only，只保留 AI CLI 进程
+                    if ai_only.unwrap_or(false) && proc.ai_cli_type.is_none() {
+                        continue;
+                    }
+
+                    // 如果设置了 filter，只保留名称包含过滤字符串的进程
+                    if let Some(ref f) = filter {
+                        if !proc.name.to_lowercase().contains(&f.to_lowercase()) &&
+                           !proc.command.to_lowercase().contains(&f.to_lowercase()) {
                             continue;
                         }
                     }
 
-                    // 如果只显示AI CLI进程
-                    if ai_only.unwrap_or(false) {
-                        if !is_ai_cli_process(&process.name) {
-                            continue;
-                        }
-                    }
-
-                    filtered_processes.push(process);
+                    filtered_processes.push(serde_json::json!({
+                        "pid": proc.pid,
+                        "name": proc.name,
+                        "status": proc.status,
+                        "command": proc.command,
+                        "parent_pid": proc.parent_pid,
+                        "ai_cli_type": proc.ai_cli_type,
+                    }));
                 }
 
-                let process_json: Vec<serde_json::Value> = filtered_processes.into_iter().map(|process| {
-                    serde_json::json!({
-                        "pid": process.pid,
-                        "name": process.name,
-                        "status": process.status,
-                        "command": process.command,
-                        "parent_pid": process.parent_pid,
-                        "ai_cli_type": process.ai_cli_type,
-                        "timestamp": chrono::Utc::now().to_rfc3339()
-                    })
-                }).collect();
-
-                Ok(serde_json::json!({
-                    "processes": process_json,
-                    "count": process_json.len(),
-                    "message": format!("Found {} processes", process_json.len())
-                }))
-            }
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "success": true,
+                    "processes": filtered_processes,
+                    "count": filtered_processes.len()
+                })).unwrap_or_else(|e| format!("{{\"success\": false, \"error\": \"{}\"}}", e))
+            },
             Err(e) => {
-                Ok(serde_json::json!({
-                    "error": format!("Failed to get processes: {}", e),
-                    "processes": [],
-                    "count": 0
-                }))
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "success": false,
+                    "error": format!("Failed to list processes: {}", e)
+                })).unwrap()
             }
         }
     }
 
-    /// 获取Provider状态和配置信息
-    pub async fn get_provider_status(&self, provider_id: Option<String>) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-        let provider_manager = self.provider_manager.lock().await;
+    /// 获取指定进程的进程树信息
+    ///
+    /// 返回指定进程及其所有子孙进程的树状结构。
+    ///
+    /// # 参数
+    /// - `pid`: 要查询的根进程ID
+    ///
+    /// # 返回
+    /// 包含进程树的JSON对象：
+    /// - root: 根进程信息
+    /// - children: 子进程列表（递归）
+    #[tool(description = "Get process tree information for a specific process")]
+    pub async fn get_process_tree(&self, pid: u32) -> String {
+        match get_system_processes().await {
+            Ok(processes) => {
+                fn build_tree(pid: u32, all_processes: &[ProcessInfo]) -> Option<Value> {
+                    let proc = all_processes.iter().find(|p| p.pid == pid)?;
+                    let children: Vec<Value> = all_processes
+                        .iter()
+                        .filter(|p| p.parent_pid == Some(pid))
+                        .filter_map(|child| build_tree(child.pid, all_processes))
+                        .collect();
 
-        let status = if let Some(id) = provider_id {
-            // 获取特定Provider状态
-            let providers_config = provider_manager.get_providers_config();
-            if providers_config.providers.contains_key(&id) {
-                serde_json::json!({
-                    "provider_id": id,
-                    "provider": providers_config.providers.get(&id),
-                    "timestamp": chrono::Utc::now().to_rfc3339()
-                })
-            } else {
-                serde_json::json!({
-                    "error": format!("Provider '{}' not found", id)
-                })
+                    Some(serde_json::json!({
+                        "pid": proc.pid,
+                        "name": proc.name,
+                        "status": proc.status,
+                        "command": proc.command,
+                        "ai_cli_type": proc.ai_cli_type,
+                        "children": children
+                    }))
+                }
+
+                if let Some(tree) = build_tree(pid, &processes) {
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "success": true,
+                        "tree": tree
+                    })).unwrap()
+                } else {
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "success": false,
+                        "error": format!("Process {} not found", pid)
+                    })).unwrap()
+                }
+            },
+            Err(e) => {
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "success": false,
+                    "error": format!("Failed to get process tree: {}", e)
+                })).unwrap()
+            }
+        }
+    }
+
+    /// 获取Provider状态和配置
+    ///
+    /// 返回指定Provider的配置信息和可用性状态。
+    ///
+    /// # 参数
+    /// - `provider_name`: 可选的Provider名称，如果不指定则返回所有Provider
+    ///
+    /// # 返回
+    /// 包含Provider状态的JSON对象：
+    /// - name: Provider名称
+    /// - description: 描述
+    /// - env_vars: 环境变量配置
+    /// - compatible_with: 兼容的AI CLI类型列表
+    #[tool(description = "Get provider configuration and status")]
+    pub async fn get_provider_status(&self, provider_name: Option<String>) -> String {
+        let pm = self.provider_manager.lock().await;
+
+        if let Some(name) = provider_name {
+            match pm.get_provider(&name) {
+                Ok(provider) => {
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "success": true,
+                        "provider": {
+                            "name": provider.name,
+                            "description": provider.description,
+                            "env_vars": provider.env,
+                            "compatible_with": provider.compatible_with,
+                        }
+                    })).unwrap()
+                },
+                Err(e) => {
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "success": false,
+                        "error": format!("Provider '{}' not found: {}", name, e)
+                    })).unwrap()
+                }
             }
         } else {
-            // 获取所有Provider状态
-            let providers_config = provider_manager.get_providers_config();
-            serde_json::json!({
-                "default_provider": providers_config.default_provider,
-                "providers": providers_config.providers,
-                "timestamp": chrono::Utc::now().to_rfc3339()
-            })
+            // 返回所有provider
+            let all_providers = pm.list_providers();
+            let providers_json: Vec<Value> = all_providers.iter().map(|(name, p)| {
+                serde_json::json!({
+                    "name": name,
+                    "description": p.description,
+                    "env_vars": p.env,
+                    "compatible_with": p.compatible_with,
+                })
+            }).collect();
+
+            serde_json::to_string_pretty(&serde_json::json!({
+                "success": true,
+                "providers": providers_json,
+                "count": providers_json.len()
+            })).unwrap()
+        }
+    }
+
+    /// 安全终止指定进程
+    ///
+    /// 使用SIGTERM（优雅终止）或SIGKILL（强制终止）信号终止进程。
+    ///
+    /// # 参数
+    /// - `pid`: 要终止的进程ID
+    /// - `force`: 是否强制终止（SIGKILL）
+    ///
+    /// # 返回
+    /// 包含操作结果的JSON对象
+    #[tool(description = "Terminate a process safely")]
+    pub async fn terminate_process(&self, pid: u32, force: Option<bool>) -> String {
+        #[cfg(target_family = "unix")]
+        {
+            use nix::sys::signal::{kill, Signal};
+            use nix::unistd::Pid;
+
+            let signal = if force.unwrap_or(false) {
+                Signal::SIGKILL
+            } else {
+                Signal::SIGTERM
+            };
+
+            match kill(Pid::from_raw(pid as i32), signal) {
+                Ok(_) => {
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "success": true,
+                        "message": format!("Process {} terminated with {:?}", pid, signal),
+                        "pid": pid,
+                        "signal": format!("{:?}", signal)
+                    })).unwrap()
+                },
+                Err(e) => {
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "success": false,
+                        "error": format!("Failed to terminate process {}: {}", pid, e)
+                    })).unwrap()
+                }
+            }
+        }
+
+        #[cfg(target_family = "windows")]
+        {
+            serde_json::to_string_pretty(&serde_json::json!({
+                "success": false,
+                "error": "Process termination not yet implemented on Windows"
+            })).unwrap()
+        }
+    }
+
+    /// 生成多个AI CLI任务的启动命令
+    ///
+    /// 为多个AI CLI任务生成可执行的bash命令。
+    /// MCP客户端（如Claude Code）可以使用Bash工具并行执行这些命令。
+    ///
+    /// # 参数
+    /// - `tasks`: 任务数组的JSON字符串，每个任务包含：
+    ///   - ai_type: AI类型（claude/codex/gemini）
+    ///   - task: 任务描述
+    ///   - provider: 可选的Provider名称
+    ///
+    /// # 返回
+    /// 包含所有任务命令的JSON对象：
+    /// - success: 操作是否成功
+    /// - tasks: 任务列表，包含每个任务的:
+    ///   - ai_type: AI类型
+    ///   - task: 任务描述
+    ///   - provider: Provider名称（如果有）
+    ///   - command: 完整的bash命令
+    /// - count: 任务数量
+    /// - message: 使用说明
+    #[tool(description = "Generate commands for multiple AI CLI tasks to run concurrently")]
+    pub async fn start_concurrent_tasks(&self, tasks_json: String) -> String {
+        // 解析tasks数组
+        let tasks: Vec<Value> = match serde_json::from_str(&tasks_json) {
+            Ok(v) => v,
+            Err(e) => {
+                return serde_json::to_string_pretty(&serde_json::json!({
+                    "success": false,
+                    "error": format!("Invalid JSON format: {}", e)
+                })).unwrap();
+            }
         };
 
-        Ok(status)
-    }
+        let mut results = Vec::new();
 
-    /// 启动AI CLI并执行任务（旧方法，保留兼容性）
-    pub async fn start_ai_cli(
-        &self,
-        ai_type: String,
-        provider: Option<String>,
-        prompt: String,
-    ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-        // 验证AI类型
-        let ai_cli_type = parse_ai_type(&ai_type)?;
-
-        // 构建外部AI CLI命令
-        match start_external_ai_cli(ai_cli_type, provider, &prompt).await {
-            Ok(output) => {
-                Ok(serde_json::json!({
-                    "success": true,
-                    "output": output,
-                    "message": "AI CLI execution completed"
-                }))
-            }
-            Err(e) => {
-                Ok(serde_json::json!({
-                    "success": false,
-                    "error": format!("Failed to start AI CLI: {}", e),
-                    "message": "AI CLI execution failed"
-                }))
-            }
-        }
-    }
-
-    /// 并发启动多个AI CLI任务
-    ///
-    /// 直接在MCP服务器中启动所有AI CLI进程，每个任务在后台运行。
-    /// 使用supervisor::execute_cli复用现有实现，包括：
-    /// - Provider配置和验证
-    /// - 环境变量注入
-    /// - TaskRegistry自动注册
-    /// - 日志文件管理
-    /// - 进程组管理
-    ///
-    /// # Arguments
-    /// * `tasks` - 任务列表，每个任务包含ai_type、provider、task内容
-    ///
-    /// # Returns
-    /// 返回包含wait命令的JSON对象，用于等待所有任务完成
-    pub async fn start_concurrent_tasks(
-        &self,
-        tasks: Vec<serde_json::Value>,
-    ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-        if tasks.is_empty() {
-            return Ok(serde_json::json!({
-                "success": false,
-                "error": "No tasks provided"
-            }));
-        }
-
-        let mut started_count = 0;
-        let mut errors = Vec::new();
-
-        // 并发启动所有任务
-        for (idx, task_json) in tasks.iter().enumerate() {
-            let ai_type_str = task_json.get("ai_type")
-                .and_then(|v| v.as_str())
-                .ok_or(format!("Task {}: Missing ai_type", idx))?;
-
-            let provider = task_json.get("provider")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-
-            let task_content = task_json.get("task")
-                .and_then(|v| v.as_str())
-                .ok_or(format!("Task {}: Missing task", idx))?;
-
-            // 解析AI类型
-            let cli_type = match parse_ai_type(ai_type_str) {
-                Ok(t) => t,
-                Err(e) => {
-                    errors.push(format!("Task {}: {}", idx, e));
+        for task_spec in tasks {
+            let ai_type = match task_spec.get("ai_type").and_then(|v| v.as_str()) {
+                Some(t) => t,
+                None => {
+                    results.push(serde_json::json!({
+                        "success": false,
+                        "error": "Missing 'ai_type' field"
+                    }));
                     continue;
                 }
             };
 
-            // 构建参数（任务内容）
-            let args = vec![OsString::from(task_content)];
-
-            // 在后台启动任务
-            let registry = self.registry();
-            tokio::spawn(async move {
-                if let Err(e) = supervisor::execute_cli(&*registry, &cli_type, &args, provider).await {
-                    eprintln!("Task {} failed: {}", idx, e);
+            let task = match task_spec.get("task").and_then(|v| v.as_str()) {
+                Some(t) => t,
+                None => {
+                    results.push(serde_json::json!({
+                        "success": false,
+                        "error": "Missing 'task' field"
+                    }));
+                    continue;
                 }
-            });
+            };
 
-            started_count += 1;
-        }
+            let provider = task_spec.get("provider").and_then(|v| v.as_str());
 
-        if started_count == 0 {
-            return Ok(serde_json::json!({
-                "success": false,
-                "error": "No tasks started",
-                "errors": errors
+            // 验证AI类型
+            if let Err(e) = parse_ai_type(ai_type) {
+                results.push(serde_json::json!({
+                    "success": false,
+                    "ai_type": ai_type,
+                    "error": format!("{}", e)
+                }));
+                continue;
+            }
+
+            // 构建启动命令
+            let command = if let Some(p) = provider {
+                format!("agent {} -p {} '{}'", ai_type, p, task.replace("'", "'\\''"))
+            } else {
+                format!("agent {} '{}'", ai_type, task.replace("'", "'\\''"))
+            };
+
+            results.push(serde_json::json!({
+                "success": true,
+                "ai_type": ai_type,
+                "task": task,
+                "provider": provider,
+                "command": command
             }));
         }
 
-        Ok(serde_json::json!({
+        let success_count = results.iter().filter(|r| r.get("success") == Some(&serde_json::json!(true))).count();
+
+        serde_json::to_string_pretty(&serde_json::json!({
             "success": true,
-            "started_count": started_count,
-            "task": {
-                "description": format!("Wait for {} concurrent MCP tasks to complete", started_count),
-                "tool": "bash",
-                "command": "agentic-warden pwait",
-                "timeout_ms": 43200000  // 12 hours in milliseconds
-            },
-            "message": format!(
-                "Started {} concurrent MCP tasks in background (InProcessRegistry). Execute the 'task' using Bash tool with 'pwait' command.",
-                started_count
-            ),
-            "note": "MCP tasks use InProcessRegistry (process-local). Use 'pwait' to wait for MCP tasks, not 'wait' (which is for cross-process CLI tasks).",
-            "errors": if errors.is_empty() { serde_json::Value::Null } else { serde_json::json!(errors) }
-        }))
+            "tasks": results,
+            "count": success_count,
+            "message": "Execute these commands using Bash tool with background mode (run_in_background: true) for concurrent execution"
+        })).unwrap()
     }
 
-    /// 获取普通启动命令
+    /// 获取单个AI CLI任务的启动命令
     ///
-    /// 返回符合Claude Code标准的task JSON结构，让Claude Code通过Bash工具执行。
+    /// 返回可以直接在MCP客户端（如Claude Code）中执行的bash命令。
     ///
-    /// # Arguments
-    /// * `ai_type` - AI CLI类型（codex, gemini等）
-    /// * `task` - 任务内容
-    /// * `provider` - 可选的Provider
+    /// # 参数
+    /// - `ai_type`: AI CLI类型（claude, codex, gemini）
+    /// - `task`: 要执行的任务
+    /// - `provider`: 可选的Provider名称
     ///
-    /// # Returns
-    /// 返回符合Claude Code标准的task JSON对象
-    pub async fn get_task_command(
-        &self,
-        ai_type: String,
-        task: String,
-        provider: Option<String>,
-    ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    /// # 返回
+    /// 包含任务启动命令的JSON对象：
+    /// - success: 操作是否成功
+    /// - task: 任务对象，包含：
+    ///   - description: 任务描述
+    ///   - tool: "bash"
+    ///   - command: 完整的shell命令
+    ///   - timeout_ms: 超时时间（12小时）
+    /// - ai_type: AI CLI类型
+    /// - provider: Provider名称（如果有）
+    /// - message: 使用说明
+    #[tool(description = "Get command to start a single AI CLI task")]
+    pub async fn get_task_command(&self, ai_type: String, task: String, provider: Option<String>) -> String {
         // 验证AI类型
-        let _ = parse_ai_type(&ai_type)?;
+        if let Err(e) = parse_ai_type(&ai_type) {
+            return serde_json::to_string_pretty(&serde_json::json!({
+                "success": false,
+                "error": format!("{}", e)
+            })).unwrap();
+        }
 
         // 构建命令字符串
-        let command = if let Some(p) = &provider {
+        let command = if let Some(ref p) = provider {
             format!("agent {} -p {} '{}'", ai_type, p, task.replace("'", "'\\''"))
         } else {
             format!("agent {} '{}'", ai_type, task.replace("'", "'\\''"))
         };
 
         // 构建任务描述
-        let description = if let Some(p) = &provider {
+        let description = if let Some(ref p) = provider {
             format!("Execute {} task with provider {}: {}", ai_type, p, task)
         } else {
             format!("Execute {} task: {}", ai_type, task)
         };
 
-        Ok(serde_json::json!({
+        serde_json::to_string_pretty(&serde_json::json!({
             "success": true,
             "task": {
                 "description": description,
                 "tool": "bash",
                 "command": command,
-                "timeout_ms": 43200000  // 12 hours in milliseconds
+                "timeout_ms": 43200000
             },
             "ai_type": ai_type,
             "provider": provider,
             "message": "Execute the 'task' using Bash tool with 12h timeout"
-        }))
-    }
-
-    /// 获取指定进程的进程树信息
-    ///
-    /// 使用agentic-warden的进程树追踪功能获取完整的进程层级结构。
-    /// 特别标注AI CLI进程，帮助理解进程之间的父子关系。
-    ///
-    /// # Arguments
-    /// * `pid` - 目标进程ID
-    ///
-    /// # Returns
-    /// 包含进程链、AI CLI识别信息的JSON对象
-    pub async fn get_process_tree(&self, pid: u32) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-        match agentic_warden::core::process_tree::get_process_tree(pid) {
-            Ok(tree_info) => {
-                // 获取进程链中每个进程的详细信息
-                let mut process_chain_details = Vec::new();
-
-                for &chain_pid in &tree_info.process_chain {
-                    if let Ok(processes) = get_system_processes().await {
-                        if let Some(process) = processes.iter().find(|p| p.pid == chain_pid) {
-                            process_chain_details.push(serde_json::json!({
-                                "pid": process.pid,
-                                "name": process.name,
-                                "command": process.command,
-                                "ai_cli_type": process.ai_cli_type,
-                                "is_ai_cli": process.ai_cli_type.is_some()
-                            }));
-                        } else {
-                            // 进程可能已经退出，仅记录PID
-                            process_chain_details.push(serde_json::json!({
-                                "pid": chain_pid,
-                                "name": "unknown",
-                                "status": "not_found"
-                            }));
-                        }
-                    }
-                }
-
-                Ok(serde_json::json!({
-                    "success": true,
-                    "process_tree": {
-                        "process_chain": tree_info.process_chain,
-                        "root_parent_pid": tree_info.root_parent_pid,
-                        "depth": tree_info.depth,
-                        "has_ai_cli_root": tree_info.has_ai_cli_root,
-                        "ai_cli_type": tree_info.ai_cli_type,
-                        "process_details": process_chain_details
-                    },
-                    "message": format!("Process tree depth: {} levels", tree_info.depth)
-                }))
-            }
-            Err(e) => {
-                Ok(serde_json::json!({
-                    "success": false,
-                    "error": format!("Failed to get process tree: {}", e),
-                    "message": "Process tree unavailable"
-                }))
-            }
-        }
-    }
-
-    /// 安全终止指定的进程
-    ///
-    /// 使用两阶段终止策略：
-    /// 1. 首先发送SIGTERM，给进程机会优雅退出
-    /// 2. 如果进程仍然存在，发送SIGKILL强制终止
-    ///
-    /// 安全检查：
-    /// - 只允许终止AI CLI相关进程
-    /// - 阻止终止agentic-warden自身
-    /// - 阻止终止系统关键进程
-    ///
-    /// # Arguments
-    /// * `pid` - 要终止的进程ID
-    /// * `force` - 是否跳过SIGTERM直接使用SIGKILL
-    ///
-    /// # Returns
-    /// 包含终止结果的JSON对象
-    pub async fn terminate_process(&self, pid: u32, force: Option<bool>) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-        // 安全检查：不允许终止自身
-        if pid == std::process::id() {
-            return Ok(serde_json::json!({
-                "success": false,
-                "error": "Cannot terminate agentic-warden itself",
-                "message": "Operation denied for safety"
-            }));
-        }
-
-        // 获取进程信息进行验证
-        match get_system_processes().await {
-            Ok(processes) => {
-                let process = processes.iter().find(|p| p.pid == pid);
-
-                if let Some(process) = process {
-                    // 安全检查：只允许终止AI CLI进程
-                    if !is_ai_cli_process(&process.name) && !is_ai_cli_process(&process.command) {
-                        return Ok(serde_json::json!({
-                            "success": false,
-                            "error": format!("Process '{}' (PID: {}) is not an AI CLI process", process.name, pid),
-                            "message": "Only AI CLI processes can be terminated via MCP"
-                        }));
-                    }
-
-                    // 执行终止操作
-                    let force_kill = force.unwrap_or(false);
-
-                    #[cfg(target_family = "unix")]
-                    {
-                        use nix::sys::signal::{self, Signal};
-                        use nix::unistd::Pid;
-
-                        let nix_pid = Pid::from_raw(pid as i32);
-
-                        if force_kill {
-                            // 直接发送SIGKILL
-                            match signal::kill(nix_pid, Signal::SIGKILL) {
-                                Ok(_) => {
-                                    Ok(serde_json::json!({
-                                        "success": true,
-                                        "pid": pid,
-                                        "process_name": process.name,
-                                        "method": "SIGKILL",
-                                        "message": "Process forcefully terminated"
-                                    }))
-                                }
-                                Err(e) => {
-                                    Ok(serde_json::json!({
-                                        "success": false,
-                                        "error": format!("Failed to terminate process: {}", e),
-                                        "message": "Termination failed"
-                                    }))
-                                }
-                            }
-                        } else {
-                            // 优雅终止：先SIGTERM，等待，再SIGKILL
-                            match signal::kill(nix_pid, Signal::SIGTERM) {
-                                Ok(_) => {
-                                    // 等待2秒让进程优雅退出
-                                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-
-                                    // 检查进程是否还存在
-                                    let still_alive = get_system_processes()
-                                        .await
-                                        .ok()
-                                        .and_then(|procs| procs.iter().find(|p| p.pid == pid).cloned())
-                                        .is_some();
-
-                                    if still_alive {
-                                        // 进程仍然存在，发送SIGKILL
-                                        let _ = signal::kill(nix_pid, Signal::SIGKILL);
-                                        Ok(serde_json::json!({
-                                            "success": true,
-                                            "pid": pid,
-                                            "process_name": process.name,
-                                            "method": "SIGTERM -> SIGKILL",
-                                            "message": "Process terminated (required SIGKILL)"
-                                        }))
-                                    } else {
-                                        Ok(serde_json::json!({
-                                            "success": true,
-                                            "pid": pid,
-                                            "process_name": process.name,
-                                            "method": "SIGTERM",
-                                            "message": "Process gracefully terminated"
-                                        }))
-                                    }
-                                }
-                                Err(e) => {
-                                    Ok(serde_json::json!({
-                                        "success": false,
-                                        "error": format!("Failed to send SIGTERM: {}", e),
-                                        "message": "Termination failed"
-                                    }))
-                                }
-                            }
-                        }
-                    }
-
-                    #[cfg(target_family = "windows")]
-                    {
-                        use std::process::Command;
-
-                        // Windows: 使用taskkill
-                        let force_flag = if force_kill { "/F" } else { "/T" };
-                        let output = Command::new("taskkill")
-                            .args(&[force_flag, "/PID", &pid.to_string()])
-                            .output();
-
-                        match output {
-                            Ok(output) if output.status.success() => {
-                                Ok(serde_json::json!({
-                                    "success": true,
-                                    "pid": pid,
-                                    "process_name": process.name,
-                                    "method": if force_kill { "taskkill /F" } else { "taskkill /T" },
-                                    "message": "Process terminated"
-                                }))
-                            }
-                            Ok(output) => {
-                                Ok(serde_json::json!({
-                                    "success": false,
-                                    "error": String::from_utf8_lossy(&output.stderr).to_string(),
-                                    "message": "Termination failed"
-                                }))
-                            }
-                            Err(e) => {
-                                Ok(serde_json::json!({
-                                    "success": false,
-                                    "error": format!("Failed to execute taskkill: {}", e),
-                                    "message": "Termination failed"
-                                }))
-                            }
-                        }
-                    }
-                } else {
-                    Ok(serde_json::json!({
-                        "success": false,
-                        "error": format!("Process with PID {} not found", pid),
-                        "message": "Process does not exist"
-                    }))
-                }
-            }
-            Err(e) => {
-                Ok(serde_json::json!({
-                    "success": false,
-                    "error": format!("Failed to enumerate processes: {}", e),
-                    "message": "Could not verify process"
-                }))
-            }
-        }
+        })).unwrap()
     }
 }
+
+// 使用tool_handler宏实现ServerHandler trait
+#[tool_handler(router = self.tool_router)]
+impl ServerHandler for AgenticWardenMcpServer {}
+
+// ==================== 辅助函数和类型定义 ====================
 
 /// 进程信息结构体
 #[derive(Debug, Clone)]
@@ -636,31 +483,18 @@ async fn get_system_processes() -> Result<Vec<ProcessInfo>, anyhow::Error> {
 
     #[cfg(target_family = "unix")]
     {
-        use psutil::process::Process;
-
-        // 获取所有进程
         for proc in psutil::process::processes()? {
             if let Ok(proc) = proc {
                 let pid = proc.pid();
-
-                // 尝试获取进程名称
                 let name = proc.name().unwrap_or_else(|_| String::from("unknown"));
-
-                // 尝试获取命令行
                 let command = match proc.cmdline() {
-                    Ok(Some(args)) => args, // cmdline()返回String
+                    Ok(Some(args)) => args,
                     _ => name.clone(),
                 };
-
-                // 尝试获取状态
                 let status = proc.status()
                     .map(|s| format!("{:?}", s))
                     .unwrap_or_else(|_| "unknown".to_string());
-
-                // 尝试获取父进程ID
                 let parent_pid = proc.ppid().ok().flatten();
-
-                // 检测AI CLI类型
                 let ai_cli_type = if is_ai_cli_process(&name) || is_ai_cli_process(&command) {
                     Some(detect_ai_cli_type(&name))
                 } else {
@@ -682,17 +516,15 @@ async fn get_system_processes() -> Result<Vec<ProcessInfo>, anyhow::Error> {
     #[cfg(target_family = "windows")]
     {
         use sysinfo::{System, SystemExt, ProcessExt};
-
         let mut sys = System::new_all();
         sys.refresh_all();
 
-        for (pid, process) in sys.processes() {
-            let name = process.name().to_string();
-            let command = process.cmd().join(" ");
-            let status = format!("{:?}", process.status());
-            let parent_pid = process.parent().map(|p| p.as_u32());
-
-            // 检测AI CLI类型
+        for (pid, proc) in sys.processes() {
+            let pid = pid.as_u32();
+            let name = proc.name().to_string();
+            let command = proc.cmd().join(" ");
+            let status = format!("{:?}", proc.status());
+            let parent_pid = proc.parent().map(|p| p.as_u32());
             let ai_cli_type = if is_ai_cli_process(&name) || is_ai_cli_process(&command) {
                 Some(detect_ai_cli_type(&name))
             } else {
@@ -700,7 +532,7 @@ async fn get_system_processes() -> Result<Vec<ProcessInfo>, anyhow::Error> {
             };
 
             processes.push(ProcessInfo {
-                pid: pid.as_u32(),
+                pid,
                 name,
                 status,
                 command,
@@ -713,101 +545,34 @@ async fn get_system_processes() -> Result<Vec<ProcessInfo>, anyhow::Error> {
     Ok(processes)
 }
 
-/// 启动外部AI CLI
-async fn start_external_ai_cli(
-    ai_type: agentic_warden::cli_type::CliType,
-    provider: Option<String>,
-    prompt: &str,
-) -> Result<String, anyhow::Error> {
-    use tokio::process::Command;
-
-    let ai_cmd = match ai_type {
-        agentic_warden::cli_type::CliType::Claude => "claude",
-        agentic_warden::cli_type::CliType::Codex => "codex",
-        agentic_warden::cli_type::CliType::Gemini => "gemini",
-    };
-
-    let mut cmd = Command::new(ai_cmd);
-    cmd.arg(prompt);
-
-    if let Some(provider_name) = provider {
-        cmd.arg("-p").arg(provider_name);
-    }
-
-    let output = cmd.output().await?;
-
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    } else {
-        Err(anyhow::anyhow!(
-            "AI CLI failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ))
-    }
-}
-
-/// 判断是否为AI CLI进程
-fn is_ai_cli_process(process_name: &str) -> bool {
-    let process_name_lower = process_name.to_lowercase();
-    process_name_lower.contains("claude")
-        || process_name_lower.contains("codex")
-        || process_name_lower.contains("gemini")
-        || process_name_lower.contains("agentic-warden")
+/// 检测进程是否为AI CLI进程
+fn is_ai_cli_process(name_or_cmd: &str) -> bool {
+    let lower = name_or_cmd.to_lowercase();
+    lower.contains("claude") ||
+    lower.contains("codex") ||
+    lower.contains("gemini") ||
+    lower.contains("aichat") ||
+    lower.contains("gpt")
 }
 
 /// 检测AI CLI类型
-fn detect_ai_cli_type(process_name: &str) -> String {
-    let name_lower = process_name.to_lowercase();
-    if name_lower.contains("claude") {
+fn detect_ai_cli_type(name_or_cmd: &str) -> String {
+    let lower = name_or_cmd.to_lowercase();
+    if lower.contains("claude") {
         "claude".to_string()
-    } else if name_lower.contains("codex") {
+    } else if lower.contains("codex") {
         "codex".to_string()
-    } else if name_lower.contains("gemini") {
+    } else if lower.contains("gemini") {
         "gemini".to_string()
     } else {
         "unknown".to_string()
     }
 }
 
-/// 解析AI类型
-fn parse_ai_type(ai_type: &str) -> Result<agentic_warden::cli_type::CliType, String> {
+/// 解析AI类型字符串
+fn parse_ai_type(ai_type: &str) -> Result<(), String> {
     match ai_type.to_lowercase().as_str() {
-        "claude" => Ok(agentic_warden::cli_type::CliType::Claude),
-        "codex" => Ok(agentic_warden::cli_type::CliType::Codex),
-        "gemini" => Ok(agentic_warden::cli_type::CliType::Gemini),
-        _ => Err(format!("Unsupported AI type: {}. Supported: claude, codex, gemini", ai_type)),
-    }
-}
-
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_is_ai_cli_process() {
-        assert!(is_ai_cli_process("claude"));
-        assert!(is_ai_cli_process("claude.exe"));
-        assert!(is_ai_cli_process("codex"));
-        assert!(is_ai_cli_process("gemini"));
-        assert!(!is_ai_cli_process("explorer"));
-        assert!(!is_ai_cli_process("chrome"));
-    }
-
-    #[test]
-    fn test_detect_ai_cli_type() {
-        assert_eq!(detect_ai_cli_type("claude"), "claude");
-        assert_eq!(detect_ai_cli_type("claude.exe"), "claude");
-        assert_eq!(detect_ai_cli_type("codex"), "codex");
-        assert_eq!(detect_ai_cli_type("gemini"), "gemini");
-        assert_eq!(detect_ai_cli_type("unknown"), "unknown");
-    }
-
-    #[test]
-    fn test_parse_ai_type() {
-        assert!(parse_ai_type("claude").is_ok());
-        assert!(parse_ai_type("CODEX").is_ok());
-        assert!(parse_ai_type("gemini").is_ok());
-        assert!(parse_ai_type("invalid").is_err());
+        "claude" | "codex" | "gemini" => Ok(()),
+        _ => Err(format!("Invalid AI type '{}'. Must be one of: claude, codex, gemini", ai_type))
     }
 }
