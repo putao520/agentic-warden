@@ -36,10 +36,6 @@ pub struct OAuthScreen {
     mode: OAuthMode,
     authenticator: Option<SmartOAuthAuthenticator>,
     flow_id: Option<String>,
-    auth_url: Option<String>,
-    code_input: String,
-    code_cursor: usize,
-    code_focused: bool,
     last_state: Option<AuthState>,
     status_flash: Option<(String, Color, Instant)>,
     spinner_index: usize,
@@ -53,17 +49,13 @@ impl OAuthScreen {
             mode: OAuthMode::Intro,
             authenticator: None,
             flow_id: None,
-            auth_url: None,
-            code_input: String::new(),
-            code_cursor: 0,
-            code_focused: false,
             last_state: None,
             status_flash: None,
             spinner_index: 0,
         })
     }
 
-    /// Start a new OAuth authorisation flow.
+    /// Start Device Flow (RFC 8628) authorization
     fn begin_oauth_flow(&mut self) -> Result<()> {
         let authenticator = self
             .app_state
@@ -75,13 +67,12 @@ impl OAuthScreen {
         self.app_state
             .create_oauth_flow(&self.provider, flow_id.clone(), None, None);
 
-        let auth_url = tokio::task::block_in_place(|| {
+        // Start Device Flow
+        let device_response = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current()
-                .block_on(authenticator.generate_auth_url_for_tui())
+                .block_on(authenticator.start_device_flow())
         })
-        .context("failed to generate authorization URL")?;
-
-        self.app_state.set_oauth_url(&flow_id, &auth_url).ok();
+        .context("failed to start device flow")?;
 
         let state = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(authenticator.get_state())
@@ -89,98 +80,21 @@ impl OAuthScreen {
         self.last_state = Some(state.clone());
         self.app_state.update_oauth_state(&flow_id, state).ok();
 
-        self.auth_url = Some(auth_url.clone());
         self.flow_id = Some(flow_id);
         self.mode = OAuthMode::AwaitingCode;
         self.spinner_index = 0;
-        self.code_input.clear();
-        self.code_cursor = 0;
-        self.code_focused = true;
 
-        match open::that(&auth_url) {
+        // Try to open browser automatically
+        match open::that(&device_response.verification_url) {
             Ok(_) => {
-                self.flash_message("Opened browser to Google's authorization page", Color::Cyan)
+                self.flash_message("Opened verification URL in browser", Color::Cyan)
             }
             Err(err) => self.flash_message(
                 format!(
-                    "Browser could not be opened automatically ({err}); copy the URL manually."
+                    "Browser could not be opened automatically ({err}); open URL manually."
                 ),
                 Color::Yellow,
             ),
-        }
-
-        Ok(())
-    }
-
-    /// Submit the user supplied authorisation code.
-    fn submit_code(&mut self, code: String) -> Result<()> {
-        if code.trim().is_empty() {
-            self.flash_message("Authorization code cannot be empty", Color::Yellow);
-            return Ok(());
-        }
-
-        let authenticator = match &self.authenticator {
-            Some(auth) => auth.clone(),
-            None => {
-                self.flash_message("Authenticator not ready; restart the flow.", Color::Red);
-                return Ok(());
-            }
-        };
-
-        self.mode = OAuthMode::Processing;
-        self.spinner_index = 0;
-        self.code_focused = false;
-
-        let exchange_result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current()
-                .block_on(authenticator.set_auth_code(code.trim().to_string()))
-        });
-        match exchange_result {
-            Ok(response) => {
-                if let Err(err) = self
-                    .app_state
-                    .persist_oauth_success(&self.provider, &response)
-                {
-                    let message = format!("Failed to persist credentials: {}", err);
-                    if let Some(flow_id) = &self.flow_id {
-                        self.app_state
-                            .update_oauth_state(
-                                flow_id,
-                                AuthState::Error {
-                                    message: message.clone(),
-                                },
-                            )
-                            .ok();
-                    }
-                    self.mode = OAuthMode::Error(message);
-                    return Ok(());
-                }
-
-                if let Some(flow_id) = &self.flow_id {
-                    let state = tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current().block_on(authenticator.get_state())
-                    });
-                    self.last_state = Some(state.clone());
-                    self.app_state.update_oauth_state(flow_id, state).ok();
-                }
-
-                self.flash_message("Google Drive authenticated.", Color::Green);
-                self.mode = OAuthMode::Success;
-            }
-            Err(err) => {
-                let message = format!("Failed to exchange authorization code: {}", err);
-                if let Some(flow_id) = &self.flow_id {
-                    self.app_state
-                        .update_oauth_state(
-                            flow_id,
-                            AuthState::Error {
-                                message: message.clone(),
-                            },
-                        )
-                        .ok();
-                }
-                self.mode = OAuthMode::Error(message);
-            }
         }
 
         Ok(())
@@ -205,12 +119,8 @@ impl OAuthScreen {
 
     /// Remove any per-flow cached data without altering stored credentials.
     fn clear_flow_state(&mut self) {
-        self.auth_url = None;
         self.flow_id = None;
         self.last_state = None;
-        self.code_input.clear();
-        self.code_cursor = 0;
-        self.code_focused = false;
         self.status_flash = None;
         self.spinner_index = 0;
     }
@@ -228,11 +138,9 @@ impl OAuthScreen {
         self.mode = OAuthMode::Intro;
     }
 
-    /// Copy the authorisation URL or user code to the system clipboard.
+    /// Copy the user code to the system clipboard.
     fn copy_auth_url(&mut self) {
-        // Check if we're in Device Flow mode
         if let Some(AuthState::WaitingForDeviceAuth { user_code, .. }) = &self.last_state {
-            // Copy user code for Device Flow
             match ClipboardContext::new()
                 .and_then(|mut ctx| ctx.set_contents(user_code.clone()))
             {
@@ -242,30 +150,16 @@ impl OAuthScreen {
                 }
             }
         } else {
-            // Copy URL for OOB flow
-            if let Some(url) = &self.auth_url {
-                match ClipboardContext::new().and_then(|mut ctx| ctx.set_contents(url.clone())) {
-                    Ok(_) => {
-                        self.flash_message("Authorization URL copied to clipboard", Color::Green)
-                    }
-                    Err(err) => {
-                        self.flash_message(format!("Clipboard unavailable: {}", err), Color::Red)
-                    }
-                }
-            } else {
-                self.flash_message("Authorization URL not available yet", Color::Yellow);
-            }
+            self.flash_message("User code not available yet", Color::Yellow);
         }
     }
 
-    /// Re-open the authorisation URL or verification URL in the default browser.
+    /// Re-open the verification URL in the default browser.
     fn reopen_auth_url(&mut self) {
-        // Check if we're in Device Flow mode
         if let Some(AuthState::WaitingForDeviceAuth {
             verification_url, ..
         }) = &self.last_state
         {
-            // Open verification URL for Device Flow
             match open::that(verification_url) {
                 Ok(_) => {
                     self.flash_message("Verification URL opened in browser", Color::Cyan)
@@ -276,20 +170,7 @@ impl OAuthScreen {
                 ),
             }
         } else {
-            // Open auth URL for OOB flow
-            if let Some(url) = &self.auth_url {
-                match open::that(url) {
-                    Ok(_) => {
-                        self.flash_message("Authorization URL opened in browser", Color::Cyan)
-                    }
-                    Err(err) => self.flash_message(
-                        format!("Failed to open browser automatically: {}", err),
-                        Color::Yellow,
-                    ),
-                }
-            } else {
-                self.flash_message("Authorization URL not available yet", Color::Yellow);
-            }
+            self.flash_message("Verification URL not available yet", Color::Yellow);
         }
     }
 
@@ -302,9 +183,6 @@ impl OAuthScreen {
     fn status_text(&self) -> String {
         match &self.last_state {
             Some(AuthState::Initializing) => "Initialising authentication flow...".to_string(),
-            Some(AuthState::WaitingForCode { .. }) => {
-                "Waiting for approval in the browser...".to_string()
-            }
             Some(AuthState::WaitingForDeviceAuth { user_code, verification_url, .. }) => {
                 format!("Visit {} and enter code: {}", verification_url, user_code)
             }
@@ -370,7 +248,6 @@ impl OAuthScreen {
     }
 
     fn render_awaiting(&self, frame: &mut Frame, area: Rect) {
-        // Check if we're in Device Flow mode
         if let Some(AuthState::WaitingForDeviceAuth {
             user_code,
             verification_url,
@@ -379,8 +256,10 @@ impl OAuthScreen {
         {
             self.render_device_flow(frame, area, user_code, verification_url, expires_at);
         } else {
-            // OOB flow rendering
-            self.render_oob_flow(frame, area);
+            // Fallback if state is not Device Flow
+            let text = Paragraph::new("Initializing Device Flow...")
+                .alignment(Alignment::Center);
+            frame.render_widget(text, area);
         }
     }
 
