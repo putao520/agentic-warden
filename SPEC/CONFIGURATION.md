@@ -423,53 +423,7 @@ AGENTIC_WARDEN_INSECURE="1"
 3. 用户配置文件
 4. 默认值
 
-### 5. 配置验证和迁移
-
-#### 5.1 配置验证流程
-```rust
-pub struct ConfigValidator;
-
-impl ConfigValidator {
-    /// 验证完整配置
-    pub fn validate_config(config: &Config) -> Result<Vec<String>> {
-        let mut warnings = Vec::new();
-
-        // 验证通用设置
-        Self::validate_general(&config.general, &mut warnings);
-
-        // 验证 TUI 设置
-        Self::validate_tui(&config.tui, &mut warnings);
-
-        // 验证进程跟踪设置
-        Self::validate_process_tracking(&config.process_tracking, &mut warnings);
-
-        // 验证同步设置
-        Self::validate_sync(&config.sync, &mut warnings);
-
-        // 验证网络设置
-        Self::validate_network(&config.network, &mut warnings);
-
-        // 验证安全设置
-        Self::validate_security(&config.security, &mut warnings);
-
-        Ok(warnings)
-    }
-
-    fn validate_general(general: &GeneralConfig, warnings: &mut Vec<String>) {
-        if general.log_level == "trace" {
-            warnings.push("Trace logging may impact performance".to_string());
-        }
-
-        if general.enable_telemetry {
-            warnings.push("Telemetry is enabled - privacy data may be collected".to_string());
-        }
-    }
-
-    // ... 其他验证方法
-}
-```
-
-#### 5.2 配置错误处理
+### 5. 配置错误处理
 对于配置文件格式错误或版本不兼容的情况，提供清晰的错误提示信息，引导用户修正配置。不提供自动迁移功能以保持简洁性。
 
 ### 6. 配置热重载

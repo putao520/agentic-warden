@@ -133,21 +133,21 @@ pub struct AuthConfig {
     /// OAuth 作用域
     pub scopes: Vec<String>,
 
-    /// OOB 流程端口
-    #[serde(default = "default_oob_port")]
-    pub oob_port: u16,
+    /// Device Flow 轮询间隔（秒）
+    #[serde(default = "default_poll_interval")]
+    pub poll_interval: u64,
 
     /// 授权超时时间（秒）
     #[serde(default = "default_auth_timeout")]
     pub auth_timeout: u64,
 }
 
-fn default_oob_port() -> u16 {
-    8080
+fn default_poll_interval() -> u64 {
+    5 // 默认每5秒轮询一次
 }
 
 fn default_auth_timeout() -> u64 {
-    300 // 5 分钟
+    900 // 15分钟（Device Flow典型有效期）
 }
 ```
 

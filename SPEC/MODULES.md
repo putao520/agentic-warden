@@ -431,10 +431,10 @@ impl GoogleDriveService {
 ```
 
 #### 5.3 sync/oauth_client.rs
-**职责**: OAuth 2.0 流程处理
-- OOB 授权流程
+**职责**: OAuth 2.0 Device Flow 处理 (RFC 8628)
+- Device Flow 授权流程
 - Token 管理和刷新
-- 回调服务器
+- 设备码轮询
 - 授权状态管理
 
 #### 5.4 sync/smart_oauth.rs
