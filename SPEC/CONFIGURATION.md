@@ -284,66 +284,27 @@ impl ProviderValidator {
 #### 3.1 主配置文件格式 (config.json)
 ```json
 {
-  "$schema": "https://agentic-warden.dev/schema/config.json",
   "version": "1.0.0",
   "general": {
-    "auto_start_dashboard": false,
     "default_ai_cli": "claude",
-    "log_level": "info",
-    "enable_telemetry": false
-  },
-  "tui": {
-    "theme": "default",
-    "auto_refresh_interval": 2,
-    "max_displayed_tasks": 50,
-    "enable_animations": true,
-    "keybindings": {
-      "quit": ["q", "Q"],
-      "escape": ["Esc"],
-      "select_up": ["Up", "k"],
-      "select_down": ["Down", "j"],
-      "confirm": ["Enter"],
-      "delete": ["d", "D"],
-      "edit": ["e", "E"],
-      "add": ["a", "A"]
-    }
+    "log_level": "info"
   },
   "process_tracking": {
     "scan_interval": 1,
     "max_instances": 100,
-    "cleanup_dead_processes": true,
-    "root_process_detection": "auto"
+    "cleanup_dead_processes": true
   },
   "sync": {
     "google_drive": {
       "auto_sync": false,
-      "sync_interval": 3600,
       "exclude_patterns": [
         "*.tmp",
         "*.log",
         ".git/",
         "target/",
         "node_modules/"
-      ],
-      "max_file_size": 104857600,
-      "parallel_uploads": 4
+      ]
     }
-  },
-  "network": {
-    "connection_timeout": 30,
-    "max_retries": 3,
-    "retry_delay": 5,
-    "proxy": {
-      "enabled": false,
-      "http": "",
-      "https": "",
-      "no_proxy": ["localhost", "127.0.0.1"]
-    }
-  },
-  "security": {
-    "encrypt_auth_tokens": true,
-    "token_expiry_check": true,
-    "insecure_connections": false
   }
 }
 ```
@@ -351,70 +312,34 @@ impl ProviderValidator {
 #### 3.2 配置字段说明
 
 ##### General (通用设置)
-- **auto_start_dashboard**: 是否自动启动 Dashboard
-- **default_ai_cli**: 默认 AI CLI 工具
-- **log_level**: 日志级别 (trace, debug, info, warn, error)
-- **enable_telemetry**: 是否启用遥测数据收集
-
-##### TUI (终端用户界面)
-- **theme**: TUI 主题 (default, dark, light)
-- **auto_refresh_interval**: 自动刷新间隔（秒）
-- **max_displayed_tasks**: 最大显示任务数
-- **enable_animations**: 是否启用动画效果
-- **keybindings**: 键盘快捷键绑定
+- **default_ai_cli**: 默认 AI CLI 工具 (claude, codex, gemini)
+- **log_level**: 日志级别 (info, warn, error)
 
 ##### Process Tracking (进程跟踪)
 - **scan_interval**: 扫描间隔（秒）
 - **max_instances**: 最大实例数
 - **cleanup_dead_processes**: 是否清理死亡进程
-- **root_process_detection**: 根进程检测模式 (auto, windows, linux, macos)
 
 ##### Sync (同步设置)
-- **auto_sync**: 是否自动同步
-- **sync_interval**: 同步间隔（秒）
-- **exclude_patterns**: 排除文件模式
-- **max_file_size**: 最大文件大小（字节）
-- **parallel_uploads**: 并行上传数
-
-##### Network (网络设置)
-- **connection_timeout**: 连接超时（秒）
-- **max_retries**: 最大重试次数
-- **retry_delay**: 重试延迟（秒）
-- **proxy**: 代理设置
-
-##### Security (安全设置)
-- **encrypt_auth_tokens**: 是否加密认证令牌
-- **token_expiry_check**: 是否检查令牌过期
-- **insecure_connections**: 是否允许不安全连接
+- **auto_sync**: 是否自动同步到Google Drive
+- **exclude_patterns**: 排除文件模式列表
 
 ### 4. 环境变量配置
 
 #### 4.1 支持的环境变量
 ```bash
-# 配置目录 override
+# 配置目录
 AGENTIC_WARDEN_CONFIG_DIR="/path/to/config"
 
-# 日志级别 override
-AGENTIC_WARDEN_LOG_LEVEL="debug"
+# 日志级别
+AGENTIC_WARDEN_LOG_LEVEL="info"
 
-# 默认 Provider override
+# 默认 Provider
 AGENTIC_WARDEN_DEFAULT_PROVIDER="openrouter"
 
-# 网络代理设置
-HTTP_PROXY="http://proxy.example.com:8080"
-HTTPS_PROXY="http://proxy.example.com:8080"
-NO_PROXY="localhost,127.0.0.1"
-
-# Google Drive 配置
+# Google Drive OAuth
 GOOGLE_CLIENT_ID="your-client-id"
 GOOGLE_CLIENT_SECRET="your-client-secret"
-
-# TUI 设置
-AGENTIC_WARDEN_THEME="dark"
-AGENTIC_WARDEN_NO_ANIMATIONS="1"
-
-# 安全设置
-AGENTIC_WARDEN_INSECURE="1"
 ```
 
 #### 4.2 环境变量优先级
@@ -426,73 +351,15 @@ AGENTIC_WARDEN_INSECURE="1"
 ### 5. 配置错误处理
 对于配置文件格式错误或版本不兼容的情况，提供清晰的错误提示信息，引导用户修正配置。不提供自动迁移功能以保持简洁性。
 
-### 6. 配置热重载
-
-#### 6.1 文件监控机制
-```rust
-use notify::{Watcher, RecursiveMode, RecommendedWatcher};
-use std::sync::mpsc;
-
-pub struct ConfigWatcher {
-    watcher: RecommendedWatcher,
-    config_path: PathBuf,
-    reload_callback: Box<dyn Fn() + Send>,
-}
-
-impl ConfigWatcher {
-    pub fn new<F>(config_path: PathBuf, callback: F) -> Result<Self>
-    where
-        F: Fn() + Send + 'static,
-    {
-        let (tx, rx) = mpsc::channel();
-        let mut watcher = notify::recommended_watcher(tx)?;
-
-        watcher.watch(&config_path, RecursiveMode::NonRecursive)?;
-
-        // 启动监控线程
-        let callback = Box::new(callback);
-        std::thread::spawn(move || {
-            while let Ok(event) = rx.recv() {
-                match event {
-                    Ok(notify::Event { kind: notify::EventKind::Modify(..), .. }) => {
-                        callback();
-                    }
-                    _ => {}
-                }
-            }
-        });
-
-        Ok(Self {
-            watcher,
-            config_path,
-            reload_callback: callback,
-        })
-    }
-}
-```
 
 ## 配置最佳实践
 
 ### 1. 安全性
 - 敏感信息（API 密钥）使用环境变量
-- 认证令牌加密存储
 - 配置文件权限控制 (600)
 - 避免在版本控制中提交敏感配置
 
-### 2. 性能
-- 配置文件大小控制在合理范围
-- 避免频繁的配置文件读写
-- 使用内存缓存减少磁盘 I/O
-- 异步配置加载
-
-### 3. 可维护性
-- 使用 JSON Schema 验证配置
-- 提供配置文件模板和示例
-- 详细的配置文档和注释
-- 版本化配置格式
-
-### 4. 用户体验
-- 友好的错误提示信息
-- 配置验证和修复建议
-- TUI 界面配置管理
-- 配置导入导出功能
+### 2. 简洁性
+- 保持配置文件简单明了
+- 提供清晰的错误提示
+- 只配置必要的选项
