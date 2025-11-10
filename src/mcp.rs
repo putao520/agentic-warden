@@ -325,15 +325,16 @@ impl AgenticWardenMcpServer {
             "success": true,
             "started_count": started_count,
             "task": {
-                "description": format!("Wait for {} concurrent AI CLI tasks to complete", started_count),
+                "description": format!("Wait for {} concurrent MCP tasks to complete", started_count),
                 "tool": "bash",
-                "command": "agentic-warden wait --timeout 12h",
+                "command": "agentic-warden pwait --timeout 12h",
                 "timeout_ms": 43200000  // 12 hours in milliseconds
             },
             "message": format!(
-                "Started {} concurrent AI CLI tasks in background. Execute the 'task' using Bash tool.",
+                "Started {} concurrent MCP tasks in background (InProcessRegistry). Execute the 'task' using Bash tool with 'pwait' command.",
                 started_count
             ),
+            "note": "MCP tasks use InProcessRegistry (process-local). Use 'pwait' to wait for MCP tasks, not 'wait' (which is for cross-process CLI tasks).",
             "errors": if errors.is_empty() { serde_json::Value::Null } else { serde_json::json!(errors) }
         }))
     }
