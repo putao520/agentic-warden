@@ -226,6 +226,237 @@ impl AgenticWardenMcpServer {
             }
         }
     }
+
+    /// 获取指定进程的进程树信息
+    ///
+    /// 使用agentic-warden的进程树追踪功能获取完整的进程层级结构。
+    /// 特别标注AI CLI进程，帮助理解进程之间的父子关系。
+    ///
+    /// # Arguments
+    /// * `pid` - 目标进程ID
+    ///
+    /// # Returns
+    /// 包含进程链、AI CLI识别信息的JSON对象
+    pub async fn get_process_tree(&self, pid: u32) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+        match crate::core::process_tree::get_process_tree(pid) {
+            Ok(tree_info) => {
+                // 获取进程链中每个进程的详细信息
+                let mut process_chain_details = Vec::new();
+
+                for &chain_pid in &tree_info.process_chain {
+                    if let Ok(processes) = get_system_processes().await {
+                        if let Some(process) = processes.iter().find(|p| p.pid == chain_pid) {
+                            process_chain_details.push(serde_json::json!({
+                                "pid": process.pid,
+                                "name": process.name,
+                                "command": process.command,
+                                "ai_cli_type": process.ai_cli_type,
+                                "is_ai_cli": process.ai_cli_type.is_some()
+                            }));
+                        } else {
+                            // 进程可能已经退出，仅记录PID
+                            process_chain_details.push(serde_json::json!({
+                                "pid": chain_pid,
+                                "name": "unknown",
+                                "status": "not_found"
+                            }));
+                        }
+                    }
+                }
+
+                Ok(serde_json::json!({
+                    "success": true,
+                    "process_tree": {
+                        "process_chain": tree_info.process_chain,
+                        "root_parent_pid": tree_info.root_parent_pid,
+                        "depth": tree_info.depth,
+                        "has_ai_cli_root": tree_info.has_ai_cli_root,
+                        "ai_cli_type": tree_info.ai_cli_type,
+                        "process_details": process_chain_details
+                    },
+                    "message": format!("Process tree depth: {} levels", tree_info.depth)
+                }))
+            }
+            Err(e) => {
+                Ok(serde_json::json!({
+                    "success": false,
+                    "error": format!("Failed to get process tree: {}", e),
+                    "message": "Process tree unavailable"
+                }))
+            }
+        }
+    }
+
+    /// 安全终止指定的进程
+    ///
+    /// 使用两阶段终止策略：
+    /// 1. 首先发送SIGTERM，给进程机会优雅退出
+    /// 2. 如果进程仍然存在，发送SIGKILL强制终止
+    ///
+    /// 安全检查：
+    /// - 只允许终止AI CLI相关进程
+    /// - 阻止终止agentic-warden自身
+    /// - 阻止终止系统关键进程
+    ///
+    /// # Arguments
+    /// * `pid` - 要终止的进程ID
+    /// * `force` - 是否跳过SIGTERM直接使用SIGKILL
+    ///
+    /// # Returns
+    /// 包含终止结果的JSON对象
+    pub async fn terminate_process(&self, pid: u32, force: Option<bool>) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+        // 安全检查：不允许终止自身
+        if pid == std::process::id() {
+            return Ok(serde_json::json!({
+                "success": false,
+                "error": "Cannot terminate agentic-warden itself",
+                "message": "Operation denied for safety"
+            }));
+        }
+
+        // 获取进程信息进行验证
+        match get_system_processes().await {
+            Ok(processes) => {
+                let process = processes.iter().find(|p| p.pid == pid);
+
+                if let Some(process) = process {
+                    // 安全检查：只允许终止AI CLI进程
+                    if !is_ai_cli_process(&process.name) && !is_ai_cli_process(&process.command) {
+                        return Ok(serde_json::json!({
+                            "success": false,
+                            "error": format!("Process '{}' (PID: {}) is not an AI CLI process", process.name, pid),
+                            "message": "Only AI CLI processes can be terminated via MCP"
+                        }));
+                    }
+
+                    // 执行终止操作
+                    let force_kill = force.unwrap_or(false);
+
+                    #[cfg(target_family = "unix")]
+                    {
+                        use nix::sys::signal::{self, Signal};
+                        use nix::unistd::Pid;
+
+                        let nix_pid = Pid::from_raw(pid as i32);
+
+                        if force_kill {
+                            // 直接发送SIGKILL
+                            match signal::kill(nix_pid, Signal::SIGKILL) {
+                                Ok(_) => {
+                                    Ok(serde_json::json!({
+                                        "success": true,
+                                        "pid": pid,
+                                        "process_name": process.name,
+                                        "method": "SIGKILL",
+                                        "message": "Process forcefully terminated"
+                                    }))
+                                }
+                                Err(e) => {
+                                    Ok(serde_json::json!({
+                                        "success": false,
+                                        "error": format!("Failed to terminate process: {}", e),
+                                        "message": "Termination failed"
+                                    }))
+                                }
+                            }
+                        } else {
+                            // 优雅终止：先SIGTERM，等待，再SIGKILL
+                            match signal::kill(nix_pid, Signal::SIGTERM) {
+                                Ok(_) => {
+                                    // 等待2秒让进程优雅退出
+                                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
+                                    // 检查进程是否还存在
+                                    let still_alive = get_system_processes()
+                                        .await
+                                        .ok()
+                                        .and_then(|procs| procs.iter().find(|p| p.pid == pid).cloned())
+                                        .is_some();
+
+                                    if still_alive {
+                                        // 进程仍然存在，发送SIGKILL
+                                        let _ = signal::kill(nix_pid, Signal::SIGKILL);
+                                        Ok(serde_json::json!({
+                                            "success": true,
+                                            "pid": pid,
+                                            "process_name": process.name,
+                                            "method": "SIGTERM -> SIGKILL",
+                                            "message": "Process terminated (required SIGKILL)"
+                                        }))
+                                    } else {
+                                        Ok(serde_json::json!({
+                                            "success": true,
+                                            "pid": pid,
+                                            "process_name": process.name,
+                                            "method": "SIGTERM",
+                                            "message": "Process gracefully terminated"
+                                        }))
+                                    }
+                                }
+                                Err(e) => {
+                                    Ok(serde_json::json!({
+                                        "success": false,
+                                        "error": format!("Failed to send SIGTERM: {}", e),
+                                        "message": "Termination failed"
+                                    }))
+                                }
+                            }
+                        }
+                    }
+
+                    #[cfg(target_family = "windows")]
+                    {
+                        use std::process::Command;
+
+                        // Windows: 使用taskkill
+                        let force_flag = if force_kill { "/F" } else { "/T" };
+                        let output = Command::new("taskkill")
+                            .args(&[force_flag, "/PID", &pid.to_string()])
+                            .output();
+
+                        match output {
+                            Ok(output) if output.status.success() => {
+                                Ok(serde_json::json!({
+                                    "success": true,
+                                    "pid": pid,
+                                    "process_name": process.name,
+                                    "method": if force_kill { "taskkill /F" } else { "taskkill /T" },
+                                    "message": "Process terminated"
+                                }))
+                            }
+                            Ok(output) => {
+                                Ok(serde_json::json!({
+                                    "success": false,
+                                    "error": String::from_utf8_lossy(&output.stderr).to_string(),
+                                    "message": "Termination failed"
+                                }))
+                            }
+                            Err(e) => {
+                                Ok(serde_json::json!({
+                                    "success": false,
+                                    "error": format!("Failed to execute taskkill: {}", e),
+                                    "message": "Termination failed"
+                                }))
+                            }
+                        }
+                    }
+                } else {
+                    Ok(serde_json::json!({
+                        "success": false,
+                        "error": format!("Process with PID {} not found", pid),
+                        "message": "Process does not exist"
+                    }))
+                }
+            }
+            Err(e) => {
+                Ok(serde_json::json!({
+                    "success": false,
+                    "error": format!("Failed to enumerate processes: {}", e),
+                    "message": "Could not verify process"
+                }))
+            }
+        }
+    }
 }
 
 /// 进程信息结构体
@@ -243,23 +474,80 @@ pub struct ProcessInfo {
 async fn get_system_processes() -> Result<Vec<ProcessInfo>, anyhow::Error> {
     let mut processes = Vec::new();
 
-    // 简化实现 - 只返回当前进程信息作为示例
-    let current_pid = std::process::id();
-    let current_name = std::env::args().next().unwrap_or_default();
-    let ai_cli_type = if is_ai_cli_process(&current_name) {
-        Some(detect_ai_cli_type(&current_name))
-    } else {
-        None
-    };
+    #[cfg(target_family = "unix")]
+    {
+        use psutil::process::Process;
 
-    processes.push(ProcessInfo {
-        pid: current_pid,
-        name: current_name,
-        status: "running".to_string(),
-        command: "agentic-warden".to_string(),
-        parent_pid: None,
-        ai_cli_type,
-    });
+        // 获取所有进程
+        for proc in psutil::process::processes()? {
+            if let Ok(proc) = proc {
+                let pid = proc.pid();
+
+                // 尝试获取进程名称
+                let name = proc.name().unwrap_or_else(|_| String::from("unknown"));
+
+                // 尝试获取命令行
+                let command = proc.cmdline()
+                    .map(|args| args.join(" "))
+                    .unwrap_or_else(|_| name.clone());
+
+                // 尝试获取状态
+                let status = proc.status()
+                    .map(|s| format!("{:?}", s))
+                    .unwrap_or_else(|_| "unknown".to_string());
+
+                // 尝试获取父进程ID
+                let parent_pid = proc.ppid().ok();
+
+                // 检测AI CLI类型
+                let ai_cli_type = if is_ai_cli_process(&name) || is_ai_cli_process(&command) {
+                    Some(detect_ai_cli_type(&name))
+                } else {
+                    None
+                };
+
+                processes.push(ProcessInfo {
+                    pid,
+                    name,
+                    status,
+                    command,
+                    parent_pid,
+                    ai_cli_type,
+                });
+            }
+        }
+    }
+
+    #[cfg(target_family = "windows")]
+    {
+        use sysinfo::{System, SystemExt, ProcessExt};
+
+        let mut sys = System::new_all();
+        sys.refresh_all();
+
+        for (pid, process) in sys.processes() {
+            let name = process.name().to_string();
+            let command = process.cmd().join(" ");
+            let status = format!("{:?}", process.status());
+            let parent_pid = process.parent().map(|p| p.as_u32());
+
+            // 检测AI CLI类型
+            let ai_cli_type = if is_ai_cli_process(&name) || is_ai_cli_process(&command) {
+                Some(detect_ai_cli_type(&name))
+            } else {
+                None
+            };
+
+            processes.push(ProcessInfo {
+                pid: pid.as_u32(),
+                name,
+                status,
+                command,
+                parent_pid,
+                ai_cli_type,
+            });
+        }
+    }
 
     Ok(processes)
 }

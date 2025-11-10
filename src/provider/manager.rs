@@ -448,6 +448,233 @@ impl ProviderManager {
     ) -> Option<&crate::provider::config::RegionalTokens> {
         self.providers_config.user_tokens.get(provider_id)
     }
+
+    // ===== SPEC-Compliant Advanced Methods =====
+
+    /// Get all providers compatible with specified AI type
+    ///
+    /// Returns a list of (provider_id, provider) tuples for providers that
+    /// support the given AI CLI type.
+    ///
+    /// # Arguments
+    /// * `ai_type` - The AI type to filter by (Codex, Claude, Gemini)
+    ///
+    /// # Returns
+    /// Vector of tuples containing provider ID and provider reference
+    ///
+    /// # Example
+    /// ```no_run
+    /// use agentic_warden::provider::manager::ProviderManager;
+    /// use agentic_warden::provider::config::AiType;
+    ///
+    /// let manager = ProviderManager::new().unwrap();
+    /// let claude_providers = manager.get_compatible_providers(&AiType::Claude);
+    /// for (id, provider) in claude_providers {
+    ///     println!("{}: {}", id, provider.name);
+    /// }
+    /// ```
+    pub fn get_compatible_providers(&self, ai_type: &AiType) -> Vec<(&String, &Provider)> {
+        self.providers_config
+            .providers
+            .iter()
+            .filter(|(_, provider)| provider.compatible_with.contains(ai_type))
+            .collect()
+    }
+
+    /// Validate all providers in configuration
+    ///
+    /// Performs validation on all providers and returns a list of warnings.
+    /// Providers with errors will be included in the warnings list.
+    ///
+    /// # Returns
+    /// `Ok(warnings)` - Vector of warning messages
+    /// `Err(error)` - Critical validation failure
+    ///
+    /// # Example
+    /// ```no_run
+    /// use agentic_warden::provider::manager::ProviderManager;
+    ///
+    /// let manager = ProviderManager::new().unwrap();
+    /// match manager.validate_all_providers() {
+    ///     Ok(warnings) if warnings.is_empty() => {
+    ///         println!("All providers valid");
+    ///     }
+    ///     Ok(warnings) => {
+    ///         for warning in warnings {
+    ///             eprintln!("Warning: {}", warning);
+    ///         }
+    ///     }
+    ///     Err(e) => eprintln!("Validation failed: {}", e),
+    /// }
+    /// ```
+    pub fn validate_all_providers(&self) -> ProviderResult<Vec<String>> {
+        let mut warnings = Vec::new();
+
+        // Validate each provider
+        for (provider_id, provider) in &self.providers_config.providers {
+            match self.validate_provider(provider_id, provider) {
+                Ok(_) => {}
+                Err(e) => {
+                    warnings.push(format!("Provider '{}': {}", provider_id, e));
+                }
+            }
+        }
+
+        // Validate default provider exists
+        if !self
+            .providers_config
+            .providers
+            .contains_key(&self.providers_config.default_provider)
+        {
+            warnings.push(format!(
+                "Default provider '{}' does not exist",
+                self.providers_config.default_provider
+            ));
+        }
+
+        // Check for providers without tokens (optional warning)
+        for (provider_id, provider) in &self.providers_config.providers {
+            if !provider.custom && !self.providers_config.user_tokens.contains_key(provider_id) {
+                let needs_token = provider
+                    .env
+                    .values()
+                    .any(|v| v.contains("{{token}}") || v.contains("${TOKEN}"));
+                if needs_token {
+                    warnings.push(format!(
+                        "Provider '{}' may require token configuration",
+                        provider_id
+                    ));
+                }
+            }
+        }
+
+        Ok(warnings)
+    }
+
+    /// Reset configuration to defaults
+    ///
+    /// Resets the entire configuration to factory defaults, removing all
+    /// custom providers and user tokens. This operation cannot be undone.
+    ///
+    /// # Returns
+    /// `Ok(())` on success, `Err` on failure to save
+    ///
+    /// # Example
+    /// ```no_run
+    /// use agentic_warden::provider::manager::ProviderManager;
+    ///
+    /// let mut manager = ProviderManager::new().unwrap();
+    /// manager.reset_to_defaults().unwrap();
+    /// ```
+    pub fn reset_to_defaults(&mut self) -> ProviderResult<()> {
+        self.providers_config = ProvidersConfig::create_default()?;
+        self.save()?;
+        Ok(())
+    }
+
+    /// Export configuration to file
+    ///
+    /// Exports the current configuration to a JSON file for backup or sharing.
+    /// The exported file includes all providers and user tokens.
+    ///
+    /// # Arguments
+    /// * `path` - Path where configuration will be exported
+    ///
+    /// # Returns
+    /// `Ok(())` on success, `Err` on IO failure
+    ///
+    /// # Example
+    /// ```no_run
+    /// use agentic_warden::provider::manager::ProviderManager;
+    /// use std::path::PathBuf;
+    ///
+    /// let manager = ProviderManager::new().unwrap();
+    /// manager.export_config(&PathBuf::from("/tmp/providers_backup.json")).unwrap();
+    /// ```
+    pub fn export_config(&self, path: &PathBuf) -> ProviderResult<()> {
+        Self::save_to_file(path, &self.providers_config)?;
+        Ok(())
+    }
+
+    /// Import configuration from file
+    ///
+    /// Imports provider configuration from a JSON file. Can either replace
+    /// the current configuration or merge with it.
+    ///
+    /// # Arguments
+    /// * `path` - Path to configuration file to import
+    /// * `merge` - If true, merge with existing config; if false, replace entirely
+    ///
+    /// # Returns
+    /// `Ok(())` on success, `Err` on validation or IO failure
+    ///
+    /// # Example
+    /// ```no_run
+    /// use agentic_warden::provider::manager::ProviderManager;
+    /// use std::path::PathBuf;
+    ///
+    /// let mut manager = ProviderManager::new().unwrap();
+    ///
+    /// // Replace entire configuration
+    /// manager.import_config(&PathBuf::from("/tmp/providers.json"), false).unwrap();
+    ///
+    /// // Merge with existing configuration
+    /// manager.import_config(&PathBuf::from("/tmp/extra_providers.json"), true).unwrap();
+    /// ```
+    pub fn import_config(&mut self, path: &PathBuf, merge: bool) -> ProviderResult<()> {
+        let imported_config = Self::load_from_file(path)?;
+
+        if merge {
+            // Merge imported providers with existing ones
+            for (provider_id, provider) in imported_config.providers {
+                // Validate before adding
+                self.validate_provider(&provider_id, &provider)?;
+
+                // Add or update provider
+                self.providers_config
+                    .add_provider(provider_id.clone(), provider);
+            }
+
+            // Merge tokens
+            for (provider_id, imported_regional_tokens) in imported_config.user_tokens {
+                if let Some(existing_tokens) = self.providers_config.user_tokens.get_mut(&provider_id)
+                {
+                    // Merge regional tokens - update non-None values
+                    if imported_regional_tokens.mainland_china.is_some() {
+                        existing_tokens.mainland_china = imported_regional_tokens.mainland_china;
+                    }
+                    if imported_regional_tokens.international.is_some() {
+                        existing_tokens.international = imported_regional_tokens.international;
+                    }
+                    if imported_regional_tokens.last_updated.is_some() {
+                        existing_tokens.last_updated = imported_regional_tokens.last_updated;
+                    }
+                } else {
+                    self.providers_config
+                        .user_tokens
+                        .insert(provider_id, imported_regional_tokens);
+                }
+            }
+
+            // Keep existing default provider if imported default doesn't exist locally
+            if !self
+                .providers_config
+                .providers
+                .contains_key(&imported_config.default_provider)
+            {
+                // Keep current default
+            } else {
+                // Optionally update default provider
+                self.providers_config.default_provider = imported_config.default_provider;
+            }
+        } else {
+            // Replace entire configuration
+            self.providers_config = imported_config;
+        }
+
+        self.save()?;
+        Ok(())
+    }
 }
 
 impl Default for ProviderManager {
