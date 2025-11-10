@@ -5,16 +5,12 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use crate::provider::manager::ProviderManager;
-use crate::task_tracker::{TaskTracker, TaskInfo, TaskStatus};
-use chrono::Utc;
 
 /// Agentic-Warden MCP服务器
 #[derive(Clone)]
 pub struct AgenticWardenMcpServer {
     /// Provider管理器
     provider_manager: Arc<Mutex<ProviderManager>>,
-    /// 任务追踪器
-    task_tracker: Arc<TaskTracker>,
 }
 
 impl AgenticWardenMcpServer {
@@ -22,13 +18,7 @@ impl AgenticWardenMcpServer {
     pub fn new(provider_manager: ProviderManager) -> Self {
         Self {
             provider_manager: Arc::new(Mutex::new(provider_manager)),
-            task_tracker: Arc::new(TaskTracker::new()),
         }
-    }
-
-    /// 获取任务追踪器的引用（用于CLI命令）
-    pub fn task_tracker(&self) -> Arc<TaskTracker> {
-        self.task_tracker.clone()
     }
 
     /// 运行MCP服务器
@@ -237,16 +227,21 @@ impl AgenticWardenMcpServer {
         }
     }
 
-    /// 并发启动多个AI CLI任务
+    /// 生成并发启动多个AI CLI任务的命令
     ///
-    /// Claude Code通过此方法提交多个任务，agentic-warden并发启动所有AI CLI，
-    /// 然后返回"agent wait"命令让Claude Code通过Bash工具（12小时超时）等待完成。
+    /// 不实际启动进程，而是生成Bash命令字符串让Claude Code执行。
+    /// 这样完全复用现有的supervisor::execute_cli实现，包括：
+    /// - Provider配置和验证
+    /// - 环境变量注入
+    /// - TaskRegistry自动注册
+    /// - 日志文件管理
+    /// - 进程组管理
     ///
     /// # Arguments
     /// * `tasks` - 任务列表，每个任务包含ai_type、provider、task内容
     ///
     /// # Returns
-    /// 返回包含"agent wait"命令的JSON对象
+    /// 返回包含Bash命令字符串的JSON对象
     pub async fn start_concurrent_tasks(
         &self,
         tasks: Vec<serde_json::Value>,
@@ -258,64 +253,48 @@ impl AgenticWardenMcpServer {
             }));
         }
 
-        let mut task_infos = Vec::new();
-        let mut started_pids = Vec::new();
+        let mut commands = Vec::new();
 
-        // 并发启动所有AI CLI
-        for (idx, task_json) in tasks.iter().enumerate() {
+        // 为每个任务生成agent命令
+        for task_json in tasks.iter() {
             let ai_type = task_json.get("ai_type")
                 .and_then(|v| v.as_str())
                 .ok_or("Missing ai_type")?;
 
             let provider = task_json.get("provider")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
+                .and_then(|v| v.as_str());
 
             let task_content = task_json.get("task")
                 .and_then(|v| v.as_str())
                 .ok_or("Missing task")?;
 
             // 验证AI类型
-            let ai_cli_type = parse_ai_type(ai_type)?;
+            let _ = parse_ai_type(ai_type)?;
 
-            // 后台启动AI CLI
-            match spawn_ai_cli_background(ai_cli_type, provider.clone(), task_content).await {
-                Ok(pid) => {
-                    let task_info = TaskInfo {
-                        task_id: format!("task-{}", idx + 1),
-                        ai_type: ai_type.to_string(),
-                        provider: provider.clone(),
-                        task: task_content.to_string(),
-                        pid,
-                        started_at: Utc::now(),
-                        status: TaskStatus::Running,
-                    };
-                    task_infos.push(task_info);
-                    started_pids.push(pid);
-                }
-                Err(e) => {
-                    eprintln!("Failed to start task {}: {}", idx + 1, e);
-                }
-            }
+            // 构建单个agent命令（Shell安全转义）
+            let task_escaped = task_content.replace("'", "'\\''");
+            let command = if let Some(p) = provider {
+                format!("agent {} -p {} '{}'", ai_type, p, task_escaped)
+            } else {
+                format!("agent {} '{}'", ai_type, task_escaped)
+            };
+            commands.push(command);
         }
 
-        if task_infos.is_empty() {
-            return Ok(serde_json::json!({
-                "success": false,
-                "error": "Failed to start any tasks"
-            }));
-        }
-
-        // 记录任务批次
-        let batch_id = self.task_tracker.start_batch(task_infos.clone());
+        // 用&连接所有命令（Bash后台执行）
+        let concurrent_command = commands.join(" & ");
+        let full_command = format!("{} &", concurrent_command);
 
         Ok(serde_json::json!({
             "success": true,
-            "batch_id": batch_id,
-            "started_count": task_infos.len(),
-            "pids": started_pids,
-            "command": "agent wait --timeout 12h",
-            "message": format!("Started {} concurrent AI CLI tasks. Use the returned command to wait for completion.", task_infos.len())
+            "task_count": tasks.len(),
+            "start_command": full_command,
+            "wait_command": "agent wait --timeout 12h",
+            "message": format!(
+                "Generated commands for {} concurrent tasks. Execute start_command first, then wait_command.",
+                tasks.len()
+            ),
+            "note": "Each agent command will be registered to TaskRegistry automatically by supervisor module"
         }))
     }
 
@@ -746,38 +725,6 @@ fn parse_ai_type(ai_type: &str) -> Result<crate::cli_type::CliType, String> {
     }
 }
 
-/// 后台启动AI CLI
-///
-/// 启动AI CLI进程并立即返回进程ID，不等待完成。
-/// 用于并发启动多个AI CLI任务。
-async fn spawn_ai_cli_background(
-    ai_cli_type: crate::cli_type::CliType,
-    provider: Option<String>,
-    task: &str,
-) -> Result<u32, Box<dyn std::error::Error>> {
-    use tokio::process::Command;
-
-    let cli_command = match ai_cli_type {
-        crate::cli_type::CliType::Claude => "claude",
-        crate::cli_type::CliType::Codex => "codex",
-        crate::cli_type::CliType::Gemini => "gemini",
-    };
-
-    let mut cmd = Command::new("agent");
-    cmd.arg(cli_command);
-
-    if let Some(p) = provider {
-        cmd.arg("-p").arg(p);
-    }
-
-    cmd.arg(task);
-
-    // 后台启动，不等待完成
-    let child = cmd.spawn()?;
-    let pid = child.id().ok_or("Failed to get process ID")?;
-
-    Ok(pid)
-}
 
 #[cfg(test)]
 mod tests {
