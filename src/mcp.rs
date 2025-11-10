@@ -19,7 +19,7 @@
 
 use rmcp::{
     tool, tool_router, tool_handler,
-    handler::server::tool::ToolRouter,
+    handler::server::tool::{ToolRouter, Parameters},
     ServerHandler,
     ServiceExt,
 };
@@ -27,9 +27,52 @@ use std::sync::Arc;
 use std::future::Future;
 use tokio::sync::Mutex;
 use serde_json::Value;
+use serde::{Serialize, Deserialize};
+use schemars::JsonSchema;
 
 use agentic_warden::provider::manager::ProviderManager;
 use agentic_warden::registry_factory::{McpRegistry, RegistryFactory};
+
+// ==================== 参数结构体定义 ====================
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct MonitorProcessesParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ai_only: Option<bool>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct GetProcessTreeParams {
+    pub pid: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct GetProviderStatusParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_name: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct TerminateProcessParams {
+    pub pid: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub force: Option<bool>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct StartConcurrentTasksParams {
+    pub tasks_json: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct GetTaskCommandParams {
+    pub ai_type: String,
+    pub task: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+}
 
 /// Agentic-Warden MCP服务器
 ///
@@ -99,19 +142,20 @@ impl AgenticWardenMcpServer {
     /// - parent_pid: 父进程ID
     /// - ai_cli_type: AI CLI类型（如果是AI CLI进程）
     #[tool(description = "Monitor AI CLI processes with optional filtering")]
-    pub async fn monitor_processes(&self, filter: Option<String>, ai_only: Option<bool>) -> String {
+    pub async fn monitor_processes(&self, params: Parameters<MonitorProcessesParams>) -> String {
+        let params = params.0;
         match get_system_processes().await {
             Ok(processes) => {
                 let mut filtered_processes = Vec::new();
 
                 for proc in processes {
                     // 如果设置了 ai_only，只保留 AI CLI 进程
-                    if ai_only.unwrap_or(false) && proc.ai_cli_type.is_none() {
+                    if params.ai_only.unwrap_or(false) && proc.ai_cli_type.is_none() {
                         continue;
                     }
 
                     // 如果设置了 filter，只保留名称包含过滤字符串的进程
-                    if let Some(ref f) = filter {
+                    if let Some(ref f) = params.filter {
                         if !proc.name.to_lowercase().contains(&f.to_lowercase()) &&
                            !proc.command.to_lowercase().contains(&f.to_lowercase()) {
                             continue;
@@ -155,7 +199,8 @@ impl AgenticWardenMcpServer {
     /// - root: 根进程信息
     /// - children: 子进程列表（递归）
     #[tool(description = "Get process tree information for a specific process")]
-    pub async fn get_process_tree(&self, pid: u32) -> String {
+    pub async fn get_process_tree(&self, params: Parameters<GetProcessTreeParams>) -> String {
+        let pid = params.0.pid;
         match get_system_processes().await {
             Ok(processes) => {
                 fn build_tree(pid: u32, all_processes: &[ProcessInfo]) -> Option<Value> {
@@ -211,10 +256,10 @@ impl AgenticWardenMcpServer {
     /// - env_vars: 环境变量配置
     /// - compatible_with: 兼容的AI CLI类型列表
     #[tool(description = "Get provider configuration and status")]
-    pub async fn get_provider_status(&self, provider_name: Option<String>) -> String {
+    pub async fn get_provider_status(&self, params: Parameters<GetProviderStatusParams>) -> String {
         let pm = self.provider_manager.lock().await;
 
-        if let Some(name) = provider_name {
+        if let Some(name) = params.0.provider_name {
             match pm.get_provider(&name) {
                 Ok(provider) => {
                     serde_json::to_string_pretty(&serde_json::json!({
@@ -265,7 +310,10 @@ impl AgenticWardenMcpServer {
     /// # 返回
     /// 包含操作结果的JSON对象
     #[tool(description = "Terminate a process safely")]
-    pub async fn terminate_process(&self, pid: u32, force: Option<bool>) -> String {
+    pub async fn terminate_process(&self, params: Parameters<TerminateProcessParams>) -> String {
+        let pid = params.0.pid;
+        let force = params.0.force;
+
         #[cfg(target_family = "unix")]
         {
             use nix::sys::signal::{kill, Signal};
@@ -326,9 +374,9 @@ impl AgenticWardenMcpServer {
     /// - count: 任务数量
     /// - message: 使用说明
     #[tool(description = "Generate commands for multiple AI CLI tasks to run concurrently")]
-    pub async fn start_concurrent_tasks(&self, tasks_json: String) -> String {
+    pub async fn start_concurrent_tasks(&self, params: Parameters<StartConcurrentTasksParams>) -> String {
         // 解析tasks数组
-        let tasks: Vec<Value> = match serde_json::from_str(&tasks_json) {
+        let tasks: Vec<Value> = match serde_json::from_str(&params.0.tasks_json) {
             Ok(v) => v,
             Err(e) => {
                 return serde_json::to_string_pretty(&serde_json::json!({
@@ -422,7 +470,11 @@ impl AgenticWardenMcpServer {
     /// - provider: Provider名称（如果有）
     /// - message: 使用说明
     #[tool(description = "Get command to start a single AI CLI task")]
-    pub async fn get_task_command(&self, ai_type: String, task: String, provider: Option<String>) -> String {
+    pub async fn get_task_command(&self, params: Parameters<GetTaskCommandParams>) -> String {
+        let ai_type = params.0.ai_type;
+        let task = params.0.task;
+        let provider = params.0.provider;
+
         // 验证AI类型
         if let Err(e) = parse_ai_type(&ai_type) {
             return serde_json::to_string_pretty(&serde_json::json!({
