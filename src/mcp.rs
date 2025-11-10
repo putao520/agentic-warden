@@ -487,9 +487,10 @@ async fn get_system_processes() -> Result<Vec<ProcessInfo>, anyhow::Error> {
                 let name = proc.name().unwrap_or_else(|_| String::from("unknown"));
 
                 // 尝试获取命令行
-                let command = proc.cmdline()
-                    .map(|args| args.join(" "))
-                    .unwrap_or_else(|_| name.clone());
+                let command = match proc.cmdline() {
+                    Ok(Some(args)) => args.join(" "),
+                    _ => name.clone(),
+                };
 
                 // 尝试获取状态
                 let status = proc.status()
@@ -497,7 +498,7 @@ async fn get_system_processes() -> Result<Vec<ProcessInfo>, anyhow::Error> {
                     .unwrap_or_else(|_| "unknown".to_string());
 
                 // 尝试获取父进程ID
-                let parent_pid = proc.ppid().ok();
+                let parent_pid = proc.ppid();
 
                 // 检测AI CLI类型
                 let ai_cli_type = if is_ai_cli_process(&name) || is_ai_cli_process(&command) {

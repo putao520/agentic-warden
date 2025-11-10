@@ -581,6 +581,7 @@ impl AuthStatus {
         match state {
             AuthState::Initializing => AuthStatus::Waiting,
             AuthState::WaitingForCode { .. } => AuthStatus::Waiting,
+            AuthState::WaitingForDeviceAuth { .. } => AuthStatus::Waiting,
             AuthState::Authenticated { .. } => AuthStatus::Authorized,
             AuthState::Error { message } => AuthStatus::Failed(message.clone()),
         }

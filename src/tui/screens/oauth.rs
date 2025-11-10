@@ -269,6 +269,9 @@ impl OAuthScreen {
             Some(AuthState::WaitingForCode { .. }) => {
                 "Waiting for approval in the browser...".to_string()
             }
+            Some(AuthState::WaitingForDeviceAuth { user_code, verification_url, .. }) => {
+                format!("Visit {} and enter code: {}", verification_url, user_code)
+            }
             Some(AuthState::Authenticated { .. }) => {
                 "Authentication completed successfully.".to_string()
             }
