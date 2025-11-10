@@ -327,7 +327,7 @@ impl AgenticWardenMcpServer {
             "task": {
                 "description": format!("Wait for {} concurrent MCP tasks to complete", started_count),
                 "tool": "bash",
-                "command": "agentic-warden pwait --timeout 12h",
+                "command": "agentic-warden pwait",
                 "timeout_ms": 43200000  // 12 hours in milliseconds
             },
             "message": format!(

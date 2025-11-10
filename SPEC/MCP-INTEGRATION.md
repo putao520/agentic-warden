@@ -100,7 +100,7 @@ pwait_mode
 - **`start_concurrent_tasks`**: 并发启动多个 AI CLI 任务
   - 直接在 MCP Server 中启动所有进程（后台）
   - 返回: 标准 task JSON 结构，包含 **pwait** 命令
-  - task 结构: `{"tool": "bash", "command": "agentic-warden pwait --timeout 12h", "timeout_ms": 43200000}`
+  - task 结构: `{"tool": "bash", "command": "agentic-warden pwait", "timeout_ms": 43200000}`
   - 通过 supervisor::execute_cli(&mcp_registry) 复用现有实现
   - 每个任务自动注册到 **InProcessRegistry** (进程内独享)
 - **`get_task_command`**: 获取单个 AI CLI 的启动任务
@@ -144,7 +144,7 @@ pwait_mode
   "task": {
     "description": "Wait for 3 concurrent MCP tasks to complete",
     "tool": "bash",
-    "command": "agentic-warden pwait --timeout 12h",
+    "command": "agentic-warden pwait",
     "timeout_ms": 43200000
   },
   "message": "Started 3 concurrent MCP tasks in background (InProcessRegistry). Execute the 'task' using Bash tool with 'pwait' command.",
@@ -155,7 +155,7 @@ pwait_mode
 **步骤4: Claude Code 执行等待任务**
 - Claude Code 解析 `task` 字段
 - 使用 Bash 工具执行 `command` (**pwait**, 不是wait!)
-- 应用 `timeout_ms` 超时设置
+- 应用 `timeout_ms` 超时设置（Bash工具的超时，而非pwait命令参数）
 
 **步骤5: 等待所有MCP任务完成并返回报告**
 - `agentic-warden pwait` 命令通过 **InProcessRegistry** 追踪所有MCP任务

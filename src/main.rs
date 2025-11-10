@@ -14,6 +14,8 @@ use agentic_warden::sync;
 use agentic_warden::sync::sync_config::save_network_status;
 use agentic_warden::tui;
 use agentic_warden::wait_mode;
+use agentic_warden::pwait_mode;
+use agentic_warden::registry_factory::RegistryFactory;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -101,6 +103,24 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
             }
             wait_mode::run().map_err(|e| e.to_string())?;
             Ok(ExitCode::from(0))
+        }
+        Commands::PWait => {
+            // 等待MCP进程内任务完成
+            let registry = RegistryFactory::instance().get_mcp_registry();
+            match pwait_mode::run_with_registry(&registry) {
+                Ok(report) => {
+                    report.print();
+                    Ok(ExitCode::from(0))
+                }
+                Err(pwait_mode::PWaitError::NoTasks) => {
+                    eprintln!("No MCP tasks to wait for");
+                    Ok(ExitCode::from(0))
+                }
+                Err(e) => {
+                    eprintln!("Error waiting for MCP tasks: {}", e);
+                    Ok(ExitCode::from(1))
+                }
+            }
         }
         Commands::Examples => {
             print_quick_examples().map_err(|e| format!("Failed to print examples: {}", e))?;

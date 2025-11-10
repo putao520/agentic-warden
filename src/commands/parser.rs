@@ -71,7 +71,7 @@ pub enum Commands {
     /// 列出远程文件
     List,
 
-    /// 等待所有并发AI CLI任务完成
+    /// 等待所有并发AI CLI任务完成（跨进程）
     Wait {
         /// 超时时间（如: 12h, 30m, 1d）
         #[arg(long, default_value = "12h")]
@@ -81,6 +81,10 @@ pub enum Commands {
         #[arg(long, short = 'v')]
         verbose: bool,
     },
+
+    /// 等待所有MCP任务完成（进程内）
+    #[command(name = "pwait")]
+    PWait,
 
     /// 显示使用示例
     #[command(alias = "demo")]
