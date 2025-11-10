@@ -71,8 +71,16 @@ pub enum Commands {
     /// 列出远程文件
     List,
 
-    /// 等待后台任务
-    Wait,
+    /// 等待所有并发AI CLI任务完成
+    Wait {
+        /// 超时时间（如: 12h, 30m, 1d）
+        #[arg(long, default_value = "12h")]
+        timeout: String,
+
+        /// 显示详细进度信息
+        #[arg(long, short = 'v')]
+        verbose: bool,
+    },
 
     /// 显示使用示例
     #[command(alias = "demo")]

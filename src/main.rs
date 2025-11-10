@@ -14,6 +14,7 @@ mod signal;
 mod supervisor;
 mod sync;
 mod task_record;
+mod task_tracker;
 mod tui;
 mod utils;
 mod wait_mode;
@@ -106,7 +107,12 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
         Commands::Pull => launch_tui(Some(crate::tui::ScreenType::Pull)).await,
         Commands::Reset => handle_sync_command("reset", None).await,
         Commands::List => handle_sync_command("list", None).await,
-        Commands::Wait => {
+        Commands::Wait { timeout, verbose } => {
+            // TODO: 实现timeout和verbose参数的支持
+            // 当前使用现有的wait_mode实现
+            if verbose {
+                eprintln!("Waiting for all concurrent AI CLI tasks to complete (timeout: {})...", timeout);
+            }
             wait_mode::run().map_err(|e| e.to_string())?;
             Ok(ExitCode::from(0))
         }
