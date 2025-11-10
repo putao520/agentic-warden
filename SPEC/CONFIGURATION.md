@@ -90,24 +90,6 @@
       "created_at": "2025-11-04T10:00:00Z",
       "updated_at": "2025-11-04T10:00:00Z"
     },
-    "cloudflare": {
-      "name": "cloudflare",
-      "description": "Cloudflare AI Gateway，提供企业级 AI 服务",
-      "compatible_with": ["codex", "claude", "gemini"],
-      "env": {
-        "CLOUDFLARE_API_TOKEN": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-        "CLOUDFLARE_ACCOUNT_ID": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-        "OPENAI_BASE_URL": "https://gateway.ai.cloudflare.com/v1/xxxxxxxxxxxxxx"
-      },
-      "metadata": {
-        "account_type": "enterprise",
-        "gateway_id": "xxxxxxxxxxxxxx",
-        "rate_limit": 1000
-      },
-      "builtin": false,
-      "created_at": "2025-11-04T10:00:00Z",
-      "updated_at": "2025-11-04T10:00:00Z"
-    },
     "official": {
       "name": "official",
       "description": "官方 API 直连，无需额外配置",
