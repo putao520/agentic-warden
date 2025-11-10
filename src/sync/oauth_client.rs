@@ -88,61 +88,6 @@ impl OAuthClient {
         self
     }
 
-    /// Generate authorization URL
-    pub fn generate_auth_url(&self) -> Result<String> {
-        let redirect_uri = "urn:ietf:wg:oauth:2.0:oob"; // OOB flow
-        let scope = self.config.scopes.join(" ");
-        let auth_url = format!(
-            "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&response_type=code&scope={}&access_type=offline&prompt=consent",
-            urlencoding::encode(&self.config.client_id),
-            urlencoding::encode(redirect_uri),
-            urlencoding::encode(&scope)
-        );
-        Ok(auth_url)
-    }
-
-    /// Exchange authorization code for tokens
-    pub async fn exchange_code_for_tokens(&mut self, code: &str) -> Result<OAuthTokenResponse> {
-        info!("Exchanging OOB authorization code for tokens...");
-
-        let client = reqwest::Client::new();
-        let params = [
-            ("client_id", self.config.client_id.clone()),
-            ("client_secret", self.config.client_secret.clone()),
-            ("code", code.to_string()),
-            ("grant_type", "authorization_code".to_string()),
-            ("redirect_uri", "urn:ietf:wg:oauth:2.0:oob".to_string()), // OOB redirect URI
-        ];
-
-        let response = client
-            .post("https://oauth2.googleapis.com/token")
-            .form(&params)
-            .send()
-            .await?;
-
-        if response.status().is_success() {
-            let token_response: OAuthTokenResponse = response.json().await?;
-
-            // Update the config with new tokens
-            self.config.access_token = Some(token_response.access_token.clone());
-            if token_response.refresh_token.is_some() {
-                self.config.refresh_token = token_response.refresh_token.clone();
-            }
-            self.config.expires_in = token_response.expires_in;
-
-            // Persist tokens to disk for future use
-            if let Err(e) = self.save() {
-                // Log error but don't fail the operation
-                debug!("Warning: Failed to save OAuth tokens to disk: {}", e);
-            }
-
-            Ok(token_response)
-        } else {
-            let error_text = response.text().await?;
-            Err(anyhow::anyhow!("OOB code exchange failed: {}", error_text))
-        }
-    }
-
     /// Start Device Flow (RFC 8628) - Request device and user codes
     /// Returns device code response with user_code and verification_url to show to user
     pub async fn start_device_flow(&self) -> Result<DeviceCodeResponse> {

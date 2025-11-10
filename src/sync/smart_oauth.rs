@@ -14,8 +14,6 @@ use tokio::sync::{Mutex, RwLock};
 pub enum AuthState {
     /// Initialising the authentication flow and validating configuration.
     Initializing,
-    /// Waiting for the user to authorise in the browser and supply the code (OOB flow).
-    WaitingForCode { url: String },
     /// Waiting for the user to complete device flow authorization.
     WaitingForDeviceAuth {
         user_code: String,
@@ -43,7 +41,6 @@ impl AuthState {
 struct SmartOAuthInner {
     client: Mutex<OAuthClient>,
     state: RwLock<AuthState>,
-    last_url: RwLock<Option<String>>,
 }
 
 /// Thin wrapper around `OAuthClient` that tracks high-level state for the TUI layer.
@@ -79,109 +76,13 @@ impl SmartOAuthAuthenticator {
             inner: Arc::new(SmartOAuthInner {
                 client: Mutex::new(client),
                 state: RwLock::new(initial_state),
-                last_url: RwLock::new(None),
             }),
-        }
-    }
-
-    /// Generate an authorisation URL for the TUI and transition into `WaitingForCode`.
-    pub async fn generate_auth_url_for_tui(&self) -> Result<String> {
-        let url_result: Result<String> = {
-            let client = self.inner.client.lock().await;
-            if let Err(err) = client.validate_config() {
-                Err(err)
-            } else {
-                client.generate_auth_url()
-            }
-        };
-
-        match url_result {
-            Ok(url) => {
-                {
-                    let mut state = self.inner.state.write().await;
-                    *state = AuthState::WaitingForCode { url: url.clone() };
-                }
-
-                {
-                    let mut last_url = self.inner.last_url.write().await;
-                    *last_url = Some(url.clone());
-                }
-
-                Ok(url)
-            }
-            Err(err) => {
-                {
-                    let mut state = self.inner.state.write().await;
-                    *state = AuthState::with_error(&err);
-                }
-                Err(err)
-            }
-        }
-    }
-
-    /// Run a full OOB authentication loop by prompting for the auth code.
-    pub async fn authenticate(&self) -> Result<OAuthTokenResponse> {
-        let url = self.generate_auth_url_for_tui().await?;
-
-        println!();
-        println!("Open the following URL in your browser to authorise Agentic Warden:");
-        println!("{}", url);
-        println!();
-
-        print!("Enter the authorisation code provided by Google: ");
-        io::stdout().flush()?;
-
-        let term = Term::stdout();
-        let code = term.read_line()?;
-        self.set_auth_code(code).await
-    }
-
-    /// Provide the user supplied authorisation code.
-    /// Returns an error if the authenticator is not currently waiting for a code.
-    pub async fn set_auth_code(&self, code: String) -> Result<OAuthTokenResponse> {
-        let trimmed = code.trim();
-        if trimmed.is_empty() {
-            return Err(anyhow!("authorisation code cannot be empty"));
-        }
-
-        {
-            let current = self.inner.state.read().await.clone();
-            if !matches!(current, AuthState::WaitingForCode { .. }) {
-                return Err(anyhow!(
-                    "authenticator is not ready to accept an authorisation code"
-                ));
-            }
-        }
-
-        let exchange_result = self.exchange_code_for_tokens(trimmed.to_string()).await;
-        match exchange_result {
-            Ok(tokens) => {
-                let mut state = self.inner.state.write().await;
-                *state = AuthState::Authenticated {
-                    access_token: Some(tokens.access_token.clone()),
-                    refresh_token: tokens.refresh_token.clone(),
-                    expires_at: expires_at_from_hint(tokens.expires_in),
-                };
-                Ok(tokens)
-            }
-            Err(err) => {
-                {
-                    let mut state = self.inner.state.write().await;
-                    *state = AuthState::with_error(&err);
-                }
-                Err(err)
-            }
         }
     }
 
     /// Get the current state snapshot.
     pub async fn get_state(&self) -> AuthState {
         self.inner.state.read().await.clone()
-    }
-
-    /// Fetch the last generated authorisation URL if available.
-    pub async fn last_auth_url(&self) -> Option<String> {
-        self.inner.last_url.read().await.clone()
     }
 
     /// Start Device Flow (RFC 8628) - Better for headless environments
@@ -284,11 +185,6 @@ impl SmartOAuthAuthenticator {
                 }
             }
         }
-    }
-
-    async fn exchange_code_for_tokens(&self, code: String) -> Result<OAuthTokenResponse> {
-        let mut client = self.inner.client.lock().await;
-        client.exchange_code_for_tokens(&code).await
     }
 }
 
