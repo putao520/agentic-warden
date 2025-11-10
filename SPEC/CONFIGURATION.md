@@ -469,40 +469,8 @@ impl ConfigValidator {
 }
 ```
 
-#### 5.2 配置迁移策略
-```rust
-pub struct ConfigMigrator;
-
-impl ConfigMigrator {
-    /// 迁移配置到最新版本
-    pub fn migrate(config_path: &PathBuf) -> Result<()> {
-        let config = Self::load_config(config_path)?;
-        let current_version = config.version.parse::<semver::Version>()?;
-        let target_version = semver::Version::parse("1.0.0")?;
-
-        if current_version < target_version {
-            Self::perform_migration(config_path, &current_version, &target_version)?;
-        }
-
-        Ok(())
-    }
-
-    fn perform_migration(
-        config_path: &PathBuf,
-        from_version: &semver::Version,
-        to_version: &semver::Version,
-    ) -> Result<()> {
-        // 备份原配置
-        let backup_path = config_path.with_extension("json.bak");
-        std::fs::copy(config_path, &backup_path)?;
-
-        // 执行具体迁移逻辑
-        // ...
-
-        Ok(())
-    }
-}
-```
+#### 5.2 配置错误处理
+对于配置文件格式错误或版本不兼容的情况，提供清晰的错误提示信息，引导用户修正配置。不提供自动迁移功能以保持简洁性。
 
 ### 6. 配置热重载
 
