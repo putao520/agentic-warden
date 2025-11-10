@@ -310,9 +310,14 @@ impl AgenticWardenMcpServer {
         Ok(serde_json::json!({
             "success": true,
             "started_count": started_count,
-            "wait_command": "agentic-warden wait --timeout 12h",
+            "task": {
+                "description": format!("Wait for {} concurrent AI CLI tasks to complete", started_count),
+                "tool": "bash",
+                "command": "agentic-warden wait --timeout 12h",
+                "timeout_ms": 43200000  // 12 hours in milliseconds
+            },
             "message": format!(
-                "Started {} concurrent AI CLI tasks in background. Execute wait_command to wait for completion.",
+                "Started {} concurrent AI CLI tasks in background. Execute the 'task' using Bash tool.",
                 started_count
             ),
             "errors": if errors.is_empty() { serde_json::Value::Null } else { serde_json::json!(errors) }
@@ -321,7 +326,7 @@ impl AgenticWardenMcpServer {
 
     /// 获取普通启动命令
     ///
-    /// 直接返回"agent <ai_type> 'task'"命令字符串，让Claude Code通过Bash工具执行。
+    /// 返回符合Claude Code标准的task JSON结构，让Claude Code通过Bash工具执行。
     ///
     /// # Arguments
     /// * `ai_type` - AI CLI类型（codex, gemini等）
@@ -329,7 +334,7 @@ impl AgenticWardenMcpServer {
     /// * `provider` - 可选的Provider
     ///
     /// # Returns
-    /// 返回包含启动命令的JSON对象
+    /// 返回符合Claude Code标准的task JSON对象
     pub async fn get_task_command(
         &self,
         ai_type: String,
@@ -340,17 +345,30 @@ impl AgenticWardenMcpServer {
         let _ = parse_ai_type(&ai_type)?;
 
         // 构建命令字符串
-        let command = if let Some(p) = provider {
+        let command = if let Some(p) = &provider {
             format!("agent {} -p {} '{}'", ai_type, p, task.replace("'", "'\\''"))
         } else {
             format!("agent {} '{}'", ai_type, task.replace("'", "'\\''"))
         };
 
+        // 构建任务描述
+        let description = if let Some(p) = &provider {
+            format!("Execute {} task with provider {}: {}", ai_type, p, task)
+        } else {
+            format!("Execute {} task: {}", ai_type, task)
+        };
+
         Ok(serde_json::json!({
             "success": true,
-            "command": command,
+            "task": {
+                "description": description,
+                "tool": "bash",
+                "command": command,
+                "timeout_ms": 43200000  // 12 hours in milliseconds
+            },
             "ai_type": ai_type,
-            "message": format!("Use Bash tool to execute this command with 12h timeout")
+            "provider": provider,
+            "message": "Execute the 'task' using Bash tool with 12h timeout"
         }))
     }
 
