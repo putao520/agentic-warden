@@ -26,6 +26,7 @@ use crate::help::{print_command_help, print_general_help, print_quick_examples};
 use crate::mcp::AgenticWardenMcpServer;
 use crate::provider::network_detector::NetworkDetector;
 use crate::provider::manager::ProviderManager;
+use crate::registry::TaskRegistry;
 use crate::sync::sync_config::save_network_status;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -247,8 +248,12 @@ async fn handle_mcp_command(action: McpAction) -> Result<ExitCode, String> {
             let provider_manager = ProviderManager::new()
                 .map_err(|e| format!("Failed to initialize provider manager: {}", e))?;
 
+            // 连接TaskRegistry
+            let registry = TaskRegistry::connect()
+                .map_err(|e| format!("Failed to connect to TaskRegistry: {}", e))?;
+
             // 创建MCP服务器
-            let mcp_server = AgenticWardenMcpServer::new(provider_manager);
+            let mcp_server = AgenticWardenMcpServer::new(provider_manager, registry);
 
             match transport.as_str() {
                 "stdio" => {

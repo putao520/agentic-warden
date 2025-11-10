@@ -3,21 +3,27 @@
 //! 提供Agentic-Warden的MCP服务，允许外部AI CLI通过MCP协议调用功能
 
 use std::sync::Arc;
+use std::ffi::OsString;
 use tokio::sync::Mutex;
 use crate::provider::manager::ProviderManager;
+use crate::registry::TaskRegistry;
+use crate::supervisor;
 
 /// Agentic-Warden MCP服务器
 #[derive(Clone)]
 pub struct AgenticWardenMcpServer {
     /// Provider管理器
     provider_manager: Arc<Mutex<ProviderManager>>,
+    /// 任务注册表
+    registry: TaskRegistry,
 }
 
 impl AgenticWardenMcpServer {
     /// 创建新的MCP服务器实例
-    pub fn new(provider_manager: ProviderManager) -> Self {
+    pub fn new(provider_manager: ProviderManager, registry: TaskRegistry) -> Self {
         Self {
             provider_manager: Arc::new(Mutex::new(provider_manager)),
+            registry,
         }
     }
 
@@ -227,10 +233,10 @@ impl AgenticWardenMcpServer {
         }
     }
 
-    /// 生成并发启动多个AI CLI任务的命令
+    /// 并发启动多个AI CLI任务
     ///
-    /// 不实际启动进程，而是生成Bash命令字符串让Claude Code执行。
-    /// 这样完全复用现有的supervisor::execute_cli实现，包括：
+    /// 直接在MCP服务器中启动所有AI CLI进程，每个任务在后台运行。
+    /// 使用supervisor::execute_cli复用现有实现，包括：
     /// - Provider配置和验证
     /// - 环境变量注入
     /// - TaskRegistry自动注册
@@ -241,7 +247,7 @@ impl AgenticWardenMcpServer {
     /// * `tasks` - 任务列表，每个任务包含ai_type、provider、task内容
     ///
     /// # Returns
-    /// 返回包含Bash命令字符串的JSON对象
+    /// 返回包含wait命令的JSON对象，用于等待所有任务完成
     pub async fn start_concurrent_tasks(
         &self,
         tasks: Vec<serde_json::Value>,
@@ -253,48 +259,63 @@ impl AgenticWardenMcpServer {
             }));
         }
 
-        let mut commands = Vec::new();
+        let mut started_count = 0;
+        let mut errors = Vec::new();
 
-        // 为每个任务生成agent命令
-        for task_json in tasks.iter() {
-            let ai_type = task_json.get("ai_type")
+        // 并发启动所有任务
+        for (idx, task_json) in tasks.iter().enumerate() {
+            let ai_type_str = task_json.get("ai_type")
                 .and_then(|v| v.as_str())
-                .ok_or("Missing ai_type")?;
+                .ok_or(format!("Task {}: Missing ai_type", idx))?;
 
             let provider = task_json.get("provider")
-                .and_then(|v| v.as_str());
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
 
             let task_content = task_json.get("task")
                 .and_then(|v| v.as_str())
-                .ok_or("Missing task")?;
+                .ok_or(format!("Task {}: Missing task", idx))?;
 
-            // 验证AI类型
-            let _ = parse_ai_type(ai_type)?;
-
-            // 构建单个agent命令（Shell安全转义）
-            let task_escaped = task_content.replace("'", "'\\''");
-            let command = if let Some(p) = provider {
-                format!("agent {} -p {} '{}'", ai_type, p, task_escaped)
-            } else {
-                format!("agent {} '{}'", ai_type, task_escaped)
+            // 解析AI类型
+            let cli_type = match parse_ai_type(ai_type_str) {
+                Ok(t) => t,
+                Err(e) => {
+                    errors.push(format!("Task {}: {}", idx, e));
+                    continue;
+                }
             };
-            commands.push(command);
+
+            // 构建参数（任务内容）
+            let args = vec![OsString::from(task_content)];
+
+            // 在后台启动任务
+            let registry = self.registry.clone();
+            tokio::spawn(async move {
+                if let Err(e) = supervisor::execute_cli(&registry, &cli_type, &args, provider).await {
+                    eprintln!("Task {} failed: {}", idx, e);
+                }
+            });
+
+            started_count += 1;
         }
 
-        // 用&连接所有命令（Bash后台执行）
-        let concurrent_command = commands.join(" & ");
-        let full_command = format!("{} &", concurrent_command);
+        if started_count == 0 {
+            return Ok(serde_json::json!({
+                "success": false,
+                "error": "No tasks started",
+                "errors": errors
+            }));
+        }
 
         Ok(serde_json::json!({
             "success": true,
-            "task_count": tasks.len(),
-            "start_command": full_command,
-            "wait_command": "agent wait --timeout 12h",
+            "started_count": started_count,
+            "wait_command": "agentic-warden wait --timeout 12h",
             "message": format!(
-                "Generated commands for {} concurrent tasks. Execute start_command first, then wait_command.",
-                tasks.len()
+                "Started {} concurrent AI CLI tasks in background. Execute wait_command to wait for completion.",
+                started_count
             ),
-            "note": "Each agent command will be registered to TaskRegistry automatically by supervisor module"
+            "errors": if errors.is_empty() { serde_json::Value::Null } else { serde_json::json!(errors) }
         }))
     }
 
