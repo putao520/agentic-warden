@@ -1,6 +1,13 @@
 //! MCP (Model Context Protocol) 服务器模块
 //!
 //! 提供Agentic-Warden的MCP服务，允许外部AI CLI通过MCP协议调用功能
+//!
+//! # 任务管理
+//!
+//! MCP服务器使用工厂模式获取进程内任务注册表：
+//! - 通过 `RegistryFactory::instance().get_mcp_registry()` 获取全局唯一的MCP注册表
+//! - 所有MCP启动的任务都存储在这个注册表中
+//! - 与CLI任务注册表完全隔离
 
 use std::sync::Arc;
 use std::ffi::OsString;
@@ -8,32 +15,31 @@ use tokio::sync::Mutex;
 use crate::provider::manager::ProviderManager;
 use crate::supervisor;
 
-// 注意：由于mcp是main.rs的子模块，而process_registry在lib.rs中
-// 我们需要使用agentic_warden前缀来访问它
+// 使用工厂模式获取注册表
+use agentic_warden::registry_factory::{RegistryFactory, TaskSource};
 use agentic_warden::process_registry::InProcessRegistry;
 
 /// Agentic-Warden MCP服务器
-/// 使用InProcessRegistry管理本进程启动的任务，不跨进程共享
+/// 使用工厂模式获取进程内任务注册表，确保全局唯一实例
 #[derive(Clone)]
 pub struct AgenticWardenMcpServer {
     /// Provider管理器
     provider_manager: Arc<Mutex<ProviderManager>>,
-    /// 进程内任务注册表
-    registry: Arc<InProcessRegistry>,
 }
 
 impl AgenticWardenMcpServer {
     /// 创建新的MCP服务器实例
+    ///
+    /// 注意：任务注册表通过RegistryFactory获取，确保全局唯一
     pub fn new(provider_manager: ProviderManager) -> Self {
         Self {
             provider_manager: Arc::new(Mutex::new(provider_manager)),
-            registry: Arc::new(InProcessRegistry::new()),
         }
     }
 
-    /// 获取进程内注册表的引用（用于测试或高级用法）
+    /// 获取MCP任务注册表（从工厂获取全局单例）
     pub fn registry(&self) -> Arc<InProcessRegistry> {
-        Arc::clone(&self.registry)
+        RegistryFactory::instance().get_mcp_registry()
     }
 
     /// 运行MCP服务器
