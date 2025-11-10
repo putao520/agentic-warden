@@ -9,7 +9,7 @@
 use crate::{
     config::{AUTH_DIRECTORY, AUTH_FILE_NAME},
     provider::config::Provider as ProviderConfig,
-    registry::RegistryEntry,
+    storage::RegistryEntry,
     sync::{
         oauth_client::{OAuthConfig, OAuthTokenResponse},
         smart_oauth::{AuthState, SmartOAuthAuthenticator},

@@ -117,10 +117,14 @@ pub async fn execute_cli<S: TaskStorage>(
 ) -> Result<i32, ProcessError> {
     platform::init_platform();
 
+    let terminate_wrapper = |pid: u32| {
+        platform::terminate_process(pid);
+        Ok(())
+    };
     registry.sweep_stale_entries(
         Utc::now(),
         platform::process_alive,
-        &platform::terminate_process,
+        &terminate_wrapper,
     )?;
 
     // Load provider configuration
@@ -445,17 +449,21 @@ impl<S: TaskStorage> Drop for RegistrationGuard<'_, S> {
 }
 
 /// Start interactive CLI mode (directly launch AI CLI without task prompt)
-pub async fn start_interactive_cli(
-    registry: &TaskRegistry,
+pub async fn start_interactive_cli<S: TaskStorage>(
+    registry: &Registry<S>,
     cli_type: &CliType,
     provider: Option<String>,
 ) -> Result<i32, ProcessError> {
     platform::init_platform();
 
+    let terminate_wrapper = |pid: u32| {
+        platform::terminate_process(pid);
+        Ok(())
+    };
     registry.sweep_stale_entries(
         Utc::now(),
         platform::process_alive,
-        &platform::terminate_process,
+        &terminate_wrapper,
     )?;
 
     // Load provider configuration
@@ -589,8 +597,8 @@ pub async fn start_interactive_cli(
 }
 
 /// Execute multiple CLI processes (for codex|claude|gemini syntax)
-pub async fn execute_multiple_clis(
-    registry: &TaskRegistry,
+pub async fn execute_multiple_clis<S: TaskStorage>(
+    registry: &Registry<S>,
     cli_selector: &crate::cli_type::CliSelector,
     task_prompt: &str,
     provider: Option<String>,

@@ -32,7 +32,7 @@ pub use core::process_tree::{get_process_tree, ProcessTreeError};
 pub use error::RegistryError;
 pub use registry::TaskRegistry;
 pub use registry_factory::{CliRegistry, McpRegistry, RegistryFactory, RegistryType, TaskSource};
-pub use storage::{CleanupEvent, RegistryEntry, TaskStorage};
+pub use storage::{CleanupEvent, CleanupReason, RegistryEntry, TaskStorage};
 pub use supervisor::ProcessError;
 pub use task_record::{TaskRecord, TaskStatus};
 pub use unified_registry::Registry;

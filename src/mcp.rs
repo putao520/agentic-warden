@@ -12,8 +12,8 @@
 use std::sync::Arc;
 use std::ffi::OsString;
 use tokio::sync::Mutex;
-use crate::provider::manager::ProviderManager;
-use crate::supervisor;
+use agentic_warden::provider::manager::ProviderManager;
+use agentic_warden::supervisor;
 
 // 使用工厂模式获取注册表
 use agentic_warden::registry_factory::{McpRegistry, RegistryFactory};
@@ -303,9 +303,9 @@ impl AgenticWardenMcpServer {
             let args = vec![OsString::from(task_content)];
 
             // 在后台启动任务
-            let registry = self.registry.clone();
+            let registry = self.registry();
             tokio::spawn(async move {
-                if let Err(e) = supervisor::execute_cli(&registry, &cli_type, &args, provider).await {
+                if let Err(e) = supervisor::execute_cli(&*registry, &cli_type, &args, provider).await {
                     eprintln!("Task {} failed: {}", idx, e);
                 }
             });
@@ -397,7 +397,7 @@ impl AgenticWardenMcpServer {
     /// # Returns
     /// 包含进程链、AI CLI识别信息的JSON对象
     pub async fn get_process_tree(&self, pid: u32) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-        match crate::core::process_tree::get_process_tree(pid) {
+        match agentic_warden::core::process_tree::get_process_tree(pid) {
             Ok(tree_info) => {
                 // 获取进程链中每个进程的详细信息
                 let mut process_chain_details = Vec::new();
@@ -714,16 +714,16 @@ async fn get_system_processes() -> Result<Vec<ProcessInfo>, anyhow::Error> {
 
 /// 启动外部AI CLI
 async fn start_external_ai_cli(
-    ai_type: crate::cli_type::CliType,
+    ai_type: agentic_warden::cli_type::CliType,
     provider: Option<String>,
     prompt: &str,
 ) -> Result<String, anyhow::Error> {
     use tokio::process::Command;
 
     let ai_cmd = match ai_type {
-        crate::cli_type::CliType::Claude => "claude",
-        crate::cli_type::CliType::Codex => "codex",
-        crate::cli_type::CliType::Gemini => "gemini",
+        agentic_warden::cli_type::CliType::Claude => "claude",
+        agentic_warden::cli_type::CliType::Codex => "codex",
+        agentic_warden::cli_type::CliType::Gemini => "gemini",
     };
 
     let mut cmd = Command::new(ai_cmd);
@@ -769,11 +769,11 @@ fn detect_ai_cli_type(process_name: &str) -> String {
 }
 
 /// 解析AI类型
-fn parse_ai_type(ai_type: &str) -> Result<crate::cli_type::CliType, String> {
+fn parse_ai_type(ai_type: &str) -> Result<agentic_warden::cli_type::CliType, String> {
     match ai_type.to_lowercase().as_str() {
-        "claude" => Ok(crate::cli_type::CliType::Claude),
-        "codex" => Ok(crate::cli_type::CliType::Codex),
-        "gemini" => Ok(crate::cli_type::CliType::Gemini),
+        "claude" => Ok(agentic_warden::cli_type::CliType::Claude),
+        "codex" => Ok(agentic_warden::cli_type::CliType::Codex),
+        "gemini" => Ok(agentic_warden::cli_type::CliType::Gemini),
         _ => Err(format!("Unsupported AI type: {}. Supported: claude, codex, gemini", ai_type)),
     }
 }

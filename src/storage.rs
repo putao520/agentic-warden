@@ -17,15 +17,24 @@ use std::sync::Arc;
 #[derive(Debug, Clone)]
 pub struct RegistryEntry {
     pub pid: u32,
+    pub key: String,
     pub record: TaskRecord,
 }
 
 /// 清理事件
 #[derive(Debug, Clone)]
 pub struct CleanupEvent {
-    pub pid: u32,
-    pub reason: String,
-    pub was_terminated: bool,
+    pub _pid: u32,
+    pub record: TaskRecord,
+    pub reason: CleanupReason,
+}
+
+/// 清理原因
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CleanupReason {
+    ProcessExited,
+    Timeout,
+    ManagerMissing,
 }
 
 /// 任务存储的统一接口
@@ -117,6 +126,7 @@ impl TaskStorage for InProcessStorage {
             .iter()
             .map(|(&pid, record)| RegistryEntry {
                 pid,
+                key: pid.to_string(),
                 record: record.clone(),
             })
             .collect())
@@ -138,18 +148,14 @@ impl TaskStorage for InProcessStorage {
         let mut tasks = self.tasks.lock();
         let mut cleanup_events = Vec::new();
 
-        let pids_to_cleanup: Vec<(u32, String, bool)> = tasks
+        let pids_to_cleanup: Vec<(u32, CleanupReason)> = tasks
             .iter()
             .filter_map(|(&pid, record)| {
                 // 如果进程已不存在
                 if !is_process_alive(pid) {
                     // 如果任务未标记完成，补标记
                     if record.status == TaskStatus::Running {
-                        return Some((
-                            pid,
-                            "Process no longer alive".to_string(),
-                            false,
-                        ));
+                        return Some((pid, CleanupReason::ProcessExited));
                     }
                 }
 
@@ -158,12 +164,8 @@ impl TaskStorage for InProcessStorage {
                 if age > max_age {
                     if record.status == TaskStatus::Running && is_process_alive(pid) {
                         // 尝试终止
-                        let terminated = terminate_process(pid).is_ok();
-                        return Some((
-                            pid,
-                            format!("Exceeded max age of {} hours", MAX_AGE_HOURS),
-                            terminated,
-                        ));
+                        let _ = terminate_process(pid);
+                        return Some((pid, CleanupReason::Timeout));
                     }
                 }
 
@@ -171,19 +173,23 @@ impl TaskStorage for InProcessStorage {
             })
             .collect();
 
-        for (pid, reason, was_terminated) in pids_to_cleanup {
+        for (pid, cleanup_reason) in pids_to_cleanup {
             if let Some(mut record) = tasks.remove(&pid) {
                 record.status = TaskStatus::CompletedButUnread;
                 record.completed_at = Some(now);
-                record.cleanup_reason = Some(reason.clone());
+                record.cleanup_reason = Some(match cleanup_reason {
+                    CleanupReason::ProcessExited => "process_exited",
+                    CleanupReason::Timeout => "timeout",
+                    CleanupReason::ManagerMissing => "manager_missing",
+                }.to_string());
 
-                // 如果被终止，重新插入标记为完成
-                tasks.insert(pid, record);
+                // 重新插入标记为完成
+                tasks.insert(pid, record.clone());
 
                 cleanup_events.push(CleanupEvent {
-                    pid,
-                    reason,
-                    was_terminated,
+                    _pid: pid,
+                    record,
+                    reason: cleanup_reason,
                 });
             }
         }
@@ -316,7 +322,11 @@ impl TaskStorage for SharedMemoryStorage {
         for (key, value) in snapshot {
             match key.parse::<u32>() {
                 Ok(pid) => match serde_json::from_str::<TaskRecord>(&value) {
-                    Ok(record) => entries.push(RegistryEntry { pid, record }),
+                    Ok(record) => entries.push(RegistryEntry {
+                        pid,
+                        key: key.clone(),
+                        record,
+                    }),
                     Err(err) => {
                         warn(format!("failed to parse task record pid={key}: {err}"));
                         invalid_keys.push(key);
@@ -350,15 +360,14 @@ impl TaskStorage for SharedMemoryStorage {
         let mut removals = Vec::new();
         let mut events = Vec::new();
 
-        for entry in entries {
+        for mut entry in entries {
             let mut should_cleanup = false;
-            let mut reason = String::new();
-            let mut was_terminated = false;
+            let mut cleanup_reason = CleanupReason::ProcessExited;
 
             // 检查进程是否存活
             if !is_process_alive(entry.pid) {
                 should_cleanup = true;
-                reason = "Process no longer alive".to_string();
+                cleanup_reason = CleanupReason::ProcessExited;
             } else {
                 // 检查manager进程
                 if let Some(manager_pid) = entry
@@ -366,11 +375,9 @@ impl TaskStorage for SharedMemoryStorage {
                     .manager_pid
                     .filter(|&manager_pid| manager_pid != entry.pid && !is_process_alive(manager_pid))
                 {
-                    if terminate_process(entry.pid).is_ok() {
-                        was_terminated = true;
-                    }
+                    let _ = terminate_process(entry.pid);
                     should_cleanup = true;
-                    reason = format!("Manager process {} missing", manager_pid);
+                    cleanup_reason = CleanupReason::ManagerMissing;
                 }
 
                 // 检查是否超时
@@ -378,21 +385,27 @@ impl TaskStorage for SharedMemoryStorage {
                     let age = now.signed_duration_since(entry.record.started_at);
                     let max_age = Duration::from_std(MAX_RECORD_AGE).unwrap_or(Duration::zero());
                     if age > max_age {
-                        if terminate_process(entry.pid).is_ok() {
-                            was_terminated = true;
-                        }
+                        let _ = terminate_process(entry.pid);
                         should_cleanup = true;
-                        reason = format!("Exceeded max age of {} hours", max_age.num_hours());
+                        cleanup_reason = CleanupReason::Timeout;
                     }
                 }
             }
 
             if should_cleanup {
                 removals.push(entry.pid.to_string());
+
+                // Update record with cleanup reason
+                entry.record.cleanup_reason = Some(match cleanup_reason {
+                    CleanupReason::ProcessExited => "process_exited",
+                    CleanupReason::Timeout => "timeout",
+                    CleanupReason::ManagerMissing => "manager_missing",
+                }.to_string());
+
                 events.push(CleanupEvent {
-                    pid: entry.pid,
-                    reason,
-                    was_terminated,
+                    _pid: entry.pid,
+                    record: entry.record,
+                    reason: cleanup_reason,
                 });
             }
         }

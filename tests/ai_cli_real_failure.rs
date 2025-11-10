@@ -1,7 +1,8 @@
 use agentic_warden::cli_type::CliType;
 use agentic_warden::commands::ai_cli::AiCliCommand;
+use agentic_warden::registry_factory::RegistryFactory;
 use agentic_warden::supervisor;
-use agentic_warden::{ProcessError, TaskRegistry};
+use agentic_warden::ProcessError;
 use serial_test::serial;
 use std::env;
 use std::ffi::{OsStr, OsString};
@@ -27,7 +28,7 @@ async fn codex_env_override_to_missing_binary_returns_os_error() {
         Path::new("Z:/definitely/missing/codex.exe").as_os_str(),
     );
 
-    let registry = TaskRegistry::connect().expect("task registry should connect");
+    let registry = RegistryFactory::instance().get_cli_registry().expect("task registry should connect");
     let args = prompt_args(&CliType::Codex, "test");
 
     let err = supervisor::execute_cli(&registry, &CliType::Codex, &args, None).await
@@ -51,7 +52,7 @@ async fn claude_empty_env_path_is_rejected_before_spawn() {
     let _home = TempHome::new();
     let _guard = EnvGuard::set("CLAUDE_BIN", OsStr::new(""));
 
-    let registry = TaskRegistry::connect().expect("task registry should connect");
+    let registry = RegistryFactory::instance().get_cli_registry().expect("task registry should connect");
     let args = prompt_args(&CliType::Claude, "test");
 
     let err = supervisor::execute_cli(&registry, &CliType::Claude, &args, None).await
@@ -82,7 +83,7 @@ async fn gemini_removed_from_path_reports_not_found() {
     let system_path = minimal_system_path();
     let _path_guard = EnvGuard::set("PATH", system_path.as_os_str());
 
-    let registry = TaskRegistry::connect().expect("task registry should connect");
+    let registry = RegistryFactory::instance().get_cli_registry().expect("task registry should connect");
     let args = prompt_args(&CliType::Gemini, "test");
 
     let err = supervisor::execute_cli(&registry, &CliType::Gemini, &args, None).await
@@ -111,7 +112,7 @@ async fn execute_cli_with_unknown_provider_surfaces_error() {
     ensure_cli_available("codex");
     let _home = TempHome::new();
 
-    let registry = TaskRegistry::connect().expect("task registry should connect");
+    let registry = RegistryFactory::instance().get_cli_registry().expect("task registry should connect");
     let args = prompt_args(&CliType::Codex, "test");
 
     let err = supervisor::execute_cli(&registry, &CliType::Codex, &args, Some("ghost".to_string())).await
@@ -138,7 +139,7 @@ async fn execute_cli_with_unknown_provider_surfaces_error() {
 async fn execute_cli_returns_error_when_tmp_dir_is_unusable() {
     ensure_cli_available("codex");
     let _home = TempHome::new();
-    let registry = TaskRegistry::connect().expect("task registry should connect");
+    let registry = RegistryFactory::instance().get_cli_registry().expect("task registry should connect");
     let fake_root = TempDir::new().expect("temp sandbox for tmp override");
     let file_path = fake_root.path().join("tmp-anchor");
     fs::write(&file_path, b"x").expect("create fake temp file");
@@ -173,7 +174,7 @@ async fn multi_cli_mode_returns_first_non_zero_exit_code() {
     let _home = TempHome::new();
 
     // Test with invalid flag that causes immediate failure
-    let registry = TaskRegistry::connect().expect("task registry should connect");
+    let registry = RegistryFactory::instance().get_cli_registry().expect("task registry should connect");
     let invalid_args = prompt_args(&CliType::Codex, "--definitely-invalid-flag");
     let codex_exit = supervisor::execute_cli(&registry, &CliType::Codex, &invalid_args, None).await
         .expect("codex should execute and return exit status");
@@ -224,7 +225,7 @@ async fn execute_cli_propagates_real_gemini_exit_status() {
     ensure_cli_available("gemini");
     let _home = TempHome::new();
 
-    let registry = TaskRegistry::connect().expect("task registry should connect");
+    let registry = RegistryFactory::instance().get_cli_registry().expect("task registry should connect");
     let args = prompt_args(&CliType::Gemini, "--definitely-invalid-flag");
 
     let exit_code = supervisor::execute_cli(&registry, &CliType::Gemini, &args, None).await

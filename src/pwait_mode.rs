@@ -5,7 +5,7 @@
 use crate::{
     config::{MAX_WAIT_DURATION, WAIT_INTERVAL_DEFAULT},
     platform,
-    process_registry::InProcessRegistry,
+    registry_factory::McpRegistry,
     task_record::TaskStatus,
 };
 use chrono::{DateTime, Utc};
@@ -94,7 +94,7 @@ impl WaitReport {
 }
 
 /// 等待进程内注册表中的所有任务完成
-pub fn run_with_registry(registry: &InProcessRegistry) -> Result<WaitReport, PWaitError> {
+pub fn run_with_registry(registry: &McpRegistry) -> Result<WaitReport, PWaitError> {
     let start = Instant::now();
     let interval = WAIT_INTERVAL_DEFAULT;
     let mut report = WaitReport::new();
@@ -176,7 +176,7 @@ pub fn run_with_registry(registry: &InProcessRegistry) -> Result<WaitReport, PWa
 /// 等待指定的进程内注册表中的任务
 ///
 /// 这个函数适用于MCP Server等长期运行的进程，用于等待其启动的任务完成
-pub async fn wait_async(registry: &InProcessRegistry) -> Result<WaitReport, PWaitError> {
+pub async fn wait_async(registry: &McpRegistry) -> Result<WaitReport, PWaitError> {
     let start = Instant::now();
     let interval = WAIT_INTERVAL_DEFAULT;
     let mut report = WaitReport::new();
