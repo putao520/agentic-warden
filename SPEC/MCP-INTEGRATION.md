@@ -84,7 +84,7 @@ pwait_mode
 - **外部集成**: 为外部 AI 助手提供 Agentic-Warden 功能的编程接口
 - **标准协议**: 使用 MCP 标准协议，确保与各种 AI 助手的兼容性
 - **安全访问**: 通过进程安全检查，只允许操作 AI CLI 相关进程
-- **实时监控**: 提供实时的进程状态和配置信息查询
+- **实时查询**: 提供实时的进程状态和配置信息查询
 
 ### 📋 功能范围
 
@@ -257,7 +257,7 @@ pub async fn tool_name(
 ) -> Result<CallToolResult, McpError>
 ```
 
-#### 进程监控模块
+#### 进程管理模块
 - **进程识别**: 智能 AI CLI 进程识别算法
 - **状态查询**: 跨平台进程状态获取
 - **安全检查**: 防止误操作非 AI CLI 进程
@@ -270,7 +270,7 @@ pub async fn tool_name(
 claude --mcp-add agentic-warden "agentic-warden mcp server"
 
 # 在 Claude Code 中使用
-# "监控当前运行的 AI CLI 进程"
+# "查询当前运行的 AI CLI 进程"
 # "获取所有 claude 进程的进程树"
 # "安全终止空闲的 codex 进程"
 ```
@@ -362,8 +362,6 @@ agentic-warden mcp status
 
 ### 新工具支持
 - **任务管理**: 创建、查询、删除 AI CLI 任务
-- **性能监控**: CPU、内存使用情况查询
-- **日志管理**: AI CLI 进程日志访问
 
 ### 配置管理
 - **动态配置**: 运行时修改部分配置
@@ -373,6 +371,6 @@ agentic-warden mcp status
 ## 相关文档
 
 - [API 设计规范](./API.md)
-- [进程监控设计](../core/process_tree.md)
+- [进程树追踪设计](../core/process_tree.md)
 - [Provider 管理设计](../provider/manager.md)
 - [部署指南](./DEPLOYMENT.md)
