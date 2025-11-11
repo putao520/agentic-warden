@@ -25,9 +25,12 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '20'
-        registry-url: 'https://registry.npmjs.org'
+        registry-url: 'https://registry.npmjs.org'  # 必需保留（即使使用OIDC）
+
+    - name: Upgrade npm
+      run: npm install -g npm@latest  # 升级到 npm >= 11.5.1 支持 OIDC
 
     - name: Publish to NPM with Provenance
       working-directory: npm-package
       run: npm publish --provenance --access public
-      # 注意：使用 OIDC 时，npm 会自动使用 OIDC token，无需 NODE_AUTH_TOKEN
+      # 自动使用 OIDC，无需 NODE_AUTH_TOKEN
