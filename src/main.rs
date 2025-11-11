@@ -9,13 +9,11 @@ use agentic_warden::error::ErrorCategory;
 use help::{print_command_help, print_general_help, print_quick_examples};
 use mcp::AgenticWardenMcpServer;
 use agentic_warden::provider::network_detector::NetworkDetector;
-use agentic_warden::provider::manager::ProviderManager;
 use agentic_warden::sync;
 use agentic_warden::sync::sync_config::save_network_status;
 use agentic_warden::tui;
 use agentic_warden::wait_mode;
 use agentic_warden::pwait_mode;
-use agentic_warden::registry_factory::RegistryFactory;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -289,12 +287,9 @@ async fn handle_mcp_command(action: McpAction) -> Result<ExitCode, String> {
                 .with_target(false)
                 .init();
 
-            // 初始化Provider管理器
-            let provider_manager = ProviderManager::new()
-                .map_err(|e| format!("Failed to initialize provider manager: {}", e))?;
-
             // 创建MCP服务器（使用InProcessRegistry）
-            let mcp_server = AgenticWardenMcpServer::new(provider_manager);
+            // Provider配置通过supervisor模块管理，不需要在MCP server中直接管理
+            let mcp_server = AgenticWardenMcpServer::new();
 
             match transport.as_str() {
                 "stdio" => {
