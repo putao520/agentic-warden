@@ -132,11 +132,21 @@ impl Registry<SharedMemoryStorage> {
         Ok(Self::new(SharedMemoryStorage::connect()?))
     }
 
+    /// 连接到指定PID的共享内存
+    pub fn shared_memory_for_pid(pid: u32) -> Result<Self, RegistryError> {
+        Ok(Self::new(SharedMemoryStorage::connect_for_pid(pid)?))
+    }
+
     /// 使用指定命名空间连接
     pub fn shared_memory_with_namespace(namespace: String) -> Result<Self, RegistryError> {
         Ok(Self::new(SharedMemoryStorage::connect_with_namespace(
             namespace,
         )?))
+    }
+
+    /// 清理共享内存（进程结束时调用）
+    pub fn cleanup(&self) -> Result<(), RegistryError> {
+        self.storage.cleanup()
     }
 }
 

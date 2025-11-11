@@ -104,20 +104,19 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
             wait_mode::run().map_err(|e| e.to_string())?;
             Ok(ExitCode::from(0))
         }
-        Commands::PWait => {
-            // 等待MCP进程内任务完成
-            let registry = RegistryFactory::instance().get_mcp_registry();
-            match pwait_mode::run_with_registry(&registry) {
+        Commands::PWait { pid } => {
+            // 等待指定进程的共享内存任务完成
+            match pwait_mode::run_for_pid(pid) {
                 Ok(report) => {
                     report.print();
                     Ok(ExitCode::from(0))
                 }
                 Err(pwait_mode::PWaitError::NoTasks) => {
-                    eprintln!("No MCP tasks to wait for");
+                    eprintln!("No tasks found for PID {}", pid);
                     Ok(ExitCode::from(0))
                 }
                 Err(e) => {
-                    eprintln!("Error waiting for MCP tasks: {}", e);
+                    eprintln!("Error waiting for tasks (PID {}): {}", pid, e);
                     Ok(ExitCode::from(1))
                 }
             }

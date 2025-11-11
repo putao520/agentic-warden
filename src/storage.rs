@@ -245,18 +245,43 @@ pub struct SharedMemoryStorage {
 }
 
 impl SharedMemoryStorage {
+    /// 连接到当前进程的共享内存
+    /// 使用当前进程PID作为命名空间: {PID}_task
     pub fn connect() -> Result<Self, RegistryError> {
-        let root_parent_pid = get_root_parent_pid_cached()?;
-        let namespace = format!("{}-{}", SHARED_NAMESPACE, root_parent_pid);
+        let pid = std::process::id();
+        Self::connect_for_pid(pid)
+    }
+
+    /// 连接到指定PID的共享内存
+    /// 使用格式: {pid}_task
+    pub fn connect_for_pid(pid: u32) -> Result<Self, RegistryError> {
+        let namespace = format!("{}_task", pid);
         Self::connect_with_namespace(namespace)
     }
 
+    /// 使用指定的命名空间连接
     pub fn connect_with_namespace(namespace: String) -> Result<Self, RegistryError> {
         let map = open_or_create(&namespace, SHARED_MEMORY_SIZE)?;
         Ok(Self {
             namespace,
             map: Mutex::new(map),
         })
+    }
+
+    /// 删除共享内存（用于进程结束时清理）
+    pub fn cleanup(&self) -> Result<(), RegistryError> {
+        use shared_memory::ShmemConf;
+
+        // 尝试删除共享内存
+        if let Ok(mut shmem) = ShmemConf::new()
+            .os_id(&self.namespace)
+            .size(SHARED_MEMORY_SIZE)
+            .open()
+        {
+            let _ = shmem.set_owner(true);
+        }
+
+        Ok(())
     }
 
     fn with_map<T>(
