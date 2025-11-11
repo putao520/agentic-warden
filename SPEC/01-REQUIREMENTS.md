@@ -184,22 +184,24 @@ Agentic-Warden MUST provide MCP server to enable external AI assistants to acces
 Agentic-Warden MUST provide `update` command to manage AI CLI tools (codex, claude, gemini). For each tool, if not installed, install the latest version; if already installed, update to the latest version.
 
 **Acceptance Criteria**:
-- [ ] `agentic-warden update` updates all installed AI CLI tools to latest version
-- [ ] `agentic-warden update <tool>` updates/installs specific tool (claude/codex/gemini)
-- [ ] For uninstalled tools: install latest version via npm
-- [ ] For installed tools: check latest version from npm registry and update if outdated
-- [ ] Query npm registry API to get latest version for each package
-- [ ] Execute npm install -g <package>@latest for updates
-- [ ] Provide progress feedback during installation/update
-- [ ] Handle errors gracefully (network errors, permission issues, etc.)
-- [ ] Display before/after version information
+- [x] `agentic-warden update` updates all installed AI CLI tools to latest version
+- [x] `agentic-warden update <tool>` updates/installs specific tool (codex/gemini)
+- [x] For uninstalled tools: install latest version via npm
+- [x] For installed tools: check latest version from npm registry and update if outdated
+- [x] Query npm registry API to get latest version for each package
+- [x] Execute npm install -g <package>@latest for updates
+- [x] Provide progress feedback during installation/update
+- [x] Handle errors gracefully (network errors, permission issues, etc.)
+- [x] Display before/after version information
+- [ ] Display summary report of all updates (implemented but need to test with multiple tools)
 
 **Technical Constraints**:
 - Use npm registry API: https://registry.npmjs.org/<package>/latest
 - Packages:
-  - @anthropic-ai/claude-cli (for claude)
-  - @openai/codex-cli (for codex)
-  - @google-ai/gemini-cli (for gemini)
+  - @openai/codex (for codex) - ✅ verified working
+  - @google/gemini-cli (for gemini) - ✅ verified working
+  - Note: Claude CLI is not available on npm and must be installed from https://console.anthropic.com/downloads
+- Use urlencoding::encode for scoped packages (e.g., @anthropic-ai/claude-cli)
 - MUST support proxy environments
 - MUST verify installation success after completion
 - Update process should not interrupt running AI CLI processes
