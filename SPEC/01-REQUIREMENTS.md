@@ -1,0 +1,313 @@
+# Requirements Specification - v0.x.x
+
+## Version Information
+- Current version: v0.1.0-dev
+- Start date: 2025-11-08
+- Based on: Initial development
+
+## Historical Requirements
+See:
+- archive/HISTORY.md - Global history overview (initial version, no history)
+
+---
+
+## Functional Requirements
+
+### REQ-001: AI CLI 进程树追踪
+**Status**: 🟢 Done
+**Priority**: P0 (Critical)
+**Version**: v0.1.0
+**Related**: ARCH-001, DATA-001
+
+**Description**:
+Agentic-Warden MUST provide intelligent process tree tracking to identify which AI CLI root process spawned the current process. This solves the problem of traditional tools attributing all processes to explorer.exe.
+
+**Acceptance Criteria**:
+- [x] Traverse process tree upward to identify the root AI CLI (codex/claude/gemini)
+- [x] Group tasks by parent process
+- [x] Isolate shared memory by AI CLI root process
+- [x] Ensure different AI CLI tasks do not interfere with each other
+
+**Technical Constraints**:
+- MUST support Windows via winapi
+- MUST support Linux and macOS via procfs
+- MUST distinguish between codex, claude, and gemini processes
+
+---
+
+### REQ-002: 第三方 Provider 管理
+**Status**: 🟢 Done
+**Priority**: P0 (Critical)
+**Version**: v0.1.0
+**Related**: ARCH-002, DATA-002, API-001
+
+**Description**:
+Agentic-Warden MUST provide unified management of third-party API providers (OpenRouter, LiteLLM, etc.) through centralized configuration.
+
+**Acceptance Criteria**:
+- [x] Store provider configurations in `~/.agentic-warden/provider.json`
+- [x] Support multiple providers with environment variables
+- [x] Inject environment variables into AI CLI processes via `-p` parameter
+- [x] Set default AI CLI in `config.json`
+- [x] Do NOT modify AI CLI's native configuration files
+
+**Technical Constraints**:
+- Configuration file format: JSON
+- Environment variable injection must be transparent to AI CLI
+- Support OpenRouter and LiteLLM as minimum
+
+---
+
+### REQ-003: Google Drive 同步集成
+**Status**: 🟢 Done
+**Priority**: P1 (High)
+**Version**: v0.1.0
+**Related**: ARCH-003, DATA-003
+
+**Description**:
+Agentic-Warden MUST integrate with Google Drive for configuration backup and restoration through `push` and `pull` commands.
+
+**Acceptance Criteria**:
+- [x] Support OAuth 2.0 Device Flow (RFC 8628)
+- [x] Automatically detect environment (desktop/server/headless) and choose best auth method
+- [x] Authorize only when executing push/pull commands
+- [x] Push directories to Google Drive
+- [x] Pull files from Google Drive
+- [x] List remote files
+
+**Technical Constraints**:
+- Authorization MUST auto-trigger with push/pull commands
+- Support concurrent local callback + manual input for better UX
+- Store tokens in secure location
+
+---
+
+### REQ-004: 统一 TUI 体验
+**Status**: 🟢 Done
+**Priority**: P1 (High)
+**Version**: v0.1.0
+**Related**: ARCH-004, MODULE-001
+
+**Description**:
+Agentic-Warden MUST provide unified TUI experience using ratatui framework for all interactive interfaces.
+
+**Acceptance Criteria**:
+- [x] Dashboard: Display AI CLI status and task summary
+- [x] Provider Management: Manage third-party API providers via TUI
+- [x] Task Status: Display task status grouped by parent process
+- [x] Push/Pull Progress: Real-time progress display for sync operations
+- [x] Use ratatui as the single TUI framework
+
+**Technical Constraints**:
+- ratatui version: 0.24+
+- crossterm version: 0.27+
+- All TUI components must use unified design system
+
+---
+
+### REQ-005: Wait 模式跨进程等待
+**Status**: 🟢 Done
+**Priority**: P2 (Normal)
+**Version**: v0.1.0
+**Related**: ARCH-005, DATA-005, API-002
+
+**Description**:
+Agentic-Warden MUST provide `wait` command to wait for concurrent AI CLI tasks completion across processes, and `pwait` command to wait for specific process's shared tasks.
+
+**Acceptance Criteria**:
+- [x] `agentic-warden wait` waits for all concurrent AI CLI tasks
+- [x] Support timeout parameter (default: 12h)
+- [x] Support verbose mode for detailed progress
+- [x] `agentic-warden pwait <PID>` waits for specific process's completed shared tasks
+- [x] Cross-process task completion detection
+
+**Technical Constraints**:
+- Use shared memory for cross-process communication
+- Timeout format: 12h, 30m, 1d
+- Default timeout: 12 hours
+
+---
+
+### REQ-006: AI CLI 工具检测与状态管理
+**Status**: 🟢 Done
+**Priority**: P1 (High)
+**Version**: v0.1.0
+**Related**: ARCH-006, MODULE-002
+
+**Description**:
+Agentic-Warden MUST detect installed AI CLI tools (codex, claude, gemini) and provide status information through `status` command.
+
+**Acceptance Criteria**:
+- [x] Detect installed status of codex, claude, gemini
+- [x] Retrieve version information for installed tools
+- [x] Identify installation type (Native or NPM)
+- [x] Display detection results in `agentic-warden status`
+- [x] Provide installation hints for uninstalled tools
+
+**Technical Constraints**:
+- Use `which` command to detect tool availability
+- Version retrieval via `--version` flag
+- Installation type detection based on path (node_modules/npm = NPM)
+
+---
+
+### REQ-007: MCP (Model Context Protocol) 服务器
+**Status**: 🟢 Done
+**Priority**: P1 (High)
+**Version**: v0.1.0
+**Related**: ARCH-007, API-003
+
+**Description**:
+Agentic-Warden MUST provide MCP server to enable external AI assistants to access Agentic-Warden functionality.
+
+**Acceptance Criteria**:
+- [x] Support stdio transport protocol
+- [x] Provide process management tools: monitor_processes, get_process_tree, terminate_process
+- [x] Provide provider status tool: get_provider_status
+- [x] Provide AI CLI launch tool: start_ai_cli
+- [x] Compatible with Claude Code and other MCP clients
+
+**Technical Constraints**:
+- MCP Protocol v1.0
+- Transport: stdio only
+- Support stdio for better integration
+
+---
+
+### REQ-008: AI CLI 更新/安装管理
+**Status**: 🔴 To Do
+**Priority**: P1 (High)
+**Version**: v0.1.0
+**Related**: ARCH-008, MODULE-002, API-004
+
+**Description**:
+Agentic-Warden MUST provide `update` command to manage AI CLI tools (codex, claude, gemini). For each tool, if not installed, install the latest version; if already installed, update to the latest version.
+
+**Acceptance Criteria**:
+- [ ] `agentic-warden update` updates all installed AI CLI tools to latest version
+- [ ] `agentic-warden update <tool>` updates/installs specific tool (claude/codex/gemini)
+- [ ] For uninstalled tools: install latest version via npm
+- [ ] For installed tools: check latest version from npm registry and update if outdated
+- [ ] Query npm registry API to get latest version for each package
+- [ ] Execute npm install -g <package>@latest for updates
+- [ ] Provide progress feedback during installation/update
+- [ ] Handle errors gracefully (network errors, permission issues, etc.)
+- [ ] Display before/after version information
+
+**Technical Constraints**:
+- Use npm registry API: https://registry.npmjs.org/<package>/latest
+- Packages:
+  - @anthropic-ai/claude-cli (for claude)
+  - @openai/codex-cli (for codex)
+  - @google-ai/gemini-cli (for gemini)
+- MUST support proxy environments
+- MUST verify installation success after completion
+- Update process should not interrupt running AI CLI processes
+
+**Error Handling**:
+- MUST handle npm not found error
+- MUST handle network connectivity issues
+- MUST handle permission denied errors (suggest sudo if needed)
+- MUST handle package not found errors
+- MUST provide clear error messages with resolution suggestions
+
+---
+
+## Non-Functional Requirements
+
+### NFR-001: 性能要求
+**Type**: Performance
+**Status**: 🟢 Done
+**Version**: v0.1.0
+
+**Description**:
+Agentic-Warden MUST meet performance criteria for process tracking and task management.
+
+**Metrics**:
+- Process detection: < 100ms for 100 processes
+- TUI rendering: < 16ms per frame (60 FPS)
+- Shared memory access: < 1ms per operation
+- Task status updates: Real-time (< 100ms delay)
+
+**Acceptance Criteria**:
+- [x] All performance tests pass under normal load
+- [x] No UI lag during concurrent AI CLI operations
+- [x] Shared memory operations do not block AI CLI processes
+
+---
+
+### NFR-002: 跨平台兼容性
+**Type**: Compatibility
+**Status**: 🟢 Done
+**Version**: v0.1.0
+
+**Requirements**:
+- MUST support Windows 10+ (x86_64, ARM64)
+- MUST support Linux (x86_64, ARM64)
+- MUST support macOS 10.15+ (x86_64, ARM64)
+- Rust version requirement: 1.70+
+
+**Acceptance Criteria**:
+- [x] All features work on Windows
+- [x] All features work on Linux
+- [x] All features work on macOS
+- [x] Cross-platform CI tests pass
+
+---
+
+### NFR-003: 安全性
+**Type**: Security
+**Status**: 🟢 Done
+**Version**: v0.1.0
+
+**Requirements**:
+- API tokens MUST be stored encrypted at rest
+- OAuth tokens MUST use secure storage
+- Process isolation MUST prevent unauthorized access
+- Configuration files MUST have appropriate permissions (600)
+
+**Acceptance Criteria**:
+- [x] Tokens encrypted in storage
+- [x] OAuth tokens stored securely
+- [x] Shared memory access control implemented
+- [x] Configuration files have restricted permissions
+
+---
+
+## User Stories
+
+### US-001: 多AI用户统一管理
+**Role**: As a developer using multiple AI CLI tools
+**Goal**: I want to manage all AI CLIs from a single interface
+**Value**: So that I can switch between AI tools seamlessly and track all tasks
+
+**Linked Requirements**: REQ-001, REQ-002, REQ-003, REQ-004
+
+**Acceptance Criteria**:
+- Given I have codex, claude, and gemini installed
+- When I run agentic-warden status
+- Then I should see status of all three tools
+- And I can launch any tool with provider configuration
+
+---
+
+## Requirements Traceability Matrix
+
+| Requirement ID | Title | Priority | Status | Version | SPEC References | Git Commits |
+|----------------|-------|----------|--------|---------|-----------------|-------------|
+| REQ-001 | AI CLI 进程树追踪 | P0 | 🟢 Done | v0.1.0 | ARCH-001, DATA-001 | Initial commit |
+| REQ-002 | 第三方 Provider 管理 | P0 | 🟢 Done | v0.1.0 | ARCH-002, DATA-002, API-001 | Initial commit |
+| REQ-003 | Google Drive 同步集成 | P1 | 🟢 Done | v0.1.0 | ARCH-003, DATA-003 | Initial commit |
+| REQ-004 | 统一 TUI 体验 | P1 | 🟢 Done | v0.1.0 | ARCH-004, MODULE-001 | Initial commit |
+| REQ-005 | Wait 模式跨进程等待 | P2 | 🟢 Done | v0.1.0 | ARCH-005, DATA-005, API-002 | Initial commit |
+| REQ-006 | AI CLI 工具检测与状态管理 | P1 | 🟢 Done | v0.1.0 | ARCH-006, MODULE-002 | Initial commit |
+| REQ-007 | MCP 服务器 | P1 | 🟢 Done | v0.1.0 | ARCH-007, API-003 | Initial commit |
+| REQ-008 | AI CLI 更新/安装管理 | P1 | 🔴 To Do | v0.1.0 | ARCH-008, MODULE-002, API-004 | - |
+
+---
+
+## Change Log
+
+### 2025-11-11
+- Added REQ-008: AI CLI 更新/安装管理
+- Status: New requirement for v0.2.0 feature
