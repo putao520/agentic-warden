@@ -191,19 +191,25 @@ impl CliToolDetector {
             .unwrap_or(false)
     }
 
-    /// Get installation hint for a tool
+    /// Get installation hint for a tool based on OS
     pub fn get_install_hint(&self, command: &str) -> String {
-        const INSTALL_HINTS: &[(&str, &str)] = &[
-            ("codex", "npm install -g @openai/codex"),
-            ("claude", "# Claude CLI is not available on npm. Install from: https://console.anthropic.com/downloads"),
-            ("gemini", "npm install -g @google/gemini-cli"),
-        ];
+        let os = Self::get_os_type();
 
-        INSTALL_HINTS
-            .iter()
-            .find(|(cmd, _)| cmd.eq_ignore_ascii_case(command))
-            .map(|(_, hint)| hint.to_string())
-            .unwrap_or_else(|| format!("Install {} via appropriate package manager", command))
+        match command.to_lowercase().as_str() {
+            "codex" => "npm install -g @openai/codex".to_string(),
+            "gemini" => "npm install -g @google/gemini-cli".to_string(),
+            "claude" => {
+                match os {
+                    "macOS" => "brew install claude".to_string(),
+                    "Linux" => {
+                        "# Download from: https://console.anthropic.com/downloads\n# Ubuntu/Debian: sudo dpkg -i claude_*.deb\n# Fedora/RHEL: sudo rpm -i claude-*.x86_64.rpm".to_string()
+                    }
+                    "Windows" => "# Download installer from: https://console.anthropic.com/downloads".to_string(),
+                    _ => "# Install from: https://console.anthropic.com/downloads".to_string(),
+                }
+            }
+            _ => format!("Install {} via appropriate package manager", command),
+        }
     }
 
     /// Check for updates (non-interactive version check)
@@ -476,10 +482,6 @@ mod tests {
     fn test_get_install_hint() {
         let detector = CliToolDetector::new();
 
-        // Test claude (not available on npm)
-        let claude_hint = detector.get_install_hint("claude");
-        assert!(claude_hint.contains("anthropic.com/downloads"));
-
         // Test codex (available on npm)
         let codex_hint = detector.get_install_hint("codex");
         assert!(codex_hint.contains("npm install"));
@@ -493,5 +495,28 @@ mod tests {
         // Test unknown tool
         let unknown_hint = detector.get_install_hint("unknown");
         assert!(unknown_hint.contains("Install"));
+    }
+
+    #[test]
+    fn test_get_install_hint_claude_by_os() {
+        let detector = CliToolDetector::new();
+        let claude_hint = detector.get_install_hint("claude");
+        let os = CliToolDetector::get_os_type();
+
+        // All Claude hints should contain the download URL
+        assert!(claude_hint.contains("https://console.anthropic.com/downloads"));
+
+        // macOS should use brew
+        if os == "macOS" {
+            assert!(claude_hint.contains("brew install claude"));
+        }
+        // Linux should mention deb/rpm
+        else if os == "Linux" {
+            assert!(claude_hint.contains("dpkg") || claude_hint.contains("rpm"));
+        }
+        // Windows should mention installer
+        else if os == "Windows" {
+            assert!(claude_hint.contains("installer"));
+        }
     }
 }
