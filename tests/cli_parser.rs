@@ -18,8 +18,13 @@ fn defaults_to_dashboard_when_no_subcommand_given() {
 #[test]
 fn parses_status_and_provider_commands() {
     match parse(&["status"]) {
-        Commands::Status => {}
+        Commands::Status { tui: false } => {}
         other => panic!("expected status command, got {other:?}"),
+    }
+
+    match parse(&["status", "--tui"]) {
+        Commands::Status { tui: true } => {}
+        other => panic!("expected status --tui command, got {other:?}"),
     }
 
     match parse(&["provider"]) {

@@ -44,8 +44,12 @@ pub enum Commands {
     /// 显示 Dashboard（无参数时的默认行为）
     Dashboard,
 
-    /// 显示任务状态 TUI
-    Status,
+    /// 显示任务状态
+    Status {
+        /// 启动TUI界面（默认显示文本摘要）
+        #[arg(long)]
+        tui: bool,
+    },
 
     /// 启动 Provider 管理 TUI
     Provider,

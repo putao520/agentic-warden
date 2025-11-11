@@ -83,7 +83,15 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
 
     match command {
         Commands::Dashboard => launch_tui(None).await,
-        Commands::Status => launch_tui(Some(tui::ScreenType::Status)).await,
+        Commands::Status { tui } => {
+            if tui {
+                // 启动TUI界面
+                launch_tui(Some(tui::ScreenType::Status)).await
+            } else {
+                // 显示文本摘要
+                handle_status_command()
+            }
+        }
         Commands::Provider => launch_tui(Some(tui::ScreenType::Provider)).await,
         Commands::Push { dirs } => {
             let directories = dirs
@@ -157,6 +165,38 @@ async fn launch_tui(initial_screen: Option<tui::ScreenType>) -> Result<ExitCode,
     };
 
     tui_result.map_err(|e| format!("TUI error: {}", e))?;
+
+    Ok(ExitCode::from(0))
+}
+
+/// 处理status命令（文本模式）
+fn handle_status_command() -> Result<ExitCode, String> {
+    use agentic_warden::storage::SharedMemoryStorage;
+    use agentic_warden::task_record::TaskStatus;
+    use agentic_warden::unified_registry::Registry;
+
+    // 连接到当前进程的共享内存
+    let storage = SharedMemoryStorage::connect()
+        .map_err(|e| format!("Failed to connect to shared memory: {}", e))?;
+
+    let registry = Registry::new(storage);
+
+    // 获取所有任务条目
+    let entries = registry.entries()
+        .map_err(|e| format!("Failed to get task entries: {}", e))?;
+
+    // 统计运行中的任务
+    let running_count = entries
+        .iter()
+        .filter(|entry| entry.record.status == TaskStatus::Running)
+        .count();
+
+    // 输出结果
+    if running_count == 0 {
+        println!("No tasks!");
+    } else {
+        println!("running {} tasks!", running_count);
+    }
 
     Ok(ExitCode::from(0))
 }
