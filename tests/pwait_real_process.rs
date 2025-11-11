@@ -93,8 +93,24 @@ fn test_pwait_waits_for_real_sleep_process() {
 #[serial]
 fn test_pwait_waits_for_multiple_real_processes() {
     use agentic_warden::pwait_mode;
+    use agentic_warden::task_record::TaskStatus;
 
     let registry = RegistryFactory::instance().get_mcp_registry();
+
+    // 清理任何现有的任务
+    let entries = registry.entries().unwrap();
+    for entry in entries {
+        if entry.record.status == TaskStatus::Running {
+            let _ = registry.mark_completed(
+                entry.pid,
+                Some("cleanup".to_string()),
+                Some(0),
+                Utc::now(),
+            );
+        }
+    }
+    // 清理已完成的任务
+    let _ = registry.get_completed_unread_tasks();
 
     // 1. Spawn 3个真实的sleep进程
     let mut children = vec![];

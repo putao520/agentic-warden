@@ -4,7 +4,7 @@ use crate::core::process_tree::ProcessTreeError;
 use crate::error::RegistryError;
 use crate::logging::debug;
 use crate::logging::warn;
-use crate::platform;
+use crate::platform::{self, ChildResources};
 use crate::provider::{AiType, ProviderManager};
 use crate::registry::TaskRegistry;
 use crate::signal;
@@ -239,7 +239,7 @@ pub async fn execute_cli<S: TaskStorage>(
     // It's only used on Windows for job object management
     #[cfg(windows)]
     {
-        let _resources = ChildResources::new();
+        let _resources = ChildResources::with_job(None);
     }
 
     let signal_guard = signal::install(child_pid)?;

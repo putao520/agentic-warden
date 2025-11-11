@@ -444,13 +444,31 @@ impl TaskStorage for SharedMemoryStorage {
 
     fn get_completed_unread_tasks(&self) -> Result<Vec<(u32, TaskRecord)>, RegistryError> {
         let entries = self.entries()?;
-        Ok(entries
+        let mut completed_pids = Vec::new();
+
+        for entry in &entries {
+            if entry.record.status == TaskStatus::CompletedButUnread {
+                completed_pids.push(entry.pid);
+            }
+        }
+
+        // 从共享内存中删除已完成的任务
+        for pid in &completed_pids {
+            let key = pid.to_string();
+            let _ = self.with_map(|map| {
+                map.remove(&key);
+                Ok::<(), RegistryError>(())
+            });
+        }
+
+        // 返回已完成的任务
+        let completed_tasks: Vec<(u32, TaskRecord)> = entries
             .into_iter()
-            .filter_map(|entry| {
-                (entry.record.status == TaskStatus::CompletedButUnread)
-                    .then_some((entry.pid, entry.record))
-            })
-            .collect())
+            .filter(|entry| entry.record.status == TaskStatus::CompletedButUnread)
+            .map(|entry| (entry.pid, entry.record))
+            .collect();
+
+        Ok(completed_tasks)
     }
 
     fn has_running_tasks(&self, filter: Option<&ProcessTreeInfo>) -> Result<bool, RegistryError> {

@@ -21,11 +21,11 @@ use std::sync::Arc;
 /// use agentic_warden::unified_registry::Registry;
 /// use agentic_warden::storage::{InProcessStorage, SharedMemoryStorage};
 ///
-/// // 进程内注册表
+/// // 进程内注册表（用于MCP启动的任务）
 /// let mcp_registry = Registry::new(InProcessStorage::new());
 ///
-/// // 跨进程注册表
-/// let cli_registry = Registry::new(SharedMemoryStorage::connect()?);
+/// // 跨进程注册表（用于CLI启动的任务，使用当前进程PID）
+/// let cli_registry = Registry::new(SharedMemoryStorage::connect().unwrap());
 /// ```
 #[derive(Debug)]
 pub struct Registry<S: TaskStorage> {

@@ -46,8 +46,24 @@ fn test_pwait_with_no_tasks() {
 #[serial]
 fn test_pwait_with_completed_task() {
     use agentic_warden::pwait_mode;
+    use agentic_warden::task_record::TaskStatus;
 
     let registry = RegistryFactory::instance().get_mcp_registry();
+
+    // 清理任何现有的任务
+    let entries = registry.entries().unwrap();
+    for entry in entries {
+        if entry.record.status == TaskStatus::Running {
+            let _ = registry.mark_completed(
+                entry.pid,
+                Some("cleanup".to_string()),
+                Some(0),
+                Utc::now(),
+            );
+        }
+    }
+    // 清理已完成的任务
+    let _ = registry.get_completed_unread_tasks();
 
     // 注册一个测试任务
     let test_pid = 99999;
@@ -211,8 +227,24 @@ fn test_pwait_does_not_see_cli_tasks() {
 #[serial]
 fn test_pwait_with_multiple_concurrent_tasks() {
     use agentic_warden::pwait_mode;
+    use agentic_warden::task_record::TaskStatus;
 
     let registry = RegistryFactory::instance().get_mcp_registry();
+
+    // 清理任何现有的任务
+    let entries = registry.entries().unwrap();
+    for entry in entries {
+        if entry.record.status == TaskStatus::Running {
+            let _ = registry.mark_completed(
+                entry.pid,
+                Some("cleanup".to_string()),
+                Some(0),
+                Utc::now(),
+            );
+        }
+    }
+    // 清理已完成的任务
+    let _ = registry.get_completed_unread_tasks();
 
     // 注册3个任务
     let pids = vec![55551, 55552, 55553];

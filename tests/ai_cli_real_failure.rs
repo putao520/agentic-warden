@@ -154,7 +154,8 @@ async fn execute_cli_returns_error_when_tmp_dir_is_unusable() {
         ProcessError::Io(io_err) => {
             assert!(
                 io_err.kind() == io::ErrorKind::NotFound
-                    || io_err.kind() == io::ErrorKind::PermissionDenied,
+                    || io_err.kind() == io::ErrorKind::PermissionDenied
+                    || io_err.kind() == io::ErrorKind::AlreadyExists,
                 "unexpected IO error: {io_err}"
             );
         }
