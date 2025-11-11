@@ -200,12 +200,8 @@ impl CliToolDetector {
             "gemini" => "npm install -g @google/gemini-cli".to_string(),
             "claude" => {
                 match os {
-                    "macOS" => "brew install claude".to_string(),
-                    "Linux" => {
-                        "# Download from: https://console.anthropic.com/downloads\n# Ubuntu/Debian: sudo dpkg -i claude_*.deb\n# Fedora/RHEL: sudo rpm -i claude-*.x86_64.rpm".to_string()
-                    }
-                    "Windows" => "# Download installer from: https://console.anthropic.com/downloads".to_string(),
-                    _ => "# Install from: https://console.anthropic.com/downloads".to_string(),
+                    "Windows" => "irm https://claude.ai/install.ps1 | iex".to_string(),
+                    _ => "curl -fsSL https://claude.ai/install.sh | bash".to_string(),
                 }
             }
             _ => format!("Install {} via appropriate package manager", command),
@@ -503,20 +499,15 @@ mod tests {
         let claude_hint = detector.get_install_hint("claude");
         let os = CliToolDetector::get_os_type();
 
-        // All Claude hints should contain the download URL
-        assert!(claude_hint.contains("https://console.anthropic.com/downloads"));
-
-        // macOS should use brew
-        if os == "macOS" {
-            assert!(claude_hint.contains("brew install claude"));
-        }
-        // Linux should mention deb/rpm
-        else if os == "Linux" {
-            assert!(claude_hint.contains("dpkg") || claude_hint.contains("rpm"));
-        }
-        // Windows should mention installer
-        else if os == "Windows" {
-            assert!(claude_hint.contains("installer"));
+        match os {
+            "Windows" => {
+                // Windows should use PowerShell
+                assert!(claude_hint.contains("irm https://claude.ai/install.ps1 | iex"));
+            }
+            _ => {
+                // All other systems (macOS, Linux) should use curl
+                assert!(claude_hint.contains("curl -fsSL https://claude.ai/install.sh | bash"));
+            }
         }
     }
 }
