@@ -131,7 +131,8 @@ async fn execute_cli_with_unknown_provider_surfaces_error() {
 
 /// Scenario: The temporary directory is invalid so the supervisor cannot create its log file.
 ///
-/// Action: Point `TMP`/`TEMP` to a non-existent drive and attempt to launch Codex.
+/// Action: Override `std::env::temp_dir()` behavior by setting TMPDIR (Unix) or TMP/TEMP (Windows)
+///         to a file path instead of a directory, then attempt to launch Codex.
 ///
 /// Expectation: `supervisor::execute_cli` returns `ProcessError::Io` due to log path creation failure.
 #[tokio::test]
@@ -143,8 +144,22 @@ async fn execute_cli_returns_error_when_tmp_dir_is_unusable() {
     let fake_root = TempDir::new().expect("temp sandbox for tmp override");
     let file_path = fake_root.path().join("tmp-anchor");
     fs::write(&file_path, b"x").expect("create fake temp file");
-    let _tmp_guard = EnvGuard::set("TMP", file_path.as_os_str());
-    let _temp_guard = EnvGuard::set("TEMP", file_path.as_os_str());
+
+    // Set the appropriate environment variable based on OS
+    #[cfg(unix)]
+    let _guard = {
+        // On Unix, std::env::temp_dir() uses TMPDIR, then /tmp
+        EnvGuard::set("TMPDIR", file_path.as_os_str())
+    };
+
+    #[cfg(windows)]
+    let _guard = {
+        // On Windows, std::env::temp_dir() checks TMP, then TEMP, then USERPROFILE
+        let _tmp_guard = EnvGuard::set("TMP", file_path.as_os_str());
+        let _temp_guard = EnvGuard::set("TEMP", file_path.as_os_str());
+        (_tmp_guard, _temp_guard)
+    };
+
     let args = prompt_args(&CliType::Codex, "test");
 
     let err = supervisor::execute_cli(&registry, &CliType::Codex, &args, None).await
@@ -155,7 +170,8 @@ async fn execute_cli_returns_error_when_tmp_dir_is_unusable() {
             assert!(
                 io_err.kind() == io::ErrorKind::NotFound
                     || io_err.kind() == io::ErrorKind::PermissionDenied
-                    || io_err.kind() == io::ErrorKind::AlreadyExists,
+                    || io_err.kind() == io::ErrorKind::AlreadyExists
+                    || io_err.kind() == io::ErrorKind::NotADirectory,
                 "unexpected IO error: {io_err}"
             );
         }
