@@ -26,7 +26,7 @@ pub mod wait_mode;
 pub mod cli_manager;
 
 // Re-export commonly used types for convenience
-pub use cli_manager::{CliTool, CliToolDetector, InstallType};
+pub use cli_manager::{execute_update, CliTool, CliToolDetector, InstallType};
 pub use core::models::*;
 pub use core::process_tree::{get_process_tree, ProcessTreeError};
 pub use error::RegistryError;

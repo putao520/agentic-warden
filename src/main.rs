@@ -6,6 +6,7 @@ use agentic_warden::cli_type::{parse_cli_selector_strict, parse_cli_type};
 use agentic_warden::commands::ai_cli::AiCliCommand;
 use agentic_warden::commands::{parse_external_as_ai_cli, Cli, Commands, parser::McpAction};
 use agentic_warden::error::ErrorCategory;
+use agentic_warden::execute_update;
 use help::{print_command_help, print_general_help, print_quick_examples};
 use mcp::AgenticWardenMcpServer;
 use agentic_warden::provider::network_detector::NetworkDetector;
@@ -142,6 +143,27 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
                 }
             }
             Ok(ExitCode::from(0))
+        }
+        Commands::Update { tool } => {
+            let tool_name = tool.as_deref();
+            match execute_update(tool_name).await {
+                Ok(results) => {
+                    let success_count = results.iter().filter(|(_, success, _)| *success).count();
+                    let total_count = results.len();
+
+                    if success_count == total_count {
+                        println!("\n✅ All {} tool(s) updated successfully!", success_count);
+                        Ok(ExitCode::from(0))
+                    } else {
+                        eprintln!("\n⚠️  {}/{} tool(s) updated successfully", success_count, total_count);
+                        Ok(ExitCode::from(1))
+                    }
+                }
+                Err(e) => {
+                    eprintln!("❌ Update failed: {}", e);
+                    Ok(ExitCode::from(1))
+                }
+            }
         }
         Commands::Mcp(action) => handle_mcp_command(action).await,
         Commands::External(tokens) => handle_external_command(tokens).await,

@@ -224,11 +224,33 @@ impl CliToolDetector {
         Ok(updates)
     }
 
-    /// Check latest version from npm (simplified version)
-    async fn check_latest_version(_package: &str) -> Option<String> {
-        // This is a simplified implementation
-        // In a real scenario, you might want to query npm registry API
-        // For now, return None to indicate version check is not implemented
+    /// Check latest version from npm registry
+    async fn check_latest_version(package: &str) -> Option<String> {
+        // URL encode the package name for scoped packages (e.g., @anthropic-ai/claude-cli)
+        let encoded_package = urlencoding::encode(package);
+        let url = format!("https://registry.npmjs.org/{}/latest", encoded_package);
+
+        match reqwest::get(&url).await {
+            Ok(response) => {
+                if response.status().is_success() {
+                    match response.json::<serde_json::Value>().await {
+                        Ok(json) => {
+                            if let Some(version) = json.get("version").and_then(|v| v.as_str()) {
+                                return Some(version.to_string());
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to parse npm registry response: {}", e);
+                        }
+                    }
+                } else {
+                    eprintln!("NPM registry returned status: {}", response.status());
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to query npm registry: {}", e);
+            }
+        }
         None
     }
 
@@ -261,12 +283,120 @@ pub async fn detect_ai_cli_tools() -> Result<Vec<CliTool>> {
 
 /// Get installation commands for all uninstalled tools
 pub fn get_install_commands() -> Vec<(String, String)> {
-    let detector = CliToolDetector::new();
+    let detector =CliToolDetector::new();
     detector
         .get_uninstalled_tools()
         .into_iter()
         .map(|tool| (tool.name.clone(), detector.get_install_hint(&tool.command)))
         .collect()
+}
+
+/// Execute update/install for AI CLI tools
+///
+/// If tool_name is None, update all installed tools
+/// If tool_name is Some, update/install that specific tool
+pub async fn execute_update(tool_name: Option<&str>) -> Result<Vec<(String, bool, String)>> {
+    let mut detector = CliToolDetector::new();
+    detector.detect_all_tools()?;
+
+    let mut results = Vec::new();
+
+    // Determine which tools to process
+    let tools_to_process: Vec<&CliTool> = if let Some(name) = tool_name {
+        // Single tool mode - find the tool by command name
+        match detector.get_tool_by_command(name) {
+            Some(tool) => vec![tool],
+            None => {
+                anyhow::bail!("Unknown AI CLI tool: {}. Supported: claude, codex, gemini", name);
+            }
+        }
+    } else {
+        // All installed tools mode
+        detector.get_installed_tools()
+    };
+
+    if tools_to_process.is_empty() {
+        println!("No AI CLI tools to update.");
+        println!("Use 'agentic-warden update <tool>' to install a specific tool.");
+        return Ok(results);
+    }
+
+    // Process each tool
+    for tool in tools_to_process {
+        println!("\n🔧 Processing {}...", tool.name);
+
+        let npm_package = &tool.npm_package;
+        let current_version = tool.version.clone();
+
+        // Get latest version from npm
+        println!("  Checking latest version...");
+        let latest_version = match CliToolDetector::check_latest_version(npm_package).await {
+            Some(version) => version,
+            None => {
+                eprintln!("  ❌ Failed to get latest version for {}", npm_package);
+                results.push((tool.name.clone(), false, "Failed to check version".to_string()));
+                continue;
+            }
+        };
+
+        println!("  Latest version: {}", latest_version);
+
+        if let Some(ref current) = current_version {
+            println!("  Current version: {}", current);
+
+            if current == &latest_version {
+                println!("  ✅ Already up to date!");
+                results.push((tool.name.clone(), true, "Already up to date".to_string()));
+                continue;
+            }
+        } else {
+            println!("  Not currently installed");
+        }
+
+        // Execute npm install
+        println!("  Installing...");
+        let install_cmd = detector.get_install_hint(&tool.command);
+
+        // Replace version if updating to latest
+        let install_cmd = if current_version.is_some() {
+            // Update mode - add @latest
+            format!("{}@latest", install_cmd)
+        } else {
+            // Install mode - use as is
+            install_cmd
+        };
+
+        match std::process::Command::new("sh")
+            .arg("-c")
+            .arg(&install_cmd)
+            .status()
+        {
+            Ok(status) => {
+                if status.success() {
+                    println!("  ✅ Successfully updated/installed!");
+                    results.push((tool.name.clone(), true, "Success".to_string()));
+                } else {
+                    eprintln!("  ❌ Installation failed with exit code: {:?}", status.code());
+                    results.push((tool.name.clone(), false, format!("Installation failed: {:?}", status.code())));
+                }
+            }
+            Err(e) => {
+                eprintln!("  ❌ Failed to execute npm: {}", e);
+                results.push((tool.name.clone(), false, format!("Execution error: {}", e)));
+            }
+        }
+    }
+
+    // Print summary
+    println!("\n{}", "=".repeat(60));
+    println!("📊 Update Summary:");
+    for (name, success, message) in &results {
+        let status = if *success { "✅" } else { "❌" };
+        println!("  {} {} - {}", status, name, message);
+    }
+    println!("{}", "=".repeat(60));
+
+    Ok(results)
 }
 
 #[cfg(test)]
