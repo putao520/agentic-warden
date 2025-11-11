@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Agentic-Warden Logo](https://img.shields.io/badge/Agentic--Warden-0.3.0-blue?style=flat-square)
+![Agentic-Warden Logo](https://img.shields.io/badge/Agentic--Warden-0.5.0-blue?style=flat-square)
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange?style=flat-square&logo=rust)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey?style=flat-square)
@@ -69,6 +69,47 @@ agentic-warden gemini "Explain this algorithm"
 # Launch multiple AI CLI simultaneously
 agentic-warden claude|codex "Compare two implementation approaches"
 ```
+
+### 🔗 Claude Code MCP Integration
+
+Agentic-Warden provides an MCP (Model Context Protocol) server that allows Claude Code to directly manage and monitor AI CLI processes.
+
+#### One-line Installation for Claude Code
+
+```bash
+claude-code mcp install agentic-warden
+```
+
+Or manually add to your Claude Code configuration:
+
+```json
+{
+  "mcpServers": {
+    "agentic-warden": {
+      "command": "agentic-warden",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+#### MCP Features in Claude Code
+
+Once integrated, you can use these MCP tools in Claude Code:
+
+- `agentic_warden_launch_ai_cli` - Launch and monitor AI CLI processes
+- `agentic_warden_list_tasks` - List all running and completed tasks
+- `agentic_warden_get_task_status` - Get detailed status of specific tasks
+- `agentic_warden_wait_for_tasks` - Wait for tasks to complete
+- `agentic_warden_cancel_task` - Cancel running tasks
+
+#### Example Usage in Claude Code
+
+```text
+Please launch a Claude instance to analyze this code, and wait for it to complete.
+```
+
+Claude Code will automatically use the Agentic-Warden MCP to launch, track, and manage the AI CLI process.
 
 ## 📖 Documentation
 
