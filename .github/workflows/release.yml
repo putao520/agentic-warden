@@ -24,9 +24,6 @@ jobs:
           - target: x86_64-apple-darwin
             os: macos-latest
             name: agentic-warden-macos-amd64
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            name: agentic-warden-macos-arm64
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             name: agentic-warden-windows-amd64
@@ -174,3 +171,59 @@ jobs:
           Created by https://github.com/mislavbump/homebrew-bump-formula-action
       env:
         COMMITTER_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+  # 发布到 NPM (使用 OIDC Trusted Publishing)
+  publish-npm:
+    name: Publish to NPM
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build-and-upload
+
+    # CRITICAL: OIDC 必需的权限
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        registry-url: 'https://registry.npmjs.org'
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: binaries/
+
+    - name: Prepare binaries for NPM package
+      run: |
+        # 为每个平台创建目录并移动二进制文件
+        mkdir -p npm-package/bin
+
+        # 提取所有二进制文件到 npm-package/bin/
+        for artifact_dir in binaries/*/; do
+          if [ -d "$artifact_dir" ]; then
+            find "$artifact_dir" -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec basename {} \; | while read archive; do
+              if [[ "$archive" == *.tar.gz ]]; then
+                tar -xzf "$artifact_dir/$archive" -C npm-package/bin/ 2>/dev/null || true
+              elif [[ "$archive" == *.zip ]]; then
+                unzip -q "$artifact_dir/$archive" -d npm-package/bin/ 2>/dev/null || true
+              fi
+            done
+          fi
+        done
+
+        # 显示准备好的文件
+        echo "=== NPM Package contents ==="
+        ls -la npm-package/
+        echo "=== Binaries ==="
+        ls -la npm-package/bin/ 2>/dev/null || echo "No binaries directory"
+
+    - name: Publish to NPM with Provenance
+      working-directory: npm-package
+      run: npm publish --provenance --access public
+      # 注意：使用 OIDC 时，npm 会自动使用 OIDC token，无需 NODE_AUTH_TOKEN
