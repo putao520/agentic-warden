@@ -335,19 +335,69 @@ pub struct Provider {
 ```
 
 #### 3.4 共享内存管理
+
+**命名规则**:
+- 每个进程使用独立的共享内存区域，命名格式: `{PID}_task`
+- 进程启动时创建共享内存，结束时自动清理
+- pwait命令通过PID参数连接到指定进程的共享内存
+
+**存储架构**:
 ```rust
-// src/shared_map.rs
-pub struct SharedMemoryMap {
-    instance_id: usize,
-    map: SharedMap,
+// src/storage.rs
+pub trait TaskStorage: Send + Sync {
+    fn register(&self, pid: u32, record: &TaskRecord) -> Result<(), RegistryError>;
+    fn mark_completed(&self, pid: u32, result: Option<String>, exit_code: Option<i32>, completed_at: DateTime<Utc>) -> Result<(), RegistryError>;
+    fn entries(&self) -> Result<Vec<RegistryEntry>, RegistryError>;
+    fn sweep_stale_entries<F, G>(&self, now: DateTime<Utc>, is_process_alive: F, terminate_process: &G) -> Result<Vec<CleanupEvent>, RegistryError>;
+    fn get_completed_unread_tasks(&self) -> Result<Vec<(u32, TaskRecord)>, RegistryError>;
+    fn has_running_tasks(&self, filter: Option<&ProcessTreeInfo>) -> Result<bool, RegistryError>;
 }
 
-impl SharedMemoryMap {
-    pub fn new() -> Result<Self>;
-    pub fn register_task(&mut self, task: TaskInfo) -> Result<()>;
-    pub fn update_task_status(&mut self, task_id: TaskId, status: TaskStatus) -> Result<()>;
-    pub fn get_tasks_by_parent(&self, parent_pid: Pid) -> Vec<TaskInfo>;
-    pub fn scan_all_instances(&self) -> Vec<TaskInfo>;
+// 进程内存储（MCP任务）
+pub struct InProcessStorage {
+    tasks: Arc<Mutex<HashMap<u32, TaskRecord>>>,
+}
+
+// 跨进程存储（CLI任务）
+pub struct SharedMemoryStorage {
+    namespace: String,  // 格式: {PID}_task
+    map: Mutex<SharedMemoryHashMap<String, String>>,
+}
+
+impl SharedMemoryStorage {
+    pub fn connect() -> Result<Self>;                    // 连接到当前进程
+    pub fn connect_for_pid(pid: u32) -> Result<Self>;    // 连接到指定PID
+    pub fn cleanup(&self) -> Result<(), RegistryError>;  // 清理共享内存
+}
+
+// 统一注册表接口
+pub struct Registry<S: TaskStorage> {
+    storage: Arc<S>,
+}
+
+pub type InProcessRegistry = Registry<InProcessStorage>;
+pub type SharedMemoryRegistry = Registry<SharedMemoryStorage>;
+```
+
+**注册表工厂**:
+```rust
+// src/registry_factory.rs
+pub struct RegistryFactory {
+    cli_registry: Mutex<Option<CliRegistry>>,  // CLI任务（跨进程）
+    mcp_registry: Arc<McpRegistry>,            // MCP任务（进程内）
+}
+
+impl RegistryFactory {
+    pub fn instance() -> &'static Self;
+    pub fn get_cli_registry(&self) -> Result<CliRegistry, RegistryError>;
+    pub fn get_mcp_registry(&self) -> Arc<McpRegistry>;
+}
+
+impl Drop for RegistryFactory {
+    fn drop(&mut self) {
+        // 进程结束时自动清理CLI注册表的共享内存
+        let _ = self.cleanup_cli_registry();
+    }
 }
 ```
 

@@ -9,13 +9,11 @@ use agentic_warden::error::ErrorCategory;
 use help::{print_command_help, print_general_help, print_quick_examples};
 use mcp::AgenticWardenMcpServer;
 use agentic_warden::provider::network_detector::NetworkDetector;
-use agentic_warden::provider::manager::ProviderManager;
 use agentic_warden::sync;
 use agentic_warden::sync::sync_config::save_network_status;
 use agentic_warden::tui;
 use agentic_warden::wait_mode;
 use agentic_warden::pwait_mode;
-use agentic_warden::registry_factory::RegistryFactory;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -83,7 +81,15 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
 
     match command {
         Commands::Dashboard => launch_tui(None).await,
-        Commands::Status => launch_tui(Some(tui::ScreenType::Status)).await,
+        Commands::Status { tui } => {
+            if tui {
+                // 启动TUI界面
+                launch_tui(Some(tui::ScreenType::Status)).await
+            } else {
+                // 显示文本摘要
+                handle_status_command()
+            }
+        }
         Commands::Provider => launch_tui(Some(tui::ScreenType::Provider)).await,
         Commands::Push { dirs } => {
             let directories = dirs
@@ -104,20 +110,19 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
             wait_mode::run().map_err(|e| e.to_string())?;
             Ok(ExitCode::from(0))
         }
-        Commands::PWait => {
-            // 等待MCP进程内任务完成
-            let registry = RegistryFactory::instance().get_mcp_registry();
-            match pwait_mode::run_with_registry(&registry) {
+        Commands::PWait { pid } => {
+            // 等待指定进程的共享内存任务完成
+            match pwait_mode::run_for_pid(pid) {
                 Ok(report) => {
                     report.print();
                     Ok(ExitCode::from(0))
                 }
                 Err(pwait_mode::PWaitError::NoTasks) => {
-                    eprintln!("No MCP tasks to wait for");
+                    eprintln!("No tasks found for PID {}", pid);
                     Ok(ExitCode::from(0))
                 }
                 Err(e) => {
-                    eprintln!("Error waiting for MCP tasks: {}", e);
+                    eprintln!("Error waiting for tasks (PID {}): {}", pid, e);
                     Ok(ExitCode::from(1))
                 }
             }
@@ -158,6 +163,38 @@ async fn launch_tui(initial_screen: Option<tui::ScreenType>) -> Result<ExitCode,
     };
 
     tui_result.map_err(|e| format!("TUI error: {}", e))?;
+
+    Ok(ExitCode::from(0))
+}
+
+/// 处理status命令（文本模式）
+fn handle_status_command() -> Result<ExitCode, String> {
+    use agentic_warden::storage::SharedMemoryStorage;
+    use agentic_warden::task_record::TaskStatus;
+    use agentic_warden::unified_registry::Registry;
+
+    // 连接到当前进程的共享内存
+    let storage = SharedMemoryStorage::connect()
+        .map_err(|e| format!("Failed to connect to shared memory: {}", e))?;
+
+    let registry = Registry::new(storage);
+
+    // 获取所有任务条目
+    let entries = registry.entries()
+        .map_err(|e| format!("Failed to get task entries: {}", e))?;
+
+    // 统计运行中的任务
+    let running_count = entries
+        .iter()
+        .filter(|entry| entry.record.status == TaskStatus::Running)
+        .count();
+
+    // 输出结果
+    if running_count == 0 {
+        println!("No tasks!");
+    } else {
+        println!("running {} tasks!", running_count);
+    }
 
     Ok(ExitCode::from(0))
 }
@@ -250,12 +287,9 @@ async fn handle_mcp_command(action: McpAction) -> Result<ExitCode, String> {
                 .with_target(false)
                 .init();
 
-            // 初始化Provider管理器
-            let provider_manager = ProviderManager::new()
-                .map_err(|e| format!("Failed to initialize provider manager: {}", e))?;
-
             // 创建MCP服务器（使用InProcessRegistry）
-            let mcp_server = AgenticWardenMcpServer::new(provider_manager);
+            // Provider配置通过supervisor模块管理，不需要在MCP server中直接管理
+            let mcp_server = AgenticWardenMcpServer::new();
 
             match transport.as_str() {
                 "stdio" => {

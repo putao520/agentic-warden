@@ -88,15 +88,7 @@ pwait_mode
 
 ### 📋 功能范围
 
-#### 进程管理工具
-- **`monitor_processes`**: 监控所有 AI CLI 进程状态
-- **`get_process_tree`**: 获取详细的进程树信息
-- **`terminate_process`**: 安全终止 AI CLI 进程
-
-#### 配置管理工具
-- **`get_provider_status`**: 获取 Provider 配置和状态信息
-
-#### AI CLI 启动工具
+#### AI CLI 启动工具（核心功能）
 - **`start_concurrent_tasks`**: 并发启动多个 AI CLI 任务
   - 直接在 MCP Server 中启动所有进程（后台）
   - 返回: 标准 task JSON 结构，包含 **pwait** 命令
@@ -107,7 +99,6 @@ pwait_mode
   - 返回: 标准 task JSON 结构
   - task 结构: `{"tool": "bash", "command": "agent <ai_type> 'task'", "timeout_ms": 43200000}`
   - 不直接启动进程，由 Claude Code 解析并通过 Bash 工具执行
-- **`start_ai_cli`**: (已废弃) 直接启动并等待单个 AI CLI 完成
 
 ### 🆕 并发模式工作流程
 
@@ -277,24 +268,27 @@ impl AgenticWardenMcpServer {
 每个工具使用 rmcp 的 `#[tool]` 宏定义：
 
 ```rust
-#[tool(description = "Monitor all AI CLI processes")]
-pub async fn monitor_processes(
+#[tool(description = "Generate commands for multiple AI CLI tasks to run concurrently")]
+pub async fn start_concurrent_tasks(
     &self,
-    #[arg(description = "Optional filter by AI type")] ai_type: Option<String>,
-) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    params: Parameters<StartConcurrentTasksParams>
+) -> String {
+    // 工具实现
+}
+
+#[tool(description = "Get command to start a single AI CLI task")]
+pub async fn get_task_command(
+    &self,
+    params: Parameters<GetTaskCommandParams>
+) -> String {
     // 工具实现
 }
 ```
 
 **rmcp 工具定义要求**：
 - 使用 `#[tool]` 宏标注工具函数
-- 使用 `#[arg]` 宏定义参数（包含 description）
-- 返回类型为 `Result<T, E>`，其中 T 实现 `Serialize`
-
-#### 进程管理模块
-- **进程识别**: 智能 AI CLI 进程识别算法
-- **状态查询**: 跨平台进程状态获取
-- **安全检查**: 防止误操作非 AI CLI 进程
+- 使用参数结构体定义输入（通过 `Parameters<T>` 包装）
+- 返回类型为简单的 `String`（JSON格式）
 
 ## 使用场景
 
@@ -304,26 +298,25 @@ pub async fn monitor_processes(
 claude --mcp-add agentic-warden "agentic-warden mcp server"
 
 # 在 Claude Code 中使用
-# "查询当前运行的 AI CLI 进程"
-# "获取所有 claude 进程的进程树"
-# "安全终止空闲的 codex 进程"
+# "并发启动3个AI任务：codex分析代码、claude写文档、gemini生成测试"
+# "启动一个codex任务处理bug修复"
 ```
 
 ### 开发者工具集成
-- IDE 插件可以通过 MCP 访问 Agentic-Warden 功能
-- 自动化脚本可以通过 MCP 调用进程管理
-- CI/CD 流程可以集成 AI CLI 状态检查
+- IDE 插件可以通过 MCP 访问 Agentic-Warden 的任务启动功能
+- 自动化脚本可以通过 MCP 调用并发任务执行
+- CI/CD 流程可以集成 AI CLI 任务调度
 
 ## 安全考虑
 
-### 进程安全
-- **AI CLI 识别**: 只允许操作 claude、codex、gemini 相关进程
-- **权限检查**: 操作前验证进程归属
-- **安全终止**: 优先使用 SIGTERM，强制终止使用 SIGKILL
+### AI类型验证
+- **AI CLI 验证**: 只允许 claude、codex、gemini 三种AI类型
+- **参数验证**: 严格验证所有输入参数
+- **命令转义**: 正确处理任务描述中的特殊字符
 
 ### 配置安全
-- **只读访问**: Provider 配置只允许读取，不允许修改
-- **敏感信息**: 不暴露 API 密钥等敏感配置
+- **Provider 配置**: 通过 ProviderManager 统一管理
+- **环境变量**: 由 supervisor 模块安全注入
 - **访问控制**: 通过 MCP 客户端身份验证
 
 ## 命令行接口
@@ -394,13 +387,15 @@ agentic-warden mcp status
 
 ## 未来扩展
 
-### 新工具支持
-- **任务管理**: 创建、查询、删除 AI CLI 任务
+### 任务管理增强
+- **任务查询**: 查询当前运行的MCP任务状态
+- **任务取消**: 取消运行中的任务
+- **任务历史**: 查看已完成任务的历史记录
 
-### 配置管理
-- **动态配置**: 运行时修改部分配置
-- **配置版本**: 配置变更历史和回滚
-- **权限细分**: 更细粒度的访问控制
+### 并发控制
+- **并发限制**: 限制同时运行的任务数量
+- **优先级队列**: 支持任务优先级调度
+- **资源管理**: 基于系统资源的智能调度
 
 ## 相关文档
 

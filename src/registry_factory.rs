@@ -98,6 +98,22 @@ impl RegistryFactory {
             mcp_initialized: true, // MCP注册表总是初始化的
         }
     }
+
+    /// 清理CLI注册表的共享内存（进程结束时调用）
+    pub fn cleanup_cli_registry(&self) -> Result<(), RegistryError> {
+        let guard = self.cli_registry.lock();
+        if let Some(registry) = guard.as_ref() {
+            registry.cleanup()?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for RegistryFactory {
+    fn drop(&mut self) {
+        // 进程结束时自动清理共享内存
+        let _ = self.cleanup_cli_registry();
+    }
 }
 
 /// 注册表类型枚举

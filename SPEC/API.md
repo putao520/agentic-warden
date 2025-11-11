@@ -57,9 +57,23 @@ agentic-warden dashboard    # 显式指定
 
 #### 2.2 Status 命令
 ```bash
-agentic-warden status
+agentic-warden status         # 默认显示文本摘要
+agentic-warden status --tui   # 启动TUI界面
 ```
-**功能**: 进入任务状态 TUI，实时显示所有运行中的任务
+**功能**:
+- **文本模式（默认）**: 显示当前进程隔离区的运行中任务数量
+  - 有任务时输出: `running X tasks!`
+  - 无任务时输出: `No tasks!`
+- **TUI模式（--tui）**: 进入任务状态 TUI，实时显示所有运行中的任务
+
+**示例**:
+```bash
+$ agentic-warden status
+running 3 tasks!
+
+$ agentic-warden status
+No tasks!
+```
 
 #### 2.3 Push 命令
 ```bash
@@ -74,7 +88,56 @@ agentic-warden pull            # 从 Google Drive 拉取所有文件
 ```
 **功能**: 从 Google Drive 拉取文件，自动检测授权并显示进度 TUI
 
-#### 2.5 Provider 管理
+#### 2.5 Wait 命令
+```bash
+agentic-warden wait [--timeout <duration>] [--verbose]
+```
+**功能**: 等待当前进程所有任务完成（跨进程共享内存）
+
+**参数**:
+- `--timeout <duration>`: 超时时间，如 `12h`, `30m`, `1d`（默认: `12h`）
+- `--verbose, -v`: 显示详细进度信息
+
+**示例**:
+```bash
+$ agentic-warden wait
+Waiting for all concurrent AI CLI tasks to complete...
+All tasks completed!
+
+$ agentic-warden wait --timeout 1h --verbose
+Waiting for all concurrent AI CLI tasks to complete (timeout: 1h)...
+Task PID 12345 completed: success
+All tasks completed!
+```
+
+#### 2.6 PWait 命令
+```bash
+agentic-warden pwait <PID>
+```
+**功能**: 等待指定PID进程的共享内存任务完成
+
+**参数**:
+- `<PID>`: 必填，要等待的进程PID
+
+**示例**:
+```bash
+$ agentic-warden pwait 12345
+Waiting for 3 tasks from PID 12345 to complete...
+Task PID 67890 completed: success
+Task PID 67891 completed: success
+Task PID 67892 completed: success
+All tasks completed!
+
+$ agentic-warden pwait 99999
+No tasks found for PID 99999
+```
+
+**共享内存命名规则**:
+- 每个进程使用独立的共享内存区域，命名格式: `{PID}_task`
+- pwait命令连接到指定PID的共享内存区域
+- 进程结束时自动清理对应的共享内存
+
+#### 2.7 Provider 管理
 ```bash
 agentic-warden provider    # 直接进入 Provider 管理 TUI 界面
 ```

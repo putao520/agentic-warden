@@ -1,12 +1,14 @@
-//! 进程内任务等待模式
+//! 共享内存任务等待模式
 //!
-//! 与wait_mode（跨进程）不同，pwait_mode等待当前进程内InProcessRegistry中的任务
+//! pwait_mode用于等待指定PID进程的共享内存任务完成
 
 use crate::{
     config::{MAX_WAIT_DURATION, WAIT_INTERVAL_DEFAULT},
     platform,
     registry_factory::McpRegistry,
+    storage::SharedMemoryStorage,
     task_record::TaskStatus,
+    unified_registry::Registry,
 };
 use chrono::{DateTime, Utc};
 use std::time::{Duration, Instant};
@@ -252,6 +254,103 @@ pub async fn wait_async(registry: &McpRegistry) -> Result<WaitReport, PWaitError
 
         // 异步等待下一次检查
         tokio::time::sleep(interval).await;
+    }
+}
+
+/// 等待指定PID进程的共享内存任务完成
+///
+/// 这是主要的入口函数，用于从命令行调用
+pub fn run_for_pid(pid: u32) -> Result<WaitReport, PWaitError> {
+    // 连接到指定PID的共享内存
+    let storage = SharedMemoryStorage::connect_for_pid(pid)
+        .map_err(|e| PWaitError::Registry(format!("Failed to connect to shared memory for PID {}: {}", pid, e)))?;
+
+    let registry = Registry::new(storage);
+
+    // 使用现有的等待逻辑
+    run_with_registry_generic(&registry, pid)
+}
+
+/// 通用的等待逻辑（支持任何类型的Registry）
+fn run_with_registry_generic<S: crate::storage::TaskStorage>(
+    registry: &Registry<S>,
+    target_pid: u32,
+) -> Result<WaitReport, PWaitError> {
+    let start = Instant::now();
+    let interval = WAIT_INTERVAL_DEFAULT;
+    let mut report = WaitReport::new();
+
+    // 检查是否有任务
+    let initial_entries = registry
+        .entries()
+        .map_err(|e| PWaitError::Registry(e.to_string()))?;
+
+    if initial_entries.is_empty() {
+        return Err(PWaitError::NoTasks);
+    }
+
+    report.total_tasks = initial_entries.len();
+    println!("Waiting for {} tasks from PID {} to complete...", report.total_tasks, target_pid);
+
+    loop {
+        let now = Utc::now();
+
+        // 清理过期任务
+        let terminate_wrapper = |pid: u32| {
+            platform::terminate_process(pid);
+            Ok(())
+        };
+        let _ = registry.sweep_stale_entries(
+            now,
+            platform::process_alive,
+            &terminate_wrapper,
+        );
+
+        // 收集已完成的任务
+        let completed = registry
+            .get_completed_unread_tasks()
+            .map_err(|e| PWaitError::Registry(e.to_string()))?;
+
+        for (pid, record) in completed {
+            let completion = TaskCompletion {
+                pid,
+                result: record.result.clone(),
+                exit_code: record.exit_code,
+                started_at: record.started_at,
+                completed_at: record.completed_at,
+                log_path: record.log_path.clone(),
+            };
+
+            println!(
+                "Task PID {} completed: {}",
+                pid,
+                record.result.as_ref().unwrap_or(&"unknown".to_string())
+            );
+
+            report.add_completion(completion);
+        }
+
+        // 检查是否还有运行中的任务
+        let has_running = registry
+            .has_running_tasks(None)
+            .map_err(|e| PWaitError::Registry(e.to_string()))?;
+
+        if !has_running {
+            println!("All tasks completed!");
+            report.duration = start.elapsed();
+            return Ok(report);
+        }
+
+        // 超时检查
+        if start.elapsed() >= MAX_WAIT_DURATION {
+            println!("⚠️  Wait timed out after {} hours", MAX_WAIT_DURATION.as_secs() / 3600);
+            report.timed_out = true;
+            report.duration = start.elapsed();
+            return Ok(report);
+        }
+
+        // 等待下一次检查
+        std::thread::sleep(interval);
     }
 }
 

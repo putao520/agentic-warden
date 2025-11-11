@@ -44,8 +44,12 @@ pub enum Commands {
     /// 显示 Dashboard（无参数时的默认行为）
     Dashboard,
 
-    /// 显示任务状态 TUI
-    Status,
+    /// 显示任务状态
+    Status {
+        /// 启动TUI界面（默认显示文本摘要）
+        #[arg(long)]
+        tui: bool,
+    },
 
     /// 启动 Provider 管理 TUI
     Provider,
@@ -82,9 +86,13 @@ pub enum Commands {
         verbose: bool,
     },
 
-    /// 等待所有MCP任务完成（进程内）
+    /// 等待指定进程的共享任务完成
     #[command(name = "pwait")]
-    PWait,
+    PWait {
+        /// 要等待的进程PID
+        #[arg(value_name = "PID")]
+        pid: u32,
+    },
 
     /// 显示使用示例
     #[command(alias = "demo")]
