@@ -185,33 +185,45 @@ Agentic-Warden MUST provide `update` command to manage AI CLI tools (codex, clau
 
 **Acceptance Criteria**:
 - [x] `agentic-warden update` updates all installed AI CLI tools to latest version
-- [x] `agentic-warden update <tool>` updates/installs specific tool (codex/gemini)
-- [x] For uninstalled tools: install latest version via npm
-- [x] For installed tools: check latest version from npm registry and update if outdated
-- [x] Query npm registry API to get latest version for each package
-- [x] Execute npm install -g <package>@latest for updates
+- [x] `agentic-warden update <tool>` updates/installs specific tool (codex/gemini/claude)
+- [x] For codex/gemini: install latest version via npm if not installed
+- [x] For codex/gemini: check latest version from npm registry and update if outdated
+- [x] For claude: use `claude update` command (when installed)
+- [x] For claude: show installation URL when not installed (https://console.anthropic.com/downloads)
+- [x] Query npm registry API to get latest version for npm packages
+- [x] Execute npm install -g <package>@latest for npm updates
 - [x] Provide progress feedback during installation/update
 - [x] Handle errors gracefully (network errors, permission issues, etc.)
 - [x] Display before/after version information
-- [ ] Display summary report of all updates (implemented but need to test with multiple tools)
+- [x] Display summary report of all updates
 
 **Technical Constraints**:
-- Use npm registry API: https://registry.npmjs.org/<package>/latest
-- Packages:
+- **codex/gemini (NPM packages)**:
+  - Use npm registry API: https://registry.npmjs.org/<package>/latest
   - @openai/codex (for codex) - ✅ verified working
   - @google/gemini-cli (for gemini) - ✅ verified working
-  - Note: Claude CLI is not available on npm and must be installed from https://console.anthropic.com/downloads
-- Use urlencoding::encode for scoped packages (e.g., @anthropic-ai/claude-cli)
-- MUST support proxy environments
-- MUST verify installation success after completion
-- Update process should not interrupt running AI CLI processes
+  - Install/update via: `npm install -g <package>@latest`
+  - Use urlencoding::encode for scoped packages
+
+- **claude (Native package)**:
+  - Not available on npm
+  - Install from: https://console.anthropic.com/downloads
+  - Update via: `claude update` command
+  - Version detection via `claude --version`
+
+- Common requirements:
+  - MUST support proxy environments
+  - MUST verify installation success after completion
+  - Update process must not interrupt running AI CLI processes
 
 **Error Handling**:
-- MUST handle npm not found error
+- MUST handle npm not found error (for codex/gemini)
+- MUST handle `claude` command not found error
 - MUST handle network connectivity issues
-- MUST handle permission denied errors (suggest sudo if needed)
+- MUST handle permission denied errors
 - MUST handle package not found errors
 - MUST provide clear error messages with resolution suggestions
+- MUST distinguish between npm packages and native packages
 
 ---
 

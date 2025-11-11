@@ -132,3 +132,29 @@ fn try_parse_fails_for_unknown_top_level_flag() {
     let result = Cli::try_parse_command_from(["agentic-warden", "--unknown"]);
     assert!(result.is_err(), "unknown flag should produce clap error");
 }
+
+#[test]
+fn parses_update_command_with_no_tool() {
+    match parse(&["update"]) {
+        Commands::Update { tool: None } => {}
+        other => panic!("expected update command with no tool, got {other:?}"),
+    }
+}
+
+#[test]
+fn parses_update_command_with_tool_name() {
+    match parse(&["update", "codex"]) {
+        Commands::Update { tool } => assert_eq!(tool.as_deref(), Some("codex")),
+        other => panic!("expected update command with tool 'codex', got {other:?}"),
+    }
+
+    match parse(&["update", "gemini"]) {
+        Commands::Update { tool } => assert_eq!(tool.as_deref(), Some("gemini")),
+        other => panic!("expected update command with tool 'gemini', got {other:?}"),
+    }
+
+    match parse(&["update", "claude"]) {
+        Commands::Update { tool } => assert_eq!(tool.as_deref(), Some("claude")),
+        other => panic!("expected update command with tool 'claude', got {other:?}"),
+    }
+}

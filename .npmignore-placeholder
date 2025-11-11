@@ -1,0 +1,13 @@
+# 发布占位包时忽略所有项目文件
+# 只发布占位相关文件
+
+# Rust 项目文件
+*
+!package-placeholder.json
+!bin-placeholder.js
+!README-placeholder.md
+
+# 重命名占位文件
+package-placeholder.json
+bin-placeholder.js
+README-placeholder.md

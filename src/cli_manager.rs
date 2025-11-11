@@ -72,8 +72,8 @@ impl CliToolDetector {
             CliTool {
                 name: "Claude CLI".to_string(),
                 command: "claude".to_string(),
-                npm_package: "@anthropic-ai/claude-cli".to_string(),
-                description: "Anthropic Claude CLI tool".to_string(),
+                npm_package: "@anthropic-ai/claude-cli".to_string(), // Note: This package doesn't exist on npm. Claude Code is installed via other methods.
+                description: "Anthropic Claude CLI tool (Note: Not available on npm)".to_string(),
                 installed: false,
                 version: None,
                 install_type: None,
@@ -82,7 +82,7 @@ impl CliToolDetector {
             CliTool {
                 name: "Codex CLI".to_string(),
                 command: "codex".to_string(),
-                npm_package: "@openai/codex-cli".to_string(),
+                npm_package: "@openai/codex".to_string(),
                 description: "OpenAI Codex CLI tool".to_string(),
                 installed: false,
                 version: None,
@@ -92,7 +92,7 @@ impl CliToolDetector {
             CliTool {
                 name: "Gemini CLI".to_string(),
                 command: "gemini".to_string(),
-                npm_package: "@google-ai/gemini-cli".to_string(),
+                npm_package: "@google/gemini-cli".to_string(),
                 description: "Google Gemini CLI tool".to_string(),
                 installed: false,
                 version: None,
@@ -194,9 +194,9 @@ impl CliToolDetector {
     /// Get installation hint for a tool
     pub fn get_install_hint(&self, command: &str) -> String {
         const INSTALL_HINTS: &[(&str, &str)] = &[
-            ("codex", "npm install -g @openai/codex-cli"),
-            ("claude", "npm install -g @anthropic-ai/claude-cli"),
-            ("gemini", "npm install -g @google-ai/gemini-cli"),
+            ("codex", "npm install -g @openai/codex"),
+            ("claude", "# Claude CLI is not available on npm. Install from: https://console.anthropic.com/downloads"),
+            ("gemini", "npm install -g @google/gemini-cli"),
         ];
 
         INSTALL_HINTS
@@ -325,6 +325,13 @@ pub async fn execute_update(tool_name: Option<&str>) -> Result<Vec<(String, bool
     for tool in tools_to_process {
         println!("\n🔧 Processing {}...", tool.name);
 
+        // Special handling for Claude - use 'claude update' command
+        if tool.command == "claude" {
+            handle_claude_update(tool, &mut results).await;
+            continue;
+        }
+
+        // For other tools (codex, gemini), use npm
         let npm_package = &tool.npm_package;
         let current_version = tool.version.clone();
 
@@ -399,6 +406,37 @@ pub async fn execute_update(tool_name: Option<&str>) -> Result<Vec<(String, bool
     Ok(results)
 }
 
+/// Handle Claude update - uses 'claude update' command instead of npm
+async fn handle_claude_update(tool: &CliTool, results: &mut Vec<(String, bool, String)>) {
+    if !tool.installed {
+        println!("  ❌ Claude CLI is not installed");
+        println!("  Install from: https://console.anthropic.com/downloads");
+        results.push((tool.name.clone(), false, "Not installed - download from https://console.anthropic.com/downloads".to_string()));
+        return;
+    }
+
+    println!("  Running 'claude update'...");
+
+    match std::process::Command::new("claude")
+        .arg("update")
+        .status()
+    {
+        Ok(status) => {
+            if status.success() {
+                println!("  ✅ Successfully updated Claude CLI!");
+                results.push((tool.name.clone(), true, "Successfully updated".to_string()));
+            } else {
+                eprintln!("  ❌ Claude update failed with exit code: {:?}", status.code());
+                results.push((tool.name.clone(), false, format!("Update failed with exit code: {:?}", status.code())));
+            }
+        }
+        Err(e) => {
+            eprintln!("  ❌ Failed to execute 'claude update': {}", e);
+            results.push((tool.name.clone(), false, format!("Failed to execute 'claude update': {}", e)));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -437,9 +475,22 @@ mod tests {
     #[test]
     fn test_get_install_hint() {
         let detector = CliToolDetector::new();
-        let hint = detector.get_install_hint("claude");
-        assert!(hint.contains("npm install"));
 
+        // Test claude (not available on npm)
+        let claude_hint = detector.get_install_hint("claude");
+        assert!(claude_hint.contains("anthropic.com/downloads"));
+
+        // Test codex (available on npm)
+        let codex_hint = detector.get_install_hint("codex");
+        assert!(codex_hint.contains("npm install"));
+        assert!(codex_hint.contains("@openai/codex"));
+
+        // Test gemini (available on npm)
+        let gemini_hint = detector.get_install_hint("gemini");
+        assert!(gemini_hint.contains("npm install"));
+        assert!(gemini_hint.contains("@google/gemini-cli"));
+
+        // Test unknown tool
         let unknown_hint = detector.get_install_hint("unknown");
         assert!(unknown_hint.contains("Install"));
     }

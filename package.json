@@ -1,0 +1,49 @@
+{
+  "name": "agentic-warden",
+  "version": "0.4.5",
+  "description": "AI CLI 多账户管理和任务协调器",
+  "keywords": [
+    "ai",
+    "cli",
+    "anthropic",
+    "openai",
+    "google",
+    "tui",
+    "multi-account"
+  ],
+  "homepage": "https://github.com/putao520/agentic-warden",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/putao520/agentic-warden.git"
+  },
+  "bugs": {
+    "url": "https://github.com/putao520/agentic-warden/issues"
+  },
+  "license": "MIT",
+  "author": "Putao520",
+  "bin": {
+    "agentic-warden": "./bin/agentic-warden.js"
+  },
+  "main": "./bin/agentic-warden.js",
+  "files": [
+    "bin/",
+    "binaries/",
+    "README.md",
+    "LICENSE"
+  ],
+  "os": [
+    "linux",
+    "darwin",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "scripts": {
+    "postinstall": "node bin/install.js"
+  }
+}
