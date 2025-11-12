@@ -201,16 +201,31 @@ This matrix provides complete traceability from:
 
 ---
 
-### REQ-009: AI CLI 更新/安装管理
+### REQ-009: 交互式 AI CLI 启动
 
 | Layer | ID | Component | Status | Implementation Files |
 |-------|----|-----------|---------|----------------------|
-| **Requirement** | REQ-009 | AI CLI 更新/安装管理 | 🔴 To Do | SPEC/01-REQUIREMENTS.md#REQ-009 |
+| **Requirement** | REQ-009 | 交互式 AI CLI 启动 | 🔴 To Do | SPEC/01-REQUIREMENTS.md#REQ-009 |
+| **Architecture** | ARCH-008 | Process Supervisor | 🟡 Planned | SPEC/02-ARCHITECTURE.md#Core-Modules |
+| **API** | API-001 | AI CLI Execution Commands | 🟡 Planned | SPEC/04-API-DESIGN.md#API-001 |
+| **Implementation** | - | External AI CLI Parser | 🔴 To Do | `src/commands/parser.rs` |
+| **Implementation** | - | Main CLI Handler | 🔴 To Do | `src/main.rs` |
+
+**Key Insights**:
+- **Not Yet Implemented**: This requirement is planned for v0.1.1
+- Will support interactive mode with provider selection
+- Leverages existing `AiCliCommand` infrastructure with empty prompt
+
+### REQ-010: AI CLI 更新/安装管理
+
+| Layer | ID | Component | Status | Implementation Files |
+|-------|----|-----------|---------|----------------------|
+| **Requirement** | REQ-010 | AI CLI 更新/安装管理 | 🔴 To Do | SPEC/01-REQUIREMENTS.md#REQ-010 |
 | **Architecture** | ARCH-008 | Update Management | 🟡 Planned | SPEC/02-ARCHITECTURE.md#Update-Management |
 | **API** | API-005 | Update Command | 🟡 Planned | SPEC/04-API-DESIGN.md#API-005 |
 | **Implementation** | - | Update Implementation | 🔴 To Do | `src/commands/update.rs` |
 | **Implementation** | - | NPM Registry Client | 🔴 To Do | `src/utils/npm_client.rs` |
-| **Implementation** | - | Version Comparison | 🔴 To Do | `src/utils/version_compare.rs` |
+| **Implementation** | - | Version Comparison | 🔴 To Do | `src/utils/version_compare.rs |
 
 **Key Insights**:
 - **Not Yet Implemented**: This requirement is planned for v0.2.0

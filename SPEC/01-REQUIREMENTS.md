@@ -233,7 +233,70 @@ Agentic-Warden MUST provide seamless AI CLI startup with dynamic provider select
 
 ---
 
-### REQ-009: AI CLI 更新/安装管理
+### REQ-009: 交互式 AI CLI 启动
+**Status**: 🔴 To Do
+**Priority**: P1 (High)
+**Version**: v0.1.1
+**Related**: ARCH-008, API-001
+
+**Description**:
+Agentic-Warden MUST support launching AI CLI tools in interactive mode when no task description is provided, while still supporting provider-specific environment variable injection for seamless switching between different API providers.
+
+**Acceptance Criteria**:
+- [ ] Support `agentic-warden claude` - launch Claude CLI in interactive mode with default provider
+- [ ] Support `agentic-warden claude -p openrouter` - launch Claude CLI in interactive mode with OpenRouter provider
+- [ ] Support `agentic-warden codex --provider litellm` - support long format provider flag in interactive mode
+- [ ] Support `agentic-warden gemini,prompt -p custom` - multiple AI CLI in interactive mode with custom provider
+- [ ] Pass all environment variable injection to interactive AI CLI process before startup
+- [ ] Maintain process tree tracking and task registration for long-running interactive sessions
+- [ ] Support graceful signal handling (Ctrl+C) compatible with both Agentic-Warden and AI CLI processes
+- [ ] Detect interactive mode completion when user exits and mark task as completed in shared memory
+- [ ] Provide clear user feedback showing provider used in interactive mode
+- [ ] Handle provider validation errors gracefully before launching interactive CLI
+
+**Technical Constraints**:
+- Interactive mode MUST preserve all provider functionality and environment variable injection
+- Process tracking MUST work for long-running interactive sessions without memory leaks
+- Environment variable injection MUST happen before interactive CLI starts, not during
+- Signal handling MUST be compatible with both Agentic-Warden process management and AI CLI signal handling
+- Task completion detection MUST work when user exits interactive mode naturally (Ctrl+D, exit command, etc.)
+- Interactive mode MUST NOT require additional prompts or confirmation dialogs after provider selection
+- Provider compatibility validation MUST occur before process startup
+
+**Usage Examples**:
+```bash
+# Basic interactive mode with default provider
+agentic-warden claude
+# Output: 🚀 Starting claude in interactive mode (provider: None)
+
+# Interactive mode with specific provider
+agentic-warden claude -p openrouter
+# Output: 🚀 Starting claude in interactive mode (provider: Some("openrouter"))
+
+# Multiple AI CLI in interactive mode with shared provider
+agentic-warden claude,codex -p litellm
+# Output: 🚀 Starting claude,codex in interactive mode (provider: Some("litellm"))
+
+# Interactive mode with long format provider flag
+agentic-warden gemini --provider custom-proxy
+# Output: 🚀 Starting gemini in interactive mode (provider: Some("custom-proxy"))
+```
+
+**Error Handling**:
+- Missing provider name after `-p`/`--provider`: Clear error message with usage example
+- Invalid provider name: Show available providers and suggest valid alternatives
+- Provider compatibility issues: Explain which AI CLI types are supported
+- Interactive CLI not found: Suggest installation or alternative CLI types
+
+**Integration Notes**:
+- Interactive mode leverages existing `AiCliCommand` infrastructure with empty prompt
+- Provider injection works identically to task mode, ensuring consistency
+- Process tree tracking continues throughout interactive session
+- Task lifecycle follows same pattern: Running → Interactive → Completed
+
+---
+
+### REQ-010: AI CLI 更新/安装管理
 **Status**: 🔴 To Do
 **Priority**: P1 (High)
 **Version**: v0.1.0
@@ -376,12 +439,16 @@ Agentic-Warden MUST meet performance criteria for process tracking and task mana
 | REQ-006 | AI CLI 工具检测与状态管理 | P1 | 🟢 Done | v0.1.0 | ARCH-006, MODULE-002 | Initial commit |
 | REQ-007 | MCP 服务器 | P1 | 🟢 Done | v0.1.0 | ARCH-007, API-003 | Initial commit |
 | REQ-008 | 指定供应商模式 AI CLI 启动 | P0 | 🟢 Done | v0.1.0 | ARCH-002, ARCH-008, API-004 | Initial commit |
-| REQ-009 | AI CLI 更新/安装管理 | P1 | 🔴 To Do | v0.1.0 | ARCH-008, MODULE-002, API-004 | - |
+| REQ-009 | 交互式 AI CLI 启动 | P1 | 🔴 To Do | v0.1.1 | ARCH-008, API-001 | - |
+| REQ-010 | AI CLI 更新/安装管理 | P1 | 🔴 To Do | v0.1.0 | ARCH-008, MODULE-002, API-004 | - |
 
 ---
 
 ## Change Log
 
-### 2025-11-11
-- Added REQ-008: AI CLI 更新/安装管理
+### 2025-11-12
+- Added REQ-009: 交互式 AI CLI 启动
+- Status: New requirement for v0.1.1 feature
+- Added REQ-010: AI CLI 更新/安装管理 (renumbered from REQ-009)
 - Status: New requirement for v0.2.0 feature
+- Re-numbered requirements to maintain sequential ordering
