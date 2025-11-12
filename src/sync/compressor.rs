@@ -251,6 +251,7 @@ pub mod utils {
     }
 
     /// Format bytes to human readable string
+    /// Re-exported from common::utils for backward compatibility
     pub fn format_bytes(bytes: u64) -> String {
         const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
         let mut size = bytes as f64;
@@ -282,6 +283,7 @@ mod tests {
 
     #[test]
     fn test_format_bytes() {
+        // Test the function in the utils namespace
         assert_eq!(utils::format_bytes(512), "512 B");
         assert_eq!(utils::format_bytes(1024), "1.00 KB");
         assert_eq!(utils::format_bytes(1048576), "1.00 MB");

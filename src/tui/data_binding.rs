@@ -15,9 +15,9 @@ use crate::{
 };
 
 use super::app_state::AppState;
+use crate::common::constants::duration::PROVIDER_REFRESH_INTERVAL_SECS;
 
 const TASK_REFRESH_INTERVAL_MS: u64 = 750;
-const PROVIDER_REFRESH_INTERVAL_SECS: u64 = 5;
 
 /// Background controller that keeps [`AppState`] in sync with disk/registry state.
 pub struct DataBindingController {

@@ -45,11 +45,33 @@ pub struct GetTaskCommandParams {
     pub provider: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SearchHistoryParams {
+    pub query: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score_threshold: Option<f64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct GetSessionTodosParams {
+    pub session_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>, // Pending, InProgress, Completed, Cancelled
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u64>,
+}
+
 /// Agentic-Warden MCP服务器
 ///
 /// 使用rmcp库实现标准的MCP v1.0服务器，提供以下工具：
 /// - `start_concurrent_tasks`: 并发启动多个任务
 /// - `get_task_command`: 获取单个任务的启动命令
+/// - `search_history`: 查询历史对话（带session_id）
+/// - `get_session_todos`: 通过session_id查询未完成TODO
 #[derive(Clone)]
 pub struct AgenticWardenMcpServer {
     /// 工具路由器（由rmcp宏生成）
@@ -70,7 +92,7 @@ impl AgenticWardenMcpServer {
         eprintln!("🚀 Starting Agentic-Warden MCP Server");
         eprintln!("   Protocol: MCP v1.0 (rmcp-based)");
         eprintln!("   Transport: stdio");
-        eprintln!("   Tools: 2 available");
+        eprintln!("   Tools: 4 available");
         eprintln!();
         eprintln!("✓ Server ready. Use Ctrl+C to stop.");
         eprintln!();
@@ -240,6 +262,180 @@ impl AgenticWardenMcpServer {
             "provider": provider,
             "message": "Execute the 'task' using Bash tool with 12h timeout"
         })).unwrap()
+    }
+
+    /// Search for relevant conversation history using semantic similarity, optionally filtered by session_id
+    ///
+    /// # 参数
+    /// - `query`: 搜索查询
+    /// - `session_id`: 可选的会话ID过滤器
+    /// - `limit`: 返回结果数量限制
+    /// - `score_threshold`: 相似度阈值
+    ///
+    /// # 返回
+    /// - success: 是否成功
+    /// - conversations: 相关对话列表，包含：
+    ///   - session_id: 会话ID
+    ///   - content: 对话内容
+    ///   - timestamp: 时间戳
+    ///   - score: 相似度分数
+    ///   - metadata: 元数据
+    /// - message: 状态信息
+    #[tool(description = "Search for relevant conversation history using semantic similarity, optionally filtered by session_id")]
+    pub async fn search_history(&self, params: Parameters<SearchHistoryParams>) -> String {
+        // 初始化内存管理器
+        let memory_manager = match agentic_warden::memory::MemoryManager::new().await {
+            Ok(mm) => mm,
+            Err(e) => {
+                return serde_json::to_string_pretty(&serde_json::json!({
+                    "success": false,
+                    "error": format!("Failed to initialize memory manager: {}", e),
+                    "conversations": Vec::<Value>::new()
+                })).unwrap();
+            }
+        };
+
+        // 搜索历史对话
+        let limit = params.0.limit.unwrap_or(10);
+        let score_threshold = params.0.score_threshold.unwrap_or(0.5) as f32;
+
+        match memory_manager.search_relevant_memories(&params.0.query, Some(limit)).await {
+            Ok(results) => {
+                // 转换结果为对话格式，包含session_id
+                let conversations: Vec<Value> = results.into_iter().filter_map(|result| {
+                    // 从metadata中提取session_id
+                    let session_id = result.point.metadata.get("session_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+
+                    // 应用session_id过滤器
+                    if let Some(ref filter_session_id) = params.0.session_id {
+                        if session_id != *filter_session_id {
+                            return None;
+                        }
+                    }
+
+                    // 应用score_threshold过滤器
+                    if result.score < score_threshold {
+                        return None;
+                    }
+
+                    Some(serde_json::json!({
+                        "session_id": session_id,
+                        "content": result.point.content,
+                        "timestamp": result.point.timestamp.to_rfc3339(),
+                        "score": result.score,
+                        "metadata": result.point.metadata
+                    }))
+                }).collect();
+
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "success": true,
+                    "conversations": conversations,
+                    "count": conversations.len(),
+                    "query": params.0.query,
+                    "message": "History search completed successfully"
+                })).unwrap()
+            }
+            Err(e) => {
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "success": false,
+                    "error": format!("Failed to search history: {}", e),
+                    "conversations": Vec::<Value>::new()
+                })).unwrap()
+            }
+        }
+    }
+
+    /// Get TODOs for a specific session_id, optionally filtered by status
+    ///
+    /// # 参数
+    /// - `session_id`: 会话ID
+    /// - `status`: 可选的状态过滤器 (Pending, InProgress, Completed, Cancelled)
+    /// - `limit`: 可选的结果数量限制
+    ///
+    /// # 返回
+    /// - success: 是否成功
+    /// - todos: TODO列表，包含：
+    ///   - id: TODO ID
+    ///   - title: 标题
+    ///   - description: 描述
+    ///   - status: 状态
+    ///   - priority: 优先级
+    ///   - created_at: 创建时间
+    ///   - updated_at: 更新时间
+    ///   - tags: 标签
+    ///   - metadata: 元数据
+    ///   - session_id: 会话ID
+    /// - message: 状态信息
+    #[tool(description = "Get TODOs for a specific session_id, optionally filtered by status")]
+    pub async fn get_session_todos(&self, params: Parameters<GetSessionTodosParams>) -> String {
+        // 初始化内存管理器
+        let memory_manager = match agentic_warden::memory::MemoryManager::new().await {
+            Ok(mm) => mm,
+            Err(e) => {
+                return serde_json::to_string_pretty(&serde_json::json!({
+                    "success": false,
+                    "error": format!("Failed to initialize memory manager: {}", e),
+                    "todos": Vec::<Value>::new()
+                })).unwrap();
+            }
+        };
+
+        // 解析状态过滤器
+        let status_filter = if let Some(ref status_str) = params.0.status {
+            match status_str.to_lowercase().as_str() {
+                "pending" => Some(agentic_warden::memory::todo_manager::TodoStatus::Pending),
+                "inprogress" => Some(agentic_warden::memory::todo_manager::TodoStatus::InProgress),
+                "completed" => Some(agentic_warden::memory::todo_manager::TodoStatus::Completed),
+                "cancelled" => Some(agentic_warden::memory::todo_manager::TodoStatus::Cancelled),
+                _ => None,
+            }
+        } else {
+            None
+        };
+
+        // 使用get_todos_by_session_id方法查找特定session_id的TODO
+        match memory_manager.get_todos_by_session_id(&params.0.session_id, status_filter).await {
+            Ok(todos) => {
+                let todos_json: Vec<Value> = todos.into_iter().map(|todo| {
+                    // 从metadata中提取session_id
+                    let session_id = todo.metadata.get("session_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+
+                    serde_json::json!({
+                        "id": todo.id,
+                        "title": todo.title,
+                        "description": todo.description,
+                        "status": format!("{:?}", todo.status),
+                        "priority": format!("{:?}", todo.priority),
+                        "created_at": todo.created_at.to_rfc3339(),
+                        "updated_at": todo.updated_at.to_rfc3339(),
+                        "tags": todo.tags,
+                        "metadata": todo.metadata,
+                        "session_id": session_id
+                    })
+                }).collect();
+
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "success": true,
+                    "todos": todos_json,
+                    "count": todos_json.len(),
+                    "session_id": params.0.session_id,
+                    "message": "Session TODOs retrieved successfully"
+                })).unwrap()
+            }
+            Err(e) => {
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "success": false,
+                    "error": format!("Failed to get session todos: {}", e),
+                    "todos": Vec::<Value>::new()
+                })).unwrap()
+            }
+        }
     }
 }
 

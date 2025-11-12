@@ -178,7 +178,7 @@ Agentic-Warden MUST detect installed AI CLI tools (codex, claude, gemini) and pr
 ### REQ-007: MCP (Model Context Protocol) 服务器
 **Status**: 🟢 Done
 **Priority**: P1 (High)
-**Version**: v0.1.0
+**Version**: v0.1.0 → v0.2.0
 **Related**: ARCH-007, API-003
 
 **Description**:
@@ -186,15 +186,19 @@ Agentic-Warden MUST provide MCP server to enable external AI assistants to acces
 
 **Acceptance Criteria**:
 - [x] Support stdio transport protocol
-- [x] Provide process management tools: monitor_processes, get_process_tree, terminate_process
-- [x] Provide provider status tool: get_provider_status
-- [x] Provide AI CLI launch tool: start_ai_cli
+- [x] Provide core task management tools:
+  - `start_concurrent_tasks`: 并发启动多个AI CLI任务
+  - `get_task_command`: 获取单个AI CLI任务的启动命令
+- [x] Provide memory-related tools:
+  - `search_history`: 查询历史对话（带session_id过滤）
+  - `get_session_todos`: 通过session_id查询未完成TODO
 - [x] Compatible with Claude Code and other MCP clients
 
 **Technical Constraints**:
 - MCP Protocol v1.0
 - Transport: stdio only
-- Support stdio for better integration
+- Memory integration with Qdrant vector database
+- Session-based TODO management
 
 ---
 
@@ -243,16 +247,16 @@ Agentic-Warden MUST provide seamless AI CLI startup with dynamic provider select
 Agentic-Warden MUST support launching AI CLI tools in interactive mode when no task description is provided, while still supporting provider-specific environment variable injection for seamless switching between different API providers.
 
 **Acceptance Criteria**:
-- [ ] Support `agentic-warden claude` - launch Claude CLI in interactive mode with default provider
-- [ ] Support `agentic-warden claude -p openrouter` - launch Claude CLI in interactive mode with OpenRouter provider
-- [ ] Support `agentic-warden codex --provider litellm` - support long format provider flag in interactive mode
-- [ ] Support `agentic-warden gemini,prompt -p custom` - multiple AI CLI in interactive mode with custom provider
-- [ ] Pass all environment variable injection to interactive AI CLI process before startup
-- [ ] Maintain process tree tracking and task registration for long-running interactive sessions
-- [ ] Support graceful signal handling (Ctrl+C) compatible with both Agentic-Warden and AI CLI processes
-- [ ] Detect interactive mode completion when user exits and mark task as completed in shared memory
-- [ ] Provide clear user feedback showing provider used in interactive mode
-- [ ] Handle provider validation errors gracefully before launching interactive CLI
+- [x] Support `agentic-warden claude` - launch Claude CLI in interactive mode with default provider
+- [x] Support `agentic-warden claude -p openrouter` - launch Claude CLI in interactive mode with OpenRouter provider
+- [x] Support `agentic-warden codex --provider litellm` - support long format provider flag in interactive mode
+- [x] Support `agentic-warden gemini,prompt -p custom` - multiple AI CLI in interactive mode with custom provider
+- [x] Pass all environment variable injection to interactive AI CLI process before startup
+- [x] Maintain process tree tracking and task registration for long-running interactive sessions
+- [x] Support graceful signal handling (Ctrl+C) compatible with both Agentic-Warden and AI CLI processes
+- [x] Detect interactive mode completion when user exits and mark task as completed in shared memory
+- [x] Provide clear user feedback showing provider used in interactive mode
+- [x] Handle provider validation errors gracefully before launching interactive CLI
 
 **Technical Constraints**:
 - Interactive mode MUST preserve all provider functionality and environment variable injection
@@ -296,8 +300,37 @@ agentic-warden gemini --provider custom-proxy
 
 ---
 
-### REQ-010: AI CLI 更新/安装管理
-**Status**: 🔴 To Do
+### REQ-010: 内存集成与语义搜索
+**Status**: 🟢 Done
+**Priority**: P1 (High)
+**Version**: v0.1.0
+**Related**: ARCH-010, DATA-003, API-005
+
+**Description**:
+Agentic-Warden MUST integrate gmemory functionality to provide semantic conversation memory and session-based TODO management with vector database storage.
+
+**Acceptance Criteria**:
+- [x] Integrate Qdrant vector database for semantic search
+- [x] Integrate Ollama embedding service for text vectorization
+- [x] Provide session_id-based conversation storage in metadata
+- [x] Provide MCP tools for memory operations:
+  - `search_history`: 查询历史对话（带session_id过滤）
+  - `get_session_todos`: 通过session_id查询未完成TODO
+- [x] Support TODO management with session association
+- [x] Configurable embedding model (default: qwen3-embedding:0.6b)
+- [x] Configurable LLM model (default: qwen3:8b, future use)
+
+**Technical Constraints**:
+- Vector database: Qdrant (non-configurable)
+- Embedding service: Ollama (configurable URL)
+- Session storage: Qdrant metadata
+- Semantic search: cosine similarity
+- Memory cleanup: automatic for stale sessions
+
+---
+
+### REQ-011: AI CLI 更新/安装管理
+**Status**: 🟢 Done
 **Priority**: P1 (High)
 **Version**: v0.1.0
 **Related**: ARCH-008, MODULE-002, API-004
@@ -440,7 +473,7 @@ Agentic-Warden MUST meet performance criteria for process tracking and task mana
 | REQ-007 | MCP 服务器 | P1 | 🟢 Done | v0.1.0 | ARCH-007, API-003 | Initial commit |
 | REQ-008 | 指定供应商模式 AI CLI 启动 | P0 | 🟢 Done | v0.1.0 | ARCH-002, ARCH-008, API-004 | Initial commit |
 | REQ-009 | 交互式 AI CLI 启动 | P1 | 🟢 Done | v0.1.1 | ARCH-008, API-001 | Interactive mode implementation |
-| REQ-010 | AI CLI 更新/安装管理 | P1 | 🔴 To Do | v0.1.0 | ARCH-008, MODULE-002, API-004 | - |
+| REQ-010 | AI CLI 更新/安装管理 | P1 | 🟢 Done | v0.1.0 | ARCH-008, MODULE-002, API-004 | Update command implementation |
 
 ---
 

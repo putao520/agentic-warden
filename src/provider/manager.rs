@@ -3,11 +3,10 @@
 use super::config::{AiType, Provider, ProvidersConfig, Region};
 use super::env_mapping::get_env_vars_for_ai_type;
 use super::error::{ProviderError, ProviderResult};
+use crate::common::constants::files::PROVIDERS_JSON;
 use crate::config::AUTH_DIRECTORY;
 use anyhow::Result;
 use std::{fs, path::PathBuf};
-
-const NEW_PROVIDER_FILE_NAME: &str = "providers.json";
 
 /// Provider configuration manager
 pub struct ProviderManager {
@@ -248,7 +247,7 @@ impl ProviderManager {
             }
         }
 
-        Ok(config_dir.join(NEW_PROVIDER_FILE_NAME))
+        Ok(config_dir.join(PROVIDERS_JSON))
     }
 
     /// Load configuration from file
@@ -729,6 +728,7 @@ mod tests {
             providers,
             default_provider: "test".to_string(),
             user_tokens: HashMap::new(),
+            memory: None,
         };
 
         let manager = ProviderManager {
@@ -768,6 +768,7 @@ mod tests {
             providers,
             default_provider: "test".to_string(),
             user_tokens: HashMap::new(),
+            memory: None,
         };
 
         let manager = ProviderManager {

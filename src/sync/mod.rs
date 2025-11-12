@@ -5,6 +5,7 @@ pub mod directory_hasher;
 pub mod error;
 pub mod google_drive_service;
 pub mod oauth_client;
+pub mod services;
 pub mod smart_oauth;
 pub mod sync_command;
 pub mod sync_config;

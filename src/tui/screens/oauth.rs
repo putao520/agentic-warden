@@ -11,14 +11,12 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
     Frame,
 };
-use std::time::{Duration as StdDuration, Instant};
+use std::time::Instant;
 
 use super::{Screen, ScreenAction};
+use crate::common::constants::{duration::FLASH_DURATION, providers::GOOGLE_DRIVE};
 use crate::sync::smart_oauth::{AuthState, SmartOAuthAuthenticator};
 use crate::tui::app_state::AppState;
-
-const PROVIDER_GOOGLE_DRIVE: &str = "google-drive";
-const FLASH_DURATION: StdDuration = StdDuration::from_secs(3);
 
 /// Visual states for the OAuth screen.
 enum OAuthMode {
@@ -45,7 +43,7 @@ impl OAuthScreen {
     pub fn new() -> Result<Self> {
         Ok(Self {
             app_state: AppState::global(),
-            provider: PROVIDER_GOOGLE_DRIVE.to_string(),
+            provider: GOOGLE_DRIVE.to_string(),
             mode: OAuthMode::Intro,
             authenticator: None,
             flow_id: None,

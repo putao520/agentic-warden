@@ -2,503 +2,250 @@
 
 <div align="center">
 
-![Agentic-Warden Logo](https://img.shields.io/badge/Agentic--Warden-0.3.0-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-5.0.1-blue?style=flat-square)
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange?style=flat-square&logo=rust)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey?style=flat-square)
 
-**Unified AI CLI Management and Process Monitoring Platform**
+**Universal AI CLI Management and Coordination Platform**
 
 </div>
 
-## 📋 Overview
+## What is Agentic-Warden?
 
-Agentic-Warden is a unified management tool designed for multi-AI environments, providing intelligent process monitoring, configuration management, and Google Drive integration.
+Agentic-Warden is a command-line tool that solves the chaos of managing multiple AI CLI assistants. It provides unified management, process tracking, and configuration synchronization for Claude, Codex, Gemini, and other AI CLI tools.
 
-### 🎯 Key Features
+## Core Problem It Solves
 
-- **🚀 Intelligent Process Tree Monitoring**: Automatically identifies AI CLI root processes, avoiding the traditional issue where all processes are attributed to system processes
-- **🔧 Unified AI CLI Management**: Support for unified startup and management of multiple AI CLI tools like codex, claude, and gemini
-- **⚙️ Provider Management**: Centralized management of third-party API providers (OpenRouter, LiteLLM, Cloudflare AI Gateway)
-- **📁 Google Drive Integration**: Cloud sync and backup of configuration files
-- **🎨 Modern TUI Interface**: Terminal user interface based on ratatui
+- **Multi-AI Management**: Switch between different AI CLI tools without losing context
+- **Provider Flexibility**: Use any API provider (OpenRouter, LiteLLM, etc.) without modifying AI CLI configurations
+- **Process Coordination**: Track and manage multiple AI CLI processes running simultaneously
+- **Configuration Sync**: Backup and restore AI CLI configurations across devices via Google Drive
 
-## 🚀 Quick Start
+## Key Features
 
-### Installation
+### 🔧 **AI CLI Management**
+- Launch and manage Claude, Codex, Gemini from a single interface
+- Interactive mode: `agentic-warden claude`
+- Task mode: `agentic-warden claude "write Python function"`
+- Multi-CLI: `agentic-warden claude,codex "compare algorithms"`
 
+### 🌐 **Provider Management**
+- Switch API providers without configuration changes: `agentic-warden claude -p openrouter`
+- Support for OpenRouter, LiteLLM, custom endpoints
+- Environment variable injection for seamless provider switching
+
+### 📊 **Process Tracking**
+- Intelligent process tree identification
+- Cross-process task coordination
+- `wait` command: `agentic-warden wait` - monitor both CLI and MCP registries, exit when all tasks complete
+- Process isolation and namespace management
+
+### 🧠 **Memory & Semantic Search**
+- Vector database integration with Qdrant for semantic conversation search
+- Ollama embedding service for text vectorization
+- Session-based conversation storage and retrieval
+- MCP tools for memory operations:
+  - `search_history`: Query conversation history with semantic similarity
+  - `get_session_todos`: Query incomplete TODOs by session_id
+- Automatic TODO extraction and session association
+
+### ☁️ **Google Drive Integration**
+- Backup configurations: `agentic-warden push`
+- Restore configurations: `agentic-warden pull`
+- Selective file packing (no cache/temp files)
+- OAuth 2.0 Device Flow for headless environments
+
+### 🛠️ **Utility Commands**
+- `agentic-warden status` - Check AI CLI tools and versions
+- `agentic-warden update` - Update/install AI CLI tools
+- `agentic-warden tui` - Launch terminal interface
+- `agentic-warden mcp` - Start MCP server for external integrations
+
+## Installation
+
+### From Cargo (Recommended)
 ```bash
-# Build from source
+cargo install agentic-warden
+```
+
+### From Source
+```bash
 git clone https://github.com/putao520/agentic-warden.git
 cd agentic-warden
-cargo build --release
 cargo install --path .
 ```
 
-### Basic Usage
+## Quick Start
 
+### 1. Check AI CLI Status
 ```bash
-# Launch TUI interface
-agentic-warden
-
-# Check Provider status
 agentic-warden status
+```
+Shows which AI CLI tools are installed and their versions.
 
-# Manage Provider configuration
-agentic-warden provider
+### 2. Launch AI CLI with Default Provider
+```bash
+# Interactive mode
+agentic-warden claude
 
-# Upload configuration to Google Drive
+# Task mode
+agentic-warden codex "debug this Rust code"
+```
+
+### 3. Switch Providers
+```bash
+# Use OpenRouter with Claude
+agentic-warden claude -p openrouter "write Python script"
+
+# Use LiteLLM with multiple AI CLIs
+agentic-warden claude,codex -p litellm "analyze data"
+```
+
+### 4. Manage Background Tasks
+```bash
+# Start multiple AI CLI tasks in background
+agentic-warden codex "task 1" &
+agentic-warden gemini "task 2" &
+agentic-warden claude "task 3" &
+
+# Wait for all tasks to complete
+agentic-warden wait
+```
+
+### 5. Memory & Semantic Search
+```bash
+# Start MCP server for memory operations (run in background)
+agentic-warden mcp &
+
+# In Claude Code or other MCP client, search conversation history:
+{
+  "tool": "search_history",
+  "arguments": {
+    "query": "python programming best practices",
+    "session_id": "session-123",
+    "limit": 10
+  }
+}
+
+# Query TODOs for a specific session:
+{
+  "tool": "get_session_todos",
+  "arguments": {
+    "session_id": "session-123",
+    "status": "pending"
+  }
+}
+```
+
+### 6. Sync Configurations
+```bash
+# Backup to Google Drive
 agentic-warden push
 
-# Download configuration from Google Drive
+# Restore from Google Drive
 agentic-warden pull
 ```
 
-### AI CLI Startup
+## Provider Setup
 
+### Add Custom Provider
 ```bash
-# Launch Claude
-agentic-warden claude "Please help me analyze this code"
-
-# Launch Codex
-agentic-warden codex "Write a Python script"
-
-# Launch Gemini
-agentic-warden gemini "Explain this algorithm"
-
-# Launch multiple AI CLI simultaneously
-agentic-warden claude|codex "Compare two implementation approaches"
+agentic-warden tui
+# Navigate to Provider Management
+# Add new provider with API keys and endpoints
 ```
 
-## 📖 Documentation
-
-### Core Features
-
-- [**Process Tree Monitoring**](SPEC/OVERVIEW.md#intelligent-process-tree-monitoring) - Intelligent identification and monitoring of AI CLI processes
-- [**Provider Management**](SPEC/CONFIGURATION.md) - Third-party API provider configuration and management
-- [**Google Drive Integration**](SPEC/DEPLOYMENT.md) - Cloud sync of configuration files
-
-### Development Documentation
-
-- [**Architecture Design**](SPEC/ARCHITECTURE.md) - System architecture and design patterns
-- [**API Documentation**](SPEC/API.md) - CLI commands and interface definitions
-- [**Data Models**](SPEC/DATA_MODEL.md) - Core data structure definitions
-- [**Module Organization**](SPEC/MODULES.md) - Code module organization structure
-- [**Testing Strategy**](SPEC/TESTING.md) - Testing architecture and coverage strategy
-
-## 🛠️ Technical Architecture
-
-### Core Components
-
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   CLI Manager    │    │   Task Registry  │    │  TUI Framework   │
-│                 │    │                 │    │                 │
-│ • CLI Detection │    │ • Shared Memory  │    │ • ratatui UI     │
-│ • Tool Management│    │ • Process Tracking│    │ • Event Handling │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-         │                       │                       │
-         ▼                       ▼                       ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                     Agentic-Warden Core                        │
-│                                                                     │
-│  ┌─────────────┐  ┌──────────────┐  ┌─────────────┐  ┌─────────────┐   │
-│  │ Process Tree │  │ Supervisor  │  │ Provider   │  │ Sync Engine │   │
-│  │   Manager   │  │   Engine    │  │  Manager    │  │            │   │
-│  └─────────────┘  └──────────────┘  └─────────────┘  └─────────┘   │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-### Technology Stack
-
-- **Language**: Rust 1.70+
-- **TUI Framework**: ratatui (0.24+) + crossterm (0.27+)
-- **Process Monitoring**: sysinfo + custom process tree analysis
-- **Shared Memory**: shared_hashmap + shared_memory
-- **Configuration Management**: serde + JSON
-- **Network Requests**: reqwest + tokio
-- **Google Drive**: yup-oauth2 + Google Drive API
-
-## 🔧 Configuration
-
-### Provider Configuration
-
-Configuration file location: `~/.agentic-warden/providers.json`
-
+### Example Provider Configuration
 ```json
 {
-  "default_provider": "openrouter",
-  "providers": {
-    "openrouter": {
-      "name": "OpenRouter",
-      "description": "OpenRouter API Gateway",
-      "icon": "🌐",
-      "website": "https://openrouter.ai",
-      "modes": {
-        "claude": {
-          "type": "anthropic",
-          "model": "claude-3-5-sonnet-20241022",
-          "regions": {
-            "us": {
-              "endpoint": "https://openrouter.ai/api/v1/chat/completions",
-              "auth_env": "OPENROUTER_API_KEY"
-            }
-          }
-        }
-      }
+  "openrouter": {
+    "name": "OpenRouter",
+    "compatible_with": ["claude", "codex", "gemini"],
+    "env": {
+      "OPENAI_API_KEY": "sk-or-v1-...",
+      "OPENAI_API_BASE": "https://openrouter.ai/api/v1"
     }
   }
 }
 ```
 
-### Environment Variables
+## Use Cases
 
+### For Developers
+- **Multi-Model Development**: Test the same prompt across different AI models
+- **Provider Testing**: Compare different API providers for cost and quality
+- **Task Management**: Run multiple AI tasks concurrently and track progress
+
+### For Teams
+- **Configuration Sync**: Share AI CLI configurations across team members
+- **Provider Management**: Centralized API key and endpoint management
+- **Process Monitoring**: Track team AI usage and task progress
+
+### For Power Users
+- **Batch Processing**: Run multiple AI tasks with different providers
+- **Configuration Backup**: Never lose your AI CLI setups
+- **Advanced Workflows**: Integrate with other tools via MCP server
+
+## Advanced Features
+
+### MCP (Model Context Protocol) Server
 ```bash
-# Claude API
-export ANTHROPIC_API_KEY="your-claude-api-key"
+# Start MCP server for external integrations
+agentic-warden mcp
 
-# OpenRouter API
-export OPENROUTER_API_KEY="your-openrouter-api-key"
-
-# Google Drive (for push/pull)
-export GOOGLE_DRIVE_CLIENT_ID="your-client-id"
-export GOOGLE_DRIVE_CLIENT_SECRET="your-client-secret"
+# Use with Claude Code or other MCP clients
+# Provides tools: monitor_processes, get_provider_status, start_ai_cli
 ```
 
-## 📊 Performance Metrics
-
-### Test Coverage
-
-- **Unit Tests**: 69 tests, 90%+ coverage
-- **Integration Tests**: 8 tests, completed in 2.21s (fixed from >60s)
-- **Concurrent Performance**: Supports 8-thread concurrent testing, no deadlock issues
-
-### Resource Usage
-
-- **Memory Usage**: Base runtime < 100MB
-- **Startup Time**: Dashboard startup < 2s
-- **Responsiveness**: TUI operation response < 100ms
-- **Concurrent Support**: Monitor 100+ AI CLI processes simultaneously
-
-## 🤖 Claude Code Integration
-
-### MCP Server Installation
-
-Agentic-Warden provides an MCP (Model Context Protocol) server for seamless integration with Claude Code, enabling you to manage AI CLI processes and providers directly from your Claude Code conversations.
-
-#### Prerequisites
-- Claude Code CLI (v1.0+)
-- Rust toolchain (for building from source)
-
-#### Installation Steps
-
-**Step 1: Install Agentic-Warden**
+### Process Wait Modes
 ```bash
-# Clone and build
-git clone https://github.com/putao520/agentic-warden.git
-cd agentic-warden
-cargo build --release
-cargo install --path .
+# Wait for all AI CLI tasks
+agentic-warden wait
 
-# Verify installation
-agentic-warden --version
+# Wait for specific process
+agentic-warden pwait <PID>
+
+# Wait with timeout
+agentic-warden wait --timeout 2h
 ```
 
-**Step 2: Add MCP Server to Claude Code (Recommended Method)**
-
-Use Claude Code's built-in MCP management commands:
-
+### Update Management
 ```bash
-# Method 1: Add MCP server using Claude Code command (Recommended)
-/mcp add agentic-warden "agentic-warden mcp server"
+# Update all AI CLI tools
+agentic-warden update
 
-# Method 2: Add with custom configuration
-/mcp add agentic-warden "agentic-warden mcp server" \
-  --env RUST_LOG=info \
-  --description "AI CLI process management and monitoring"
+# Update specific tool
+agentic-warden update claude
 
-# Method 3: Manual configuration (alternative)
-/mcp edit
+# Install if not present
+agentic-warden update gemini
 ```
 
-The `/mcp add` command will automatically:
-- Update your `~/.claude/mcp_servers.json` configuration
-- Validate the command path and arguments
-- Set up proper environment variables
-- Test the connection
+## Requirements
 
-**Step 3: Verify MCP Server Installation**
-```bash
-# List all configured MCP servers
-/mcp list
+- **Rust**: 1.70+ for building from source
+- **OS**: Windows 10+, Linux, macOS 10.15+
+- **AI CLI Tools**: Claude, Codex, Gemini (optional)
+- **Node.js**: 14+ (for npm packages)
 
-# Test Agentic-Warden MCP server specifically
-/mcp test agentic-warden
+## Configuration
 
-# Restart Claude Code to ensure server is loaded
-/reload
-```
+Configuration files are stored in `~/.agentic-warden/`:
+- `provider.json` - Provider configurations
+- `sync_state.json` - Google Drive sync state
+- `oauth_tokens.json` - OAuth tokens (encrypted)
 
-#### Available MCP Tools
+## Support
 
-Once configured, you'll have access to these tools in Claude Code:
+- **GitHub Issues**: [Report bugs and request features](https://github.com/putao520/agentic-warden/issues)
+- **Documentation**: [Complete SPEC documentation](./SPEC/)
+- **Discussions**: [Community discussions](https://github.com/putao520/agentic-warden/discussions)
 
-**Process Management Tools:**
-- `mcp__agentic_warden__monitor_processes` - Monitor running AI CLI processes
-- `mcp__agentic_warden__get_process_tree` - Get detailed process tree information
-- `mcp__agentic_warden__terminate_process` - Safely terminate AI CLI processes
+## License
 
-**Provider Management Tools:**
-- `mcp__context7__resolve-library-id` - Resolve library/package names to documentation
-- `mcp__context7__get-library-docs` - Fetch up-to-date documentation for any library
-
-**Task Registry Tools:**
-- Access to shared memory task tracking
-- Real-time process monitoring
-- Task status management
-
-#### Usage Examples in Claude Code
-
-**Example 1: Monitor AI CLI Processes**
-```bash
-# Claude Code will automatically detect running AI processes
-"Show me all currently running AI CLI processes and their status"
-```
-
-**Example 2: Library Documentation Lookup**
-```bash
-# Get documentation for any library
-"Can you fetch the latest React documentation for hooks?"
-"Get me the Rust tokio documentation for async runtime"
-```
-
-**Example 3: Process Management**
-```bash
-"Terminate all idle Claude processes"
-"Show me the process tree for the current codex session"
-```
-
-#### Configuration Options
-
-**Environment Variables:**
-```bash
-# Agentic-Warden configuration
-export AGENTIC_WARDEN_LOG_LEVEL="info"
-export AGENTIC_WARDEN_CONFIG_DIR="$HOME/.agentic-warden"
-
-# Optional: Custom AI CLI paths
-export CLAUDE_BIN="/path/to/claude"
-export CODEX_BIN="/path/to/codex"
-export GEMINI_BIN="/path/to/gemini"
-```
-
-**Advanced MCP Configuration:**
-For advanced users, you can customize the MCP server behavior:
-
-```json
-{
-  "mcpServers": {
-    "agentic-warden": {
-      "command": "agentic-warden",
-      "args": [
-        "mcp",
-        "server",
-        "--log-level", "debug",
-        "--config-dir", "/custom/config/path"
-      ],
-      "env": {
-        "RUST_LOG": "debug",
-        "AGENTIC_WARDEN_CACHE_TTL": "3600"
-      }
-    }
-  }
-}
-```
-
-#### MCP Server Management Commands
-
-Claude Code provides built-in commands for managing MCP servers:
-
-```bash
-# Add a new MCP server
-/mcp add <name> "<command>" [options]
-
-# List all configured MCP servers
-/mcp list
-
-# Test a specific MCP server
-/mcp test <name>
-
-# Edit MCP server configuration
-/mcp edit
-
-# Remove an MCP server
-/mcp remove <name>
-
-# Reload all MCP servers
-/mcp reload
-
-# Show MCP server help
-/mcp --help
-```
-
-#### Troubleshooting MCP Integration
-
-**Common Issues:**
-
-**Q: MCP server not starting?**
-```bash
-# Check if agentic-warden is in PATH
-which agentic-warden
-
-# Test MCP server directly
-agentic-warden mcp server --test
-
-# Check Claude Code MCP status
-/mcp list
-
-# Check Claude Code logs
-tail -f ~/.claude/logs/claude.log
-```
-
-**Q: Tools not appearing in Claude Code?**
-```bash
-# Restart Claude Code completely
-exit
-claude
-
-# Verify MCP configuration
-/mcp list
-
-# Test specific server
-/mcp test agentic-warden
-
-# Reload MCP servers
-/mcp reload
-```
-
-**Q: `/mcp add` command not found?**
-```bash
-# Update Claude Code to latest version
-claude --update
-
-# Check if MCP commands are available
-/help | grep mcp
-```
-
-**Q: Permission errors?**
-```bash
-# Ensure proper permissions
-chmod +x $(which agentic-warden)
-
-# Check config directory permissions
-ls -la ~/.agentic-warden/
-
-# Test MCP server permissions
-agentic-warden mcp server --test
-```
-
-#### Benefits of MCP Integration
-
-- **Seamless Workflow**: Manage AI CLI processes without leaving Claude Code
-- **Real-time Monitoring**: Get instant visibility into running AI processes
-- **Documentation Access**: Fetch library docs on-demand during development
-- **Process Automation**: Automate repetitive AI CLI management tasks
-- **Enhanced Debugging**: Better visibility into AI agent interactions
-
-For more advanced usage and configuration options, see the [MCP Configuration Guide](SPEC/MCP-CONFIGURATION.md).
-
-## 🤝 Contributing
-
-We welcome community contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
-
-### Development Setup
-
-```bash
-# Clone repository
-git clone https://github.com/putao520/agentic-warden.git
-cd agentic-warden
-
-# Install development dependencies
-cargo build
-
-# Run tests
-cargo test
-
-# Run specific tests
-cargo test --test ai_cli_real_failure
-
-# Check code formatting
-cargo fmt --check
-
-# Run clippy
-cargo clippy -- -D warnings
-```
-
-### Commit Guidelines
-
-We use [Conventional Commits](https://www.conventionalcommits.org/) specification:
-
-```
-feat: new feature
-fix: bug fix
-docs: documentation update
-style: code formatting
-refactor: code refactoring
-test: testing related
-chore: build process or auxiliary tool changes
-```
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-#### Q: AI CLI tools not found
-**A**: Ensure the AI CLI tools are installed and environment variables are configured:
-
-```bash
-# Set Claude
-export CLAUDE_BIN="/path/to/claude"
-
-# Set Codex
-export CODEX_BIN="/path/to/codex"
-
-# Set Gemini
-export GEMINI_BIN="/path/to/gemini"
-```
-
-#### Q: Google Drive authorization failed
-**A**: Check network connection and API key configuration, ensure proper access permissions.
-
-#### Q: TUI display issues
-**A**: Ensure terminal supports ANSI colors and Unicode characters.
-
-### Logging and Debugging
-
-```bash
-# Enable debug logging
-export RUST_LOG=debug
-
-# Run debug mode
-agentic-warden --verbose
-```
-
-## 📄 License
-
-This project is licensed under the [MIT License](LICENSE).
-
-## 🔗 Related Links
-
-- **GitHub Repository**: https://github.com/putao520/agentic-warden
-- **Documentation Site**: https://docs.agentic-warden.dev
-- **Issue Reporting**: [GitHub Issues](https://github.com/putao520/agentic-warden/issues)
-- **Changelog**: [CHANGELOG.md](CHANGELOG.md)
+MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-<div align="center">
-
-**Made with ❤️ by the Agentic-Warden Team**
-
-</div>
+**Agentic-Warden** - Unified control for your AI CLI ecosystem.

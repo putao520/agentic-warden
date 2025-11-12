@@ -135,6 +135,7 @@ fn select_best_mode_prefers_highest_priority_matching_ai_type() {
         )]),
         default_provider: "demo".into(),
         user_tokens: HashMap::new(),
+        memory: None,
     };
 
     let best = config

@@ -1,6 +1,8 @@
 //! Push progress screen
 
 use super::{Screen, ScreenAction, ScreenType};
+use crate::common::constants::providers::GOOGLE_DRIVE;
+use crate::common::utils::format_bytes_alt as format_bytes;
 use crate::error::{errors, AgenticWardenError, ErrorCategory, SyncOperation, UserFacingError};
 use crate::sync::config_sync_manager::{ConfigSyncManager, PushProgressEvent, SyncOperationResult};
 use crate::sync::smart_oauth::AuthState;
@@ -26,8 +28,6 @@ use tokio::{
     sync::mpsc::{error::TryRecvError, unbounded_channel, UnboundedReceiver, UnboundedSender},
     task::JoinHandle,
 };
-
-const PROVIDER_GOOGLE_DRIVE: &str = "google-drive";
 
 /// Push screen mode
 enum PushMode {
@@ -155,7 +155,7 @@ impl PushScreen {
 
         self.auth_checked = true;
 
-        match self.app_state.ensure_authenticator(PROVIDER_GOOGLE_DRIVE) {
+        match self.app_state.ensure_authenticator(GOOGLE_DRIVE) {
             Ok(authenticator) => {
                 let state = tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current().block_on(authenticator.get_state())
@@ -711,21 +711,6 @@ fn compute_percent(index: usize, total: usize, stage: f32) -> u8 {
     value.clamp(0.0, 100.0).round() as u8
 }
 
-fn format_bytes(bytes: u64) -> String {
-    const KB: u64 = 1024;
-    const MB: u64 = KB * 1024;
-    const GB: u64 = MB * 1024;
-
-    if bytes >= GB {
-        format!("{:.2} GB", bytes as f64 / GB as f64)
-    } else if bytes >= MB {
-        format!("{:.2} MB", bytes as f64 / MB as f64)
-    } else if bytes >= KB {
-        format!("{:.2} KB", bytes as f64 / KB as f64)
-    } else {
-        format!("{} bytes", bytes)
-    }
-}
 
 async fn run_push_worker(
     directories: Vec<String>,

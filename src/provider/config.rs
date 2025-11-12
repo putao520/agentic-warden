@@ -22,6 +22,10 @@ pub struct ProvidersConfig {
     /// User stored tokens (regional)
     #[serde(default)]
     pub user_tokens: HashMap<String, RegionalTokens>,
+
+    /// Memory configuration for semantic search and TODO management
+    #[serde(default)]
+    pub memory: Option<crate::memory::MemoryConfig>,
 }
 
 /// Single Provider configuration
@@ -591,6 +595,16 @@ impl ProvidersConfig {
     pub fn has_token(&self, provider_id: &str, region: &Region) -> bool {
         self.get_token(provider_id, region).is_some()
     }
+
+    /// Get memory configuration
+    pub fn get_memory_config(&self) -> crate::memory::MemoryConfig {
+        self.memory.clone().unwrap_or_default()
+    }
+
+    /// Set memory configuration
+    pub fn set_memory_config(&mut self, config: crate::memory::MemoryConfig) {
+        self.memory = Some(config);
+    }
 }
 
 impl Default for ProvidersConfig {
@@ -600,6 +614,7 @@ impl Default for ProvidersConfig {
             default_provider: "official".to_string(),
             providers: HashMap::new(),
             user_tokens: HashMap::new(),
+            memory: Some(crate::memory::MemoryConfig::default()),
         })
     }
 }
@@ -674,6 +689,7 @@ mod tests {
             providers,
             default_provider: "official".to_string(),
             user_tokens: HashMap::new(),
+            memory: None,
         };
 
         config.ensure_defaults_and_validate().unwrap();

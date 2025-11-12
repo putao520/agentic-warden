@@ -1,7 +1,6 @@
 use crate::{
-    config::{MAX_RECORD_AGE, SHARED_MEMORY_SIZE, SHARED_NAMESPACE},
+    config::{MAX_RECORD_AGE, SHARED_MEMORY_SIZE},
     core::models::ProcessTreeInfo,
-    core::process_tree::get_root_parent_pid_cached,
     core::shared_map::open_or_create,
     error::RegistryError,
     logging::warn,
@@ -395,7 +394,7 @@ impl TaskStorage for SharedMemoryStorage {
                 cleanup_reason = CleanupReason::ProcessExited;
             } else {
                 // 检查manager进程
-                if let Some(manager_pid) = entry
+                if let Some(_manager_pid) = entry
                     .record
                     .manager_pid
                     .filter(|&manager_pid| manager_pid != entry.pid && !is_process_alive(manager_pid))

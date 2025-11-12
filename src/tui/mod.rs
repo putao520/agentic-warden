@@ -22,6 +22,7 @@ mod data_binding;
 pub mod app;
 pub mod app_state;
 pub mod screens;
+pub mod components;
 
 use self::data_binding::DataBindingController;
 

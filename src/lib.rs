@@ -4,6 +4,7 @@
 
 pub mod cli_type;
 pub mod commands;
+pub mod common;
 pub mod config;
 pub mod core;
 pub mod error;
@@ -22,6 +23,7 @@ pub mod tui;
 pub mod unified_registry;
 pub mod utils;
 pub mod wait_mode;
+pub mod memory;
 
 pub mod cli_manager;
 

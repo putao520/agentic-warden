@@ -7,7 +7,6 @@ use crate::{
     platform,
     registry_factory::McpRegistry,
     storage::SharedMemoryStorage,
-    task_record::TaskStatus,
     unified_registry::Registry,
 };
 use chrono::{DateTime, Utc};

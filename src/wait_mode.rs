@@ -26,7 +26,9 @@ pub enum WaitError {
 }
 
 pub fn run() -> Result<(), WaitError> {
-    let registry = RegistryFactory::instance().get_cli_registry()?;
+    let factory = RegistryFactory::instance();
+    let cli_registry = factory.get_cli_registry()?;
+    let mcp_registry = factory.get_mcp_registry();
     let interval = read_interval();
     let start = Instant::now();
     let mut processed_pids: HashSet<u32> = HashSet::new();
@@ -48,12 +50,14 @@ pub fn run() -> Result<(), WaitError> {
 
     loop {
         let now = chrono::Utc::now();
-        let cleanups = registry.sweep_stale_entries(
+
+        // Process CLI registry tasks
+        let cli_cleanups = cli_registry.sweep_stale_entries(
             now,
             platform::process_alive,
             &terminate_wrapper,
         )?;
-        for event in cleanups {
+        for event in cli_cleanups {
             if event.reason == CleanupReason::Timeout {
                 continue;
             }
@@ -71,7 +75,7 @@ pub fn run() -> Result<(), WaitError> {
             }
         }
 
-        for (pid, record) in registry.get_completed_unread_tasks()? {
+        for (pid, record) in cli_registry.get_completed_unread_tasks()? {
             // Filter tasks by root parent PID
             if !should_process_task(&record, current_root_parent) {
                 continue;
@@ -82,27 +86,65 @@ pub fn run() -> Result<(), WaitError> {
                 emit_realtime_update(&completion);
                 report.add_completion(completion);
             }
-            // TODO: Implement remove_by_pid in TaskStorage trait if needed
         }
 
-        let entries = registry.entries()?;
-        let has_running = entries.iter().any(|entry| {
+        // Process MCP registry tasks (without root parent filtering for cross-process)
+        let mcp_cleanups = mcp_registry.sweep_stale_entries(
+            now,
+            platform::process_alive,
+            &terminate_wrapper,
+        )?;
+        for event in mcp_cleanups {
+            if event.reason == CleanupReason::Timeout {
+                continue;
+            }
+
+            let pid = event._pid;
+            if processed_pids.insert(pid) {
+                let completion = TaskCompletion::from_record(pid, event.record);
+                emit_realtime_update(&completion);
+                report.add_completion(completion);
+            }
+        }
+
+        for (pid, record) in mcp_registry.get_completed_unread_tasks()? {
+            if processed_pids.insert(pid) {
+                let completion = TaskCompletion::from_record(pid, record);
+                emit_realtime_update(&completion);
+                report.add_completion(completion);
+            }
+        }
+
+        // Check both registries for running tasks
+        let cli_entries = cli_registry.entries()?;
+        let mcp_entries = mcp_registry.entries()?;
+
+        let cli_has_running = cli_entries.iter().any(|entry| {
             entry.record.status == TaskStatus::Running
                 && should_process_task(&entry.record, current_root_parent)
         });
 
-        if !has_running {
+        let mcp_has_running = mcp_entries.iter().any(|entry| {
+            entry.record.status == TaskStatus::Running
+        });
+
+        // Only exit when both registries have no running tasks
+        if !cli_has_running && !mcp_has_running {
             print_report(&report, None, false, start.elapsed());
             return Ok(());
         }
 
         if start.elapsed() >= MAX_WAIT_DURATION {
             // Filter running entries to only show related processes
-            let filtered_entries: Vec<RegistryEntry> = entries
+            let mut filtered_entries: Vec<RegistryEntry> = cli_entries
                 .iter()
                 .filter(|entry| should_process_task(&entry.record, current_root_parent))
                 .cloned()
                 .collect();
+
+            // Add MCP entries (no filtering for cross-process)
+            filtered_entries.extend(mcp_entries.iter().cloned());
+
             print_report(&report, Some(&filtered_entries), true, start.elapsed());
             return Ok(());
         }
