@@ -54,8 +54,8 @@ async fn handle_external_ai_cli(args: &[String]) -> Result<ExitCode, String> {
     // args[1] 是 CLI type "codex"/"claude"/"gemini"
     // args[2..] 是实际的 prompt 和选项
 
-    if args.len() < 3 {
-        return Err("Please provide a task description".to_string());
+    if args.len() < 2 {
+        return Err("Please specify AI CLI type".to_string());
     }
 
     let cli_type_str = &args[1];
@@ -67,9 +67,9 @@ async fn handle_external_ai_cli(args: &[String]) -> Result<ExitCode, String> {
         None => return Err(format!("Unsupported AI CLI type: {}", cli_type_str)),
     };
 
-    // 直接解析参数，提取供应商和提示词
+    // Parse provider parameters
     let mut provider: Option<String> = None;
-    let mut prompt_parts: Vec<String> = Vec::new();
+    let mut prompt_parts = Vec::new();
 
     let mut iter = remaining_args.iter().enumerate();
     while let Some((_i, token)) = iter.next() {
@@ -78,25 +78,34 @@ async fn handle_external_ai_cli(args: &[String]) -> Result<ExitCode, String> {
                 if let Some((_, next_token)) = iter.next() {
                     provider = Some(next_token.clone());
                 } else {
-                    return Err("Missing provider name after -p flag".to_string());
+                    return Err("Missing provider name after -p/--provider flag".to_string());
                 }
             }
             _ => {
-                // 这是提示词的一部分
+                // This is part of the prompt
                 prompt_parts.push(token.clone());
             }
         }
     }
 
-    let prompt_text = prompt_parts.join(" ");
+    // Check if this is interactive mode (no prompt)
+    if prompt_parts.is_empty() {
+        println!("🚀 Starting {} in interactive mode (provider: {:?})",
+                 cli_type_str, provider);
 
-    if prompt_text.trim().is_empty() {
-        return Err("Please provide a task description".to_string());
+        // Interactive mode: start AI CLI directly with empty prompt
+        let command = AiCliCommand::new(vec![cli_type], provider, String::new());
+        command.execute().await.map_err(|e| e.to_string())
+    } else {
+      // Task mode: execute specific task
+        let prompt_text = prompt_parts.join(" ");
+
+        println!("🚀 Starting {} with task: {} (provider: {:?})",
+                 cli_type_str, prompt_text, provider);
+
+        let command = AiCliCommand::new(vec![cli_type], provider, prompt_text);
+        command.execute().await.map_err(|e| e.to_string())
     }
-
-    // 使用 AiCliCommand 来执行，包含供应商参数
-    let command = AiCliCommand::new(vec![cli_type], provider, prompt_text);
-    command.execute().await.map_err(|e| e.to_string())
 }
 
 async fn main_impl(command: Commands) -> Result<ExitCode, String> {
