@@ -205,16 +205,23 @@ This matrix provides complete traceability from:
 
 | Layer | ID | Component | Status | Implementation Files |
 |-------|----|-----------|---------|----------------------|
-| **Requirement** | REQ-009 | 交互式 AI CLI 启动 | 🔴 To Do | SPEC/01-REQUIREMENTS.md#REQ-009 |
-| **Architecture** | ARCH-008 | Process Supervisor | 🟡 Planned | SPEC/02-ARCHITECTURE.md#Core-Modules |
-| **API** | API-001 | AI CLI Execution Commands | 🟡 Planned | SPEC/04-API-DESIGN.md#API-001 |
-| **Implementation** | - | External AI CLI Parser | 🔴 To Do | `src/commands/parser.rs` |
-| **Implementation** | - | Main CLI Handler | 🔴 To Do | `src/main.rs` |
+| **Requirement** | REQ-009 | 交互式 AI CLI 启动 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-009 |
+| **Architecture** | ARCH-008 | Process Supervisor | 🟢 Done | SPEC/02-ARCHITECTURE.md#Core-Modules |
+| **API** | API-001 | AI CLI Execution Commands | 🟢 Done | SPEC/04-API-DESIGN.md#API-001 |
+| **Implementation** | - | External AI CLI Parser | 🟢 Done | `src/commands/parser.rs` |
+| **Implementation** | - | Main CLI Handler | 🟢 Done | `src/main.rs` |
 
 **Key Insights**:
-- **Not Yet Implemented**: This requirement is planned for v0.1.1
-- Will support interactive mode with provider selection
+- ✅ **Implemented**: Interactive mode launched with empty prompt for AI CLI
+- Supports both single and multiple AI CLI with shared provider
 - Leverages existing `AiCliCommand` infrastructure with empty prompt
+- Provider environment injection works identically to task mode
+- Smart detection automatically distinguishes between interactive and task modes
+
+**Usage Examples**:
+- `agentic-warden claude` → Interactive mode with default provider ✅
+- `agentic-warden claude -p openrouter` → Interactive mode with OpenRouter ✅
+- `agentic-warden claude,gemini -p litellm` → Multiple AI CLI interactive mode ✅
 
 ### REQ-010: AI CLI 更新/安装管理
 

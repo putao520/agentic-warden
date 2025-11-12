@@ -234,7 +234,7 @@ Agentic-Warden MUST provide seamless AI CLI startup with dynamic provider select
 ---
 
 ### REQ-009: 交互式 AI CLI 启动
-**Status**: 🔴 To Do
+**Status**: 🟢 Done
 **Priority**: P1 (High)
 **Version**: v0.1.1
 **Related**: ARCH-008, API-001
@@ -439,7 +439,7 @@ Agentic-Warden MUST meet performance criteria for process tracking and task mana
 | REQ-006 | AI CLI 工具检测与状态管理 | P1 | 🟢 Done | v0.1.0 | ARCH-006, MODULE-002 | Initial commit |
 | REQ-007 | MCP 服务器 | P1 | 🟢 Done | v0.1.0 | ARCH-007, API-003 | Initial commit |
 | REQ-008 | 指定供应商模式 AI CLI 启动 | P0 | 🟢 Done | v0.1.0 | ARCH-002, ARCH-008, API-004 | Initial commit |
-| REQ-009 | 交互式 AI CLI 启动 | P1 | 🔴 To Do | v0.1.1 | ARCH-008, API-001 | - |
+| REQ-009 | 交互式 AI CLI 启动 | P1 | 🟢 Done | v0.1.1 | ARCH-008, API-001 | Interactive mode implementation |
 | REQ-010 | AI CLI 更新/安装管理 | P1 | 🔴 To Do | v0.1.0 | ARCH-008, MODULE-002, API-004 | - |
 
 ---
