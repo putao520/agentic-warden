@@ -52,18 +52,14 @@ async fn main() -> ExitCode {
 async fn handle_external_ai_cli(args: &[String]) -> Result<ExitCode, String> {
     // args[0] 是程序名 "agentic-warden"
     // args[1] 是 CLI type "codex"/"claude"/"gemini"
-    // args[2..] 是实际的 prompt
+    // args[2..] 是实际的 prompt 和选项
 
     if args.len() < 3 {
         return Err("Please provide a task description".to_string());
     }
 
     let cli_type_str = &args[1];
-    let prompt: String = args[2..].join(" ");
-
-    if prompt.trim().is_empty() {
-        return Err("Please provide a task description".to_string());
-    }
+    let remaining_args = &args[2..];
 
     // 解析 CLI 类型
     let cli_type = match parse_cli_type(cli_type_str) {
@@ -71,10 +67,35 @@ async fn handle_external_ai_cli(args: &[String]) -> Result<ExitCode, String> {
         None => return Err(format!("Unsupported AI CLI type: {}", cli_type_str)),
     };
 
-    println!("🚀 Starting {} with task: {}", cli_type_str, prompt);
+    // 直接解析参数，提取供应商和提示词
+    let mut provider: Option<String> = None;
+    let mut prompt_parts: Vec<String> = Vec::new();
 
-    // 使用 AiCliCommand 来执行，而不是递归调用 agentic-warden
-    let command = AiCliCommand::new(vec![cli_type], None, prompt);
+    let mut iter = remaining_args.iter().enumerate();
+    while let Some((_i, token)) = iter.next() {
+        match token.as_str() {
+            "-p" | "--provider" => {
+                if let Some((_, next_token)) = iter.next() {
+                    provider = Some(next_token.clone());
+                } else {
+                    return Err("Missing provider name after -p flag".to_string());
+                }
+            }
+            _ => {
+                // 这是提示词的一部分
+                prompt_parts.push(token.clone());
+            }
+        }
+    }
+
+    let prompt_text = prompt_parts.join(" ");
+
+    if prompt_text.trim().is_empty() {
+        return Err("Please provide a task description".to_string());
+    }
+
+    // 使用 AiCliCommand 来执行，包含供应商参数
+    let command = AiCliCommand::new(vec![cli_type], provider, prompt_text);
     command.execute().await.map_err(|e| e.to_string())
 }
 
