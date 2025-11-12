@@ -42,43 +42,67 @@ Agentic-Warden MUST provide intelligent process tree tracking to identify which 
 **Related**: ARCH-002, DATA-002, API-001
 
 **Description**:
-Agentic-Warden MUST provide unified management of third-party API providers (OpenRouter, LiteLLM, etc.) through centralized configuration.
+Agentic-Warden MUST provide unified management of third-party API providers (OpenRouter, LiteLLM, etc.) through centralized configuration with transparent environment variable injection.
 
 **Acceptance Criteria**:
-- [x] Store provider configurations in `~/.agentic-warden/provider.json`
-- [x] Support multiple providers with environment variables
-- [x] Inject environment variables into AI CLI processes via `-p` parameter
-- [x] Set default AI CLI in `config.json`
-- [x] Do NOT modify AI CLI's native configuration files
+- [x] Store provider configurations in `~/.agentic-warden/provider.json` with JSON schema validation
+- [x] Support multiple providers with environment variable injection (API keys, base URLs, org IDs)
+- [x] Inject environment variables into AI CLI processes via `-p` parameter (transparent to user)
+- [x] Set default provider in configuration with fallback to first available provider
+- [x] Do NOT modify AI CLI's native configuration files (maintain separation of concerns)
+- [x] Validate provider compatibility with AI CLI types before injection
+- [x] Support built-in providers with read-only configurations
+- [x] Provide TUI interface for provider management (add, edit, delete, test)
+- [x] Implement provider health checking and network connectivity detection
+- [x] Mask sensitive values (API keys) in display and logs
 
 **Technical Constraints**:
-- Configuration file format: JSON
-- Environment variable injection must be transparent to AI CLI
-- Support OpenRouter and LiteLLM as minimum
+- Configuration file format: JSON with schema validation
+- Environment variable injection must be transparent to AI CLI process
+- Support OpenRouter, LiteLLM, and custom providers as minimum
+- Provider configurations must support inheritance and overrides
+- Sensitive data must be masked in UI output
+- Compatibility validation required before provider injection
 
 ---
 
-### REQ-003: Google Drive 同步集成
+### REQ-003: Google Drive 配置记录和同步
 **Status**: 🟢 Done
 **Priority**: P1 (High)
 **Version**: v0.1.0
 **Related**: ARCH-003, DATA-003
 
 **Description**:
-Agentic-Warden MUST integrate with Google Drive for configuration backup and restoration through `push` and `pull` commands.
+Agentic-Warden MUST integrate with Google Drive for selective AI CLI configuration backup and restoration through `push` and `pull` commands, with intelligent file selection to avoid unnecessary data transfer.
 
 **Acceptance Criteria**:
-- [x] Support OAuth 2.0 Device Flow (RFC 8628)
-- [x] Automatically detect environment (desktop/server/headless) and choose best auth method
-- [x] Authorize only when executing push/pull commands
-- [x] Push directories to Google Drive
-- [x] Pull files from Google Drive
-- [x] List remote files
+- [x] Support OAuth 2.0 Device Flow (RFC 8628) for headless environments
+- [x] Automatically detect environment (desktop/server/headless) and choose optimal auth method
+- [x] Authorize only when executing push/pull commands (no background auth)
+- [x] Implement selective configuration packing (exclude temp/cache/unnecessary files)
+- [x] Push compressed configuration archives to Google Drive with metadata
+- [x] Pull and extract configuration archives with conflict resolution
+- [x] List remote configuration files with version information
+- [x] Maintain sync state with hash-based change detection
+- [x] Support incremental sync (only changed configurations)
+- [x] Provide progress indicators for large configuration transfers
+- [x] Handle network interruptions with automatic retry mechanism
 
 **Technical Constraints**:
 - Authorization MUST auto-trigger with push/pull commands
 - Support concurrent local callback + manual input for better UX
-- Store tokens in secure location
+- Store OAuth tokens securely with automatic refresh
+- Configuration archives MUST be compressed (tar.gz format)
+- File selection MUST exclude: temp files, cache, logs, binaries
+- Hash validation MUST ensure data integrity
+- Retry policy MUST use exponential backoff (max 3 attempts)
+- Archive size MUST be optimized (< 5MB typical)
+
+**Configuration File Selection Strategy**:
+- **Claude**: `CLAUDE.md`, `settings.json`, `agents/`, `skills/SKILL.md`
+- **Codex**: `auth.json`, `config.toml`, `agents.md`, `history.jsonl`
+- **Gemini**: `google_accounts.json`, `oauth_creds.json`, `settings.json`, `gemini.md`
+- **Exclude**: `.cache/`, `temp/`, `logs/`, `node_modules/`, binaries
 
 ---
 
@@ -174,7 +198,42 @@ Agentic-Warden MUST provide MCP server to enable external AI assistants to acces
 
 ---
 
-### REQ-008: AI CLI 更新/安装管理
+### REQ-008: 指定供应商模式 AI CLI 启动
+**Status**: 🟢 Done
+**Priority**: P0 (Critical)
+**Version**: v0.1.0
+**Related**: ARCH-002, ARCH-008, API-004
+
+**Description**:
+Agentic-Warden MUST provide seamless AI CLI startup with dynamic provider selection through environment variable injection, enabling users to switch between different API providers without modifying AI CLI native configurations.
+
+**Acceptance Criteria**:
+- [x] Support `agentic-warden <ai_type> -p <provider> <prompt>` command syntax
+- [x] Transparent environment variable injection before AI CLI process startup
+- [x] Provider compatibility validation with AI CLI type before execution
+- [x] Fallback to default provider when no provider specified
+- [x] Support concurrent AI CLI processes with different providers
+- [x] Maintain process isolation and namespace separation per provider
+- [x] Handle provider configuration errors gracefully with clear error messages
+- [x] Support both single AI CLI and multi-AI CLI execution modes
+- [x] Preserve AI CLI native behavior while injecting provider configuration
+- [x] Log provider usage for audit and debugging purposes
+
+**Technical Constraints**:
+- Environment injection MUST happen before process exec(), not after
+- Provider validation MUST occur before process startup
+- Process isolation MUST prevent provider cross-contamination
+- Error handling MUST provide specific failure reasons
+- Command syntax MUST be intuitive and consistent across AI CLI types
+
+**Usage Examples**:
+- `agentic-warden claude -p openrouter "Write a Python function"` - Use OpenRouter with Claude
+- `agentic-warden codex "Debug this code"` - Use default provider with Codex
+- `agentic-warden gemini,codex -p litellm "Compare algorithms"` - Multiple AI CLI with same provider
+
+---
+
+### REQ-009: AI CLI 更新/安装管理
 **Status**: 🔴 To Do
 **Priority**: P1 (High)
 **Version**: v0.1.0
@@ -316,7 +375,8 @@ Agentic-Warden MUST meet performance criteria for process tracking and task mana
 | REQ-005 | Wait 模式跨进程等待 | P2 | 🟢 Done | v0.1.0 | ARCH-005, DATA-005, API-002 | Initial commit |
 | REQ-006 | AI CLI 工具检测与状态管理 | P1 | 🟢 Done | v0.1.0 | ARCH-006, MODULE-002 | Initial commit |
 | REQ-007 | MCP 服务器 | P1 | 🟢 Done | v0.1.0 | ARCH-007, API-003 | Initial commit |
-| REQ-008 | AI CLI 更新/安装管理 | P1 | 🔴 To Do | v0.1.0 | ARCH-008, MODULE-002, API-004 | - |
+| REQ-008 | 指定供应商模式 AI CLI 启动 | P0 | 🟢 Done | v0.1.0 | ARCH-002, ARCH-008, API-004 | Initial commit |
+| REQ-009 | AI CLI 更新/安装管理 | P1 | 🔴 To Do | v0.1.0 | ARCH-008, MODULE-002, API-004 | - |
 
 ---
 
