@@ -501,10 +501,7 @@ impl ProvidersConfig {
 
     /// Set token for a specific provider and region
     pub fn set_token(&mut self, provider_id: &str, region: Region, token: String) {
-        let tokens = self
-            .user_tokens
-            .entry(provider_id.to_string())
-            .or_default();
+        let tokens = self.user_tokens.entry(provider_id.to_string()).or_default();
 
         match region {
             Region::MainlandChina => tokens.mainland_china = Some(token),
@@ -618,7 +615,6 @@ impl Default for ProvidersConfig {
         })
     }
 }
-
 
 #[cfg(test)]
 mod tests {

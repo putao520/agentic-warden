@@ -753,7 +753,7 @@ impl ProviderAddWizard {
             ]),
             Line::from(""),
             Line::from(Span::styled(
-                "Configuration will be saved to ~/.agentic-warden/providers.json",
+                "Configuration will be saved to ~/.aiw/providers.json",
                 Style::default().fg(Color::Gray),
             )),
             Line::from(""),

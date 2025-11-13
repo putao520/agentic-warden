@@ -578,7 +578,7 @@ impl ConfigSyncManager {
             println!();
             println!("📁 Your data will be stored in:");
             println!("   • Google Drive: /agentic-warden/<directory-name>/");
-            println!("   • Local auth: ~/.agentic-warden/auth.json");
+            println!("   • Local auth: ~/.aiw/auth.json");
             println!();
             println!("🔒 Privacy:");
             println!("   • Only you can access your Google Drive files");
@@ -620,7 +620,7 @@ impl ConfigSyncManager {
             println!("4. Create OAuth 2.0 Client ID credentials");
             println!("5. Add urn:ietf:wg:oauth:2.0:oob to authorized redirect URIs");
             println!();
-            println!("We'll store these credentials securely in ~/.agentic-warden/auth.json");
+            println!("We'll store these credentials securely in ~/.aiw/auth.json");
             println!();
         }
 
@@ -990,7 +990,7 @@ impl ConfigSyncManager {
 
         println!("🔐 Google Drive OAuth credentials are required.");
         println!("   Please create OAuth 2.0 credentials in Google Cloud Console.");
-        println!("   We'll store them securely in ~/.agentic-warden/auth.json.\n");
+        println!("   We'll store them securely in ~/.aiw/auth.json.\n");
 
         let existing_id = auth.client_id.clone();
         let _existing_secret = auth.client_secret.clone();

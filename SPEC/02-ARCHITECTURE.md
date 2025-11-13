@@ -587,11 +587,12 @@ graph TB
     subgraph "Agentic-Warden Core"
         IntelligentRouter[Intelligent MCP Router]
         LLMEngine[LLM Decision Engine]
+        FastEmbed[FastEmbed Service]
     end
 
     subgraph "Vector Storage Layer"
         MemVDB[MemVDB In-Memory<br/>MCP Tools/Methods]
-        Qdrant[Qdrant Server<br/>Historical Data]
+        SahomeDB[SahomeDB File Storage<br/>Conversation History]
     end
 
     subgraph "MCP Client Layer"
@@ -608,9 +609,11 @@ graph TB
     MCPInterface --> IntelligentRouter
     IntelligentRouter --> MemVDB
     IntelligentRouter --> LLMEngine
+    IntelligentRouter --> FastEmbed
     IntelligentRouter --> RMCPClientPool
     RMCPClientPool --> MCPServers
-    LLMEngine --> Qdrant
+    FastEmbed --> MemVDB
+    FastEmbed --> SahomeDB
     MCPConfig --> ConfigValidator
     ConfigValidator --> IntelligentRouter
 ```
@@ -625,15 +628,17 @@ graph TB
 ##### 2. Dual-Mode Vector Database Layer
 - **MemVDB (In-Memory)**:
   - Collections: `mcp_tools`, `mcp_methods`
-  - Purpose: Fast MCP routing index, rebuilt on startup
+  - Purpose: Fast MCP routing index, rebuilt on startup from .mcp.json
   - Features: Thread-safe, cosine similarity, batch operations
   - Lifecycle: Memory-only, destroyed on shutdown
+  - Rebuild: Automatically reconstructed from MCP configuration
 
-- **Qdrant Server (Persistent)**:
-  - Collections: `agentic_warden_memory`
-  - Purpose: Historical conversation and TODO data
-  - Features: HTTP API, persistent storage, session-based access
-  - Integration: Existing memory module integration
+- **SahomeDB (File-based Persistent)**:
+  - Collections: `conversation_history`
+  - Purpose: Claude Code conversation history storage and semantic search
+  - Features: Persistent file storage, zero external dependencies, semantic search
+  - Integration: New conversation history management module
+  - Data: Session metadata, conversation context, tool usage patterns
 
 ##### 3. RMCP Client Connection Pool
 - **Purpose**: Dynamic MCP server lifecycle management
@@ -673,23 +678,31 @@ sequenceDiagram
 #### Technology Stack Integration
 
 ##### New Dependencies for ARCH-012:
-- `memvdb` = "0.1" # In-memory vector database
+- `fastembed` = "4.0" # Local text embedding generation
+- `memvdb` = "0.1" # In-memory vector database for MCP routing
+- `sahomedb` = "0.1" # File-based vector database for conversation history
 - `rmcp` = { version = "0.5", features = ["client"] } # MCP client functionality
-- `ollama-rs` = "0.3.1" # LLM communication
+- `ollama-rs` = "0.3.1" # LLM communication (retained for tool selection decisions)
+- `ndarray` = "0.15" # Vector calculations (FastEmbed dependency)
+- `hnswlib` = "0.7" # High-performance vector search (MemVDB backend)
 
 ##### Existing Component Integration:
-- **Memory Module**: Leverages existing embedding service and Qdrant integration
+- **Memory Module**: Refactored to use FastEmbed embeddings + SahomeDB for conversation history
 - **Configuration System**: Extends .mcp.json validation and management
 - **Process Supervisor**: Integrates with MCP server lifecycle management
+- **Embedding Service**: Replaced Ollama-based embedding with FastEmbed local generation
 
 #### Performance Architecture
 
 ##### Key Performance Targets:
-- **Tool Discovery**: < 500ms for typical semantic queries
-- **Method Routing**: < 1000ms end-to-end including LLM decisions
-- **Vector Search**: < 100ms for MemVDB operations
+- **Tool Discovery**: < 50ms for typical semantic queries (MemVDB + FastEmbed)
+- **Method Routing**: < 200ms end-to-end including LLM decisions
+- **Embedding Generation**: < 30ms local (FastEmbed vs 200-500ms network)
+- **Vector Search**: < 10ms for MemVDB operations, < 150ms for SahomeDB
+- **Conversation History Search**: < 200ms for semantic queries
 - **MCP Connections**: Support 10+ concurrent client connections
-- **Memory Usage**: < 100MB for MemVDB index (typical MCP ecosystem)
+- **Memory Usage**: < 50MB for MemVDB index, < 200MB for SahomeDB storage
+- **Startup Time**: < 500ms for MemVDB index reconstruction from .mcp.json
 
 ##### Scalability Considerations:
 - **Horizontal Scaling**: Multiple MCP server connections

@@ -9,6 +9,7 @@ pub mod config;
 pub mod core;
 pub mod error;
 pub mod logging;
+pub mod mcp_routing;
 pub mod memory;
 pub mod platform;
 pub mod provider;

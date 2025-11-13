@@ -2,17 +2,17 @@
 mod help;
 mod mcp;
 
-use aiw::cli_type::{parse_cli_selector_strict, parse_cli_type};
-use aiw::commands::ai_cli::AiCliCommand;
-use aiw::commands::{parse_external_as_ai_cli, parser::McpAction, Cli, Commands};
-use aiw::error::ErrorCategory;
-use aiw::execute_update;
-use aiw::provider::network_detector::NetworkDetector;
-use aiw::pwait_mode;
-use aiw::sync;
-use aiw::sync::sync_config::save_network_status;
-use aiw::tui;
-use aiw::wait_mode;
+use agentic_warden::cli_type::{parse_cli_selector_strict, parse_cli_type};
+use agentic_warden::commands::ai_cli::AiCliCommand;
+use agentic_warden::commands::{parse_external_as_ai_cli, parser::McpAction, Cli, Commands};
+use agentic_warden::error::ErrorCategory;
+use agentic_warden::execute_update;
+use agentic_warden::provider::network_detector::NetworkDetector;
+use agentic_warden::pwait_mode;
+use agentic_warden::sync;
+use agentic_warden::sync::sync_config::save_network_status;
+use agentic_warden::tui;
+use agentic_warden::wait_mode;
 use help::{print_command_help, print_general_help, print_quick_examples};
 use mcp::AgenticWardenMcpServer;
 use std::path::PathBuf;
@@ -230,9 +230,9 @@ async fn launch_tui(initial_screen: Option<tui::ScreenType>) -> Result<ExitCode,
 
 /// 处理status命令（文本模式）
 fn handle_status_command() -> Result<ExitCode, String> {
-    use aiw::storage::SharedMemoryStorage;
-    use aiw::task_record::TaskStatus;
-    use aiw::unified_registry::Registry;
+    use agentic_warden::storage::SharedMemoryStorage;
+    use agentic_warden::task_record::TaskStatus;
+    use agentic_warden::unified_registry::Registry;
 
     // 连接到当前进程的共享内存
     let storage = SharedMemoryStorage::connect()
@@ -357,7 +357,9 @@ async fn handle_mcp_command(action: McpAction) -> Result<ExitCode, String> {
 
             // 创建MCP服务器（使用InProcessRegistry）
             // Provider配置通过supervisor模块管理，不需要在MCP server中直接管理
-            let mcp_server = AgenticWardenMcpServer::new();
+            let mcp_server = AgenticWardenMcpServer::bootstrap()
+                .await
+                .map_err(|e| format!("Failed to initialise MCP server: {e}"))?;
 
             match transport.as_str() {
                 "stdio" => {

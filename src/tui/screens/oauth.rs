@@ -225,7 +225,7 @@ impl OAuthScreen {
             Line::from("  2. You approve the request and receive a one-time code;"),
             Line::from("  3. Paste the code back into this screen to finish."),
             Line::from(""),
-            Line::from("Credentials are stored in ~/.agentic-warden/auth.json."),
+            Line::from("Credentials are stored in ~/.aiw/auth.json."),
             Line::from("You can revoke access at any time from Google's security settings."),
             Line::from(""),
             Line::from("Press Enter to start the OAuth flow."),

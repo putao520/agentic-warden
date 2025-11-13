@@ -804,10 +804,10 @@ impl AgenticWardenError {
                         .to_string(),
                 ),
                 SyncOperation::ConfigLoading | SyncOperation::ConfigSaving => Some(
-                    "Validate JSON files under ~/.agentic-warden/providers and retry.".to_string(),
+                    "Validate JSON files under ~/.aiw/providers and retry.".to_string(),
                 ),
                 SyncOperation::ArchiveExtraction => Some(
-                    "Remove the corrupted archive under ~/.agentic-warden/sync and pull again."
+                    "Remove the corrupted archive under ~/.aiw/sync and pull again."
                         .to_string(),
                 ),
                 SyncOperation::GoogleDriveAuth | SyncOperation::OAuthCallback => Some(
@@ -860,7 +860,7 @@ impl AgenticWardenError {
                 "Let the active operation finish before starting another one.".to_string(),
             ),
             AgenticWardenError::Unknown { .. } => Some(
-                "Open ~/.agentic-warden/logs/latest.log for detailed diagnostics.".to_string(),
+                "Open ~/.aiw/logs/latest.log for detailed diagnostics.".to_string(),
             ),
         };
 

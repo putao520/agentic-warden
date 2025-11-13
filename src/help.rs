@@ -216,7 +216,7 @@ DESCRIPTION:
     - Debug/IDE/shell snapshot files
 
     All files are saved in a single zip file:
-    Google Drive: .agentic-warden/<CONFIG_NAME>.zip
+    Google Drive: .aiw/<CONFIG_NAME>.zip
 
     OVERWRITE PROTECTION:
     - Before uploading, the system checks if a configuration with the same name
@@ -233,7 +233,7 @@ EXAMPLES:
     agentic-warden push dev       # Save as dev.zip
 
 SETUP:
-    Requires Google Drive OAuth configuration in ~/.agentic-warden/auth.json
+    Requires Google Drive OAuth configuration in ~/.aiw/auth.json
 "#;
     print!("{}", help_text);
     io::stdout().flush()
@@ -256,7 +256,7 @@ DESCRIPTION:
     Download and restore AI CLI configurations from Google Drive.
 
     Downloads and extracts:
-    - Google Drive: .agentic-warden/<CONFIG_NAME>.zip
+    - Google Drive: .aiw/<CONFIG_NAME>.zip
     - Extracts to: ~/.claude, ~/.codex, ~/.gemini (directories will be created if needed)
 
     Restores only the specific configuration files that were backed up.
@@ -280,7 +280,7 @@ NOTES:
     - CONFIG_NAME is optional (defaults to "default")
 
 SETUP:
-    Requires Google Drive OAuth configuration in ~/.agentic-warden/auth.json
+    Requires Google Drive OAuth configuration in ~/.aiw/auth.json
 "#;
     print!("{}", help_text);
     io::stdout().flush()

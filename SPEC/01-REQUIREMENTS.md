@@ -414,14 +414,15 @@ Agentic-Warden MUST provide an intelligent MCP (Model Context Protocol) routing 
 - [x] Support health check configuration per MCP server (interval, timeout)
 
 #### 4.2 双模式向量数据库集成
-- [x] **持久化模式**: Qdrant Server for historical data (conversations, todos)
-- [x] **内存模式**: MemVDB for MCP routing index (tools, methods)
-- [x] Tool-level collection: index MCP tools with descriptions and capabilities
-- [x] Method-level collection: index individual methods with detailed schemas and examples
+- [x] **MCP路由模式**: MemVDB for intelligent MCP tool routing and discovery
+- [x] **历史会话模式**: SahomeDB for Claude Code conversation history storage and search
+- [x] Tool-level indexing: index MCP tools with descriptions and capabilities for routing
+- [x] Method-level indexing: index individual methods with detailed schemas for precise routing
+- [x] Conversation history: store and search Claude Code conversation history with semantic search
 - [x] Maintain metadata associations between tools and methods
 - [x] Support batch indexing and incremental updates
 - [x] Provide semantic search capabilities with configurable similarity thresholds
-- [x] Memory-only index rebuilt on startup from .mcp.json configuration
+- [x] Memory-only MCP index rebuilt on startup from .mcp.json configuration
 
 #### 4.3 智能路由算法
 - [x] Implement two-stage vector search: tool-level then method-level
@@ -462,6 +463,18 @@ Agentic-Warden MUST provide an intelligent MCP (Model Context Protocol) routing 
 
 **Technical Constraints**:
 
+#### New Dependencies for REQ-012:
+- **FastEmbed-rs**: Local text embedding generation, replacing Ollama for embeddings
+  - Model: AllMiniLML6V2 (default), BGEBaseEN (for knowledge)
+  - Zero network dependency, 10-50ms local generation
+- **SahomeDB**: File-based vector database for conversation history storage
+  - Persistent file storage, no external server required
+  - Semantic search capabilities with configurable thresholds
+- **MemVDB**: In-memory vector database for MCP tool routing
+  - Pure memory operations, rebuilt from .mcp.json on startup
+  - Thread-safe, multiple distance metrics supported
+- **Ollama-rs**: Retained for LLM inference (tool selection decisions), not embeddings
+
 #### Configuration Format (.mcp.json):
 ```json
 {
@@ -494,27 +507,26 @@ Agentic-Warden MUST provide an intelligent MCP (Model Context Protocol) routing 
 ```
 
 #### 双模式向量数据库架构:
-- **Qdrant Server** (Persistent): Historical data storage
-  - **agentic_warden_memory**: Single collection storing both conversations and TODOs
-  - Differentiated by metadata.type: "conversation" vs "todo"
-  - Session-based access via metadata.session_id
-  - Long-term persistent storage across service restarts
-  - HTTP REST API integration
+- **SahomeDB** (File-based Persistent): Claude Code conversation history storage
+  - **conversation_history**: Store Claude Code conversation history with semantic search
+  - Persistent file-based storage across service restarts
+  - Metadata: session_id, timestamp, user, tools_used, conversation_context
+  - Long-term memory for conversation retrieval and analysis
+  - Semantic search for finding relevant past conversations
 
-- **MemVDB** (In-Memory): MCP routing index
-  - **mcp_tools**: Tool-level vectors with description embedding
-  - Pure memory mode, rebuilt on startup from .mcp.json
+- **MemVDB** (In-Memory): MCP intelligent routing index
+  - **mcp_tools**: Tool-level vectors with description embedding for routing discovery
+  - Pure memory mode, rebuilt on startup from .mcp.json configuration
   - Metadata: MCP name, tool name, category, capabilities, health status
-  - **mcp_methods**: Method-level vectors with detailed schema embedding
-  - Pure memory mode, dynamically built from MCP server connections
+  - **mcp_methods**: Method-level vectors with detailed schema embedding for precise routing
+  - Real-time MCP tool discovery and intelligent routing decisions
   - Metadata: MCP name, method name, parameters, examples, availability
   - Thread-safe, zero dependencies, multiple distance metrics (cosine, euclidean, dot-product)
 
 #### Environment Variables:
 - `AGENTIC_WARDEN_LLM_ENDPOINT`: Internal LLM endpoint (default: http://localhost:11434)
 - `AGENTIC_WARDEN_LLM_MODEL`: Internal LLM model (default: qwen2.5:7b)
-- `AGENTIC_WARDEN_LLM_TIMEOUT`: LLM request timeout in seconds (default: 30)
-- Existing embedding variables remain unchanged
+- `AGENTIC_WARDEN_FASTEMBED_MODEL`: FastEmbed model (default: AllMiniLML6V2)
 
 #### Algorithm Requirements:
 - Vector search MUST use cosine similarity with configurable thresholds

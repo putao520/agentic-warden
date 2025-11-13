@@ -4,7 +4,9 @@ use crate::core::process_tree::ProcessTreeError;
 use crate::error::RegistryError;
 use crate::logging::debug;
 use crate::logging::warn;
-use crate::platform::{self, ChildResources};
+use crate::platform::{self};
+#[cfg(windows)]
+use crate::platform::ChildResources;
 use crate::provider::{AiType, ProviderManager};
 use crate::signal;
 use crate::storage::TaskStorage;
@@ -171,7 +173,6 @@ pub async fn execute_cli<S: TaskStorage>(
     // Platform-specific command preparation (Unix: set process group and death signal)
     #[cfg(unix)]
     {
-        use std::os::unix::process::CommandExt;
         unsafe {
             command.pre_exec(|| {
                 // Set process group ID
@@ -337,11 +338,11 @@ pub async fn execute_cli<S: TaskStorage>(
 /// - Logs are automatically cleaned up on system reboot
 fn generate_log_path(pid: u32) -> io::Result<PathBuf> {
     // Use system temp directory as per SPEC design (cross-platform)
-    // Linux/macOS: /tmp/.agentic-warden/logs/
-    // Windows: %TEMP%\.agentic-warden\logs\
-    // Runtime data (logs, temp files) → temp_dir()/.agentic-warden/
-    // Persistent config → ~/.agentic-warden/
-    let log_dir = std::env::temp_dir().join(".agentic-warden").join("logs");
+    // Linux/macOS: /tmp/.aiw/logs/
+    // Windows: %TEMP%\.aiw\logs\
+    // Runtime data (logs, temp files) → temp_dir()/.aiw/
+    // Persistent config → ~/.aiw/
+    let log_dir = std::env::temp_dir().join(".aiw").join("logs");
 
     // Create the logs directory if it doesn't exist
     if !log_dir.exists() {
@@ -519,7 +520,6 @@ pub async fn start_interactive_cli<S: TaskStorage>(
     // Platform-specific command preparation (Unix: set process group and death signal)
     #[cfg(unix)]
     {
-        use std::os::unix::process::CommandExt;
         unsafe {
             command.pre_exec(|| {
                 // Set process group ID

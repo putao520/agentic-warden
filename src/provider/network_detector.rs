@@ -59,7 +59,9 @@ impl NetworkStatus {
     pub fn should_warn_international(&self) -> bool {
         matches!(
             self,
-            NetworkStatus::DomesticOnly { .. } | NetworkStatus::Poor { .. } | NetworkStatus::Unknown { .. }
+            NetworkStatus::DomesticOnly { .. }
+                | NetworkStatus::Poor { .. }
+                | NetworkStatus::Unknown { .. }
         )
     }
 
@@ -67,7 +69,9 @@ impl NetworkStatus {
     pub fn should_warn_domestic(&self) -> bool {
         matches!(
             self,
-            NetworkStatus::InternationalOnly { .. } | NetworkStatus::Poor { .. } | NetworkStatus::Unknown { .. }
+            NetworkStatus::InternationalOnly { .. }
+                | NetworkStatus::Poor { .. }
+                | NetworkStatus::Unknown { .. }
         )
     }
 
