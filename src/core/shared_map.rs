@@ -45,7 +45,10 @@ const _: () = {
     let map_size = std::mem::size_of::<SharedMemoryHashMap<String, String>>();
 
     // This will fail to compile if sizes don't match
-    assert!(repr_size == map_size, "SharedMapRepr and SharedMemoryHashMap size mismatch");
+    assert!(
+        repr_size == map_size,
+        "SharedMapRepr and SharedMemoryHashMap size mismatch"
+    );
 };
 
 pub fn open_or_create(

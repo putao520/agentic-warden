@@ -28,10 +28,13 @@ async fn codex_env_override_to_missing_binary_returns_os_error() {
         Path::new("Z:/definitely/missing/codex.exe").as_os_str(),
     );
 
-    let registry = RegistryFactory::instance().get_cli_registry().expect("task registry should connect");
+    let registry = RegistryFactory::instance()
+        .get_cli_registry()
+        .expect("task registry should connect");
     let args = prompt_args(&CliType::Codex, "test");
 
-    let err = supervisor::execute_cli(&registry, &CliType::Codex, &args, None).await
+    let err = supervisor::execute_cli(&registry, &CliType::Codex, &args, None)
+        .await
         .expect_err("missing binary must surface as IO error");
 
     match err {
@@ -52,10 +55,13 @@ async fn claude_empty_env_path_is_rejected_before_spawn() {
     let _home = TempHome::new();
     let _guard = EnvGuard::set("CLAUDE_BIN", OsStr::new(""));
 
-    let registry = RegistryFactory::instance().get_cli_registry().expect("task registry should connect");
+    let registry = RegistryFactory::instance()
+        .get_cli_registry()
+        .expect("task registry should connect");
     let args = prompt_args(&CliType::Claude, "test");
 
-    let err = supervisor::execute_cli(&registry, &CliType::Claude, &args, None).await
+    let err = supervisor::execute_cli(&registry, &CliType::Claude, &args, None)
+        .await
         .expect_err("empty path must be rejected");
 
     match err {
@@ -83,10 +89,13 @@ async fn gemini_removed_from_path_reports_not_found() {
     let system_path = minimal_system_path();
     let _path_guard = EnvGuard::set("PATH", system_path.as_os_str());
 
-    let registry = RegistryFactory::instance().get_cli_registry().expect("task registry should connect");
+    let registry = RegistryFactory::instance()
+        .get_cli_registry()
+        .expect("task registry should connect");
     let args = prompt_args(&CliType::Gemini, "test");
 
-    let err = supervisor::execute_cli(&registry, &CliType::Gemini, &args, None).await
+    let err = supervisor::execute_cli(&registry, &CliType::Gemini, &args, None)
+        .await
         .expect_err("missing binary on PATH must be reported");
 
     match err {
@@ -112,10 +121,13 @@ async fn execute_cli_with_unknown_provider_surfaces_error() {
     ensure_cli_available("codex");
     let _home = TempHome::new();
 
-    let registry = RegistryFactory::instance().get_cli_registry().expect("task registry should connect");
+    let registry = RegistryFactory::instance()
+        .get_cli_registry()
+        .expect("task registry should connect");
     let args = prompt_args(&CliType::Codex, "test");
 
-    let err = supervisor::execute_cli(&registry, &CliType::Codex, &args, Some("ghost".to_string())).await
+    let err = supervisor::execute_cli(&registry, &CliType::Codex, &args, Some("ghost".to_string()))
+        .await
         .expect_err("unknown provider must fail");
 
     match err {
@@ -140,7 +152,9 @@ async fn execute_cli_with_unknown_provider_surfaces_error() {
 async fn execute_cli_returns_error_when_tmp_dir_is_unusable() {
     ensure_cli_available("codex");
     let _home = TempHome::new();
-    let registry = RegistryFactory::instance().get_cli_registry().expect("task registry should connect");
+    let registry = RegistryFactory::instance()
+        .get_cli_registry()
+        .expect("task registry should connect");
     let fake_root = TempDir::new().expect("temp sandbox for tmp override");
     let file_path = fake_root.path().join("tmp-anchor");
     fs::write(&file_path, b"x").expect("create fake temp file");
@@ -162,7 +176,8 @@ async fn execute_cli_returns_error_when_tmp_dir_is_unusable() {
 
     let args = prompt_args(&CliType::Codex, "test");
 
-    let err = supervisor::execute_cli(&registry, &CliType::Codex, &args, None).await
+    let err = supervisor::execute_cli(&registry, &CliType::Codex, &args, None)
+        .await
         .expect_err("invalid temp dir should cause IO error");
 
     match err {
@@ -191,9 +206,12 @@ async fn multi_cli_mode_returns_first_non_zero_exit_code() {
     let _home = TempHome::new();
 
     // Test with invalid flag that causes immediate failure
-    let registry = RegistryFactory::instance().get_cli_registry().expect("task registry should connect");
+    let registry = RegistryFactory::instance()
+        .get_cli_registry()
+        .expect("task registry should connect");
     let invalid_args = prompt_args(&CliType::Codex, "--definitely-invalid-flag");
-    let codex_exit = supervisor::execute_cli(&registry, &CliType::Codex, &invalid_args, None).await
+    let codex_exit = supervisor::execute_cli(&registry, &CliType::Codex, &invalid_args, None)
+        .await
         .expect("codex should execute and return exit status");
     assert_ne!(
         codex_exit, 0,
@@ -206,7 +224,9 @@ async fn multi_cli_mode_returns_first_non_zero_exit_code() {
         None,
         "--definitely-invalid-flag".to_string(),
     );
-    let exit_code = command.execute().await
+    let exit_code = command
+        .execute()
+        .await
         .expect("ai cli execution should finish");
 
     assert_eq!(exit_code, ExitCode::from((codex_exit & 0xFF) as u8));
@@ -221,7 +241,9 @@ async fn multi_cli_mode_returns_first_non_zero_exit_code() {
 #[serial]
 async fn interactive_mode_rejects_multiple_cli_without_prompt() {
     let command = AiCliCommand::new(vec![CliType::Codex, CliType::Gemini], None, String::new());
-    let err = command.execute().await
+    let err = command
+        .execute()
+        .await
         .expect_err("interactive multi CLI should be rejected");
 
     assert!(
@@ -242,10 +264,13 @@ async fn execute_cli_propagates_real_gemini_exit_status() {
     ensure_cli_available("gemini");
     let _home = TempHome::new();
 
-    let registry = RegistryFactory::instance().get_cli_registry().expect("task registry should connect");
+    let registry = RegistryFactory::instance()
+        .get_cli_registry()
+        .expect("task registry should connect");
     let args = prompt_args(&CliType::Gemini, "--definitely-invalid-flag");
 
-    let exit_code = supervisor::execute_cli(&registry, &CliType::Gemini, &args, None).await
+    let exit_code = supervisor::execute_cli(&registry, &CliType::Gemini, &args, None)
+        .await
         .expect("gemini command should execute and return exit status");
 
     assert_ne!(

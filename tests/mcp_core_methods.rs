@@ -56,10 +56,7 @@ fn test_get_task_command_with_provider() {
         task.replace("'", "'\\''")
     );
 
-    assert_eq!(
-        command,
-        "agent claude -p openrouter 'Write documentation'"
-    );
+    assert_eq!(command, "agent claude -p openrouter 'Write documentation'");
     println!("✅ Command with provider: {}", command);
 }
 
@@ -130,7 +127,12 @@ fn test_concurrent_tasks_command_generation() {
 
     for (ai_type, task, provider) in tasks {
         let command = if let Some(p) = provider {
-            format!("agent {} -p {} '{}'", ai_type, p, task.replace("'", "'\\''"))
+            format!(
+                "agent {} -p {} '{}'",
+                ai_type,
+                p,
+                task.replace("'", "'\\''")
+            )
         } else {
             format!("agent {} '{}'", ai_type, task.replace("'", "'\\''"))
         };
@@ -142,7 +144,10 @@ fn test_concurrent_tasks_command_generation() {
     assert_eq!(commands[1], "agent gemini 'task2'");
     assert_eq!(commands[2], "agent claude -p anthropic 'task3'");
 
-    println!("✅ Generated {} commands for concurrent tasks", commands.len());
+    println!(
+        "✅ Generated {} commands for concurrent tasks",
+        commands.len()
+    );
 }
 
 /// 测试无效的JSON格式
@@ -169,8 +174,7 @@ fn test_missing_required_fields() {
         }
     ]);
 
-    let tasks: Vec<serde_json::Value> =
-        serde_json::from_value(tasks_json).expect("JSON is valid");
+    let tasks: Vec<serde_json::Value> = serde_json::from_value(tasks_json).expect("JSON is valid");
 
     // 第一个任务缺少ai_type
     assert!(

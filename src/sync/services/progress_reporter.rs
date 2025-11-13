@@ -3,7 +3,7 @@
 //! Eliminates repeated progress reporting logic across sync operations,
 //! providing consistent progress updates and user feedback.
 
-use super::sync_service::{SyncResult, ProgressReporter};
+use super::sync_service::{ProgressReporter, SyncResult};
 
 /// Multi-channel progress reporter that reports to multiple sources
 pub struct MultiProgressReporter {
@@ -81,7 +81,13 @@ impl ProgressReporter for LoggingProgressReporter {
         let elapsed = self.start_time.elapsed().as_secs_f32();
         match self.log_level {
             tracing::Level::DEBUG => {
-                tracing::debug!("{}: {}% - {} ({:.1}s elapsed)", self.operation_name, percent, message, elapsed);
+                tracing::debug!(
+                    "{}: {}% - {} ({:.1}s elapsed)",
+                    self.operation_name,
+                    percent,
+                    message,
+                    elapsed
+                );
             }
             tracing::Level::INFO => {
                 tracing::info!("{}: {}% - {}", self.operation_name, percent, message);
@@ -265,16 +271,11 @@ impl ProgressReporterFactory {
 
     /// Create multi-reporter that reports to all provided reporters
     pub fn multi(reporters: Vec<Box<dyn ProgressReporter>>) -> Box<dyn ProgressReporter> {
-        Box::new(MultiProgressReporter {
-            reporters
-        })
+        Box::new(MultiProgressReporter { reporters })
     }
 
     /// Create combined logging and TUI reporter
     pub fn logging_and_tui(operation: impl Into<String>) -> Box<dyn ProgressReporter> {
-        Self::multi(vec![
-            Self::logging(operation),
-            Self::tui(),
-        ])
+        Self::multi(vec![Self::logging(operation), Self::tui()])
     }
 }

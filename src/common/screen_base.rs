@@ -58,7 +58,10 @@ pub trait ScreenBase {
 
     /// Check if the screen is in a terminal state (completed, failed, or cancelled)
     fn is_terminal(&self) -> bool {
-        matches!(self.mode(), ScreenMode::Completed | ScreenMode::Failed(_) | ScreenMode::Cancelled)
+        matches!(
+            self.mode(),
+            ScreenMode::Completed | ScreenMode::Failed(_) | ScreenMode::Cancelled
+        )
     }
 
     /// Check if the screen is in an active state
@@ -90,17 +93,19 @@ pub trait ScreenBase {
 
         let status_text = match self.mode() {
             ScreenMode::Ready => Span::styled("Ready", Style::default().fg(Color::Green)),
-            ScreenMode::Processing => Span::styled("Processing...", Style::default().fg(Color::Yellow)),
+            ScreenMode::Processing => {
+                Span::styled("Processing...", Style::default().fg(Color::Yellow))
+            }
             ScreenMode::Completed => Span::styled("Completed", Style::default().fg(Color::Green)),
-            ScreenMode::Failed(msg) => Span::styled(format!("Error: {}", msg), Style::default().fg(Color::Red)),
+            ScreenMode::Failed(msg) => {
+                Span::styled(format!("Error: {}", msg), Style::default().fg(Color::Red))
+            }
             ScreenMode::Cancelled => Span::styled("Cancelled", Style::default().fg(Color::Yellow)),
             ScreenMode::NeedAuth => Span::styled("Auth Required", Style::default().fg(Color::Red)),
             ScreenMode::Loading => Span::styled("Loading...", Style::default().fg(Color::Cyan)),
         };
 
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title("Status");
+        let block = Block::default().borders(Borders::ALL).title("Status");
 
         let paragraph = Paragraph::new(status_text)
             .block(block)
@@ -117,18 +122,16 @@ pub trait ScreenBase {
             widgets::Paragraph,
         };
 
-        let help_text = vec![
-            Line::from(vec![
-                Span::styled("ESC", Style::default().fg(Color::Cyan)),
-                Span::raw(": Back "),
-                Span::styled("Q", Style::default().fg(Color::Cyan)),
-                Span::raw(": Quit "),
-                Span::styled("F5", Style::default().fg(Color::Cyan)),
-                Span::raw(": Refresh "),
-                Span::styled("F1", Style::default().fg(Color::Cyan)),
-                Span::raw(": Help"),
-            ]),
-        ];
+        let help_text = vec![Line::from(vec![
+            Span::styled("ESC", Style::default().fg(Color::Cyan)),
+            Span::raw(": Back "),
+            Span::styled("Q", Style::default().fg(Color::Cyan)),
+            Span::raw(": Quit "),
+            Span::styled("F5", Style::default().fg(Color::Cyan)),
+            Span::raw(": Refresh "),
+            Span::styled("F1", Style::default().fg(Color::Cyan)),
+            Span::raw(": Help"),
+        ])];
 
         let paragraph = Paragraph::new(help_text)
             .style(Style::default().fg(Color::Gray))
@@ -185,6 +188,7 @@ pub trait AsyncScreen: ScreenBase {
 mod tests {
     use super::*;
 
+    #[allow(dead_code)]
     struct MockScreen {
         mode: ScreenMode,
         app_state: AppState,
@@ -208,7 +212,10 @@ mod tests {
     fn test_screen_mode_display() {
         assert_eq!(ScreenMode::Ready.to_string(), "Ready");
         assert_eq!(ScreenMode::Processing.to_string(), "Processing...");
-        assert_eq!(ScreenMode::Failed("test".to_string()).to_string(), "Error: test");
+        assert_eq!(
+            ScreenMode::Failed("test".to_string()).to_string(),
+            "Error: test"
+        );
     }
 
     #[test]

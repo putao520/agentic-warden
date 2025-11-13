@@ -144,6 +144,7 @@ fn test_status_workflow() {
 
     // 5. 清理
     for &pid in &test_pids {
-        let _ = registry.mark_completed(pid, Some("workflow done".to_string()), Some(0), Utc::now());
+        let _ =
+            registry.mark_completed(pid, Some("workflow done".to_string()), Some(0), Utc::now());
     }
 }

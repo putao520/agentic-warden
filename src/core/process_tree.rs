@@ -494,7 +494,7 @@ fn get_parent_pid_unix(pid: u32) -> Result<Option<u32>, ProcessTreeError> {
         Ok(parent_pid_opt) => {
             // ppid() returns Option<u32>, already the correct type
             Ok(parent_pid_opt)
-        },
+        }
         Err(err) => Err(err.into()),
     }
 }
@@ -575,6 +575,7 @@ fn process_tree_issue(operation: &str, message: impl Into<String>) -> AgenticWar
     }
 }
 
+#[allow(dead_code)]
 fn process_tree_issue_with_source(
     operation: &str,
     message: impl Into<String>,

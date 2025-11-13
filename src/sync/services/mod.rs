@@ -3,16 +3,16 @@
 //! This module provides a unified service layer to eliminate the 336+ repeated
 //! sync/upload/download calls across the sync module, following DRY principles.
 
-pub mod sync_service;
-pub mod google_drive_sync_service;
-pub mod progress_reporter;
 pub mod auth_manager;
+pub mod google_drive_sync_service;
 pub mod mock_sync_service;
+pub mod progress_reporter;
+pub mod sync_service;
 
-pub use sync_service::{SyncService, SyncOperation, SyncResult, SyncError};
 pub use google_drive_sync_service::GoogleDriveSyncService;
+pub use mock_sync_service::{MockAuthManager, MockSyncService};
 pub use sync_service::ProgressReporter;
-pub use mock_sync_service::{MockSyncService, MockAuthManager};
+pub use sync_service::{SyncError, SyncOperation, SyncResult, SyncService};
 
 /// Common synchronization events
 #[derive(Debug, Clone)]

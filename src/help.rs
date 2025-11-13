@@ -1,4 +1,4 @@
-//! Help module for agentic-warden
+//! Help module for aiw
 //!
 //! Provides comprehensive help information for all commands and features
 
@@ -7,11 +7,11 @@ use std::io::{self, Write};
 /// Print general help information
 pub fn print_general_help() -> io::Result<()> {
     let help_text = r#"
-agentic-warden v0.3.0 - Universal AI Agent Manager
+aiw v5.0.1 - Universal AI Agent Manager
 
 USAGE:
-    agentic-warden [OPTIONS] <AGENT_SELECTOR> "<TASK_DESCRIPTION>"
-    agentic-warden <COMMAND> [COMMAND_ARGS]
+    aiw [OPTIONS] <AGENT_SELECTOR> "<TASK_DESCRIPTION>"
+    aiw <COMMAND> [COMMAND_ARGS]
 
 AGENT SELECTORS:
     claude, codex, gemini    Single AI agent
@@ -32,27 +32,27 @@ OPTIONS:
 
 EXAMPLES:
     # Single agent tasks
-    agentic-warden claude "Write a Rust quicksort algorithm"
-    agentic-warden codex "Generate Python data visualization code"
-    agentic-warden gemini "Explain microservices architecture"
+    aiw claude "Write a Rust quicksort algorithm"
+    aiw codex "Generate Python data visualization code"
+    aiw gemini "Explain microservices architecture"
 
     # Multiple agent tasks
-    agentic-warden all "Review this code and suggest improvements"
-    agentic-warden "claude|gemini" "Compare these two approaches"
-    agentic-warden "claude|codex|gemini" "Write comprehensive documentation"
+    aiw all "Review this code and suggest improvements"
+    aiw "claude|gemini" "Compare these two approaches"
+    aiw "claude|codex|gemini" "Write comprehensive documentation"
 
     # Configuration management
-    agentic-warden push
-    agentic-warden pull ~/.claude ~/.codex
-    agentic-warden status
+    aiw push
+    aiw pull ~/.claude ~/.codex
+    aiw status
 
     # Task monitoring
-    agentic-warden wait
+    aiw wait
 
 For more detailed information about a specific command, use:
-    agentic-warden --help <command>
+    aiw --help <command>
 
-Project home: https://github.com/your-username/agentic-warden
+Project home: https://github.com/putao520/agentic-warden
 "#;
     print!("{}", help_text);
     io::stdout().flush()
@@ -72,7 +72,7 @@ pub fn print_command_help(command: &str) -> io::Result<()> {
         "provider" => print_provider_help(),
         _ => {
             eprintln!("Unknown command: {}", command);
-            eprintln!("Use 'agentic-warden --help' for general help");
+            eprintln!("Use 'aiw --help' for general help");
             Ok(())
         }
     }
@@ -85,15 +85,15 @@ fn print_agent_help(agent: &str) -> io::Result<()> {
 {} AGENT
 
 USAGE:
-    agentic-warden {} "<TASK_DESCRIPTION>"
+    aiw {} "<TASK_DESCRIPTION>"
 
 DESCRIPTION:
     Send a task to the {} AI agent with full access permissions.
 
 EXAMPLES:
-    agentic-warden {} "Write a sorting algorithm in Rust"
-    agentic-warden {} "Explain how neural networks work"
-    agentic-warden {} "Review this code for security issues"
+    aiw {} "Write a sorting algorithm in Rust"
+    aiw {} "Explain how neural networks work"
+    aiw {} "Review this code for security issues"
 
 The agent will run with full access permissions and automatically
 handle file operations, code execution, and other tasks.
@@ -380,12 +380,13 @@ EXAMPLE OUTPUT:
 }
 
 /// Print version information
+#[allow(dead_code)]
 pub fn print_version() -> io::Result<()> {
-    println!("agentic-warden v0.3.0");
+    println!("aiw v5.0.1");
     println!("Universal AI Agent Manager");
     println!("Built with Rust");
     println!();
-    println!("Project home: https://github.com/your-username/agentic-warden");
+    println!("Project home: https://github.com/putao520/agentic-warden");
     println!("License: MIT");
     io::stdout().flush()
 }

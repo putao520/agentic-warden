@@ -1,12 +1,12 @@
 [package]
-name = "agentic-warden"
-description = "Universal AI agent manager with shared-memory task tracking, process management, and multi-agent orchestration."
+name = "aiw"
+description = "AIW (AI Warden) - Universal AI CLI management platform with intelligent process tracking, semantic memory, and provider coordination."
 license = "MIT"
 repository = "https://github.com/putao520/agentic-warden"
 readme = "README.md"
-keywords = ["ai", "agents", "cli", "supervisor", "automation"]
+keywords = ["ai", "cli", "llm", "claude", "gemini", "process-management", "semantic-search", "mcp", "coordination"]
 categories = ["command-line-utilities", "development-tools"]
-version = "5.0.1"
+version = "5.0.2"
 edition = "2021"
 
 [dependencies]

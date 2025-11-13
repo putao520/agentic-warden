@@ -3,11 +3,11 @@
 //! Provides a common interface to eliminate repeated sync logic and consolidate
 //! upload/download operations across different providers.
 
+use anyhow::Result;
 use async_trait::async_trait;
 use std::path::Path;
-use anyhow::Result;
 
-use super::{SyncConfig, AuthStatus};
+use super::{AuthStatus, SyncConfig};
 
 /// Synchronization operations
 #[derive(Debug, Clone, PartialEq)]
@@ -173,11 +173,7 @@ pub trait SyncService: Send + Sync {
     ) -> Result<SyncResult>;
 
     /// Verify synchronization
-    async fn verify_sync(
-        &mut self,
-        local_dir: &Path,
-        remote_dir: &str,
-    ) -> Result<SyncResult>;
+    async fn verify_sync(&mut self, local_dir: &Path, remote_dir: &str) -> Result<SyncResult>;
 }
 
 /// Remote file information
@@ -231,9 +227,11 @@ impl SyncServiceFactory {
             super::SyncProvider::Local => {
                 Err(SyncError::Configuration("Local sync not implemented".to_string()).into())
             }
-            super::SyncProvider::Custom(name) => {
-                Err(SyncError::Configuration(format!("Custom provider '{}' not implemented", name)).into())
-            }
+            super::SyncProvider::Custom(name) => Err(SyncError::Configuration(format!(
+                "Custom provider '{}' not implemented",
+                name
+            ))
+            .into()),
         }
     }
 

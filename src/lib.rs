@@ -9,6 +9,7 @@ pub mod config;
 pub mod core;
 pub mod error;
 pub mod logging;
+pub mod memory;
 pub mod platform;
 pub mod provider;
 pub mod pwait_mode;
@@ -23,7 +24,6 @@ pub mod tui;
 pub mod unified_registry;
 pub mod utils;
 pub mod wait_mode;
-pub mod memory;
 
 pub mod cli_manager;
 

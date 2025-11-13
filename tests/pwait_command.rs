@@ -74,7 +74,9 @@ fn test_pwait_with_completed_task() {
         Some(std::process::id()),
     );
 
-    registry.register(test_pid, &task).expect("Failed to register task");
+    registry
+        .register(test_pid, &task)
+        .expect("Failed to register task");
 
     // 立即标记为完成
     registry
@@ -255,7 +257,9 @@ fn test_pwait_with_multiple_concurrent_tasks() {
             format!("/tmp/concurrent-{}.log", i),
             Some(std::process::id()),
         );
-        registry.register(pid, &task).expect("Failed to register task");
+        registry
+            .register(pid, &task)
+            .expect("Failed to register task");
     }
 
     // 在后台线程中模拟任务完成

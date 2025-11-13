@@ -176,11 +176,14 @@ impl TaskStorage for InProcessStorage {
             if let Some(mut record) = tasks.remove(&pid) {
                 record.status = TaskStatus::CompletedButUnread;
                 record.completed_at = Some(now);
-                record.cleanup_reason = Some(match cleanup_reason {
-                    CleanupReason::ProcessExited => "process_exited",
-                    CleanupReason::Timeout => "timeout",
-                    CleanupReason::ManagerMissing => "manager_missing",
-                }.to_string());
+                record.cleanup_reason = Some(
+                    match cleanup_reason {
+                        CleanupReason::ProcessExited => "process_exited",
+                        CleanupReason::Timeout => "timeout",
+                        CleanupReason::ManagerMissing => "manager_missing",
+                    }
+                    .to_string(),
+                );
 
                 // 重新插入标记为完成
                 tasks.insert(pid, record.clone());
@@ -231,7 +234,9 @@ impl TaskStorage for InProcessStorage {
                         .unwrap_or(false)
             }))
         } else {
-            Ok(tasks.values().any(|record| record.status == TaskStatus::Running))
+            Ok(tasks
+                .values()
+                .any(|record| record.status == TaskStatus::Running))
         }
     }
 }
@@ -394,11 +399,9 @@ impl TaskStorage for SharedMemoryStorage {
                 cleanup_reason = CleanupReason::ProcessExited;
             } else {
                 // 检查manager进程
-                if let Some(_manager_pid) = entry
-                    .record
-                    .manager_pid
-                    .filter(|&manager_pid| manager_pid != entry.pid && !is_process_alive(manager_pid))
-                {
+                if let Some(_manager_pid) = entry.record.manager_pid.filter(|&manager_pid| {
+                    manager_pid != entry.pid && !is_process_alive(manager_pid)
+                }) {
                     let _ = terminate_process(entry.pid);
                     should_cleanup = true;
                     cleanup_reason = CleanupReason::ManagerMissing;
@@ -420,11 +423,14 @@ impl TaskStorage for SharedMemoryStorage {
                 removals.push(entry.pid.to_string());
 
                 // Update record with cleanup reason
-                entry.record.cleanup_reason = Some(match cleanup_reason {
-                    CleanupReason::ProcessExited => "process_exited",
-                    CleanupReason::Timeout => "timeout",
-                    CleanupReason::ManagerMissing => "manager_missing",
-                }.to_string());
+                entry.record.cleanup_reason = Some(
+                    match cleanup_reason {
+                        CleanupReason::ProcessExited => "process_exited",
+                        CleanupReason::Timeout => "timeout",
+                        CleanupReason::ManagerMissing => "manager_missing",
+                    }
+                    .to_string(),
+                );
 
                 events.push(CleanupEvent {
                     _pid: entry.pid,

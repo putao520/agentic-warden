@@ -109,11 +109,17 @@ impl OAuthClient {
 
         if response.status().is_success() {
             let device_response: DeviceCodeResponse = response.json().await?;
-            info!("Device code obtained. User code: {}", device_response.user_code);
+            info!(
+                "Device code obtained. User code: {}",
+                device_response.user_code
+            );
             Ok(device_response)
         } else {
             let error_text = response.text().await?;
-            Err(anyhow::anyhow!("Device flow initialization failed: {}", error_text))
+            Err(anyhow::anyhow!(
+                "Device flow initialization failed: {}",
+                error_text
+            ))
         }
     }
 
@@ -122,7 +128,10 @@ impl OAuthClient {
     /// Returns Ok(Some(tokens)) when user completes authorization
     /// Returns Ok(None) when still waiting (authorization_pending)
     /// Returns Err when polling fails or user denies
-    pub async fn poll_for_tokens(&mut self, device_code: &str) -> Result<Option<OAuthTokenResponse>> {
+    pub async fn poll_for_tokens(
+        &mut self,
+        device_code: &str,
+    ) -> Result<Option<OAuthTokenResponse>> {
         debug!("Polling for device flow authorization...");
 
         let client = reqwest::Client::new();
@@ -130,7 +139,10 @@ impl OAuthClient {
             ("client_id", self.config.client_id.clone()),
             ("client_secret", self.config.client_secret.clone()),
             ("device_code", device_code.to_string()),
-            ("grant_type", "urn:ietf:params:oauth:grant-type:device_code".to_string()),
+            (
+                "grant_type",
+                "urn:ietf:params:oauth:grant-type:device_code".to_string(),
+            ),
         ];
 
         let response = client
@@ -177,7 +189,9 @@ impl OAuthClient {
                             return Err(anyhow::anyhow!("User denied authorization"));
                         }
                         "expired_token" => {
-                            return Err(anyhow::anyhow!("Device code expired, please restart authorization"));
+                            return Err(anyhow::anyhow!(
+                                "Device code expired, please restart authorization"
+                            ));
                         }
                         _ => {
                             return Err(anyhow::anyhow!("Device flow error: {}", error_type));
@@ -186,7 +200,10 @@ impl OAuthClient {
                 }
             }
 
-            Err(anyhow::anyhow!("Device flow polling failed with status: {}", status))
+            Err(anyhow::anyhow!(
+                "Device flow polling failed with status: {}",
+                status
+            ))
         }
     }
 
@@ -244,7 +261,10 @@ impl OAuthClient {
             // Persist refreshed tokens to disk
             if let Err(e) = self.save() {
                 // Log error but don't fail the operation
-                debug!("Warning: Failed to save refreshed OAuth tokens to disk: {}", e);
+                debug!(
+                    "Warning: Failed to save refreshed OAuth tokens to disk: {}",
+                    e
+                );
             }
 
             Ok(token_response)
@@ -314,7 +334,10 @@ impl OAuthClient {
             .join("agentic-warden")
             .join("auth.json");
 
-        debug!("Attempting to load OAuth configuration from {:?}", auth_file_path);
+        debug!(
+            "Attempting to load OAuth configuration from {:?}",
+            auth_file_path
+        );
 
         // Check if file exists
         if !auth_file_path.exists() {

@@ -205,7 +205,10 @@ impl RectExt for Rect {
     }
 
     fn split_vertical_half(self) -> (Rect, Rect) {
-        let rects = LayoutBuilder::new().fixed(self.height / 2).remaining().split(self);
+        let rects = LayoutBuilder::new()
+            .fixed(self.height / 2)
+            .remaining()
+            .split(self);
         (rects[0], rects[1])
     }
 

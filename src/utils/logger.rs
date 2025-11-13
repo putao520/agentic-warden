@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use std::path::PathBuf;
-use tracing_subscriber::{fmt, EnvFilter, prelude::*};
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 /// 初始化日志系统
 ///

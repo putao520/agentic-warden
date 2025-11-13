@@ -52,11 +52,8 @@ pub fn run() -> Result<(), WaitError> {
         let now = chrono::Utc::now();
 
         // Process CLI registry tasks
-        let cli_cleanups = cli_registry.sweep_stale_entries(
-            now,
-            platform::process_alive,
-            &terminate_wrapper,
-        )?;
+        let cli_cleanups =
+            cli_registry.sweep_stale_entries(now, platform::process_alive, &terminate_wrapper)?;
         for event in cli_cleanups {
             if event.reason == CleanupReason::Timeout {
                 continue;
@@ -89,11 +86,8 @@ pub fn run() -> Result<(), WaitError> {
         }
 
         // Process MCP registry tasks (without root parent filtering for cross-process)
-        let mcp_cleanups = mcp_registry.sweep_stale_entries(
-            now,
-            platform::process_alive,
-            &terminate_wrapper,
-        )?;
+        let mcp_cleanups =
+            mcp_registry.sweep_stale_entries(now, platform::process_alive, &terminate_wrapper)?;
         for event in mcp_cleanups {
             if event.reason == CleanupReason::Timeout {
                 continue;
@@ -124,9 +118,9 @@ pub fn run() -> Result<(), WaitError> {
                 && should_process_task(&entry.record, current_root_parent)
         });
 
-        let mcp_has_running = mcp_entries.iter().any(|entry| {
-            entry.record.status == TaskStatus::Running
-        });
+        let mcp_has_running = mcp_entries
+            .iter()
+            .any(|entry| entry.record.status == TaskStatus::Running);
 
         // Only exit when both registries have no running tasks
         if !cli_has_running && !mcp_has_running {

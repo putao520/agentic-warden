@@ -26,26 +26,41 @@ mod tests {
         let mut config = MemoryConfig::default();
 
         // Valid config should pass
-        assert!(config.validate().is_ok(), "Valid config should pass validation");
+        assert!(
+            config.validate().is_ok(),
+            "Valid config should pass validation"
+        );
 
         // Empty ollama_url should fail
         config.ollama_url = "".to_string();
-        assert!(config.validate().is_err(), "Empty ollama_url should fail validation");
+        assert!(
+            config.validate().is_err(),
+            "Empty ollama_url should fail validation"
+        );
 
         // Reset and test empty qdrant_url
         config = MemoryConfig::default();
         config.qdrant_url = "".to_string();
-        assert!(config.validate().is_err(), "Empty qdrant_url should fail validation");
+        assert!(
+            config.validate().is_err(),
+            "Empty qdrant_url should fail validation"
+        );
 
         // Reset and test empty embedding_model
         config = MemoryConfig::default();
         config.embedding_model = "".to_string();
-        assert!(config.validate().is_err(), "Empty embedding_model should fail validation");
+        assert!(
+            config.validate().is_err(),
+            "Empty embedding_model should fail validation"
+        );
 
         // Reset and test empty llm_model
         config = MemoryConfig::default();
         config.llm_model = "".to_string();
-        assert!(config.validate().is_err(), "Empty llm_model should fail validation");
+        assert!(
+            config.validate().is_err(),
+            "Empty llm_model should fail validation"
+        );
 
         println!("✅ Memory configuration validation works correctly");
     }
@@ -104,7 +119,10 @@ mod tests {
 
         assert_eq!(retrieved_config.ollama_url, custom_config.ollama_url);
         assert_eq!(retrieved_config.qdrant_url, custom_config.qdrant_url);
-        assert_eq!(retrieved_config.embedding_model, custom_config.embedding_model);
+        assert_eq!(
+            retrieved_config.embedding_model,
+            custom_config.embedding_model
+        );
         assert_eq!(retrieved_config.llm_model, custom_config.llm_model);
 
         println!("✅ Providers config memory integration works correctly");
@@ -197,10 +215,8 @@ mod tests {
 
         use agentic_warden::memory::embedding::EmbeddingService;
 
-        let embedding_service = EmbeddingService::new(
-            "http://localhost:11434",
-            "qwen3-embedding:0.6b"
-        );
+        let embedding_service =
+            EmbeddingService::new("http://localhost:11434", "qwen3-embedding:0.6b");
 
         let test_text = "这是一个测试文本，用于验证嵌入服务是否正常工作。";
 
@@ -210,7 +226,10 @@ mod tests {
                 println!("   嵌入维度: {}", embedding_result.embedding.len());
 
                 // Embedding should be a vector of reasonable size (typically > 100)
-                assert!(embedding_result.embedding.len() > 100, "嵌入向量维度应该大于100");
+                assert!(
+                    embedding_result.embedding.len() > 100,
+                    "嵌入向量维度应该大于100"
+                );
 
                 // Values should be reasonable (not NaN or infinite)
                 for &val in &embedding_result.embedding {
@@ -231,9 +250,9 @@ mod tests {
         // Test basic vector store operations
         println!("🔄 正在测试向量存储基本操作...");
 
-        use agentic_warden::memory::vector_store::{VectorStore, MemoryPoint};
-        use std::time::SystemTime;
+        use agentic_warden::memory::vector_store::{MemoryPoint, VectorStore};
         use std::collections::HashMap;
+        use std::time::SystemTime;
 
         println!("  测试 HTTP 端口: localhost:26333");
 
@@ -248,8 +267,8 @@ mod tests {
         }
 
         println!("  创建 VectorStore 实例（使用HTTP REST API）...");
-        let vector_store = VectorStore::new("http://localhost:26333")
-            .expect("向量存储应该能初始化");
+        let vector_store =
+            VectorStore::new("http://localhost:26333").expect("向量存储应该能初始化");
 
         println!("  初始化集合...");
         match vector_store.initialize_collection().await {
@@ -292,10 +311,9 @@ mod tests {
         };
 
         // Store the vector
-        let point_id = vector_store.upsert_point(
-            memory_point,
-            test_embedding.clone()
-        ).await;
+        let point_id = vector_store
+            .upsert_point(memory_point, test_embedding.clone())
+            .await;
 
         match point_id {
             Ok(id) => {
@@ -305,7 +323,10 @@ mod tests {
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
                 // Test search functionality
-                match vector_store.search(test_embedding, Some(1), Some(0.9)).await {
+                match vector_store
+                    .search(test_embedding, Some(1), Some(0.9))
+                    .await
+                {
                     Ok(results) => {
                         println!("✅ 向量搜索成功，找到 {} 个结果", results.len());
 
@@ -339,11 +360,13 @@ mod tests {
         let test_todo_description = "这是一个用于验证TODO管理器功能的测试项目";
 
         // Add a new TODO
-        let todo_item = memory_manager.create_todo(
-            test_todo_title,
-            Some(test_todo_description.to_string()),
-            Some(test_session_id.to_string())
-        ).await;
+        let todo_item = memory_manager
+            .create_todo(
+                test_todo_title,
+                Some(test_todo_description.to_string()),
+                Some(test_session_id.to_string()),
+            )
+            .await;
 
         match todo_item {
             Ok(todo) => {
@@ -353,16 +376,19 @@ mod tests {
                 tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
 
                 // Test getting TODOs by session_id
-                match memory_manager.get_todos_by_session_id(
-                    test_session_id,
-                    None
-                ).await {
+                match memory_manager
+                    .get_todos_by_session_id(test_session_id, None)
+                    .await
+                {
                     Ok(todos) => {
                         println!("✅ 按session_id查询TODO成功，找到 {} 个", todos.len());
 
                         if let Some(todo) = todos.iter().find(|t| t.title == test_todo_title) {
                             assert_eq!(todo.title, test_todo_title);
-                            assert_eq!(todo.description.as_ref().unwrap_or(&String::new()), test_todo_description);
+                            assert_eq!(
+                                todo.description.as_ref().unwrap_or(&String::new()),
+                                test_todo_description
+                            );
                             println!("   ✅ TODO内容验证通过");
 
                             // Test session_id extraction
@@ -399,18 +425,24 @@ mod tests {
         let test_limit = 5;
 
         // Test searching memories
-        match memory_manager.search_relevant_memories(test_query, Some(test_limit)).await {
+        match memory_manager
+            .search_relevant_memories(test_query, Some(test_limit))
+            .await
+        {
             Ok(results) => {
                 println!("✅ 语义搜索成功，找到 {} 个相关记忆", results.len());
 
                 for (i, result) in results.iter().enumerate() {
-                    println!("   结果 {}: 相似度 {:.4}", i+1, result.score);
+                    println!("   结果 {}: 相似度 {:.4}", i + 1, result.score);
                     println!("   内容预览: {:.50}...", result.point.content);
                 }
 
                 // Scores should be reasonable
                 for result in &results {
-                    assert!(result.score >= 0.0 && result.score <= 1.0, "相似度分数应该在0-1之间");
+                    assert!(
+                        result.score >= 0.0 && result.score <= 1.0,
+                        "相似度分数应该在0-1之间"
+                    );
                 }
             }
             Err(e) => {

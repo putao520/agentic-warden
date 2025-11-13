@@ -170,10 +170,7 @@ fn test_pwait_waits_for_multiple_real_processes() {
     assert!(result.is_ok(), "pwait should complete successfully");
 
     let report = result.unwrap();
-    assert_eq!(
-        report.total_tasks, 3,
-        "Should track 3 real processes"
-    );
+    assert_eq!(report.total_tasks, 3, "Should track 3 real processes");
     assert_eq!(report.completed.len(), 3, "Should complete 3 tasks");
     assert!(!report.timed_out, "Should not timeout");
 
@@ -339,7 +336,10 @@ fn test_pwait_handles_already_completed_real_process() {
         "Should track already-completed process"
     );
 
-    println!("✅ Test passed: pwait handled pre-completed process {}", real_pid);
+    println!(
+        "✅ Test passed: pwait handled pre-completed process {}",
+        real_pid
+    );
 }
 
 /// 测试进程被kill的情况（非正常退出）

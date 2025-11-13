@@ -80,6 +80,7 @@ struct SearchErrorStatus {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct SearchSuccessStatus {
     #[serde(rename = "ok")]
     ok: bool,
@@ -115,14 +116,22 @@ impl VectorStore {
     pub async fn initialize_collection(&self) -> anyhow::Result<()> {
         let url = format!("{}/collections", self.base_url);
 
-        let response = self.client.get(&url).send().await
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
             .map_err(|e| anyhow::anyhow!("Failed to list collections: {}", e))?;
 
         if response.status() == 200 {
-            let collections: CollectionsResponse = response.json().await
+            let collections: CollectionsResponse = response
+                .json()
+                .await
                 .map_err(|e| anyhow::anyhow!("Failed to parse collections response: {}", e))?;
 
-            let collection_exists = collections.result.collections
+            let collection_exists = collections
+                .result
+                .collections
                 .iter()
                 .any(|c| c.name == self.collection_name);
 
@@ -135,30 +144,49 @@ impl VectorStore {
                     },
                 };
 
-                let create_response = self.client.put(&create_url)
+                let create_response = self
+                    .client
+                    .put(&create_url)
                     .json(&create_request)
-                    .send().await
+                    .send()
+                    .await
                     .map_err(|e| anyhow::anyhow!("Failed to create collection: {}", e))?;
 
                 if create_response.status().is_success() {
                     println!("Created collection: {}", self.collection_name);
                 } else {
-                    return Err(anyhow::anyhow!("Failed to create collection: {}", create_response.status()));
+                    return Err(anyhow::anyhow!(
+                        "Failed to create collection: {}",
+                        create_response.status()
+                    ));
                 }
             }
         } else {
-            return Err(anyhow::anyhow!("Failed to list collections: {}", response.status()));
+            return Err(anyhow::anyhow!(
+                "Failed to list collections: {}",
+                response.status()
+            ));
         }
 
         Ok(())
     }
 
-    pub async fn upsert_point(&self, point: MemoryPoint, embedding: Vec<f32>) -> anyhow::Result<String> {
+    pub async fn upsert_point(
+        &self,
+        point: MemoryPoint,
+        embedding: Vec<f32>,
+    ) -> anyhow::Result<String> {
         let point_id = Uuid::new_v4().to_string();
 
         let mut metadata = point.metadata.clone();
-        metadata.insert("content".to_string(), serde_json::Value::String(point.content.clone()));
-        metadata.insert("timestamp".to_string(), serde_json::Value::String(point.timestamp.to_rfc3339()));
+        metadata.insert(
+            "content".to_string(),
+            serde_json::Value::String(point.content.clone()),
+        );
+        metadata.insert(
+            "timestamp".to_string(),
+            serde_json::Value::String(point.timestamp.to_rfc3339()),
+        );
 
         let point_request = PointRequest {
             id: point_id.clone(),
@@ -166,20 +194,29 @@ impl VectorStore {
             payload: serde_json::to_value(metadata)?,
         };
 
-        let url = format!("{}/collections/{}/points", self.base_url, self.collection_name);
+        let url = format!(
+            "{}/collections/{}/points",
+            self.base_url, self.collection_name
+        );
         let upsert_request = UpsertRequest {
             points: vec![point_request],
         };
 
-        let response = self.client.put(&url)
+        let response = self
+            .client
+            .put(&url)
             .json(&upsert_request)
-            .send().await
+            .send()
+            .await
             .map_err(|e| anyhow::anyhow!("Failed to upsert point: {}", e))?;
 
         if response.status().is_success() {
             Ok(point_id)
         } else {
-            Err(anyhow::anyhow!("Failed to upsert point: {}", response.status()))
+            Err(anyhow::anyhow!(
+                "Failed to upsert point: {}",
+                response.status()
+            ))
         }
     }
 
@@ -189,7 +226,10 @@ impl VectorStore {
         limit: Option<u64>,
         score_threshold: Option<f32>,
     ) -> anyhow::Result<Vec<SearchResult>> {
-        let url = format!("{}/collections/{}/points/search", self.base_url, self.collection_name);
+        let url = format!(
+            "{}/collections/{}/points/search",
+            self.base_url, self.collection_name
+        );
 
         let search_request = SearchRequest {
             vector: query_embedding,
@@ -198,16 +238,24 @@ impl VectorStore {
             with_payload: true,
         };
 
-        let response = self.client.post(&url)
+        let response = self
+            .client
+            .post(&url)
             .json(&search_request)
-            .send().await
+            .send()
+            .await
             .map_err(|e| anyhow::anyhow!("Failed to search points: {}", e))?;
 
         if response.status() != 200 {
-            return Err(anyhow::anyhow!("Search failed with status: {}", response.status()));
+            return Err(anyhow::anyhow!(
+                "Search failed with status: {}",
+                response.status()
+            ));
         }
 
-        let search_response: SearchResponse = response.json().await
+        let search_response: SearchResponse = response
+            .json()
+            .await
             .map_err(|e| anyhow::anyhow!("Failed to parse search response: {}", e))?;
 
         // Check for error status
@@ -220,15 +268,19 @@ impl VectorStore {
         let mut results = Vec::new();
         if let Some(result_points) = search_response.result {
             for scored_point in result_points {
-                let payload = scored_point.payload.as_object()
+                let payload = scored_point
+                    .payload
+                    .as_object()
                     .ok_or_else(|| anyhow::anyhow!("Invalid payload format"))?;
 
-                let content = payload.get("content")
+                let content = payload
+                    .get("content")
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
 
-                let timestamp_str = payload.get("timestamp")
+                let timestamp_str = payload
+                    .get("timestamp")
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
 
@@ -261,21 +313,30 @@ impl VectorStore {
     }
 
     pub async fn delete_point(&self, point_id: &str) -> anyhow::Result<()> {
-        let url = format!("{}/collections/{}/points", self.base_url, self.collection_name);
+        let url = format!(
+            "{}/collections/{}/points",
+            self.base_url, self.collection_name
+        );
 
         let delete_request = serde_json::json!({
             "points": [point_id]
         });
 
-        let response = self.client.delete(&url)
+        let response = self
+            .client
+            .delete(&url)
             .json(&delete_request)
-            .send().await
+            .send()
+            .await
             .map_err(|e| anyhow::anyhow!("Failed to delete point: {}", e))?;
 
         if response.status().is_success() {
             Ok(())
         } else {
-            Err(anyhow::anyhow!("Failed to delete point: {}", response.status()))
+            Err(anyhow::anyhow!(
+                "Failed to delete point: {}",
+                response.status()
+            ))
         }
     }
 

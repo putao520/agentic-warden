@@ -152,12 +152,18 @@ impl TokenValidator {
     }
 }
 
+impl Default for TokenValidator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 fn find_mode<'a>(provider: &'a Provider, mode_type: &ModeType) -> Option<&'a SupportMode> {
     provider
         .support_modes
         .iter()
         .find(|mode| &mode.mode_type == mode_type)
-        .or_else(|| provider.support_modes.iter().next())
+        .or_else(|| provider.support_modes.first())
 }
 
 fn preferred_region_from_status(status: &NetworkStatus) -> Option<Region> {

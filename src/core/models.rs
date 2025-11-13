@@ -29,6 +29,7 @@ pub enum AiType {
 pub struct TaskId(u64);
 
 impl TaskId {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self(
             SystemTime::now()

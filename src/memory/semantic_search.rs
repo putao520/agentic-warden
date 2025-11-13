@@ -1,8 +1,8 @@
 //! Semantic search functionality
 
 use super::{
+    embedding::EmbeddingService,
     vector_store::{MemoryPoint, SearchResult, VectorStore},
-    embedding::EmbeddingService
 };
 use std::collections::HashMap;
 
@@ -30,11 +30,9 @@ impl SemanticSearch {
         let embedding_result = self.embedding_service.generate_embedding(query).await?;
 
         // Search vector store
-        self.vector_store.search(
-            embedding_result.embedding,
-            limit,
-            score_threshold,
-        ).await
+        self.vector_store
+            .search(embedding_result.embedding, limit, score_threshold)
+            .await
     }
 
     pub async fn add_memory(
@@ -54,7 +52,9 @@ impl SemanticSearch {
         };
 
         // Store in vector store
-        self.vector_store.upsert_point(point, embedding_result.embedding).await
+        self.vector_store
+            .upsert_point(point, embedding_result.embedding)
+            .await
     }
 
     pub async fn search_related_conversations(
@@ -74,7 +74,11 @@ impl SemanticSearch {
         }
 
         // Remove duplicates and sort by score
-        all_results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        all_results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         all_results.dedup_by(|a, b| a.point.id == b.point.id);
         all_results.truncate(limit.unwrap_or(10) as usize);
 

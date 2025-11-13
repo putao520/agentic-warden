@@ -133,7 +133,7 @@ impl Cli {
         T: Into<OsString> + Clone,
     {
         let mut cli = Cli::try_parse_from(iter)?;
-        Ok(cli.command.take().unwrap_or_else(|| Commands::Dashboard))
+        Ok(cli.command.take().unwrap_or(Commands::Dashboard))
     }
 
     /// 解析命令行参数（失败时由 clap 处理错误输出和退出）

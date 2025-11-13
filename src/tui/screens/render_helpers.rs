@@ -211,6 +211,7 @@ pub struct InputState {
     masked: bool,
 }
 
+#[allow(dead_code)]
 impl InputState {
     pub fn new(label: String) -> Self {
         Self {

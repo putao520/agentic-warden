@@ -238,7 +238,11 @@ fn test_shared_memory_cleanup() {
     }
 
     let entries_before = registry.entries().unwrap();
-    assert_eq!(entries_before.len(), 3, "Should have 3 tasks before cleanup");
+    assert_eq!(
+        entries_before.len(),
+        3,
+        "Should have 3 tasks before cleanup"
+    );
 
     // 执行清理
     registry.cleanup().expect("Cleanup should succeed");

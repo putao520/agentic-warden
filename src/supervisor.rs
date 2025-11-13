@@ -4,7 +4,7 @@ use crate::core::process_tree::ProcessTreeError;
 use crate::error::RegistryError;
 use crate::logging::debug;
 use crate::logging::warn;
-use crate::platform::{self};
+use crate::platform::{self, ChildResources};
 use crate::provider::{AiType, ProviderManager};
 use crate::signal;
 use crate::storage::TaskStorage;
@@ -120,11 +120,7 @@ pub async fn execute_cli<S: TaskStorage>(
         platform::terminate_process(pid);
         Ok(())
     };
-    registry.sweep_stale_entries(
-        Utc::now(),
-        platform::process_alive,
-        &terminate_wrapper,
-    )?;
+    registry.sweep_stale_entries(Utc::now(), platform::process_alive, &terminate_wrapper)?;
 
     // Load provider configuration
     let provider_manager = ProviderManager::new()
@@ -202,7 +198,9 @@ pub async fn execute_cli<S: TaskStorage>(
     }
 
     let mut child = command.spawn()?;
-    let child_pid = child.id().ok_or_else(|| io::Error::other("Failed to get child PID"))?;
+    let child_pid = child
+        .id()
+        .ok_or_else(|| io::Error::other("Failed to get child PID"))?;
 
     let log_path = match generate_log_path(child_pid) {
         Ok(path) => path,
@@ -247,10 +245,18 @@ pub async fn execute_cli<S: TaskStorage>(
     let mut copy_handles = Vec::new();
 
     if let Some(stdout) = child.stdout.take() {
-        copy_handles.push(tokio::spawn(spawn_copy(stdout, log_writer.clone(), StreamMirror::Stdout)));
+        copy_handles.push(tokio::spawn(spawn_copy(
+            stdout,
+            log_writer.clone(),
+            StreamMirror::Stdout,
+        )));
     }
     if let Some(stderr) = child.stderr.take() {
-        copy_handles.push(tokio::spawn(spawn_copy(stderr, log_writer.clone(), StreamMirror::Stderr)));
+        copy_handles.push(tokio::spawn(spawn_copy(
+            stderr,
+            log_writer.clone(),
+            StreamMirror::Stderr,
+        )));
     }
 
     let registration_guard = if true {
@@ -459,11 +465,7 @@ pub async fn start_interactive_cli<S: TaskStorage>(
         platform::terminate_process(pid);
         Ok(())
     };
-    registry.sweep_stale_entries(
-        Utc::now(),
-        platform::process_alive,
-        &terminate_wrapper,
-    )?;
+    registry.sweep_stale_entries(Utc::now(), platform::process_alive, &terminate_wrapper)?;
 
     // Load provider configuration
     let provider_manager = ProviderManager::new()
@@ -544,7 +546,9 @@ pub async fn start_interactive_cli<S: TaskStorage>(
     }
 
     let mut child = command.spawn()?;
-    let child_pid = child.id().ok_or_else(|| io::Error::other("Failed to get child PID"))?;
+    let child_pid = child
+        .id()
+        .ok_or_else(|| io::Error::other("Failed to get child PID"))?;
 
     // Register the interactive CLI process
     let log_path = generate_log_path(child_pid)?;

@@ -207,10 +207,7 @@ fn test_mcp_cli_storage_isolation_during_launch() {
         .register(cli_pid, &cli_task)
         .expect("Failed to register CLI task");
 
-    println!(
-        "✅ MCP task PID: {}, CLI task PID: {}",
-        mcp_pid, cli_pid
-    );
+    println!("✅ MCP task PID: {}, CLI task PID: {}", mcp_pid, cli_pid);
 
     // 4. 验证存储隔离
     let mcp_entries = mcp_registry.entries().expect("Failed to get MCP entries");

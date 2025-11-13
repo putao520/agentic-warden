@@ -63,7 +63,10 @@ impl WaitReport {
         println!("Duration: {:.1}s", self.duration.as_secs_f64());
 
         if self.timed_out {
-            println!("⚠️  Wait timed out (max {} hours)", MAX_WAIT_DURATION.as_secs() / 3600);
+            println!(
+                "⚠️  Wait timed out (max {} hours)",
+                MAX_WAIT_DURATION.as_secs() / 3600
+            );
         }
 
         if !self.completed.is_empty() {
@@ -110,7 +113,10 @@ pub fn run_with_registry(registry: &McpRegistry) -> Result<WaitReport, PWaitErro
     }
 
     report.total_tasks = initial_entries.len();
-    println!("Waiting for {} process-internal tasks to complete...", report.total_tasks);
+    println!(
+        "Waiting for {} process-internal tasks to complete...",
+        report.total_tasks
+    );
 
     loop {
         let now = Utc::now();
@@ -120,11 +126,7 @@ pub fn run_with_registry(registry: &McpRegistry) -> Result<WaitReport, PWaitErro
             platform::terminate_process(pid);
             Ok(())
         };
-        let _ = registry.sweep_stale_entries(
-            now,
-            platform::process_alive,
-            &terminate_wrapper,
-        );
+        let _ = registry.sweep_stale_entries(now, platform::process_alive, &terminate_wrapper);
 
         // 收集已完成的任务
         let completed = registry
@@ -163,7 +165,10 @@ pub fn run_with_registry(registry: &McpRegistry) -> Result<WaitReport, PWaitErro
 
         // 超时检查
         if start.elapsed() >= MAX_WAIT_DURATION {
-            println!("⚠️  Wait timed out after {} hours", MAX_WAIT_DURATION.as_secs() / 3600);
+            println!(
+                "⚠️  Wait timed out after {} hours",
+                MAX_WAIT_DURATION.as_secs() / 3600
+            );
             report.timed_out = true;
             report.duration = start.elapsed();
             return Ok(report);
@@ -192,7 +197,10 @@ pub async fn wait_async(registry: &McpRegistry) -> Result<WaitReport, PWaitError
     }
 
     report.total_tasks = initial_entries.len();
-    tracing::info!("Waiting for {} process-internal tasks to complete...", report.total_tasks);
+    tracing::info!(
+        "Waiting for {} process-internal tasks to complete...",
+        report.total_tasks
+    );
 
     loop {
         let now = Utc::now();
@@ -202,11 +210,7 @@ pub async fn wait_async(registry: &McpRegistry) -> Result<WaitReport, PWaitError
             platform::terminate_process(pid);
             Ok(())
         };
-        let _ = registry.sweep_stale_entries(
-            now,
-            platform::process_alive,
-            &terminate_wrapper,
-        );
+        let _ = registry.sweep_stale_entries(now, platform::process_alive, &terminate_wrapper);
 
         // 收集已完成的任务
         let completed = registry
@@ -245,7 +249,10 @@ pub async fn wait_async(registry: &McpRegistry) -> Result<WaitReport, PWaitError
 
         // 超时检查
         if start.elapsed() >= MAX_WAIT_DURATION {
-            tracing::warn!("Wait timed out after {} hours", MAX_WAIT_DURATION.as_secs() / 3600);
+            tracing::warn!(
+                "Wait timed out after {} hours",
+                MAX_WAIT_DURATION.as_secs() / 3600
+            );
             report.timed_out = true;
             report.duration = start.elapsed();
             return Ok(report);
@@ -261,8 +268,12 @@ pub async fn wait_async(registry: &McpRegistry) -> Result<WaitReport, PWaitError
 /// 这是主要的入口函数，用于从命令行调用
 pub fn run_for_pid(pid: u32) -> Result<WaitReport, PWaitError> {
     // 连接到指定PID的共享内存
-    let storage = SharedMemoryStorage::connect_for_pid(pid)
-        .map_err(|e| PWaitError::Registry(format!("Failed to connect to shared memory for PID {}: {}", pid, e)))?;
+    let storage = SharedMemoryStorage::connect_for_pid(pid).map_err(|e| {
+        PWaitError::Registry(format!(
+            "Failed to connect to shared memory for PID {}: {}",
+            pid, e
+        ))
+    })?;
 
     let registry = Registry::new(storage);
 
@@ -289,7 +300,10 @@ fn run_with_registry_generic<S: crate::storage::TaskStorage>(
     }
 
     report.total_tasks = initial_entries.len();
-    println!("Waiting for {} tasks from PID {} to complete...", report.total_tasks, target_pid);
+    println!(
+        "Waiting for {} tasks from PID {} to complete...",
+        report.total_tasks, target_pid
+    );
 
     loop {
         let now = Utc::now();
@@ -299,11 +313,7 @@ fn run_with_registry_generic<S: crate::storage::TaskStorage>(
             platform::terminate_process(pid);
             Ok(())
         };
-        let _ = registry.sweep_stale_entries(
-            now,
-            platform::process_alive,
-            &terminate_wrapper,
-        );
+        let _ = registry.sweep_stale_entries(now, platform::process_alive, &terminate_wrapper);
 
         // 收集已完成的任务
         let completed = registry
@@ -342,7 +352,10 @@ fn run_with_registry_generic<S: crate::storage::TaskStorage>(
 
         // 超时检查
         if start.elapsed() >= MAX_WAIT_DURATION {
-            println!("⚠️  Wait timed out after {} hours", MAX_WAIT_DURATION.as_secs() / 3600);
+            println!(
+                "⚠️  Wait timed out after {} hours",
+                MAX_WAIT_DURATION.as_secs() / 3600
+            );
             report.timed_out = true;
             report.duration = start.elapsed();
             return Ok(report);
@@ -381,7 +394,9 @@ mod tests {
         registry.register(123, &task).unwrap();
 
         // 立即标记为完成
-        registry.mark_completed(123, Some("success".to_string()), Some(0), Utc::now()).unwrap();
+        registry
+            .mark_completed(123, Some("success".to_string()), Some(0), Utc::now())
+            .unwrap();
 
         // 等待应该立即返回
         let result = run_with_registry(&registry);

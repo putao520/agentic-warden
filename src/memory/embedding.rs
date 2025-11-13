@@ -1,9 +1,6 @@
 //! Embedding service using Ollama
 
-use ollama_rs::{
-    Ollama,
-    generation::embeddings::request::GenerateEmbeddingsRequest,
-};
+use ollama_rs::{generation::embeddings::request::GenerateEmbeddingsRequest, Ollama};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,13 +18,19 @@ pub struct EmbeddingService {
 impl EmbeddingService {
     pub fn new(ollama_url: &str, model: &str) -> Self {
         // 根据 ollama-rs 文档，需要传入完整的 host（包含协议）和端口
-        let (host, port) = if ollama_url.starts_with("http://") || ollama_url.starts_with("https://") {
+        let (host, port) = if ollama_url.starts_with("http://")
+            || ollama_url.starts_with("https://")
+        {
             let url = reqwest::Url::parse(ollama_url).unwrap_or_else(|_| {
                 reqwest::Url::parse("http://localhost:11434").expect("Default URL should be valid")
             });
             (
-                format!("{}://{}", url.scheme(), url.host_str().unwrap_or("localhost")),
-                url.port().unwrap_or(11434)
+                format!(
+                    "{}://{}",
+                    url.scheme(),
+                    url.host_str().unwrap_or("localhost")
+                ),
+                url.port().unwrap_or(11434),
             )
         } else {
             // 假设是 hostname:port 格式，添加默认协议
@@ -48,12 +51,12 @@ impl EmbeddingService {
     }
 
     pub async fn generate_embedding(&self, text: &str) -> anyhow::Result<EmbeddingResult> {
-        let request = GenerateEmbeddingsRequest::new(
-            self.model.clone(),
-            text.to_string().into()
-        );
+        let request = GenerateEmbeddingsRequest::new(self.model.clone(), text.to_string().into());
 
-        let response = self.client.generate_embeddings(request).await
+        let response = self
+            .client
+            .generate_embeddings(request)
+            .await
             .map_err(|e| anyhow::anyhow!("Failed to generate embedding: {}", e))?;
 
         if response.embeddings.is_empty() || response.embeddings[0].is_empty() {
@@ -68,7 +71,7 @@ impl EmbeddingService {
 
     pub async fn generate_batch_embeddings(
         &self,
-        texts: &[String]
+        texts: &[String],
     ) -> anyhow::Result<Vec<EmbeddingResult>> {
         let mut results = Vec::with_capacity(texts.len());
 

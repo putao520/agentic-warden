@@ -1,5 +1,6 @@
 //! Push progress screen
 
+use super::render_helpers::{DialogResult, DialogState, ProgressState};
 use super::{Screen, ScreenAction, ScreenType};
 use crate::common::constants::providers::GOOGLE_DRIVE;
 use crate::common::utils::format_bytes_alt as format_bytes;
@@ -7,7 +8,6 @@ use crate::error::{errors, AgenticWardenError, ErrorCategory, SyncOperation, Use
 use crate::sync::config_sync_manager::{ConfigSyncManager, PushProgressEvent, SyncOperationResult};
 use crate::sync::smart_oauth::AuthState;
 use crate::tui::app_state::{AppState, SyncPhase, TransferKind, TransferProgress};
-use super::render_helpers::{DialogResult, DialogState, ProgressState};
 use anyhow::{Context, Result};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
@@ -203,9 +203,8 @@ impl PushScreen {
 
         let directories = self.directories.clone();
         let flag_clone = cancel_flag.clone();
-        let handle = tokio::spawn(async move {
-            run_push_worker(directories, tx, flag_clone).await
-        });
+        let handle =
+            tokio::spawn(async move { run_push_worker(directories, tx, flag_clone).await });
 
         self.worker_handle = Some(handle);
         self.progress_rx = Some(rx);
@@ -710,7 +709,6 @@ fn compute_percent(index: usize, total: usize, stage: f32) -> u8 {
     let value = index as f32 * per_dir + clamped_stage * per_dir;
     value.clamp(0.0, 100.0).round() as u8
 }
-
 
 async fn run_push_worker(
     directories: Vec<String>,

@@ -189,6 +189,12 @@ impl RecommendationEngine {
     }
 }
 
+impl Default for RecommendationEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 fn preferred_region_from_status(status: &NetworkStatus) -> Option<Region> {
     match status.prefer_domestic() {
         Some(true) => Some(Region::MainlandChina),

@@ -66,12 +66,18 @@ fn test_pwait_connects_to_specific_pid_shared_memory() {
     let result = pwait_mode::run_for_pid(test_pid);
 
     // 应该能成功读取任务
-    assert!(result.is_ok(), "Should be able to read tasks from PID's shared memory");
+    assert!(
+        result.is_ok(),
+        "Should be able to read tasks from PID's shared memory"
+    );
 
     let report = result.unwrap();
     assert_eq!(report.total_tasks, 1, "Should find 1 task in shared memory");
 
-    println!("✅ pwait successfully connected to PID {} shared memory", test_pid);
+    println!(
+        "✅ pwait successfully connected to PID {} shared memory",
+        test_pid
+    );
 }
 
 /// 测试pwait连接到当前进程的共享内存
@@ -111,7 +117,10 @@ fn test_pwait_current_process_shared_memory() {
     let report = result.unwrap();
     assert!(report.total_tasks >= 1, "Should have at least 1 task");
 
-    println!("✅ pwait can access current process (PID {}) shared memory", current_pid);
+    println!(
+        "✅ pwait can access current process (PID {}) shared memory",
+        current_pid
+    );
 }
 
 /// 测试pwait连接到不存在任务的PID
@@ -128,10 +137,16 @@ fn test_pwait_with_nonexistent_pid_tasks() {
     // 应该返回NoTasks错误或成功但没有任务
     match result {
         Err(pwait_mode::PWaitError::NoTasks) => {
-            println!("✅ pwait correctly reports no tasks for PID {}", nonexistent_pid);
+            println!(
+                "✅ pwait correctly reports no tasks for PID {}",
+                nonexistent_pid
+            );
         }
         Err(pwait_mode::PWaitError::Registry(msg)) if msg.contains("Failed to connect") => {
-            println!("✅ pwait correctly reports connection failure for PID {}", nonexistent_pid);
+            println!(
+                "✅ pwait correctly reports connection failure for PID {}",
+                nonexistent_pid
+            );
         }
         Ok(report) if report.total_tasks == 0 => {
             println!("✅ pwait reports 0 tasks for PID {}", nonexistent_pid);
@@ -148,8 +163,8 @@ fn test_different_pids_isolated_shared_memory() {
     let pid2 = 80002u32;
 
     // 在PID1的共享内存中注册任务
-    let storage1 = SharedMemoryStorage::connect_for_pid(pid1)
-        .expect("Failed to create storage for PID1");
+    let storage1 =
+        SharedMemoryStorage::connect_for_pid(pid1).expect("Failed to create storage for PID1");
     let registry1 = Registry::new(storage1);
 
     let task1 = TaskRecord::new(
@@ -164,8 +179,8 @@ fn test_different_pids_isolated_shared_memory() {
         .expect("Failed to register task in PID1");
 
     // 在PID2的共享内存中注册任务
-    let storage2 = SharedMemoryStorage::connect_for_pid(pid2)
-        .expect("Failed to create storage for PID2");
+    let storage2 =
+        SharedMemoryStorage::connect_for_pid(pid2).expect("Failed to create storage for PID2");
     let registry2 = Registry::new(storage2);
 
     let task2 = TaskRecord::new(
@@ -231,8 +246,8 @@ fn test_shared_memory_naming_format() {
 fn test_multiple_tasks_same_shared_memory() {
     let test_pid = 90000u32;
 
-    let storage = SharedMemoryStorage::connect_for_pid(test_pid)
-        .expect("Failed to create shared memory");
+    let storage =
+        SharedMemoryStorage::connect_for_pid(test_pid).expect("Failed to create shared memory");
     let registry = Registry::new(storage);
 
     // 注册多个任务
@@ -264,7 +279,10 @@ fn test_multiple_tasks_same_shared_memory() {
 
     assert_eq!(entries.len(), 3, "Should have 3 tasks in shared memory");
 
-    println!("✅ Multiple tasks can share the same shared memory (PID {})", test_pid);
+    println!(
+        "✅ Multiple tasks can share the same shared memory (PID {})",
+        test_pid
+    );
 }
 
 /// 测试共享内存清理
@@ -274,8 +292,8 @@ fn test_shared_memory_cleanup() {
     let test_pid = 95000u32;
 
     {
-        let storage = SharedMemoryStorage::connect_for_pid(test_pid)
-            .expect("Failed to create shared memory");
+        let storage =
+            SharedMemoryStorage::connect_for_pid(test_pid).expect("Failed to create shared memory");
         let registry = Registry::new(storage);
 
         // 注册一个任务
@@ -292,7 +310,10 @@ fn test_shared_memory_cleanup() {
 
         // 显式清理
         let cleanup_result = registry.cleanup();
-        assert!(cleanup_result.is_ok(), "Should be able to cleanup shared memory");
+        assert!(
+            cleanup_result.is_ok(),
+            "Should be able to cleanup shared memory"
+        );
     }
 
     println!("✅ Shared memory cleanup successful");
@@ -306,8 +327,8 @@ fn test_pwait_cli_integration() {
 
     // 1. 创建一个共享内存区域
     let test_pid = 85000u32;
-    let storage = SharedMemoryStorage::connect_for_pid(test_pid)
-        .expect("Failed to create shared memory");
+    let storage =
+        SharedMemoryStorage::connect_for_pid(test_pid).expect("Failed to create shared memory");
     let registry = Registry::new(storage);
 
     // 2. 注册并立即完成一个任务

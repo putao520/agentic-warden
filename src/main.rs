@@ -2,19 +2,19 @@
 mod help;
 mod mcp;
 
-use agentic_warden::cli_type::{parse_cli_selector_strict, parse_cli_type};
-use agentic_warden::commands::ai_cli::AiCliCommand;
-use agentic_warden::commands::{parse_external_as_ai_cli, Cli, Commands, parser::McpAction};
-use agentic_warden::error::ErrorCategory;
-use agentic_warden::execute_update;
+use aiw::cli_type::{parse_cli_selector_strict, parse_cli_type};
+use aiw::commands::ai_cli::AiCliCommand;
+use aiw::commands::{parse_external_as_ai_cli, parser::McpAction, Cli, Commands};
+use aiw::error::ErrorCategory;
+use aiw::execute_update;
+use aiw::provider::network_detector::NetworkDetector;
+use aiw::pwait_mode;
+use aiw::sync;
+use aiw::sync::sync_config::save_network_status;
+use aiw::tui;
+use aiw::wait_mode;
 use help::{print_command_help, print_general_help, print_quick_examples};
 use mcp::AgenticWardenMcpServer;
-use agentic_warden::provider::network_detector::NetworkDetector;
-use agentic_warden::sync;
-use agentic_warden::sync::sync_config::save_network_status;
-use agentic_warden::tui;
-use agentic_warden::wait_mode;
-use agentic_warden::pwait_mode;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -90,18 +90,22 @@ async fn handle_external_ai_cli(args: &[String]) -> Result<ExitCode, String> {
 
     // Check if this is interactive mode (no prompt)
     if prompt_parts.is_empty() {
-        println!("🚀 Starting {} in interactive mode (provider: {:?})",
-                 cli_type_str, provider);
+        println!(
+            "🚀 Starting {} in interactive mode (provider: {:?})",
+            cli_type_str, provider
+        );
 
         // Interactive mode: start AI CLI directly with empty prompt
         let command = AiCliCommand::new(vec![cli_type], provider, String::new());
         command.execute().await.map_err(|e| e.to_string())
     } else {
-      // Task mode: execute specific task
+        // Task mode: execute specific task
         let prompt_text = prompt_parts.join(" ");
 
-        println!("🚀 Starting {} with task: {} (provider: {:?})",
-                 cli_type_str, prompt_text, provider);
+        println!(
+            "🚀 Starting {} with task: {} (provider: {:?})",
+            cli_type_str, prompt_text, provider
+        );
 
         let command = AiCliCommand::new(vec![cli_type], provider, prompt_text);
         command.execute().await.map_err(|e| e.to_string())
@@ -109,7 +113,6 @@ async fn handle_external_ai_cli(args: &[String]) -> Result<ExitCode, String> {
 }
 
 async fn main_impl(command: Commands) -> Result<ExitCode, String> {
-
     match command {
         Commands::Dashboard => launch_tui(None).await,
         Commands::Status { tui } => {
@@ -136,7 +139,10 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
             // TODO: 实现timeout和verbose参数的支持
             // 当前使用现有的wait_mode实现
             if verbose {
-                eprintln!("Waiting for all concurrent AI CLI tasks to complete (timeout: {})...", timeout);
+                eprintln!(
+                    "Waiting for all concurrent AI CLI tasks to complete (timeout: {})...",
+                    timeout
+                );
             }
             wait_mode::run().map_err(|e| e.to_string())?;
             Ok(ExitCode::from(0))
@@ -185,7 +191,10 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
                         println!("\n✅ All {} tool(s) updated successfully!", success_count);
                         Ok(ExitCode::from(0))
                     } else {
-                        eprintln!("\n⚠️  {}/{} tool(s) updated successfully", success_count, total_count);
+                        eprintln!(
+                            "\n⚠️  {}/{} tool(s) updated successfully",
+                            success_count, total_count
+                        );
                         Ok(ExitCode::from(1))
                     }
                 }
@@ -221,9 +230,9 @@ async fn launch_tui(initial_screen: Option<tui::ScreenType>) -> Result<ExitCode,
 
 /// 处理status命令（文本模式）
 fn handle_status_command() -> Result<ExitCode, String> {
-    use agentic_warden::storage::SharedMemoryStorage;
-    use agentic_warden::task_record::TaskStatus;
-    use agentic_warden::unified_registry::Registry;
+    use aiw::storage::SharedMemoryStorage;
+    use aiw::task_record::TaskStatus;
+    use aiw::unified_registry::Registry;
 
     // 连接到当前进程的共享内存
     let storage = SharedMemoryStorage::connect()
@@ -232,7 +241,8 @@ fn handle_status_command() -> Result<ExitCode, String> {
     let registry = Registry::new(storage);
 
     // 获取所有任务条目
-    let entries = registry.entries()
+    let entries = registry
+        .entries()
         .map_err(|e| format!("Failed to get task entries: {}", e))?;
 
     // 统计运行中的任务
@@ -251,7 +261,10 @@ fn handle_status_command() -> Result<ExitCode, String> {
     Ok(ExitCode::from(0))
 }
 
-async fn handle_sync_command(command: &str, args: Option<Vec<PathBuf>>) -> Result<ExitCode, String> {
+async fn handle_sync_command(
+    command: &str,
+    args: Option<Vec<PathBuf>>,
+) -> Result<ExitCode, String> {
     let config_name = match (command, args) {
         ("push", Some(dirs)) => dirs
             .into_iter()
@@ -324,7 +337,10 @@ fn handle_help_command(topic: Option<String>) -> Result<ExitCode, String> {
 /// 处理MCP命令
 async fn handle_mcp_command(action: McpAction) -> Result<ExitCode, String> {
     match action {
-        McpAction::Server { transport, log_level } => {
+        McpAction::Server {
+            transport,
+            log_level,
+        } => {
             // 初始化日志
             let log_level_filter = match log_level.to_lowercase().as_str() {
                 "debug" => tracing::Level::DEBUG,
@@ -359,7 +375,10 @@ async fn handle_mcp_command(action: McpAction) -> Result<ExitCode, String> {
                         }
                     }
                 }
-                _ => Err(format!("Unsupported transport: {}. Supported: stdio", transport)),
+                _ => Err(format!(
+                    "Unsupported transport: {}. Supported: stdio",
+                    transport
+                )),
             }
         }
         McpAction::Test => {
@@ -390,7 +409,9 @@ async fn handle_mcp_command(action: McpAction) -> Result<ExitCode, String> {
 }
 
 /// 运行stdio传输的MCP服务器
-async fn run_mcp_server_stdio(server: AgenticWardenMcpServer) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_mcp_server_stdio(
+    server: AgenticWardenMcpServer,
+) -> Result<(), Box<dyn std::error::Error>> {
     server.run().await
 }
 
@@ -406,4 +427,3 @@ async fn perform_background_network_detection() -> anyhow::Result<()> {
 
     Ok(())
 }
-

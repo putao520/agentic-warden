@@ -7,7 +7,7 @@
 #![allow(dead_code)] // CLI管理模块，部分功能当前未使用
 
 use anyhow::Result;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// CLI Tool information
@@ -151,7 +151,7 @@ impl CliToolDetector {
     }
 
     /// Detect installation type from path
-    fn detect_install_type_static(path: &PathBuf) -> Option<InstallType> {
+    fn detect_install_type_static(path: &Path) -> Option<InstallType> {
         if let Some(path_str) = path.to_str() {
             if path_str.contains("node_modules") || path_str.contains("npm") {
                 return Some(InstallType::Npm);
@@ -198,12 +198,10 @@ impl CliToolDetector {
         match command.to_lowercase().as_str() {
             "codex" => "npm install -g @openai/codex".to_string(),
             "gemini" => "npm install -g @google/gemini-cli".to_string(),
-            "claude" => {
-                match os {
-                    "Windows" => "irm https://claude.ai/install.ps1 | iex".to_string(),
-                    _ => "curl -fsSL https://claude.ai/install.sh | bash".to_string(),
-                }
-            }
+            "claude" => match os {
+                "Windows" => "irm https://claude.ai/install.ps1 | iex".to_string(),
+                _ => "curl -fsSL https://claude.ai/install.sh | bash".to_string(),
+            },
             _ => format!("Install {} via appropriate package manager", command),
         }
     }
@@ -285,7 +283,7 @@ pub async fn detect_ai_cli_tools() -> Result<Vec<CliTool>> {
 
 /// Get installation commands for all uninstalled tools
 pub fn get_install_commands() -> Vec<(String, String)> {
-    let detector =CliToolDetector::new();
+    let detector = CliToolDetector::new();
     detector
         .get_uninstalled_tools()
         .into_iter()
@@ -309,7 +307,10 @@ pub async fn execute_update(tool_name: Option<&str>) -> Result<Vec<(String, bool
         match detector.get_tool_by_command(name) {
             Some(tool) => vec![tool],
             None => {
-                anyhow::bail!("Unknown AI CLI tool: {}. Supported: claude, codex, gemini", name);
+                anyhow::bail!(
+                    "Unknown AI CLI tool: {}. Supported: claude, codex, gemini",
+                    name
+                );
             }
         }
     } else {
@@ -343,7 +344,11 @@ pub async fn execute_update(tool_name: Option<&str>) -> Result<Vec<(String, bool
             Some(version) => version,
             None => {
                 eprintln!("  ❌ Failed to get latest version for {}", npm_package);
-                results.push((tool.name.clone(), false, "Failed to check version".to_string()));
+                results.push((
+                    tool.name.clone(),
+                    false,
+                    "Failed to check version".to_string(),
+                ));
                 continue;
             }
         };
@@ -385,8 +390,15 @@ pub async fn execute_update(tool_name: Option<&str>) -> Result<Vec<(String, bool
                     println!("  ✅ Successfully updated/installed!");
                     results.push((tool.name.clone(), true, "Success".to_string()));
                 } else {
-                    eprintln!("  ❌ Installation failed with exit code: {:?}", status.code());
-                    results.push((tool.name.clone(), false, format!("Installation failed: {:?}", status.code())));
+                    eprintln!(
+                        "  ❌ Installation failed with exit code: {:?}",
+                        status.code()
+                    );
+                    results.push((
+                        tool.name.clone(),
+                        false,
+                        format!("Installation failed: {:?}", status.code()),
+                    ));
                 }
             }
             Err(e) => {
@@ -413,28 +425,40 @@ async fn handle_claude_update(tool: &CliTool, results: &mut Vec<(String, bool, S
     if !tool.installed {
         println!("  ❌ Claude CLI is not installed");
         println!("  Install from: https://console.anthropic.com/downloads");
-        results.push((tool.name.clone(), false, "Not installed - download from https://console.anthropic.com/downloads".to_string()));
+        results.push((
+            tool.name.clone(),
+            false,
+            "Not installed - download from https://console.anthropic.com/downloads".to_string(),
+        ));
         return;
     }
 
     println!("  Running 'claude update'...");
 
-    match std::process::Command::new("claude")
-        .arg("update")
-        .status()
-    {
+    match std::process::Command::new("claude").arg("update").status() {
         Ok(status) => {
             if status.success() {
                 println!("  ✅ Successfully updated Claude CLI!");
                 results.push((tool.name.clone(), true, "Successfully updated".to_string()));
             } else {
-                eprintln!("  ❌ Claude update failed with exit code: {:?}", status.code());
-                results.push((tool.name.clone(), false, format!("Update failed with exit code: {:?}", status.code())));
+                eprintln!(
+                    "  ❌ Claude update failed with exit code: {:?}",
+                    status.code()
+                );
+                results.push((
+                    tool.name.clone(),
+                    false,
+                    format!("Update failed with exit code: {:?}", status.code()),
+                ));
             }
         }
         Err(e) => {
             eprintln!("  ❌ Failed to execute 'claude update': {}", e);
-            results.push((tool.name.clone(), false, format!("Failed to execute 'claude update': {}", e)));
+            results.push((
+                tool.name.clone(),
+                false,
+                format!("Failed to execute 'claude update': {}", e),
+            ));
         }
     }
 }

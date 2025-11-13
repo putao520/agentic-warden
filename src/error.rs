@@ -548,13 +548,11 @@ impl ErrorContext {
         result: Result<T, impl Into<AgenticWardenError>>,
     ) -> AgenticResult<T> {
         result.map_err(|e| {
-            let error = e.into();
-
             // Apply context to the error if possible
             // This would require extending the error types to support context
             // For now, we just return the error as-is
 
-            error
+            e.into()
         })
     }
 }

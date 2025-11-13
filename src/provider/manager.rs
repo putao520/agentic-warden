@@ -56,7 +56,7 @@ impl ProviderManager {
         const MAX_ID_LENGTH: usize = 100;
         if provider_id.trim().is_empty() {
             return Err(ProviderError::InvalidConfig(
-                "Provider ID cannot be empty".to_string()
+                "Provider ID cannot be empty".to_string(),
             ));
         }
         if provider_id.len() > MAX_ID_LENGTH {
@@ -106,7 +106,10 @@ impl ProviderManager {
                 )));
             }
             // Basic URL validation - check for suspicious patterns
-            if website.contains("..") || website.contains("javascript:") || website.contains("data:") {
+            if website.contains("..")
+                || website.contains("javascript:")
+                || website.contains("data:")
+            {
                 return Err(ProviderError::InvalidConfig(format!(
                     "Website URL for provider '{}' contains suspicious patterns",
                     provider_id
@@ -636,7 +639,8 @@ impl ProviderManager {
 
             // Merge tokens
             for (provider_id, imported_regional_tokens) in imported_config.user_tokens {
-                if let Some(existing_tokens) = self.providers_config.user_tokens.get_mut(&provider_id)
+                if let Some(existing_tokens) =
+                    self.providers_config.user_tokens.get_mut(&provider_id)
                 {
                     // Merge regional tokens - update non-None values
                     if imported_regional_tokens.mainland_china.is_some() {
@@ -697,7 +701,7 @@ mod tests {
     #[test]
     fn test_get_config_path() {
         let path = ProviderManager::get_config_path().unwrap();
-        assert!(path.to_string_lossy().contains(".agentic-warden"));
+        assert!(path.to_string_lossy().contains(".aiw"));
         assert!(path.to_string_lossy().contains("providers.json"));
     }
 

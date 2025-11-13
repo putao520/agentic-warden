@@ -2,15 +2,14 @@
 //!
 //! Provides a mock implementation for testing purposes.
 
+use anyhow::Result;
 use async_trait::async_trait;
 use std::path::Path;
-use anyhow::Result;
 
 use super::sync_service::{
-    SyncService, AuthManager, ProgressReporter, SyncResult, SyncOperation,
-    SyncError, RemoteFile
+    AuthManager, ProgressReporter, RemoteFile, SyncError, SyncOperation, SyncResult, SyncService,
 };
-use super::{AuthStatus};
+use super::AuthStatus;
 use crate::sync::services::auth_manager::AuthToken;
 
 /// Mock sync service for testing
@@ -71,7 +70,11 @@ impl SyncService for MockSyncService {
             bytes_transferred: 2048,
             files_processed: 1,
             duration_ms: 150,
-            message: format!("Mock downloaded {} to {}", remote_path, local_path.display()),
+            message: format!(
+                "Mock downloaded {} to {}",
+                remote_path,
+                local_path.display()
+            ),
         })
     }
 
@@ -87,7 +90,11 @@ impl SyncService for MockSyncService {
             bytes_transferred: 4096,
             files_processed: 5,
             duration_ms: 500,
-            message: format!("Mock uploaded directory {} to {}", local_dir.display(), remote_dir),
+            message: format!(
+                "Mock uploaded directory {} to {}",
+                local_dir.display(),
+                remote_dir
+            ),
         })
     }
 
@@ -103,7 +110,11 @@ impl SyncService for MockSyncService {
             bytes_transferred: 8192,
             files_processed: 8,
             duration_ms: 750,
-            message: format!("Mock downloaded directory {} to {}", remote_dir, local_dir.display()),
+            message: format!(
+                "Mock downloaded directory {} to {}",
+                remote_dir,
+                local_dir.display()
+            ),
         })
     }
 
@@ -131,7 +142,10 @@ impl SyncService for MockSyncService {
     }
 
     async fn get_file_metadata(&mut self, remote_path: &str) -> Result<RemoteFile> {
-        Ok(RemoteFile::new(remote_path.to_string(), remote_path.to_string()))
+        Ok(RemoteFile::new(
+            remote_path.to_string(),
+            remote_path.to_string(),
+        ))
     }
 
     async fn create_directory(&mut self, remote_path: &str) -> Result<()> {
@@ -160,11 +174,7 @@ impl SyncService for MockSyncService {
         })
     }
 
-    async fn verify_sync(
-        &mut self,
-        local_dir: &Path,
-        remote_dir: &str,
-    ) -> Result<SyncResult> {
+    async fn verify_sync(&mut self, local_dir: &Path, remote_dir: &str) -> Result<SyncResult> {
         Ok(SyncResult {
             operation: SyncOperation::Verify,
             success: true,
@@ -221,9 +231,9 @@ impl AuthManager for MockAuthManager {
     async fn refresh_auth(&mut self) -> Result<AuthStatus> {
         // Mock refresh - just extend expiration
         if let Some(ref mut token) = self.token {
-            *token = token.clone().with_expiration(
-                chrono::Utc::now() + chrono::Duration::hours(1)
-            );
+            *token = token
+                .clone()
+                .with_expiration(chrono::Utc::now() + chrono::Duration::hours(1));
         }
         Ok(self.status.clone())
     }

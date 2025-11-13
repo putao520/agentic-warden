@@ -4,8 +4,8 @@
 //! providing unified authentication state management.
 
 use super::{AuthStatus, SyncError};
-use async_trait::async_trait;
 use anyhow::Result;
+use async_trait::async_trait;
 
 /// Configuration for authentication
 #[derive(Debug, Clone)]
@@ -95,6 +95,7 @@ impl AuthToken {
 
 /// Default authentication manager implementation
 pub struct DefaultAuthManager {
+    #[allow(dead_code)]
     config: AuthConfig,
     auth_status: AuthStatus,
     current_token: Option<AuthToken>,
@@ -232,17 +233,21 @@ pub struct AuthManagerFactory;
 
 impl AuthManagerFactory {
     /// Create auth manager for Google Drive
-    pub fn google_drive(client_id: String, client_secret: String) -> Box<dyn crate::sync::services::sync_service::AuthManager> {
-        let config = AuthConfig::new(client_id, client_secret)
-            .with_scopes(vec![
-                "https://www.googleapis.com/auth/drive.file".to_string()
-            ]);
+    pub fn google_drive(
+        client_id: String,
+        client_secret: String,
+    ) -> Box<dyn crate::sync::services::sync_service::AuthManager> {
+        let config = AuthConfig::new(client_id, client_secret).with_scopes(vec![
+            "https://www.googleapis.com/auth/drive.file".to_string(),
+        ]);
 
         Box::new(DefaultAuthManager::new(config))
     }
 
     /// Create auth manager with custom config
-    pub fn with_config(config: AuthConfig) -> Box<dyn crate::sync::services::sync_service::AuthManager> {
+    pub fn with_config(
+        config: AuthConfig,
+    ) -> Box<dyn crate::sync::services::sync_service::AuthManager> {
         Box::new(DefaultAuthManager::new(config))
     }
 

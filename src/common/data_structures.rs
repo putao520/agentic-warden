@@ -113,19 +113,14 @@ pub enum ItemType {
 }
 
 /// Common status enum
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Status {
+    #[default]
     Pending,
     Running,
     Completed,
     Failed(String),
     Cancelled,
-}
-
-impl Default for Status {
-    fn default() -> Self {
-        Status::Pending
-    }
 }
 
 /// Common timestamp utilities
@@ -223,7 +218,9 @@ impl CommonConfig {
     where
         T: for<'de> serde::Deserialize<'de>,
     {
-        self.settings.get(key).and_then(|v| serde_json::from_value(v.clone()).ok())
+        self.settings
+            .get(key)
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
     }
 
     pub fn set_setting<T>(&mut self, key: String, value: T) -> Result<(), serde_json::Error>

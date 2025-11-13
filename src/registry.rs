@@ -116,23 +116,26 @@ impl TaskRegistry {
         });
 
         let pool = registry_pool();
-        let mut guard = pool.lock().map_err(|_poisoned| {
-            // Mutex poisoning indicates a panic occurred while holding the lock
-            // We can attempt to recover by accessing the poisoned data
-            tracing::error!(
-                "Registry pool mutex is poisoned, attempting recovery for namespace '{}'",
-                namespace
-            );
+        let mut guard = pool
+            .lock()
+            .map_err(|_poisoned| {
+                // Mutex poisoning indicates a panic occurred while holding the lock
+                // We can attempt to recover by accessing the poisoned data
+                tracing::error!(
+                    "Registry pool mutex is poisoned, attempting recovery for namespace '{}'",
+                    namespace
+                );
 
-            // Return a specific error that can be handled by the caller
-            RegistryError::Poison
-        }).or_else(|e| {
-            // Attempt to recover from poisoned mutex
-            // In this case, we'll try to continue with the existing registry
-            // or create a new one if recovery isn't possible
-            tracing::warn!("Attempting to recover from poisoned registry pool");
-            Err(e)
-        })?;
+                // Return a specific error that can be handled by the caller
+                RegistryError::Poison
+            })
+            .or_else(|e| {
+                // Attempt to recover from poisoned mutex
+                // In this case, we'll try to continue with the existing registry
+                // or create a new one if recovery isn't possible
+                tracing::warn!("Attempting to recover from poisoned registry pool");
+                Err(e)
+            })?;
 
         match guard.entry(namespace.clone()) {
             Entry::Occupied(mut entry) => {
@@ -570,7 +573,9 @@ mod tests {
         // 注册3个任务
         for i in 1..=3 {
             let task = create_test_task(&format!("task-{}", i));
-            registry.register(40000 + i, &task).expect("register failed");
+            registry
+                .register(40000 + i, &task)
+                .expect("register failed");
         }
 
         // 标记2个任务为完成
@@ -665,7 +670,9 @@ mod tests {
                 thread::spawn(move || {
                     let registry = TaskRegistry::connect_test(&ns).expect("connect failed");
                     let task = create_test_task(&format!("concurrent-{}", i));
-                    registry.register(70000 + i, &task).expect("register failed");
+                    registry
+                        .register(70000 + i, &task)
+                        .expect("register failed");
                 })
             })
             .collect();

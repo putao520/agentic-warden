@@ -91,15 +91,27 @@ mod tests {
 
     #[test]
     fn test_ui_messages() {
-        assert_eq!(UIMessages::success(SuccessType::OperationComplete), "Operation completed successfully");
-        assert_eq!(UIMessages::error(ErrorType::NetworkError), "Network error occurred");
-        assert_eq!(UIMessages::confirmation(ConfirmationType::Delete), "Are you sure you want to delete this item?");
+        assert_eq!(
+            UIMessages::success(SuccessType::OperationComplete),
+            "Operation completed successfully"
+        );
+        assert_eq!(
+            UIMessages::error(ErrorType::NetworkError),
+            "Network error occurred"
+        );
+        assert_eq!(
+            UIMessages::confirmation(ConfirmationType::Delete),
+            "Are you sure you want to delete this item?"
+        );
         assert_eq!(UIMessages::status(StatusType::Loading), "Loading...");
     }
 
     #[test]
     fn test_format_progress() {
-        assert_eq!(format_progress(50, "Processing files"), "50% complete - Processing files");
+        assert_eq!(
+            format_progress(50, "Processing files"),
+            "50% complete - Processing files"
+        );
     }
 
     #[test]

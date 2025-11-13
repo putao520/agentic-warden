@@ -18,15 +18,13 @@
 //! - 与CLI任务注册表完全隔离
 
 use rmcp::{
-    tool, tool_router, tool_handler,
-    handler::server::tool::{ToolRouter, Parameters},
-    ServerHandler,
-    ServiceExt,
+    handler::server::tool::{Parameters, ToolRouter},
+    tool, tool_handler, tool_router, ServerHandler, ServiceExt,
 };
-use std::future::Future;
-use serde_json::Value;
-use serde::{Serialize, Deserialize};
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::future::Future;
 
 // Note: ProviderManager is managed by supervisor module, not directly by MCP server
 
@@ -127,7 +125,10 @@ impl AgenticWardenMcpServer {
     /// - count: 任务数量
     /// - message: 使用说明
     #[tool(description = "Generate commands for multiple AI CLI tasks to run concurrently")]
-    pub async fn start_concurrent_tasks(&self, params: Parameters<StartConcurrentTasksParams>) -> String {
+    pub async fn start_concurrent_tasks(
+        &self,
+        params: Parameters<StartConcurrentTasksParams>,
+    ) -> String {
         // 解析tasks数组
         let tasks: Vec<Value> = match serde_json::from_str(&params.0.tasks_json) {
             Ok(v) => v,
@@ -135,7 +136,8 @@ impl AgenticWardenMcpServer {
                 return serde_json::to_string_pretty(&serde_json::json!({
                     "success": false,
                     "error": format!("Invalid JSON format: {}", e)
-                })).unwrap();
+                }))
+                .unwrap();
             }
         };
 
@@ -178,7 +180,12 @@ impl AgenticWardenMcpServer {
 
             // 构建启动命令
             let command = if let Some(p) = provider {
-                format!("agent {} -p {} '{}'", ai_type, p, task.replace("'", "'\\''"))
+                format!(
+                    "agent {} -p {} '{}'",
+                    ai_type,
+                    p,
+                    task.replace("'", "'\\''")
+                )
             } else {
                 format!("agent {} '{}'", ai_type, task.replace("'", "'\\''"))
             };
@@ -192,7 +199,10 @@ impl AgenticWardenMcpServer {
             }));
         }
 
-        let success_count = results.iter().filter(|r| r.get("success") == Some(&serde_json::json!(true))).count();
+        let success_count = results
+            .iter()
+            .filter(|r| r.get("success") == Some(&serde_json::json!(true)))
+            .count();
 
         serde_json::to_string_pretty(&serde_json::json!({
             "success": true,
@@ -233,12 +243,18 @@ impl AgenticWardenMcpServer {
             return serde_json::to_string_pretty(&serde_json::json!({
                 "success": false,
                 "error": format!("{}", e)
-            })).unwrap();
+            }))
+            .unwrap();
         }
 
         // 构建命令字符串
         let command = if let Some(ref p) = provider {
-            format!("agent {} -p {} '{}'", ai_type, p, task.replace("'", "'\\''"))
+            format!(
+                "agent {} -p {} '{}'",
+                ai_type,
+                p,
+                task.replace("'", "'\\''")
+            )
         } else {
             format!("agent {} '{}'", ai_type, task.replace("'", "'\\''"))
         };
@@ -261,7 +277,8 @@ impl AgenticWardenMcpServer {
             "ai_type": ai_type,
             "provider": provider,
             "message": "Execute the 'task' using Bash tool with 12h timeout"
-        })).unwrap()
+        }))
+        .unwrap()
     }
 
     /// Search for relevant conversation history using semantic similarity, optionally filtered by session_id
@@ -281,17 +298,20 @@ impl AgenticWardenMcpServer {
     ///   - score: 相似度分数
     ///   - metadata: 元数据
     /// - message: 状态信息
-    #[tool(description = "Search for relevant conversation history using semantic similarity, optionally filtered by session_id")]
+    #[tool(
+        description = "Search for relevant conversation history using semantic similarity, optionally filtered by session_id"
+    )]
     pub async fn search_history(&self, params: Parameters<SearchHistoryParams>) -> String {
         // 初始化内存管理器
-        let memory_manager = match agentic_warden::memory::MemoryManager::new().await {
+        let memory_manager = match aiw::memory::MemoryManager::new().await {
             Ok(mm) => mm,
             Err(e) => {
                 return serde_json::to_string_pretty(&serde_json::json!({
                     "success": false,
                     "error": format!("Failed to initialize memory manager: {}", e),
                     "conversations": Vec::<Value>::new()
-                })).unwrap();
+                }))
+                .unwrap();
             }
         };
 
@@ -299,36 +319,45 @@ impl AgenticWardenMcpServer {
         let limit = params.0.limit.unwrap_or(10);
         let score_threshold = params.0.score_threshold.unwrap_or(0.5) as f32;
 
-        match memory_manager.search_relevant_memories(&params.0.query, Some(limit)).await {
+        match memory_manager
+            .search_relevant_memories(&params.0.query, Some(limit))
+            .await
+        {
             Ok(results) => {
                 // 转换结果为对话格式，包含session_id
-                let conversations: Vec<Value> = results.into_iter().filter_map(|result| {
-                    // 从metadata中提取session_id
-                    let session_id = result.point.metadata.get("session_id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown")
-                        .to_string();
+                let conversations: Vec<Value> = results
+                    .into_iter()
+                    .filter_map(|result| {
+                        // 从metadata中提取session_id
+                        let session_id = result
+                            .point
+                            .metadata
+                            .get("session_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown")
+                            .to_string();
 
-                    // 应用session_id过滤器
-                    if let Some(ref filter_session_id) = params.0.session_id {
-                        if session_id != *filter_session_id {
+                        // 应用session_id过滤器
+                        if let Some(ref filter_session_id) = params.0.session_id {
+                            if session_id != *filter_session_id {
+                                return None;
+                            }
+                        }
+
+                        // 应用score_threshold过滤器
+                        if result.score < score_threshold {
                             return None;
                         }
-                    }
 
-                    // 应用score_threshold过滤器
-                    if result.score < score_threshold {
-                        return None;
-                    }
-
-                    Some(serde_json::json!({
-                        "session_id": session_id,
-                        "content": result.point.content,
-                        "timestamp": result.point.timestamp.to_rfc3339(),
-                        "score": result.score,
-                        "metadata": result.point.metadata
-                    }))
-                }).collect();
+                        Some(serde_json::json!({
+                            "session_id": session_id,
+                            "content": result.point.content,
+                            "timestamp": result.point.timestamp.to_rfc3339(),
+                            "score": result.score,
+                            "metadata": result.point.metadata
+                        }))
+                    })
+                    .collect();
 
                 serde_json::to_string_pretty(&serde_json::json!({
                     "success": true,
@@ -336,15 +365,15 @@ impl AgenticWardenMcpServer {
                     "count": conversations.len(),
                     "query": params.0.query,
                     "message": "History search completed successfully"
-                })).unwrap()
+                }))
+                .unwrap()
             }
-            Err(e) => {
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "success": false,
-                    "error": format!("Failed to search history: {}", e),
-                    "conversations": Vec::<Value>::new()
-                })).unwrap()
-            }
+            Err(e) => serde_json::to_string_pretty(&serde_json::json!({
+                "success": false,
+                "error": format!("Failed to search history: {}", e),
+                "conversations": Vec::<Value>::new()
+            }))
+            .unwrap(),
         }
     }
 
@@ -372,24 +401,25 @@ impl AgenticWardenMcpServer {
     #[tool(description = "Get TODOs for a specific session_id, optionally filtered by status")]
     pub async fn get_session_todos(&self, params: Parameters<GetSessionTodosParams>) -> String {
         // 初始化内存管理器
-        let memory_manager = match agentic_warden::memory::MemoryManager::new().await {
+        let memory_manager = match aiw::memory::MemoryManager::new().await {
             Ok(mm) => mm,
             Err(e) => {
                 return serde_json::to_string_pretty(&serde_json::json!({
                     "success": false,
                     "error": format!("Failed to initialize memory manager: {}", e),
                     "todos": Vec::<Value>::new()
-                })).unwrap();
+                }))
+                .unwrap();
             }
         };
 
         // 解析状态过滤器
         let status_filter = if let Some(ref status_str) = params.0.status {
             match status_str.to_lowercase().as_str() {
-                "pending" => Some(agentic_warden::memory::todo_manager::TodoStatus::Pending),
-                "inprogress" => Some(agentic_warden::memory::todo_manager::TodoStatus::InProgress),
-                "completed" => Some(agentic_warden::memory::todo_manager::TodoStatus::Completed),
-                "cancelled" => Some(agentic_warden::memory::todo_manager::TodoStatus::Cancelled),
+                "pending" => Some(aiw::memory::todo_manager::TodoStatus::Pending),
+                "inprogress" => Some(aiw::memory::todo_manager::TodoStatus::InProgress),
+                "completed" => Some(aiw::memory::todo_manager::TodoStatus::Completed),
+                "cancelled" => Some(aiw::memory::todo_manager::TodoStatus::Cancelled),
                 _ => None,
             }
         } else {
@@ -397,28 +427,36 @@ impl AgenticWardenMcpServer {
         };
 
         // 使用get_todos_by_session_id方法查找特定session_id的TODO
-        match memory_manager.get_todos_by_session_id(&params.0.session_id, status_filter).await {
+        match memory_manager
+            .get_todos_by_session_id(&params.0.session_id, status_filter)
+            .await
+        {
             Ok(todos) => {
-                let todos_json: Vec<Value> = todos.into_iter().map(|todo| {
-                    // 从metadata中提取session_id
-                    let session_id = todo.metadata.get("session_id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown")
-                        .to_string();
+                let todos_json: Vec<Value> = todos
+                    .into_iter()
+                    .map(|todo| {
+                        // 从metadata中提取session_id
+                        let session_id = todo
+                            .metadata
+                            .get("session_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown")
+                            .to_string();
 
-                    serde_json::json!({
-                        "id": todo.id,
-                        "title": todo.title,
-                        "description": todo.description,
-                        "status": format!("{:?}", todo.status),
-                        "priority": format!("{:?}", todo.priority),
-                        "created_at": todo.created_at.to_rfc3339(),
-                        "updated_at": todo.updated_at.to_rfc3339(),
-                        "tags": todo.tags,
-                        "metadata": todo.metadata,
-                        "session_id": session_id
+                        serde_json::json!({
+                            "id": todo.id,
+                            "title": todo.title,
+                            "description": todo.description,
+                            "status": format!("{:?}", todo.status),
+                            "priority": format!("{:?}", todo.priority),
+                            "created_at": todo.created_at.to_rfc3339(),
+                            "updated_at": todo.updated_at.to_rfc3339(),
+                            "tags": todo.tags,
+                            "metadata": todo.metadata,
+                            "session_id": session_id
+                        })
                     })
-                }).collect();
+                    .collect();
 
                 serde_json::to_string_pretty(&serde_json::json!({
                     "success": true,
@@ -426,15 +464,15 @@ impl AgenticWardenMcpServer {
                     "count": todos_json.len(),
                     "session_id": params.0.session_id,
                     "message": "Session TODOs retrieved successfully"
-                })).unwrap()
+                }))
+                .unwrap()
             }
-            Err(e) => {
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "success": false,
-                    "error": format!("Failed to get session todos: {}", e),
-                    "todos": Vec::<Value>::new()
-                })).unwrap()
-            }
+            Err(e) => serde_json::to_string_pretty(&serde_json::json!({
+                "success": false,
+                "error": format!("Failed to get session todos: {}", e),
+                "todos": Vec::<Value>::new()
+            }))
+            .unwrap(),
         }
     }
 }
@@ -449,6 +487,9 @@ impl ServerHandler for AgenticWardenMcpServer {}
 fn parse_ai_type(ai_type: &str) -> Result<(), String> {
     match ai_type.to_lowercase().as_str() {
         "claude" | "codex" | "gemini" => Ok(()),
-        _ => Err(format!("Invalid AI type '{}'. Must be one of: claude, codex, gemini", ai_type))
+        _ => Err(format!(
+            "Invalid AI type '{}'. Must be one of: claude, codex, gemini",
+            ai_type
+        )),
     }
 }

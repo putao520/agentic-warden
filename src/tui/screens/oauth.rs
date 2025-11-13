@@ -22,6 +22,7 @@ use crate::tui::app_state::AppState;
 enum OAuthMode {
     Intro,
     AwaitingCode,
+    #[allow(dead_code)]
     Processing,
     Success,
     Error(String),
@@ -67,8 +68,7 @@ impl OAuthScreen {
 
         // Start Device Flow
         let device_response = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current()
-                .block_on(authenticator.start_device_flow())
+            tokio::runtime::Handle::current().block_on(authenticator.start_device_flow())
         })
         .context("failed to start device flow")?;
 
@@ -84,13 +84,9 @@ impl OAuthScreen {
 
         // Try to open browser automatically
         match open::that(&device_response.verification_url) {
-            Ok(_) => {
-                self.flash_message("Opened verification URL in browser", Color::Cyan)
-            }
+            Ok(_) => self.flash_message("Opened verification URL in browser", Color::Cyan),
             Err(err) => self.flash_message(
-                format!(
-                    "Browser could not be opened automatically ({err}); open URL manually."
-                ),
+                format!("Browser could not be opened automatically ({err}); open URL manually."),
                 Color::Yellow,
             ),
         }
@@ -139,9 +135,7 @@ impl OAuthScreen {
     /// Copy the user code to the system clipboard.
     fn copy_auth_url(&mut self) {
         if let Some(AuthState::WaitingForDeviceAuth { user_code, .. }) = &self.last_state {
-            match ClipboardContext::new()
-                .and_then(|mut ctx| ctx.set_contents(user_code.clone()))
-            {
+            match ClipboardContext::new().and_then(|mut ctx| ctx.set_contents(user_code.clone())) {
                 Ok(_) => self.flash_message("User code copied to clipboard", Color::Green),
                 Err(err) => {
                     self.flash_message(format!("Clipboard unavailable: {}", err), Color::Red)
@@ -159,9 +153,7 @@ impl OAuthScreen {
         }) = &self.last_state
         {
             match open::that(verification_url) {
-                Ok(_) => {
-                    self.flash_message("Verification URL opened in browser", Color::Cyan)
-                }
+                Ok(_) => self.flash_message("Verification URL opened in browser", Color::Cyan),
                 Err(err) => self.flash_message(
                     format!("Failed to open browser automatically: {}", err),
                     Color::Yellow,
@@ -178,10 +170,15 @@ impl OAuthScreen {
     }
 
     /// Map the latest authenticator state to a human readable status line.
+    #[allow(dead_code)]
     fn status_text(&self) -> String {
         match &self.last_state {
             Some(AuthState::Initializing) => "Initialising authentication flow...".to_string(),
-            Some(AuthState::WaitingForDeviceAuth { user_code, verification_url, .. }) => {
+            Some(AuthState::WaitingForDeviceAuth {
+                user_code,
+                verification_url,
+                ..
+            }) => {
                 format!("Visit {} and enter code: {}", verification_url, user_code)
             }
             Some(AuthState::Authenticated { .. }) => {
@@ -255,8 +252,7 @@ impl OAuthScreen {
             self.render_device_flow(frame, area, user_code, verification_url, expires_at);
         } else {
             // Fallback if state is not Device Flow
-            let text = Paragraph::new("Initializing Device Flow...")
-                .alignment(Alignment::Center);
+            let text = Paragraph::new("Initializing Device Flow...").alignment(Alignment::Center);
             frame.render_widget(text, area);
         }
     }
@@ -310,7 +306,10 @@ impl OAuthScreen {
         status_lines.push(Line::from(""));
 
         let remaining = (*expires_at - chrono::Utc::now()).num_seconds();
-        status_lines.push(Line::from(format!("Code expires in {} seconds", remaining.max(0))));
+        status_lines.push(Line::from(format!(
+            "Code expires in {} seconds",
+            remaining.max(0)
+        )));
 
         let status = Paragraph::new(status_lines)
             .wrap(Wrap { trim: true })
@@ -324,7 +323,9 @@ impl OAuthScreen {
                 Span::raw("Visit: "),
                 Span::styled(
                     verification_url,
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::UNDERLINED),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::UNDERLINED),
                 ),
             ]),
             Line::from(""),
@@ -367,7 +368,6 @@ impl OAuthScreen {
             .block(Block::default().borders(Borders::ALL));
         frame.render_widget(help, chunks[4]);
     }
-
 
     fn render_processing(&self, frame: &mut Frame, area: Rect) {
         let message = format!(
@@ -499,10 +499,9 @@ impl Screen for OAuthScreen {
             }
         }
 
-        if let (Some(authenticator), Some(flow_id)) = (
-            self.authenticator.clone(),
-            self.flow_id.clone(),
-        ) {
+        if let (Some(authenticator), Some(flow_id)) =
+            (self.authenticator.clone(), self.flow_id.clone())
+        {
             let state = tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current().block_on(authenticator.get_state())
             });

@@ -41,7 +41,8 @@ impl AiCliCommand {
 
             let cli_type = &self.ai_types[0];
             let exit_code =
-                supervisor::start_interactive_cli(&registry, cli_type, self.provider.clone()).await?;
+                supervisor::start_interactive_cli(&registry, cli_type, self.provider.clone())
+                    .await?;
             Ok(ExitCode::from((exit_code & 0xFF) as u8))
         } else {
             // 浠诲姟妯″紡
@@ -52,7 +53,8 @@ impl AiCliCommand {
                 let os_args: Vec<OsString> = cli_args.into_iter().map(|s| s.into()).collect();
 
                 let exit_code =
-                    supervisor::execute_cli(&registry, cli_type, &os_args, self.provider.clone()).await?;
+                    supervisor::execute_cli(&registry, cli_type, &os_args, self.provider.clone())
+                        .await?;
                 Ok(ExitCode::from((exit_code & 0xFF) as u8))
             } else {
                 // 澶氫釜 CLI 鎵归噺鎵ц
@@ -74,7 +76,8 @@ impl AiCliCommand {
                     &cli_selector,
                     &self.prompt,
                     self.provider.clone(),
-                ).await?;
+                )
+                .await?;
 
                 // 杩斿洖绗竴涓け璐ョ殑 exit code锛屾垨鑰?0 濡傛灉鍏ㄩ儴鎴愬姛
                 let final_exit_code = exit_codes

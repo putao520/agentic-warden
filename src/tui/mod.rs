@@ -21,8 +21,8 @@ mod data_binding;
 
 pub mod app;
 pub mod app_state;
-pub mod screens;
 pub mod components;
+pub mod screens;
 
 use self::data_binding::DataBindingController;
 
@@ -45,8 +45,7 @@ impl App {
     }
 
     pub fn with_initial_screen(initial_screen: ScreenType) -> Self {
-        let mut history = Vec::new();
-        history.push(initial_screen.clone());
+        let history = vec![initial_screen.clone()];
         Self {
             should_quit: false,
             current_screen: initial_screen,
@@ -145,7 +144,8 @@ impl App {
                 if self.history.len() > 1 {
                     self.history.pop();
                     // Safe: We just checked that len > 1, so after pop there's at least 1 element
-                    self.current_screen = self.history
+                    self.current_screen = self
+                        .history
                         .last()
                         .expect("history should have at least one screen after pop")
                         .clone();
@@ -212,5 +212,11 @@ impl App {
             .wrap(Wrap { trim: true });
 
         frame.render_widget(paragraph, area);
+    }
+}
+
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
     }
 }

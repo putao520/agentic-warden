@@ -35,7 +35,9 @@ fn test_status_command_workflow() {
     }
 
     // 3. 验证初始状态 - 直接调用status逻辑，而不是运行新进程
-    let running_count = registry.entries().unwrap()
+    let running_count = registry
+        .entries()
+        .unwrap()
         .iter()
         .filter(|entry| entry.record.status == TaskStatus::Running)
         .count();
@@ -61,7 +63,9 @@ fn test_status_command_workflow() {
     }
 
     // 5. 验证状态 - 直接调用status逻辑
-    let running_count = registry.entries().unwrap()
+    let running_count = registry
+        .entries()
+        .unwrap()
         .iter()
         .filter(|entry| entry.record.status == TaskStatus::Running)
         .count();
@@ -91,7 +95,9 @@ fn test_status_command_workflow() {
     let _ = registry.get_completed_unread_tasks();
 
     // 8. 最终状态应该是无任务
-    let running_count = registry.entries().unwrap()
+    let running_count = registry
+        .entries()
+        .unwrap()
         .iter()
         .filter(|entry| entry.record.status == TaskStatus::Running)
         .count();
@@ -188,14 +194,8 @@ fn test_status_tui_flag() {
     println!("Status help: {}", stdout);
 
     // 帮助信息应该包含--tui选项
-    assert!(
-        stdout.contains("--tui"),
-        "Help should mention --tui option"
-    );
-    assert!(
-        stdout.contains("TUI"),
-        "Help should explain TUI option"
-    );
+    assert!(stdout.contains("--tui"), "Help should mention --tui option");
+    assert!(stdout.contains("TUI"), "Help should explain TUI option");
 }
 
 /// 测试pwait命令的参数验证
@@ -207,10 +207,7 @@ fn test_pwait_requires_pid_argument() {
         .output()
         .expect("Failed to run pwait without args");
 
-    assert!(
-        !output.status.success(),
-        "pwait without PID should fail"
-    );
+    assert!(!output.status.success(), "pwait without PID should fail");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     println!("PWait error: {}", stderr);
@@ -269,12 +266,7 @@ fn test_complete_task_lifecycle() {
 
     // 3. 标记任务完成
     registry
-        .mark_completed(
-            310001,
-            Some("success".to_string()),
-            Some(0),
-            Utc::now(),
-        )
+        .mark_completed(310001, Some("success".to_string()), Some(0), Utc::now())
         .unwrap();
 
     // 4. 验证完成状态

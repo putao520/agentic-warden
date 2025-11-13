@@ -696,7 +696,9 @@ impl ConfigSyncManager {
         }
 
         // Safe: temp_archive_path was just set above
-        let archive_path = self.temp_archive_path.as_ref()
+        let archive_path = self
+            .temp_archive_path
+            .as_ref()
             .expect("temp_archive_path must be set");
         let size = self
             .config_packer
@@ -791,7 +793,9 @@ impl ConfigSyncManager {
             }
 
             // Safe: temp_archive_path was just set above if it was None
-            let archive_path = self.temp_archive_path.as_ref()
+            let archive_path = self
+                .temp_archive_path
+                .as_ref()
                 .expect("temp_archive_path must be set");
 
             if let Some(parent) = archive_path.parent() {
@@ -1060,14 +1064,17 @@ impl ConfigSyncManager {
         };
 
         let authenticator = SmartOAuthAuthenticator::new(oauth_config);
-        let token_response = authenticator.authenticate_with_device_flow().await.map_err(|err| {
-            error!(
-                target: "agentic_warden::sync",
-                "Device Flow authentication failed: {}",
-                err
-            );
-            Self::auth_failed_error()
-        })?;
+        let token_response = authenticator
+            .authenticate_with_device_flow()
+            .await
+            .map_err(|err| {
+                error!(
+                    target: "agentic_warden::sync",
+                    "Device Flow authentication failed: {}",
+                    err
+                );
+                Self::auth_failed_error()
+            })?;
 
         auth.access_token = Some(token_response.access_token.clone());
         auth.token_type = Some(token_response.token_type.clone());

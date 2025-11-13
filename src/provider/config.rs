@@ -245,7 +245,7 @@ impl std::fmt::Display for Region {
 }
 
 /// Regional tokens storage
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RegionalTokens {
     /// Token for mainland China
     #[serde(default)]
@@ -504,7 +504,7 @@ impl ProvidersConfig {
         let tokens = self
             .user_tokens
             .entry(provider_id.to_string())
-            .or_insert_with(RegionalTokens::default);
+            .or_default();
 
         match region {
             Region::MainlandChina => tokens.mainland_china = Some(token),
@@ -619,15 +619,6 @@ impl Default for ProvidersConfig {
     }
 }
 
-impl Default for RegionalTokens {
-    fn default() -> Self {
-        Self {
-            mainland_china: None,
-            international: None,
-            last_updated: None,
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {

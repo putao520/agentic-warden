@@ -15,7 +15,7 @@ pub const DEBUG_ENV: &str = "AGENTIC_WARDEN_DEBUG";
 pub const LEGACY_DEBUG_ENV: &str = "CODEX_WORKER_DEBUG";
 
 // Common constants used across modules
-pub const AUTH_DIRECTORY: &str = ".agentic-warden";
+pub const AUTH_DIRECTORY: &str = ".aiw";
 pub const AUTH_FILE_NAME: &str = "auth.json";
 
 pub const MAX_RECORD_AGE: Duration = Duration::from_secs(12 * 60 * 60);

@@ -3,19 +3,15 @@
 //! Wraps the existing GoogleDriveService to provide unified sync interface,
 //! eliminating repeated authentication and file operation patterns.
 
+use anyhow::Result;
 use async_trait::async_trait;
 use std::path::Path;
-use anyhow::Result;
 
 use super::sync_service::{
-    SyncService, AuthManager, ProgressReporter, SyncResult, SyncOperation,
-    SyncError, RemoteFile
+    AuthManager, ProgressReporter, RemoteFile, SyncError, SyncOperation, SyncResult, SyncService,
 };
-use crate::sync::{
-    google_drive_service::GoogleDriveService,
-    oauth_client::OAuthClient,
-};
-use super::{SyncConfig, AuthStatus};
+use super::{AuthStatus, SyncConfig};
+use crate::sync::{google_drive_service::GoogleDriveService, oauth_client::OAuthClient};
 
 /// Google Drive implementation of SyncService
 pub struct GoogleDriveSyncService {
@@ -47,7 +43,8 @@ impl GoogleDriveSyncService {
                 self.auth_manager.client_id.clone(),
                 self.auth_manager.client_secret.clone(),
                 self.auth_manager.refresh_token.clone(),
-            ).with_scopes(vec![
+            )
+            .with_scopes(vec![
                 "https://www.googleapis.com/auth/drive.file".to_string()
             ]);
 
@@ -71,12 +68,15 @@ impl GoogleDriveSyncService {
                 service.create_or_find_folder(part, None).await?
             } else {
                 // Create or find subfolder
-                service.create_or_find_folder(part, parent_id.as_deref()).await?
+                service
+                    .create_or_find_folder(part, parent_id.as_deref())
+                    .await?
             };
             parent_id = Some(folder_id);
         }
 
-        parent_id.ok_or_else(|| SyncError::Configuration("Failed to create folder".to_string()).into())
+        parent_id
+            .ok_or_else(|| SyncError::Configuration("Failed to create folder".to_string()).into())
     }
 
     /// Convert Google Drive file to RemoteFile
@@ -117,7 +117,8 @@ impl SyncService for GoogleDriveSyncService {
 
         // Report start
         if let Some(ref mut p) = progress {
-            p.report(0, format!("Uploading {}", local_path.display())).await;
+            p.report(0, format!("Uploading {}", local_path.display()))
+                .await;
         }
 
         // Extract folder path and file name
@@ -146,12 +147,15 @@ impl SyncService for GoogleDriveSyncService {
         }
 
         // Upload file
-        let drive_file = service.upload_file(local_path, folder_id.as_deref()).await?;
+        let drive_file = service
+            .upload_file(local_path, folder_id.as_deref())
+            .await?;
         let file_size = drive_file.size.unwrap_or(0) as u64;
 
         // Report completion
         if let Some(ref mut p) = progress {
-            p.report(100, format!("Upload completed: {}", file_name)).await;
+            p.report(100, format!("Upload completed: {}", file_name))
+                .await;
         }
 
         let result = SyncResult {
@@ -185,9 +189,14 @@ impl SyncService for GoogleDriveSyncService {
 
         // Find the file by listing all files and searching
         let service = self.ensure_drive_service().await?;
-        let file_name = remote_path.trim_start_matches('/').split('/').last()
+        let file_name = remote_path
+            .trim_start_matches('/')
+            .split('/')
+            .last()
             .ok_or_else(|| SyncError::Configuration("Invalid remote path".to_string()))?;
-        let drive_file = service.list_folder_files("").await?
+        let drive_file = service
+            .list_folder_files("")
+            .await?
             .into_iter()
             .find(|f| f.name == file_name)
             .ok_or_else(|| SyncError::Provider(format!("File not found: {}", remote_path)))?;
@@ -198,7 +207,8 @@ impl SyncService for GoogleDriveSyncService {
 
         // Report completion
         if let Some(ref mut p) = progress {
-            p.report(100, format!("Download completed: {}", file_name)).await;
+            p.report(100, format!("Download completed: {}", file_name))
+                .await;
         }
 
         let result = SyncResult {
@@ -227,7 +237,8 @@ impl SyncService for GoogleDriveSyncService {
 
         // Report start
         if let Some(ref mut p) = progress {
-            p.report(0, format!("Uploading directory {}", local_dir.display())).await;
+            p.report(0, format!("Uploading directory {}", local_dir.display()))
+                .await;
         }
 
         // Ensure remote directory exists
@@ -245,7 +256,10 @@ impl SyncService for GoogleDriveSyncService {
             bytes_transferred: 0,
             files_processed: 0,
             duration_ms: start_time.elapsed().as_millis() as u64,
-            message: format!("Directory upload not fully implemented: {}", local_dir.display()),
+            message: format!(
+                "Directory upload not fully implemented: {}",
+                local_dir.display()
+            ),
         };
 
         if let Some(ref mut p) = progress {
@@ -265,7 +279,8 @@ impl SyncService for GoogleDriveSyncService {
 
         // Report start
         if let Some(ref mut p) = progress {
-            p.report(0, format!("Downloading directory {}", remote_dir)).await;
+            p.report(0, format!("Downloading directory {}", remote_dir))
+                .await;
         }
 
         // Find remote directory
@@ -324,10 +339,14 @@ impl SyncService for GoogleDriveSyncService {
         let service = self.ensure_drive_service().await?;
 
         // Extract file name and search for it
-        let file_name = remote_path.trim_start_matches('/').split('/').last()
+        let file_name = remote_path
+            .trim_start_matches('/')
+            .split('/')
+            .last()
             .ok_or_else(|| SyncError::Configuration("Invalid remote path".to_string()))?;
         let drive_files = service.list_folder_files("").await?;
-        let drive_file = drive_files.iter()
+        let drive_file = drive_files
+            .iter()
             .find(|f| f.name == file_name)
             .ok_or_else(|| SyncError::Provider(format!("File not found: {}", remote_path)))?;
 
@@ -354,12 +373,16 @@ impl SyncService for GoogleDriveSyncService {
         let service = self.ensure_drive_service().await?;
 
         // Extract file name from path
-        let file_name = remote_path.trim_start_matches('/').split('/').last()
+        let file_name = remote_path
+            .trim_start_matches('/')
+            .split('/')
+            .last()
             .ok_or_else(|| SyncError::Configuration("Invalid remote path".to_string()))?;
 
         // Search for the file
         let files = service.list_folder_files("").await?;
-        let drive_file = files.iter()
+        let drive_file = files
+            .iter()
             .find(|f| f.name == file_name)
             .ok_or_else(|| SyncError::Provider(format!("File not found: {}", remote_path)))?;
 
@@ -376,10 +399,14 @@ impl SyncService for GoogleDriveSyncService {
 
         // Find the directory
         let files = service.list_folder_files("").await?;
-        let dir_name = remote_path.trim_start_matches('/').split('/').last()
+        let dir_name = remote_path
+            .trim_start_matches('/')
+            .split('/')
+            .last()
             .ok_or_else(|| SyncError::Configuration("Invalid directory path".to_string()))?;
 
-        let dir_file = files.iter()
+        let dir_file = files
+            .iter()
             .find(|f| f.name == dir_name && f.mime_type.contains("folder"))
             .ok_or_else(|| SyncError::Provider(format!("Directory not found: {}", remote_path)))?;
 
@@ -398,11 +425,7 @@ impl SyncService for GoogleDriveSyncService {
         self.upload_directory(local_dir, remote_dir, progress).await
     }
 
-    async fn verify_sync(
-        &mut self,
-        local_dir: &Path,
-        remote_dir: &str,
-    ) -> Result<SyncResult> {
+    async fn verify_sync(&mut self, local_dir: &Path, remote_dir: &str) -> Result<SyncResult> {
         let start_time = std::time::Instant::now();
 
         // List local files
@@ -425,8 +448,12 @@ impl SyncService for GoogleDriveSyncService {
             bytes_transferred: 0,
             files_processed: local_count + remote_count,
             duration_ms: start_time.elapsed().as_millis() as u64,
-            message: format!("Verification: {} local files, {} remote files - {}",
-                local_count, remote_count, if matches { "matches" } else { "mismatch" }),
+            message: format!(
+                "Verification: {} local files, {} remote files - {}",
+                local_count,
+                remote_count,
+                if matches { "matches" } else { "mismatch" }
+            ),
         })
     }
 }

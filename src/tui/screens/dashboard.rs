@@ -523,6 +523,7 @@ mod tests {
     use tempfile::TempDir;
 
     struct TempHome {
+        #[allow(dead_code)]
         dir: TempDir,
         old_home: Option<std::ffi::OsString>,
         old_user: Option<std::ffi::OsString>,

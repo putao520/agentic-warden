@@ -192,7 +192,7 @@ impl ProviderAddWizard {
                         &self.providers_config,
                         ai_type,
                         &preferences,
-                    )
+                    ),
                 )
             })?;
 
@@ -327,7 +327,7 @@ impl ProviderAddWizard {
                         &self.selected_provider_id.as_ref().unwrap(),
                         &support_mode.mode_type,
                         &self.input_buffer,
-                    )
+                    ),
                 )
             });
 

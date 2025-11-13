@@ -57,22 +57,18 @@ impl NetworkStatus {
 
     /// Check if international URL might be inaccessible
     pub fn should_warn_international(&self) -> bool {
-        match self {
-            NetworkStatus::DomesticOnly { .. } => true,
-            NetworkStatus::Poor { .. } => true,
-            NetworkStatus::Unknown { .. } => true,
-            _ => false,
-        }
+        matches!(
+            self,
+            NetworkStatus::DomesticOnly { .. } | NetworkStatus::Poor { .. } | NetworkStatus::Unknown { .. }
+        )
     }
 
     /// Check if domestic URL might be inaccessible
     pub fn should_warn_domestic(&self) -> bool {
-        match self {
-            NetworkStatus::InternationalOnly { .. } => true,
-            NetworkStatus::Poor { .. } => true,
-            NetworkStatus::Unknown { .. } => true,
-            _ => false,
-        }
+        matches!(
+            self,
+            NetworkStatus::InternationalOnly { .. } | NetworkStatus::Poor { .. } | NetworkStatus::Unknown { .. }
+        )
     }
 
     /// Check if user is in China mainland

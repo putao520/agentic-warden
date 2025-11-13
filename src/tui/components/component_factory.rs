@@ -5,11 +5,8 @@
 
 use ratatui::{
     layout::{Alignment, Rect},
-    text::{Line},
-    widgets::{
-        Block, Clear, List, ListItem, Paragraph, Table, Row,
-        Wrap, Gauge,
-    },
+    text::Line,
+    widgets::{Block, Clear, Gauge, List, ListItem, Paragraph, Row, Table, Wrap},
     Frame,
 };
 
@@ -28,7 +25,10 @@ impl ComponentFactory {
     }
 
     /// Create a title paragraph with custom styling
-    pub fn title_with_config(text: impl Into<String>, config: ComponentConfig) -> Paragraph<'static> {
+    pub fn title_with_config(
+        text: impl Into<String>,
+        config: ComponentConfig,
+    ) -> Paragraph<'static> {
         let mut paragraph = Paragraph::new(text.into())
             .style(StyleManager::title())
             .alignment(config.alignment.unwrap_or(Alignment::Center));
@@ -116,7 +116,10 @@ impl ComponentFactory {
     }
 
     /// Create a list with custom title
-    pub fn list_with_title(items: Vec<ListItem<'static>>, title: impl Into<String>) -> List<'static> {
+    pub fn list_with_title(
+        items: Vec<ListItem<'static>>,
+        title: impl Into<String>,
+    ) -> List<'static> {
         List::new(items)
             .block(Self::default_block().title(title.into()))
             .highlight_style(StyleManager::selected())
@@ -124,7 +127,10 @@ impl ComponentFactory {
     }
 
     /// Create a table component
-    pub fn table(rows: Vec<Row<'static>>, widths: Vec<ratatui::layout::Constraint>) -> Table<'static> {
+    pub fn table(
+        rows: Vec<Row<'static>>,
+        widths: Vec<ratatui::layout::Constraint>,
+    ) -> Table<'static> {
         Table::new(rows, widths)
             .block(Self::default_block())
             .column_spacing(1)
@@ -168,7 +174,10 @@ impl ComponentFactory {
     }
 
     /// Create confirmation dialog
-    pub fn confirm_dialog(title: impl Into<String>, message: impl Into<String>) -> Paragraph<'static> {
+    pub fn confirm_dialog(
+        title: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Paragraph<'static> {
         let content = format!("{}\n\n{}", title.into(), message.into());
         Paragraph::new(content)
             .alignment(Alignment::Center)
@@ -209,7 +218,10 @@ impl ComponentFactory {
     }
 
     /// Create component from configuration
-    pub fn from_config(component_type: ComponentType, config: ComponentConfig) -> Box<dyn ComponentRenderer> {
+    pub fn from_config(
+        component_type: ComponentType,
+        config: ComponentConfig,
+    ) -> Box<dyn ComponentRenderer> {
         match component_type {
             ComponentType::Title => Box::new(TitleComponent::new(config)),
             ComponentType::Status => Box::new(StatusComponent::new(config)),
@@ -315,8 +327,11 @@ impl StatusComponent {
     pub fn new(config: ComponentConfig) -> Self {
         let text = config.content.unwrap_or_else(|| "Ready".to_string());
         let title = config.title.unwrap_or_else(|| "Status".to_string());
-        let paragraph = Paragraph::new(text)
-            .block(Block::default().borders(StyleManager::block_borders()).title(title));
+        let paragraph = Paragraph::new(text).block(
+            Block::default()
+                .borders(StyleManager::block_borders())
+                .title(title),
+        );
 
         Self { paragraph }
     }
@@ -339,7 +354,11 @@ impl ErrorComponent {
         let title = config.title.unwrap_or_else(|| "Error".to_string());
         let paragraph = Paragraph::new(text)
             .style(StyleManager::error())
-            .block(Block::default().borders(StyleManager::block_borders()).title(title))
+            .block(
+                Block::default()
+                    .borders(StyleManager::block_borders())
+                    .title(title),
+            )
             .wrap(Wrap { trim: true });
 
         Self { paragraph }
@@ -364,7 +383,11 @@ impl HelpComponent {
         let paragraph = Paragraph::new(text)
             .style(StyleManager::muted())
             .alignment(Alignment::Center)
-            .block(Block::default().borders(StyleManager::block_borders()).title(title))
+            .block(
+                Block::default()
+                    .borders(StyleManager::block_borders())
+                    .title(title),
+            )
             .wrap(Wrap { trim: true });
 
         Self { paragraph }
@@ -387,7 +410,11 @@ impl DetailsComponent {
         let text = config.content.as_ref().cloned().unwrap_or_default();
         let title = config.title.unwrap_or_else(|| "Details".to_string());
         let paragraph = Paragraph::new(text)
-            .block(Block::default().borders(StyleManager::block_borders()).title(title))
+            .block(
+                Block::default()
+                    .borders(StyleManager::block_borders())
+                    .title(title),
+            )
             .wrap(Wrap { trim: true });
 
         Self { paragraph }
@@ -407,15 +434,18 @@ pub struct ProgressComponent {
 
 impl ProgressComponent {
     pub fn new(config: ComponentConfig) -> Self {
-        let percent = config.content
+        let percent = config
+            .content
             .as_ref()
             .and_then(|s| s.parse::<u16>().ok())
             .unwrap_or(0);
 
         let title = config.title.unwrap_or_else(|| "Progress".to_string());
-        let gauge = Gauge::default()
-            .percent(percent)
-            .block(Block::default().borders(StyleManager::block_borders()).title(title));
+        let gauge = Gauge::default().percent(percent).block(
+            Block::default()
+                .borders(StyleManager::block_borders())
+                .title(title),
+        );
 
         Self { gauge }
     }
