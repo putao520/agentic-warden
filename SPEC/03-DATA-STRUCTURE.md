@@ -645,6 +645,255 @@ Prevention:
 
 ---
 
+## [v0] MCP Routing Data Structures
+
+### DATA-012: 智能MCP路由系统数据结构
+
+#### MCP Configuration Data Model
+
+##### .mcp.json Configuration Schema
+```json
+{
+  "$schema": "https://agentic-warden.dev/schema/mcp-config-v1.json",
+  "version": "1.0",
+  "mcpServers": {
+    "git-server": {
+      "command": "mcp-server-git",
+      "args": ["--repository", "/workspace"],
+      "description": "Git version control operations",
+      "category": "development",
+      "enabled": true,
+      "health_check": {
+        "enabled": true,
+        "interval": 60,
+        "timeout": 10
+      }
+    },
+    "filesystem-server": {
+      "command": "mcp-server-filesystem",
+      "args": ["/workspace"],
+      "description": "File system operations",
+      "category": "development",
+      "enabled": true,
+      "health_check": {
+        "enabled": true,
+        "interval": 30,
+        "timeout": 5
+      }
+    }
+  },
+  "routing": {
+    "max_tools_per_request": 10,
+    "clustering_threshold": 0.7,
+    "rerank_top_k": 5,
+    "similarity_threshold": 0.5
+  },
+  "llm": {
+    "endpoint": "http://localhost:11434",
+    "model": "qwen2.5:7b",
+    "timeout": 30
+  }
+}
+```
+
+#### In-Memory Vector Data Structures
+
+##### MemVDB Tool Index Structure
+```rust
+// MCP Tool Vector Entry
+pub struct McpToolVector {
+    pub id: String,                    // Unique tool identifier
+    pub mcp_server: String,            // MCP server name
+    pub tool_name: String,             // Tool display name
+    pub description: String,           // Tool description
+    pub category: String,              // Tool category
+    pub embedding: Vec<f32>,           // Semantic embedding vector
+    pub capabilities: Vec<String>,     // Tool capabilities list
+    pub health_status: HealthStatus,   // Current health status
+    pub metadata: ToolMetadata,        // Additional tool metadata
+}
+
+// MCP Method Vector Entry
+pub struct McpMethodVector {
+    pub id: String,                    // Unique method identifier
+    pub mcp_server: String,            // Parent MCP server
+    pub tool_name: String,             // Parent tool name
+    pub method_name: String,           // Method name
+    pub description: String,           // Method description
+    pub schema: MethodSchema,          // JSON schema for parameters
+    pub examples: Vec<String>,         // Usage examples
+    pub embedding: Vec<f32>,           // Semantic embedding vector
+    pub availability: Availability,    // Current availability status
+    pub metadata: MethodMetadata,      // Additional method metadata
+}
+```
+
+#### RMCP Client Management Data Structures
+
+##### MCP Connection Pool Structure
+```rust
+// MCP Server Connection Info
+pub struct McpServerConnection {
+    pub server_name: String,           // Server identifier
+    pub process_id: Option<u32>,       // Running process PID
+    pub connection_status: ConnectionStatus,
+    pub health_status: HealthStatus,
+    pub last_health_check: chrono::DateTime<chrono::Utc>,
+    pub tool_count: usize,             // Number of discovered tools
+    pub methods: HashMap<String, MethodSchema>, // Cached method schemas
+    pub connection_config: ConnectionConfig,
+}
+
+// Connection Pool Metrics
+pub struct ConnectionPoolMetrics {
+    pub active_connections: usize,
+    pub healthy_connections: usize,
+    pub failed_connections: usize,
+    pub total_requests: u64,
+    pub average_response_time: f64,
+    pub last_updated: chrono::DateTime<chrono::Utc>,
+}
+```
+
+#### Routing Decision Data Structures
+
+##### Intelligent Routing Request/Response
+```rust
+// Routing Request
+pub struct IntelligentRouteRequest {
+    pub user_request: String,          // Original user query
+    pub session_id: Option<String>,    // Optional session context
+    pub preferences: UserPreferences,  // User routing preferences
+    pub context: RoutingContext,       // Additional routing context
+}
+
+// Routing Response
+pub struct IntelligentRouteResponse {
+    pub success: bool,
+    pub result: Option<RouteExecutionResult>,
+    pub routing_trace: RoutingTrace,    // Detailed routing decision trace
+    pub confidence_score: f64,         // Decision confidence
+    pub alternatives: Vec<RouteAlternative>, // Alternative routing options
+}
+
+// Route Execution Result
+pub struct RouteExecutionResult {
+    pub method_name: String,
+    pub mcp_server: String,
+    pub execution_time: u64,
+    pub result_data: serde_json::Value,
+    pub error: Option<RouteError>,
+}
+```
+
+#### LLM Decision Engine Data Structures
+
+##### LLM Analysis Request/Response
+```rust
+// LLM Tool Selection Request
+pub struct LlmAnalysisRequest {
+    pub user_query: String,
+    pub candidate_tools: Vec<CandidateTool>,
+    pub routing_context: RoutingContext,
+    pub previous_interactions: Vec<PreviousInteraction>,
+}
+
+// LLM Tool Selection Response
+pub struct LlmAnalysisResponse {
+    pub selected_tool: SelectedTool,
+    pub confidence_score: f64,
+    pub reasoning: String,             // LLM reasoning explanation
+    pub alternative_tools: Vec<AlternativeTool>,
+    pub clarification_needed: Option<String>,
+}
+
+// Tool Clustering Analysis
+pub struct ClusteringAnalysis {
+    pub clusters: Vec<ToolCluster>,
+    pub similarity_matrix: Vec<Vec<f64>>,
+    pub outlier_tools: Vec<OutlierTool>,
+    pub clustering_confidence: f64,
+}
+```
+
+#### Data Validation and Integrity
+
+##### Configuration Validation Schema
+```json
+{
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+$"
+    },
+    "mcpServers": {
+      "type": "object",
+      "patternProperties": {
+        "^[a-zA-Z0-9_-]+$": {
+          "type": "object",
+          "required": ["command", "description", "category"],
+          "properties": {
+            "command": {"type": "string", "minLength": 1},
+            "args": {
+              "type": "array",
+              "items": {"type": "string"}
+            },
+            "description": {"type": "string", "minLength": 1},
+            "category": {
+              "enum": ["development", "system", "utility", "ai", "other"]
+            },
+            "enabled": {"type": "boolean"},
+            "health_check": {
+              "type": "object",
+              "properties": {
+                "enabled": {"type": "boolean"},
+                "interval": {"type": "integer", "minimum": 1},
+                "timeout": {"type": "integer", "minimum": 1}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "required": ["version", "mcpServers"]
+}
+```
+
+#### Performance Metrics Data Structures
+
+##### Routing Performance Metrics
+```rust
+// Performance Tracking
+pub struct RoutingMetrics {
+    pub request_id: String,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub user_query_length: usize,
+    pub vector_search_time: u64,       // MemVDB search duration
+    pub llm_analysis_time: u64,        // LLM decision duration
+    pub mcp_execution_time: u64,       // MCP method execution
+    pub total_routing_time: u64,       // End-to-end routing time
+    pub cache_hit: bool,               // Route cache utilization
+    pub confidence_score: f64,
+    pub success: bool,
+}
+
+// Aggregated Performance Statistics
+pub struct RoutingStatistics {
+    pub total_requests: u64,
+    pub successful_routes: u64,
+    pub failed_routes: u64,
+    pub average_response_time: f64,
+    pub cache_hit_rate: f64,
+    pub average_confidence: f64,
+    pub most_used_tools: Vec<ToolUsageStats>,
+    pub performance_by_category: HashMap<String, CategoryStats>,
+}
+```
+
+---
+
 ## Deprecated Data Structures
 
 ### Historical Data Models (Not applicable for v0)

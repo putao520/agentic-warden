@@ -571,6 +571,134 @@ impl ConfigPacker {
 
 ---
 
+## [v0] Intelligent MCP Routing Architecture
+
+### ARCH-012: 智能MCP路由系统架构设计
+
+#### System Context Integration
+
+```mermaid
+graph TB
+    subgraph "External AI Interface"
+        MainAI[Main AI CLI]
+        MCPInterface[MCP Interface]
+    end
+
+    subgraph "Agentic-Warden Core"
+        IntelligentRouter[Intelligent MCP Router]
+        LLMEngine[LLM Decision Engine]
+    end
+
+    subgraph "Vector Storage Layer"
+        MemVDB[MemVDB In-Memory<br/>MCP Tools/Methods]
+        Qdrant[Qdrant Server<br/>Historical Data]
+    end
+
+    subgraph "MCP Client Layer"
+        RMCPClientPool[RMCP Client Pool]
+        MCPServers[External MCP Servers]
+    end
+
+    subgraph "Configuration Layer"
+        MCPConfig[.mcp.json Config]
+        ConfigValidator[Schema Validator]
+    end
+
+    MainAI --> MCPInterface
+    MCPInterface --> IntelligentRouter
+    IntelligentRouter --> MemVDB
+    IntelligentRouter --> LLMEngine
+    IntelligentRouter --> RMCPClientPool
+    RMCPClientPool --> MCPServers
+    LLMEngine --> Qdrant
+    MCPConfig --> ConfigValidator
+    ConfigValidator --> IntelligentRouter
+```
+
+#### Component Architecture Details
+
+##### 1. Intelligent MCP Router (Core Component)
+- **Purpose**: Meta-MCP gateway providing intelligent tool discovery and routing
+- **Interface**: Two public methods - `intelligent_route`, `get_method_schema`
+- **Internal Components**: Vector search engine, clustering algorithm, request dispatcher
+
+##### 2. Dual-Mode Vector Database Layer
+- **MemVDB (In-Memory)**:
+  - Collections: `mcp_tools`, `mcp_methods`
+  - Purpose: Fast MCP routing index, rebuilt on startup
+  - Features: Thread-safe, cosine similarity, batch operations
+  - Lifecycle: Memory-only, destroyed on shutdown
+
+- **Qdrant Server (Persistent)**:
+  - Collections: `agentic_warden_memory`
+  - Purpose: Historical conversation and TODO data
+  - Features: HTTP API, persistent storage, session-based access
+  - Integration: Existing memory module integration
+
+##### 3. RMCP Client Connection Pool
+- **Purpose**: Dynamic MCP server lifecycle management
+- **Features**: Health monitoring, auto-reconnection, concurrent operations
+- **Isolation**: Proper process isolation and resource management
+- **Discovery**: Automatic tool schema discovery and caching
+
+##### 4. LLM Decision Engine
+- **Purpose**: Intelligent tool/method selection using semantic understanding
+- **Integration**: Ollama service with configurable endpoints
+- **Models**: qwen2.5:7b (default), configurable via environment
+- **Capabilities**: Clustering analysis, ambiguity handling, confidence scoring
+
+#### Data Flow Architecture
+
+```mermaid
+sequenceDiagram
+    participant MainAI
+    participant Router
+    participant MemVDB
+    participant LLMEngine
+    participant RMCPClient
+    participant MCPServer
+
+    MainAI->>Router: intelligent_route(user_request)
+    Router->>MemVDB: semantic_search(tools)
+    MemVDB-->>Router: candidate_tools[top_k]
+    Router->>LLMEngine: analyze_and_select(tools, request)
+    LLMEngine-->>Router: selected_tool_with_confidence
+    Router->>RMCPClient: connect_to_mcp(tool.mcp_server)
+    RMCPClient->>MCPServer: execute_method(tool.method)
+    MCPServer-->>RMCPClient: execution_result
+    RMCPClient-->>Router: processed_result
+    Router-->>MainAI: final_result
+```
+
+#### Technology Stack Integration
+
+##### New Dependencies for ARCH-012:
+- `memvdb` = "0.1" # In-memory vector database
+- `rmcp` = { version = "0.5", features = ["client"] } # MCP client functionality
+- `ollama-rs` = "0.3.1" # LLM communication
+
+##### Existing Component Integration:
+- **Memory Module**: Leverages existing embedding service and Qdrant integration
+- **Configuration System**: Extends .mcp.json validation and management
+- **Process Supervisor**: Integrates with MCP server lifecycle management
+
+#### Performance Architecture
+
+##### Key Performance Targets:
+- **Tool Discovery**: < 500ms for typical semantic queries
+- **Method Routing**: < 1000ms end-to-end including LLM decisions
+- **Vector Search**: < 100ms for MemVDB operations
+- **MCP Connections**: Support 10+ concurrent client connections
+- **Memory Usage**: < 100MB for MemVDB index (typical MCP ecosystem)
+
+##### Scalability Considerations:
+- **Horizontal Scaling**: Multiple MCP server connections
+- **Memory Management**: Efficient MemVDB data structures, automatic cleanup
+- **Caching Strategy**: Route result caching with TTL-based invalidation
+- **Load Balancing**: Connection pool distribution and health-based routing
+
+---
+
 ## Deprecated Architecture Solutions
 
 ### Historical Decisions (Not applicable for v0)

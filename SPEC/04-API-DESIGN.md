@@ -588,6 +588,419 @@ pub enum AgenticWardenError {
 
 ---
 
+## [v0] Intelligent MCP Routing APIs
+
+### API-012: 智能MCP路由系统API设计
+
+#### External MCP Interface
+
+##### Public MCP Methods
+
+###### intelligent_route
+智能路由MCP工具调用的主要接口。
+
+**Method Signature**:
+```json
+{
+  "name": "intelligent_route",
+  "description": "Intelligently route user requests to appropriate MCP tools using semantic analysis and LLM-powered decision making",
+  "inputSchema": {
+    "type": "object",
+    "required": ["user_request"],
+    "properties": {
+      "user_request": {
+        "type": "string",
+        "description": "Natural language description of the task the user wants to accomplish"
+      },
+      "session_id": {
+        "type": "string",
+        "description": "Optional session identifier for context preservation"
+      },
+      "preferences": {
+        "type": "object",
+        "properties": {
+          "preferred_categories": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "avoid_mcp_servers": {
+            "type": "array",
+            "items": {"type": "string"}
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+**Response Schema**:
+```json
+{
+  "type": "object",
+  "properties": {
+    "success": {
+      "type": "boolean"
+    },
+    "result": {
+      "type": ["object", "string", "number", "boolean", "array", "null"]
+    },
+    "confidence_score": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "routing_trace": {
+      "type": "object",
+      "properties": {
+        "selected_tool": {"type": "string"},
+        "mcp_server": {"type": "string"},
+        "method_name": {"type": "string"},
+        "execution_time_ms": {"type": "integer"}
+      }
+    },
+    "alternatives": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "tool": {"type": "string"},
+          "confidence": {"type": "number"},
+          "reason": {"type": "string"}
+        }
+      }
+    }
+  }
+}
+```
+
+**Error Responses**:
+```json
+{
+  "success": false,
+  "error": {
+    "code": "NO_SUITABLE_TOOL_FOUND",
+    "message": "No MCP tool matches the user request",
+    "suggestions": [
+      "Try rephrasing your request with more specific details",
+      "Consider using get_method_schema to explore available tools"
+    ]
+  }
+}
+```
+
+###### get_method_schema
+获取特定MCP方法的详细schema信息。
+
+**Method Signature**:
+```json
+{
+  "name": "get_method_schema",
+  "description": "Get detailed schema information for specific MCP tools and methods",
+  "inputSchema": {
+    "type": "object",
+    "required": ["mcp_name"],
+    "properties": {
+      "mcp_name": {
+        "type": "string",
+        "description": "Name of the MCP server"
+      },
+      "method_name": {
+        "type": "string",
+        "description": "Optional specific method name (null returns all methods)"
+      }
+    }
+  }
+}
+```
+
+**Response Schema**:
+```json
+{
+  "type": "object",
+  "properties": {
+    "mcp_server": {
+      "type": "object",
+      "properties": {
+        "name": {"type": "string"},
+        "description": {"type": "string"},
+        "category": {"type": "string"},
+        "health_status": {"type": "string"}
+      }
+    },
+    "tools": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "tool_name": {"type": "string"},
+          "description": {"type": "string"},
+          "methods": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {"type": "string"},
+                "description": {"type": "string"},
+                "parameters": {
+                  "type": "object",
+                  "properties": {}
+                },
+                "examples": {
+                  "type": "array",
+                  "items": {"type": "string"}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+#### Internal Rust APIs
+
+##### MCP Router Core API
+
+```rust
+// Main intelligent router interface
+#[async_trait]
+pub trait IntelligentRouter {
+    async fn intelligent_route(
+        &self,
+        request: IntelligentRouteRequest,
+    ) -> Result<IntelligentRouteResponse, RouterError>;
+
+    async fn get_method_schema(
+        &self,
+        mcp_name: &str,
+        method_name: Option<&str>,
+    ) -> Result<MethodSchemaResponse, RouterError>;
+
+    async fn health_check(&self) -> RouterHealthStatus;
+}
+
+// Vector search interface for MemVDB integration
+#[async_trait]
+pub trait VectorSearchEngine {
+    async fn search_tools(
+        &self,
+        query: &str,
+        limit: usize,
+        threshold: f64,
+    ) -> Result<Vec<ToolSearchResult>, SearchError>;
+
+    async fn search_methods(
+        &self,
+        query: &str,
+        tool_filter: Option<&str>,
+        limit: usize,
+        threshold: f64,
+    ) -> Result<Vec<MethodSearchResult>, SearchError>;
+
+    async fn index_tools(
+        &self,
+        tools: Vec<McpToolVector>,
+    ) -> Result<(), IndexError>;
+
+    async fn index_methods(
+        &self,
+        methods: Vec<McpMethodVector>,
+    ) -> Result<(), IndexError>;
+}
+```
+
+##### MCP Client Management API
+
+```rust
+// MCP connection pool management
+#[async_trait]
+pub trait McpConnectionPool {
+    async fn get_connection(
+        &self,
+        server_name: &str,
+    ) -> Result<McpClientConnection, PoolError>;
+
+    async fn start_server(
+        &self,
+        config: &McpServerConfig,
+    ) -> Result<ServerHandle, PoolError>;
+
+    async fn stop_server(
+        &self,
+        server_name: &str,
+    ) -> Result<(), PoolError>;
+
+    async fn health_check_all(
+        &self,
+    ) -> Vec<HealthCheckResult>;
+
+    async fn discover_tools(
+        &self,
+        server_name: &str,
+    ) -> Result<Vec<DiscoveredTool>, DiscoveryError>;
+}
+
+// Individual MCP client interface
+#[async_trait]
+pub trait McpClientConnection {
+    async fn call_method(
+        &self,
+        method_name: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value, McpError>;
+
+    async fn get_tool_list(&self) -> Result<Vec<ToolInfo>, McpError>;
+
+    async fn get_method_schema(
+        &self,
+        method_name: &str,
+    ) -> Result<MethodSchema, McpError>;
+
+    fn connection_info(&self) -> &McpServerConnection;
+}
+```
+
+##### LLM Decision Engine API
+
+```rust
+// LLM-powered tool selection
+#[async_trait]
+pub trait LlmDecisionEngine {
+    async fn analyze_and_select_tool(
+        &self,
+        request: LlmAnalysisRequest,
+    ) -> Result<LlmAnalysisResponse, LlmError>;
+
+    async fn analyze_request_intent(
+        &self,
+        user_query: &str,
+    ) -> Result<RequestIntent, LlmError>;
+
+    async fn cluster_similar_tools(
+        &self,
+        tools: Vec<CandidateTool>,
+    ) -> Result<ClusteringAnalysis, LlmError>;
+}
+
+// Prompt engineering and response parsing
+pub trait PromptEngine {
+    fn generate_tool_selection_prompt(
+        &self,
+        user_query: &str,
+        candidate_tools: &[CandidateTool],
+        context: &RoutingContext,
+    ) -> String;
+
+    fn parse_llm_response(
+        &self,
+        response: &str,
+    ) -> Result<LlmAnalysisResponse, ParseError>;
+}
+```
+
+#### Configuration Management APIs
+
+##### MCP Configuration Interface
+
+```rust
+// Configuration loading and validation
+pub trait McpConfigManager {
+    fn load_config(&self, path: &Path) -> Result<McpConfig, ConfigError>;
+
+    fn validate_config(&self, config: &McpConfig) -> Result<(), ValidationError>;
+
+    fn save_config(&self, config: &McpConfig, path: &Path) -> Result<(), ConfigError>;
+
+    fn merge_configs(&self, base: &McpConfig, overlay: &McpConfig) -> McpConfig;
+
+    fn get_schema(&self) -> serde_json::Value;
+}
+
+// Dynamic configuration updates
+pub trait ConfigurationManager {
+    async fn reload_config(&self) -> Result<(), ConfigError>;
+
+    async fn add_mcp_server(&self, server: McpServerConfig) -> Result<(), ConfigError>;
+
+    async fn remove_mcp_server(&self, server_name: &str) -> Result<(), ConfigError>;
+
+    async fn update_mcp_server(&self, server_name: &str, config: McpServerConfig) -> Result<(), ConfigError>;
+
+    fn get_current_config(&self) -> &McpConfig;
+}
+```
+
+#### Error Handling and Status Codes
+
+##### Router Error Taxonomy
+
+```rust
+#[derive(Debug, thiserror::Error)]
+pub enum RouterError {
+    #[error("No suitable tool found for request")]
+    NoSuitableToolFound,
+
+    #[error("MCP server connection failed: {server}")]
+    McpConnectionFailed { server: String },
+
+    #[error("LLM analysis failed: {reason}")]
+    LlmAnalysisFailed { reason: String },
+
+    #[error("Vector search error: {reason}")]
+    VectorSearchError { reason: String },
+
+    #[error("Configuration error: {reason}")]
+    ConfigurationError { reason: String },
+
+    #[error("Request timeout after {timeout_ms}ms")]
+    RequestTimeout { timeout_ms: u64 },
+
+    #[error("Insufficient confidence: {confidence}")]
+    LowConfidence { confidence: f64 },
+}
+```
+
+##### HTTP Status Mapping
+| Router Error | HTTP Status | MCP Error Code |
+|--------------|------------|---------------|
+| NoSuitableToolFound | 404 Not Found | -32601 Method not found |
+| McpConnectionFailed | 503 Service Unavailable | -32603 Internal error |
+| LlmAnalysisFailed | 502 Bad Gateway | -32603 Internal error |
+| VectorSearchError | 500 Internal Server Error | -32603 Internal error |
+| ConfigurationError | 422 Unprocessable Entity | -32602 Invalid params |
+| RequestTimeout | 408 Request Timeout | -32603 Internal error |
+
+#### Performance Monitoring APIs
+
+```rust
+// Metrics collection interface
+pub trait RouterMetrics {
+    fn record_routing_request(&self, request: &RoutingMetrics);
+
+    fn get_performance_stats(&self) -> RoutingStatistics;
+
+    fn get_tool_usage_stats(&self) -> Vec<ToolUsageStats>;
+
+    fn get_mcp_server_stats(&self) -> Vec<McpServerStats>;
+
+    fn export_metrics(&self) -> serde_json::Value;
+}
+
+// Health check interface
+pub trait HealthCheck {
+    async fn check_router_health(&self) -> RouterHealthStatus;
+
+    async fn check_dependencies_health(&self) -> DependencyHealthStatus;
+
+    async fn detailed_health_report(&self) -> DetailedHealthReport;
+}
+```
+
+---
+
 ## Deprecated APIs
 
 ### [v0] Historical API Changes (Not applicable for v0)

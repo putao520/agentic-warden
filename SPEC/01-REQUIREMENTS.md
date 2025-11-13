@@ -321,11 +321,24 @@ Agentic-Warden MUST integrate gmemory functionality to provide semantic conversa
 - [x] Configurable LLM model (default: qwen3:8b, future use)
 
 **Technical Constraints**:
-- Vector database: Qdrant (non-configurable)
+- Vector database: Qdrant with dual-mode architecture:
+  - Persistent mode: `http://localhost:6333` for long-term memory storage
+  - Memory mode: `:memory:` embedded for MCP routing index
 - Embedding service: Ollama (configurable URL)
-- Session storage: Qdrant metadata
+- Session storage: Qdrant metadata with single collection design
 - Semantic search: cosine similarity
 - Memory cleanup: automatic for stale sessions
+
+**Qdrant Collections Architecture:**
+- **Persistent Collection**: `agentic_warden_memory`
+  - Stores both conversations and TODOs in single collection
+  - Differentiated by metadata.type: "conversation" or "todo"
+  - Session-based filtering via metadata.session_id
+  - Persistent storage for long-term memory
+- **Memory Collections**: `mcp_tools`, `mcp_methods` (REQ-012)
+  - Embedded memory mode for MCP routing
+  - Rebuilt on startup from .mcp.json configuration
+  - Tool-level and method-level indexing for intelligent routing
 
 ---
 
@@ -379,6 +392,174 @@ Agentic-Warden MUST provide `update` command to manage AI CLI tools (codex, clau
 - MUST handle package not found errors
 - MUST provide clear error messages with resolution suggestions
 - MUST distinguish between npm packages and native packages
+
+---
+
+### REQ-012: 智能MCP路由系统
+**Status**: 🟡 Pending
+**Priority**: P0 (Critical)
+**Version**: v0.2.0
+**Related**: ARCH-012, DATA-012, API-012
+
+**Description**:
+Agentic-Warden MUST provide an intelligent MCP (Model Context Protocol) routing system that acts as a meta-MCP gateway, using rmcp client functionality to connect to multiple MCP servers and provide intelligent tool discovery, clustering-based routing, and LLM-powered tool selection. This system minimizes context usage for the main AI while maximizing tool discovery and routing efficiency.
+
+**Acceptance Criteria**:
+
+#### 4.1 MCP配置管理
+- [x] Support industry-standard `.mcp.json` configuration file format
+- [x] Provide configuration schema validation and migration support
+- [x] Support per-MCP server configuration including command, args, description, category
+- [x] Enable/disable individual MCP servers with runtime configuration updates
+- [x] Support health check configuration per MCP server (interval, timeout)
+
+#### 4.2 双模式向量数据库集成
+- [x] **持久化模式**: Qdrant Server for historical data (conversations, todos)
+- [x] **内存模式**: MemVDB for MCP routing index (tools, methods)
+- [x] Tool-level collection: index MCP tools with descriptions and capabilities
+- [x] Method-level collection: index individual methods with detailed schemas and examples
+- [x] Maintain metadata associations between tools and methods
+- [x] Support batch indexing and incremental updates
+- [x] Provide semantic search capabilities with configurable similarity thresholds
+- [x] Memory-only index rebuilt on startup from .mcp.json configuration
+
+#### 4.3 智能路由算法
+- [x] Implement two-stage vector search: tool-level then method-level
+- [x] Provide clustering algorithm for grouping similar tools/methods (top-k + threshold)
+- [x] Support configurable clustering thresholds and ranking parameters
+- [x] Integrate internal LLM for final tool/method selection decisions
+- [x] Support ambiguous case handling with multiple option presentation
+- [x] Provide route caching and performance optimization
+
+#### 4.4 RMCP客户端集成
+- [x] Use rmcp library for dynamic MCP server connections
+- [x] Maintain connection pool with health monitoring and auto-reconnection
+- [x] Support concurrent MCP server operations with proper isolation
+- [x] Provide tool schema discovery and caching from connected MCPs
+- [x] Handle MCP server lifecycle (start, stop, restart, health checks)
+
+#### 4.5 内部LLM集成
+- [x] Integrate Ollama for internal LLM operations (separate from embedding service)
+- [x] Support configurable LLM endpoint via environment variable (`AGENTIC_WARDEN_LLM_ENDPOINT`)
+- [x] Support configurable LLM model via environment variable (`AGENTIC_WARDEN_LLM_MODEL`)
+- [x] Implement tool selection prompt engineering and response parsing
+- [x] Provide clustering analysis and decision-making capabilities
+- [x] Handle LLM fallback and error scenarios gracefully
+
+#### 4.6 统一MCP接口
+- [x] Expose only two methods to external AI: `intelligent_route` and `get_method_schema`
+- [x] Provide transparent tool execution - external AI only sees final results
+- [x] Support automatic method execution after routing decision
+- [x] Provide method schema query for complex cases requiring manual selection
+- [x] Maintain MCP protocol compliance for external integration
+
+#### 4.7 监控和维护
+- [x] Provide MCP server health monitoring and status reporting
+- [x] Support route decision logging and performance metrics
+- [x] Provide configuration validation and error reporting
+- [x] Support hot-reload of MCP configurations without service restart
+- [x] Provide diagnostic tools for troubleshooting routing decisions
+
+**Technical Constraints**:
+
+#### Configuration Format (.mcp.json):
+```json
+{
+  "version": "1.0",
+  "mcp_servers": {
+    "git-server": {
+      "command": "uvx",
+      "args": ["mcp-server-git"],
+      "description": "Git version control operations",
+      "category": "development",
+      "enabled": true,
+      "health_check": {
+        "enabled": true,
+        "interval": 60,
+        "timeout": 10
+      }
+    }
+  },
+  "routing": {
+    "max_tools_per_request": 10,
+    "clustering_threshold": 0.7,
+    "rerank_top_k": 5
+  },
+  "llm": {
+    "endpoint": "http://localhost:11434",
+    "model": "qwen2.5:7b",
+    "timeout": 30
+  }
+}
+```
+
+#### 双模式向量数据库架构:
+- **Qdrant Server** (Persistent): Historical data storage
+  - **agentic_warden_memory**: Single collection storing both conversations and TODOs
+  - Differentiated by metadata.type: "conversation" vs "todo"
+  - Session-based access via metadata.session_id
+  - Long-term persistent storage across service restarts
+  - HTTP REST API integration
+
+- **MemVDB** (In-Memory): MCP routing index
+  - **mcp_tools**: Tool-level vectors with description embedding
+  - Pure memory mode, rebuilt on startup from .mcp.json
+  - Metadata: MCP name, tool name, category, capabilities, health status
+  - **mcp_methods**: Method-level vectors with detailed schema embedding
+  - Pure memory mode, dynamically built from MCP server connections
+  - Metadata: MCP name, method name, parameters, examples, availability
+  - Thread-safe, zero dependencies, multiple distance metrics (cosine, euclidean, dot-product)
+
+#### Environment Variables:
+- `AGENTIC_WARDEN_LLM_ENDPOINT`: Internal LLM endpoint (default: http://localhost:11434)
+- `AGENTIC_WARDEN_LLM_MODEL`: Internal LLM model (default: qwen2.5:7b)
+- `AGENTIC_WARDEN_LLM_TIMEOUT`: LLM request timeout in seconds (default: 30)
+- Existing embedding variables remain unchanged
+
+#### Algorithm Requirements:
+- Vector search MUST use cosine similarity with configurable thresholds
+- Clustering algorithm MUST support top-k selection and similarity grouping
+- LLM decisions MUST include confidence scoring and fallback handling
+- Route caching MUST respect TTL and invalidation strategies
+
+#### Performance Requirements:
+- Tool discovery: < 500ms for typical queries
+- Method routing: < 1000ms end-to-end including LLM decisions
+- MCP connection pool: Support 10+ concurrent connections
+- Vector indexing: Batch operations for 1000+ items efficiently
+
+**Usage Examples**:
+
+```bash
+# Main AI calls only one method - everything else is transparent
+mcp_call("intelligent_route", {
+  "user_request": "I want to check git status and commit all changes"
+})
+
+# Returns direct execution result:
+# "On branch main\nChanges not staged for commit:\n  modified:   src/main.rs\n"
+
+# For complex cases, AI can query method details:
+mcp_call("get_method_schema", {
+  "mcp_name": "git-server",
+  "method_name": "git_commit"
+})
+```
+
+**Integration Points**:
+- rmcp client library for MCP server connections
+- Qdrant Server (HTTP API) for persistent historical data
+- MemVDB for in-memory MCP routing index
+- Ollama integration for internal LLM operations
+- Existing memory module for embedding services
+- Existing configuration system for .mcp.json management
+
+**Technical Dependencies**:
+- `memvdb` = "0.1" # Fast, lightweight in-memory vector database
+- `rmcp` = { version = "0.5", features = ["server", "transport-io", "macros"] }
+- `ollama-rs` = "0.3.1" # For internal LLM communication
+- Existing Qdrant HTTP integration (via reqwest)
+- Existing embedding service (Ollama)
 
 ---
 
@@ -473,11 +654,25 @@ Agentic-Warden MUST meet performance criteria for process tracking and task mana
 | REQ-007 | MCP 服务器 | P1 | 🟢 Done | v0.1.0 | ARCH-007, API-003 | Initial commit |
 | REQ-008 | 指定供应商模式 AI CLI 启动 | P0 | 🟢 Done | v0.1.0 | ARCH-002, ARCH-008, API-004 | Initial commit |
 | REQ-009 | 交互式 AI CLI 启动 | P1 | 🟢 Done | v0.1.1 | ARCH-008, API-001 | Interactive mode implementation |
-| REQ-010 | AI CLI 更新/安装管理 | P1 | 🟢 Done | v0.1.0 | ARCH-008, MODULE-002, API-004 | Update command implementation |
+| REQ-010 | 内存集成与语义搜索 | P1 | 🟢 Done | v0.1.0 | ARCH-010, DATA-003, API-005 | Memory and search integration |
+| REQ-011 | AI CLI 更新/安装管理 | P1 | 🟢 Done | v0.1.0 | ARCH-008, MODULE-002, API-004 | Update command implementation |
+| REQ-012 | 智能MCP路由系统 | P0 | 🟡 Pending | v0.2.0 | ARCH-012, DATA-012, API-012 | Intelligent routing system design |
 
 ---
 
 ## Change Log
+
+### 2025-11-13
+- Added REQ-012: 智能MCP路由系统
+- Status: New requirement for v0.2.0 feature (P0 Critical)
+- Complete intelligent routing system design with:
+  - Industry-standard .mcp.json configuration support
+  - Dual Qdrant collections for tool/method indexing
+  - RMCP client integration for dynamic MCP connections
+  - Internal LLM-powered intelligent tool selection
+  - Two-method interface for external AI integration
+  - Clustering-based routing with semantic search
+  - Health monitoring and performance optimization
 
 ### 2025-11-12
 - Added REQ-009: 交互式 AI CLI 启动
