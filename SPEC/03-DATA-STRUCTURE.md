@@ -762,18 +762,25 @@ pub struct ConnectionPoolMetrics {
 // Routing Request
 pub struct IntelligentRouteRequest {
     pub user_request: String,          // Original user query
+    #[serde(default)]
     pub session_id: Option<String>,    // Optional session context
-    pub preferences: UserPreferences,  // User routing preferences
-    pub context: RoutingContext,       // Additional routing context
+    #[serde(default)]
+    pub max_candidates: Option<usize>, // Maximum candidate tools to consider
+    #[serde(default)]
+    pub metadata: HashMap<String, String>, // Additional routing metadata
 }
 
 // Routing Response
 pub struct IntelligentRouteResponse {
     pub success: bool,
-    pub result: Option<RouteExecutionResult>,
-    pub routing_trace: RoutingTrace,    // Detailed routing decision trace
-    pub confidence_score: f64,         // Decision confidence
-    pub alternatives: Vec<RouteAlternative>, // Alternative routing options
+    pub confidence: f32,               // Decision confidence (0.0-1.0)
+    pub message: String,               // Human readable response message
+    pub selected_tool: Option<SelectedRoute>, // Selected tool for execution
+    pub result: Option<RouteExecutionResult>, // Execution result if available
+    #[serde(default)]
+    pub alternatives: Vec<SelectedRoute>,    // Alternative routing options
+    #[serde(default)]
+    pub conversation_context: Vec<ConversationRecord>, // Relevant conversation history
 }
 
 // Route Execution Result

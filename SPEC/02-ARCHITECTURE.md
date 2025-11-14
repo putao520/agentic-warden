@@ -678,13 +678,12 @@ sequenceDiagram
 #### Technology Stack Integration
 
 ##### New Dependencies for ARCH-012:
-- `fastembed` = "4.0" # Local text embedding generation
-- `memvdb` = "0.1" # In-memory vector database for MCP routing
-- `sahomedb` = "0.1" # File-based vector database for conversation history
-- `rmcp` = { version = "0.5", features = ["client"] } # MCP client functionality
+- `fastembed` = "4.0.0" # Local text embedding generation
+- `memvdb` = "0.1.1" # In-memory vector database for MCP routing (pure Rust, zero deps)
+- `sahomedb` = "0.4.0" # File-based vector database for conversation history
+- `rmcp` = { version = "0.5", features = ["client", "server", "transport-io", "transport-child-process", "macros"] } # MCP client functionality
 - `ollama-rs` = "0.3.1" # LLM communication (retained for tool selection decisions)
-- `ndarray` = "0.15" # Vector calculations (FastEmbed dependency)
-- `hnswlib` = "0.7" # High-performance vector search (MemVDB backend)
+- `ndarray` = { version = "0.15", features = ["serde"] } # Vector calculations (FastEmbed dependency)
 
 ##### Existing Component Integration:
 - **Memory Module**: Refactored to use FastEmbed embeddings + SahomeDB for conversation history

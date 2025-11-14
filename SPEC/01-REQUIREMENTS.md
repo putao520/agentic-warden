@@ -396,7 +396,7 @@ Agentic-Warden MUST provide `update` command to manage AI CLI tools (codex, clau
 ---
 
 ### REQ-012: 智能MCP路由系统
-**Status**: 🟡 Pending
+**Status**: 🟢 Done
 **Priority**: P0 (Critical)
 **Version**: v0.2.0
 **Related**: ARCH-012, DATA-012, API-012
@@ -668,7 +668,7 @@ Agentic-Warden MUST meet performance criteria for process tracking and task mana
 | REQ-009 | 交互式 AI CLI 启动 | P1 | 🟢 Done | v0.1.1 | ARCH-008, API-001 | Interactive mode implementation |
 | REQ-010 | 内存集成与语义搜索 | P1 | 🟢 Done | v0.1.0 | ARCH-010, DATA-003, API-005 | Memory and search integration |
 | REQ-011 | AI CLI 更新/安装管理 | P1 | 🟢 Done | v0.1.0 | ARCH-008, MODULE-002, API-004 | Update command implementation |
-| REQ-012 | 智能MCP路由系统 | P0 | 🟡 Pending | v0.2.0 | ARCH-012, DATA-012, API-012 | Intelligent routing system design |
+| REQ-012 | 智能MCP路由系统 | P0 | 🟢 Done | v0.2.0 | ARCH-012, DATA-012, API-012 | Intelligent routing system design |
 
 ---
 
