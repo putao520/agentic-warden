@@ -164,23 +164,44 @@ impl ServerHandler for AgenticWardenMcpServer {
     async fn initialize(
         &self,
         request: InitializeRequestParam,
-        _context: rmcp::handler::RequestContext<rmcp::service::RoleServer>,
+        context: rmcp::handler::RequestContext<rmcp::service::RoleServer>,
     ) -> Result<InitializeResult, rmcp::McpError> {
-        // Detect client capabilities
-        let capabilities = ClientCapabilities::from_init_request(&request);
+        // Create initial capabilities (before testing)
+        let mut capabilities = ClientCapabilities::from_init_request(&request);
 
         eprintln!("🔌 MCP Client connected:");
         eprintln!("   Name: {}", capabilities.client_name);
         eprintln!("   Version: {}", capabilities.client_version);
-        eprintln!("   Dynamic tools: {}",
-            if capabilities.supports_dynamic_tools {
-                "✅ Supported (using dynamic registration)"
-            } else {
-                "⚠️  Not supported (using fallback mode)"
-            }
-        );
+        eprintln!("   Testing dynamic tools support...");
 
-        // Save capabilities
+        // Clone Arc for background task
+        let client_capabilities = Arc::clone(&self.client_capabilities);
+        let peer = context.peer.clone();
+
+        // Spawn background task to test dynamic tools support
+        // We delay a bit to allow the MCP initialization handshake to complete
+        tokio::spawn(async move {
+            // Wait for initialization to complete
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+            // Test if client supports dynamic tool registration
+            let supports = ClientCapabilities::test_dynamic_tools_support(&peer).await;
+
+            // Update capabilities
+            if let Some(caps) = client_capabilities.write().await.as_mut() {
+                caps.supports_dynamic_tools = supports;
+
+                eprintln!("   Mode: {}",
+                    if supports {
+                        "✅ Dynamic registration (primary mode)"
+                    } else {
+                        "⚠️  Two-phase negotiation (fallback mode)"
+                    }
+                );
+            }
+        });
+
+        // Save initial capabilities
         *self.client_capabilities.write().await = Some(capabilities);
 
         // Return server info and capabilities

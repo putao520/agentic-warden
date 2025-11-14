@@ -1,9 +1,12 @@
 //! Client capability detection for MCP features.
 //!
-//! Detects whether the connected MCP client supports dynamic tool registration
-//! (notifications/tools/list_changed).
+//! Tests whether the connected MCP client supports dynamic tool registration
+//! (notifications/tools/list_changed) by actually sending a test notification.
 
-use rmcp::model::InitializeRequestParam;
+use rmcp::model::{InitializeRequestParam, ToolListChangedNotification};
+use rmcp::service::server::ClientSink;
+use std::time::Duration;
+use tokio::time::timeout;
 
 #[derive(Debug, Clone)]
 pub struct ClientCapabilities {
@@ -16,82 +19,40 @@ pub struct ClientCapabilities {
 }
 
 impl ClientCapabilities {
-    /// Detect client capabilities from initialize request
+    /// Create initial capabilities from initialize request (before testing)
     pub fn from_init_request(request: &InitializeRequestParam) -> Self {
-        let client_name = request.client_info.name.clone();
-        let client_version = request.client_info.version.clone();
-
-        let supports_dynamic_tools = Self::is_known_to_support(&client_name, &client_version);
-
         Self {
-            supports_dynamic_tools,
-            client_name,
-            client_version,
+            supports_dynamic_tools: false, // Will be tested later
+            client_name: request.client_info.name.clone(),
+            client_version: request.client_info.version.clone(),
         }
     }
 
-    /// Check if a client is known to support dynamic tools
-    fn is_known_to_support(name: &str, version: &str) -> bool {
-        let name_lower = name.to_lowercase();
+    /// Test if client supports dynamic tool registration by sending a test notification.
+    /// This should be called after the initialization handshake is complete.
+    pub async fn test_dynamic_tools_support(peer: &ClientSink) -> bool {
+        // Create a test notification
+        let notification = ToolListChangedNotification::default();
 
-        // Claude Code 2.0.0+ supports dynamic tool registration
-        if name_lower.contains("claude") || name_lower.contains("claude-code") {
-            return Self::version_gte(version, "2.0.0");
-        }
+        // Try to send it with a short timeout
+        let test_result = timeout(
+            Duration::from_millis(500),
+            peer.send_notification(notification.into())
+        ).await;
 
-        // Cursor IDE supports dynamic tools
-        if name_lower.contains("cursor") {
-            return true;
-        }
-
-        // VS Code with MCP extension
-        if name_lower.contains("vscode") || name_lower.contains("code") {
-            return true;
-        }
-
-        // Conservative default: unknown clients use fallback mode
-        false
-    }
-
-    /// Simple version comparison (major.minor.patch >= target)
-    fn version_gte(version: &str, target: &str) -> bool {
-        let parse_version = |v: &str| -> Option<(u32, u32, u32)> {
-            let parts: Vec<&str> = v.split('.').collect();
-            if parts.len() < 2 {
-                return None;
+        match test_result {
+            Ok(Ok(())) => {
+                eprintln!("   ✅ Dynamic tools test: SUCCESS");
+                true
             }
-            Some((
-                parts[0].parse().ok()?,
-                parts.get(1)?.parse().ok()?,
-                parts.get(2).and_then(|p| p.parse().ok()).unwrap_or(0),
-            ))
-        };
-
-        match (parse_version(version), parse_version(target)) {
-            (Some(v), Some(t)) => v >= t,
-            _ => false,
+            Ok(Err(e)) => {
+                eprintln!("   ⚠️  Dynamic tools test: FAILED - {}", e);
+                false
+            }
+            Err(_) => {
+                eprintln!("   ⚠️  Dynamic tools test: TIMEOUT");
+                false
+            }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_version_comparison() {
-        assert!(ClientCapabilities::version_gte("2.0.0", "2.0.0"));
-        assert!(ClientCapabilities::version_gte("2.1.0", "2.0.0"));
-        assert!(ClientCapabilities::version_gte("2.0.5", "2.0.0"));
-        assert!(!ClientCapabilities::version_gte("1.9.9", "2.0.0"));
-    }
-
-    #[test]
-    fn test_known_clients() {
-        assert!(ClientCapabilities::is_known_to_support("claude-code", "2.0.1"));
-        assert!(ClientCapabilities::is_known_to_support("Claude Code", "2.1.0"));
-        assert!(!ClientCapabilities::is_known_to_support("claude-code", "1.9.0"));
-        assert!(ClientCapabilities::is_known_to_support("cursor", "0.1.0"));
-        assert!(!ClientCapabilities::is_known_to_support("unknown-client", "1.0.0"));
     }
 }
