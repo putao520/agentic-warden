@@ -4,17 +4,28 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
-/// Routing mode determines how the intelligent router behaves.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, Default)]
+/// Execution mode for intelligent routing (automatically chosen based on client capabilities).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, Default, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum RouteMode {
-    /// Auto-execute the selected tool and return result (default behavior).
+pub enum ExecutionMode {
+    /// Register tool dynamically for client to call (when client supports dynamic tools).
+    #[default]
+    Dynamic,
+    /// Return suggestions for two-phase negotiation (fallback for legacy clients).
+    Query,
+}
+
+/// Decision engine mode (LLM ReAct vs Vector Search).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum DecisionMode {
+    /// Auto-select based on LLM endpoint availability (default).
     #[default]
     Auto,
-    /// Register tool dynamically and return prompt (for dynamic registration).
-    Dynamic,
-    /// Only return tool suggestions without executing (for two-phase negotiation).
-    Query,
+    /// Force use of LLM ReAct for decision making.
+    LlmReact,
+    /// Force use of vector search for decision making.
+    Vector,
 }
 
 #[derive(Debug, Clone)]
@@ -42,8 +53,12 @@ pub struct IntelligentRouteRequest {
     pub session_id: Option<String>,
     #[serde(default)]
     pub max_candidates: Option<usize>,
+    /// Decision engine to use (auto/llm/vector). Auto selects based on LLM endpoint availability.
     #[serde(default)]
-    pub mode: RouteMode,
+    pub decision_mode: DecisionMode,
+    /// Execution mode (dynamic/query). Usually auto-selected based on client capabilities.
+    #[serde(default)]
+    pub execution_mode: ExecutionMode,
     #[serde(default)]
     pub metadata: HashMap<String, String>,
 }
@@ -120,7 +135,8 @@ impl Default for IntelligentRouteRequest {
             user_request: String::new(),
             session_id: None,
             max_candidates: None,
-            mode: RouteMode::Auto,
+            decision_mode: DecisionMode::Auto,
+            execution_mode: ExecutionMode::Dynamic,
             metadata: HashMap::new(),
         }
     }

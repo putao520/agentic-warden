@@ -100,33 +100,35 @@ impl AgenticWardenMcpServer {
 
     #[tool(
         name = "intelligent_route",
-        description = "Route the user request to the best MCP tool. Supports dynamic registration, auto-execution, or query modes."
+        description = "Route user request to best MCP tool. Returns tool selection (LLM/vector). Auto-chooses execution mode (dynamic/query) based on client capabilities."
     )]
     pub async fn intelligent_route_tool(
         &self,
         params: Parameters<IntelligentRouteRequest>,
     ) -> Result<Json<IntelligentRouteResponse>, String> {
-        use rmcp::model::ToolListChangedNotification;
+        use crate::mcp_routing::models::ExecutionMode;
 
         let mut request = params.0;
 
-        // Auto-detect mode based on client capabilities if not explicitly set
-        if matches!(request.mode, crate::mcp_routing::models::RouteMode::Auto) {
+        // Auto-select execution mode based on client capabilities
+        // (only if not explicitly overridden by caller)
+        if request.execution_mode == ExecutionMode::Dynamic {
             if let Some(caps) = self.client_capabilities.read().await.as_ref() {
-                if caps.supports_dynamic_tools {
-                    // Client supports dynamic tools, use dynamic mode
-                    request.mode = crate::mcp_routing::models::RouteMode::Dynamic;
+                if !caps.supports_dynamic_tools {
+                    // Client doesn't support dynamic registration, use query mode
+                    request.execution_mode = ExecutionMode::Query;
+                    eprintln!("   ⚠️  Switching to Query mode (client doesn't support dynamic tools)");
                 }
             }
         }
 
         let mut response = self.router
-            .intelligent_route(request)
+            .intelligent_route(request.clone())
             .await
             .map_err(|err| err.to_string())?;
 
         // Handle dynamic registration mode
-        if matches!(params.0.mode, crate::mcp_routing::models::RouteMode::Dynamic) {
+        if request.execution_mode == ExecutionMode::Dynamic {
             if let Some(ref selected) = response.selected_tool {
                 // Get the tool schema
                 let schema_response = self.router
@@ -157,7 +159,7 @@ impl AgenticWardenMcpServer {
                     response.tool_schema = Some(schema);
                     response.dynamically_registered = true;
                     response.message = format!(
-                        "Tool '{}' has been registered. You can now call it with the provided schema.",
+                        "Tool '{}' registered. Call it directly with full context for accurate parameters.",
                         selected.tool_name
                     );
                 }

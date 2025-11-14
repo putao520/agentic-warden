@@ -145,53 +145,17 @@ impl IntelligentRouter {
             })
             .await?;
 
-        use models::RouteMode;
-
-        // For Query and Dynamic modes, don't execute the tool
-        let (result, execute_message) = match request.mode {
-            RouteMode::Auto => {
-                // Execute the tool in auto mode
-                let start = Instant::now();
-                let execution = self
-                    .connection_pool
-                    .call_tool(&decision.server, &decision.tool, decision.arguments.clone())
-                    .await;
-                let duration = start.elapsed().as_millis();
-
-                match execution {
-                    Ok(output) => (
-                        Some(RouteExecutionResult {
-                            mcp_server: decision.server.clone(),
-                            tool_name: decision.tool.clone(),
-                            duration_ms: duration,
-                            output,
-                            raw_stdout: None,
-                        }),
-                        "Tool executed successfully".to_string(),
-                    ),
-                    Err(err) => {
-                        return Ok(IntelligentRouteResponse {
-                            success: false,
-                            confidence: decision.confidence,
-                            message: format!("Tool execution failed: {err}"),
-                            selected_tool: None,
-                            result: None,
-                            alternatives: Vec::new(),
-                            conversation_context,
-                            tool_schema: None,
-                            dynamically_registered: false,
-                        });
-                    }
-                }
+        // Never execute tools - only return suggestions/schema
+        // Execution mode (Dynamic vs Query) determines how the response is used:
+        // - Dynamic: Tool will be registered for client to call
+        // - Query: Client will call execute_tool after reviewing suggestion
+        let execute_message = match request.execution_mode {
+            models::ExecutionMode::Dynamic => {
+                format!("Selected tool: {}::{} (will be dynamically registered)", decision.server, decision.tool)
             }
-            RouteMode::Dynamic => (
-                None,
-                format!("Selected tool: {}::{}", decision.server, decision.tool),
-            ),
-            RouteMode::Query => (
-                None,
-                "Tool suggestion ready (not executed)".to_string(),
-            ),
+            models::ExecutionMode::Query => {
+                format!("Suggested tool: {}::{} (review and call execute_tool)", decision.server, decision.tool)
+            }
         };
 
         if let Some(session) = request.session_id.as_ref() {
@@ -214,7 +178,7 @@ impl IntelligentRouter {
                 arguments: decision.arguments,
                 rationale: decision.rationale.clone(),
             }),
-            result,
+            result: None, // Never execute, always None
             alternatives: candidate_infos
                 .into_iter()
                 .skip(1)
