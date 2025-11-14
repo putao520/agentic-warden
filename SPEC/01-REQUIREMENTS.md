@@ -301,7 +301,7 @@ agentic-warden gemini --provider custom-proxy
 ---
 
 ### REQ-010: Claude Code会话历史集成（Hook-Based）
-**Status**: 🔄 In Progress
+**Status**: 🟢 Done
 **Priority**: P1 (High)
 **Version**: v0.2.0
 **Related**: ARCH-010, DATA-010, API-010
@@ -310,17 +310,20 @@ agentic-warden gemini --provider custom-proxy
 Agentic-Warden MUST integrate with Claude Code hooks mechanism to automatically capture and index conversation history for semantic search via MCP tools.
 
 **Architecture**:
-Hook-driven design using Claude Code's `SessionEnd` and `PreCompact` hooks to trigger conversation history ingestion.
+Hook-driven design using Claude Code's `SessionEnd` and `PreCompact` hooks to trigger conversation history ingestion. MCP server automatically manages hooks installation/uninstallation.
 
 **Acceptance Criteria**:
-- [ ] Implement `agentic-warden hooks handle` CLI command
-- [ ] Read hook input from stdin (session_id, transcript_path, hook_event_name)
-- [ ] Parse Claude Code JSONL transcript format
-- [ ] Generate embeddings using FastEmbed (AllMiniLML6V2)
-- [ ] Store conversations in SahomeDB vector database
-- [ ] Provide MCP tool: `search_history` for semantic conversation search
-- [ ] Support session_id-based filtering
-- [ ] Handle incremental updates (avoid duplicates)
+- [x] Implement `agentic-warden hooks handle` CLI command
+- [x] Read hook input from stdin (session_id, transcript_path, hook_event_name)
+- [x] Parse Claude Code JSONL transcript format
+- [x] Generate embeddings using FastEmbed (AllMiniLML6V2)
+- [x] Store conversations in SahomeDB vector database
+- [x] Provide MCP tool: `search_history` for semantic conversation search
+- [x] Support session_id-based filtering
+- [x] Handle incremental updates (avoid duplicates)
+- [x] Auto-install hooks when MCP server starts
+- [x] Auto-uninstall hooks when MCP server stops
+- [x] RAII cleanup guard for signal/panic safety
 
 **Hook Integration Flow**:
 ```
@@ -339,25 +342,21 @@ SahomeDB: conversation_history collection
 search_history MCP tool
 ```
 
-**Claude Code Configuration** (~/.claude/settings.json):
+**Claude Code Configuration** (~/.config/claude/hooks.json):
 ```json
 {
-  "hooks": {
-    "SessionEnd": [{
-      "hooks": [{
-        "type": "command",
-        "command": "agentic-warden hooks handle"
-      }]
-    }],
-    "PreCompact": [{
-      "hooks": [{
-        "type": "command",
-        "command": "agentic-warden hooks handle"
-      }]
-    }]
+  "SessionEnd": {
+    "command": "agentic-warden hooks handle",
+    "stdin": true
+  },
+  "PreCompact": {
+    "command": "agentic-warden hooks handle",
+    "stdin": true
   }
 }
 ```
+
+**Note**: This configuration is automatically managed by `agentic-warden mcp` (installs on start, uninstalls on stop). Manual configuration is not required.
 
 **Hook Input Format** (stdin):
 ```json

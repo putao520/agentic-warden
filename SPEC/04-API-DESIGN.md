@@ -569,7 +569,7 @@ pub enum AgenticWardenError {
 
 ### API-010: Claude Code Hooks Handler
 **Version**: v0.2.0
-**Status**: 🔄 In Progress
+**Status**: 🟢 Done
 **Related**: REQ-010, ARCH-010
 
 #### Command: `agentic-warden hooks handle`
@@ -639,7 +639,7 @@ tail -f ~/.config/agentic-warden/hooks.log
 
 ### API-010-MCP: search_history MCP Tool
 **Version**: v0.2.0
-**Status**: 🔄 In Progress
+**Status**: 🟢 Done
 **Related**: REQ-010, ARCH-010
 
 #### Tool Definition
