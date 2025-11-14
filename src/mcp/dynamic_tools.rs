@@ -2,7 +2,7 @@
 //!
 //! Manages tools that are registered on-demand based on routing decisions.
 
-use rmcp::model::{Tool, ToolParam};
+use rmcp::model::Tool;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -30,10 +30,18 @@ impl DynamicToolManager {
         description: String,
         input_schema: serde_json::Value,
     ) -> bool {
+        // Convert serde_json::Value to JsonObject (Map<String, Value>)
+        let schema_object = match input_schema {
+            serde_json::Value::Object(map) => map,
+            _ => serde_json::Map::new(), // Fallback to empty object if not an object
+        };
+
         let tool = Tool {
-            name: tool_name.clone(),
-            description: Some(description),
-            input_schema: ToolParam(input_schema),
+            name: tool_name.clone().into(),
+            description: Some(description.into()),
+            input_schema: Arc::new(schema_object),
+            output_schema: None,
+            annotations: None,
         };
 
         let mut tools = self.tools.write().await;

@@ -1,5 +1,12 @@
-use crate::provider::network_detector::NetworkStatus;
 use crate::sync::directory_hasher::DirectoryHash;
+
+/// Network connectivity status
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum NetworkStatus {
+    Online,
+    Offline,
+    Unknown,
+}
 use crate::sync::error::{SyncError, SyncResult};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

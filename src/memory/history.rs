@@ -14,7 +14,7 @@ use uuid::Uuid;
 const COLLECTION_NAME: &str = "conversation_history";
 
 /// Canonical structure for recorded Claude Code conversations.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ConversationRecord {
     pub id: String,
     pub session_id: Option<String>,
@@ -43,7 +43,7 @@ impl ConversationRecord {
 }
 
 /// Search result containing a conversation record and its similarity score.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ConversationSearchResult {
     pub record: ConversationRecord,
     /// Similarity score (0.0 to 1.0, higher is more similar).

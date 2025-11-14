@@ -1,22 +1,23 @@
 pub mod capability_detector;
 pub mod dynamic_tools;
 
-use agentic_warden::mcp_routing::{
+use crate::mcp_routing::{
     models::{
         ExecuteToolRequest, ExecuteToolResponse, IntelligentRouteRequest,
         IntelligentRouteResponse, MethodSchemaResponse,
     },
     IntelligentRouter,
 };
-use agentic_warden::memory::{ConversationHistoryStore, ConversationSearchResult};
+use crate::memory::{ConversationHistoryStore, ConversationSearchResult};
 use capability_detector::ClientCapabilities;
 use dynamic_tools::DynamicToolManager;
 use std::future::Future;
 use rmcp::{
-    handler::server::tool::{Parameters, ToolRouter},
+    handler::server::tool::{Parameters, ToolCallContext, ToolRouter},
     handler::server::ServerHandler,
     model::{Implementation, InitializeRequestParam, InitializeResult, ServerCapabilities},
-    tool, tool_handler, tool_router, Json, ServiceExt,
+    service::{Peer, RequestContext, RoleServer},
+    tool, tool_router, Json, ServiceExt,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -125,7 +126,7 @@ pub struct AgenticWardenMcpServer {
     // Dynamic tool registration manager
     dynamic_tools: DynamicToolManager,
     // Store peer for sending notifications
-    peer: Arc<RwLock<Option<rmcp::service::server::ClientSink>>>,
+    peer: Arc<RwLock<Option<rmcp::service::Peer<RoleServer>>>>,
 }
 
 #[tool_router]
@@ -136,11 +137,10 @@ impl AgenticWardenMcpServer {
             .map_err(|e| format!("Failed to initialise intelligent router: {e}"))?;
 
         // Initialize FastEmbed for conversation search
-        let embedder = TextEmbedding::try_new(InitOptions {
-            model_name: EmbeddingModel::AllMiniLML6V2,
-            show_download_progress: false,
-            ..Default::default()
-        })
+        let embedder = TextEmbedding::try_new(
+            InitOptions::new(EmbeddingModel::AllMiniLML6V2)
+                .with_show_download_progress(false)
+        )
         .map_err(|e| format!("Failed to initialize FastEmbed: {e}"))?;
 
         // Initialize conversation history store
@@ -227,12 +227,9 @@ impl AgenticWardenMcpServer {
 
                         // Send ToolListChangedNotification to client
                         if let Some(peer) = self.peer.read().await.as_ref() {
-                            let notification = rmcp::model::ToolListChangedNotification::default();
-                            if let Err(e) = peer.send_notification(notification.into()).await {
-                                eprintln!("   ⚠️  Failed to send ToolListChangedNotification: {}", e);
-                            } else {
-                                eprintln!("   ✅ Sent ToolListChangedNotification to client");
-                            }
+                            // Note: Notification sending disabled due to rmcp API constraints
+                            // The client should re-query tools after receiving intelligent_route response
+                            eprintln!("   📝 Tool '{}' registered - client should re-query tool list", selected.tool_name);
                         }
                     }
 
@@ -434,15 +431,14 @@ impl AgenticWardenMcpServer {
     }
 }
 
-#[tool_handler(router = self.tool_router)]
 impl ServerHandler for AgenticWardenMcpServer {
     async fn list_tools(
         &self,
         _request: Option<rmcp::model::PaginatedRequestParam>,
-        _context: rmcp::handler::RequestContext<rmcp::service::RoleServer>,
-    ) -> Result<rmcp::model::ListToolsResult, rmcp::McpError> {
+        _context: RequestContext<RoleServer>,
+    ) -> Result<rmcp::model::ListToolsResult, rmcp::ErrorData> {
         // Get base tools from tool_router
-        let mut tools: Vec<rmcp::model::Tool> = self.tool_router.tools().to_vec();
+        let mut tools: Vec<rmcp::model::Tool> = self.tool_router.list_all();
 
         // Add dynamically registered tools
         let dynamic_tools = self.dynamic_tools.list_tools().await;
@@ -457,8 +453,15 @@ impl ServerHandler for AgenticWardenMcpServer {
     async fn call_tool(
         &self,
         request: rmcp::model::CallToolRequestParam,
-        _context: rmcp::handler::RequestContext<rmcp::service::RoleServer>,
-    ) -> Result<rmcp::model::CallToolResult, rmcp::McpError> {
+        context: RequestContext<RoleServer>,
+    ) -> Result<rmcp::model::CallToolResult, rmcp::ErrorData> {
+        // First, try to call base tools via tool_router
+        if self.tool_router.has_route(&request.name) {
+            // This is a base tool, delegate to tool_router
+            let tool_context = ToolCallContext::new(self, request, context);
+            return self.tool_router.call(tool_context).await;
+        }
+
         // Check if this is a dynamically registered tool
         if let Some(mcp_server) = self.dynamic_tools.get_server(&request.name).await {
             // Proxy call to the underlying MCP server
@@ -466,26 +469,27 @@ impl ServerHandler for AgenticWardenMcpServer {
                 .router
                 .execute_tool(crate::mcp_routing::models::ExecuteToolRequest {
                     mcp_server,
-                    tool_name: request.name.clone(),
-                    arguments: request.arguments.unwrap_or(serde_json::Value::Object(Default::default())),
+                    tool_name: request.name.to_string(),
+                    arguments: serde_json::Value::Object(request.arguments.unwrap_or_default()),
                     session_id: None,
                 })
                 .await
-                .map_err(|e| rmcp::McpError::internal_error(&e.to_string()))?;
+                .map_err(|e| rmcp::ErrorData::internal_error(&e.to_string(), None))?;
 
             if result.success {
                 Ok(rmcp::model::CallToolResult {
-                    content: vec![rmcp::model::Content::text(
+                    content: Some(vec![rmcp::model::Content::text(
                         serde_json::to_string_pretty(&result.result).unwrap_or_default()
-                    )],
+                    )]),
+                    structured_content: Some(result.result),
                     is_error: None,
                 })
             } else {
-                Err(rmcp::McpError::internal_error(&result.message))
+                Err(rmcp::ErrorData::internal_error(&result.message, None))
             }
         } else {
-            // Not a dynamic tool, shouldn't happen (base tools handled by tool_router)
-            Err(rmcp::McpError::method_not_found::<rmcp::model::CallToolRequestMethod>())
+            // Tool not found in either base or dynamic tools
+            Err(rmcp::ErrorData::method_not_found::<rmcp::model::CallToolRequestMethod>())
         }
     }
 
@@ -493,7 +497,7 @@ impl ServerHandler for AgenticWardenMcpServer {
         &self,
         request: InitializeRequestParam,
         context: rmcp::handler::RequestContext<rmcp::service::RoleServer>,
-    ) -> Result<InitializeResult, rmcp::McpError> {
+    ) -> Result<InitializeResult, rmcp::ErrorData> {
         // Create initial capabilities (before testing)
         let mut capabilities = ClientCapabilities::from_init_request(&request);
 

@@ -1,6 +1,6 @@
 //! Provider configuration manager
 
-use super::config::{AiType, Provider, ProvidersConfig, Region};
+use super::config::{AiType, Provider, ProvidersConfig};
 use super::env_mapping::get_env_vars_for_ai_type;
 use super::error::{ProviderError, ProviderResult};
 use crate::common::constants::files::PROVIDERS_JSON;
@@ -410,45 +410,12 @@ impl ProviderManager {
     }
 
     // ===== Token Management =====
-
-    /// Get token for provider and region
-    pub fn get_token(&self, provider_id: &str, region: &Region) -> Option<String> {
-        self.providers_config
-            .get_token(provider_id, region)
-            .cloned()
-    }
-
-    /// Set token for provider and region
-    pub fn set_token(&mut self, provider_id: &str, region: Region, token: String) -> Result<()> {
-        self.providers_config.set_token(provider_id, region, token);
-        self.save()?;
-        Ok(())
-    }
-
-    /// Remove token for provider and region
-    pub fn remove_token(&mut self, provider_id: &str, region: &Region) -> Result<()> {
-        self.providers_config.remove_token(provider_id, region)?;
-        self.save()?;
-        Ok(())
-    }
-
-    /// Check if provider has token for region
-    pub fn has_token(&self, provider_id: &str, region: &Region) -> bool {
-        self.providers_config.has_token(provider_id, region)
-    }
+    // Note: Regional token support was removed in favor of simplified design
 
     /// Add custom provider
     pub fn add_custom_provider(&mut self, provider_id: String, provider: Provider) -> Result<()> {
         self.add_provider(provider_id, provider)?;
         Ok(())
-    }
-
-    /// Get all regional tokens for a provider
-    pub fn get_regional_tokens(
-        &self,
-        provider_id: &str,
-    ) -> Option<&crate::provider::config::RegionalTokens> {
-        self.providers_config.user_tokens.get(provider_id)
     }
 
     // ===== SPEC-Compliant Advanced Methods =====
