@@ -2,7 +2,10 @@ mod capability_detector;
 mod dynamic_tools;
 
 use agentic_warden::mcp_routing::{
-    models::{IntelligentRouteRequest, IntelligentRouteResponse, MethodSchemaResponse},
+    models::{
+        ExecuteToolRequest, ExecuteToolResponse, IntelligentRouteRequest,
+        IntelligentRouteResponse, MethodSchemaResponse,
+    },
     IntelligentRouter,
 };
 use agentic_warden::memory::{ConversationHistoryStore, ConversationSearchResult};
@@ -208,6 +211,21 @@ impl AgenticWardenMcpServer {
             .map_err(|e| format!("Failed to search conversation history: {e}"))?;
 
         Ok(Json(results))
+    }
+
+    #[tool(
+        name = "execute_tool",
+        description = "Execute a specific MCP tool with confirmed parameters. Used in two-phase negotiation mode."
+    )]
+    pub async fn execute_tool_mcp(
+        &self,
+        params: Parameters<ExecuteToolRequest>,
+    ) -> Result<Json<ExecuteToolResponse>, String> {
+        self.router
+            .execute_tool(params.0)
+            .await
+            .map(Json)
+            .map_err(|err| err.to_string())
     }
 
     pub async fn run(self) -> Result<(), Box<dyn std::error::Error>> {

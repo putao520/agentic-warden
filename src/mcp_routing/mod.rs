@@ -11,8 +11,9 @@ use self::{
     embedding::FastEmbedder,
     index::{MemRoutingIndex, MethodEmbedding, ScoredMethod, ScoredTool, ToolEmbedding},
     models::{
-        IntelligentRouteRequest, IntelligentRouteResponse, MethodSchemaResponse,
-        RouteExecutionResult, SelectedRoute, ToolVectorRecord,
+        ExecuteToolRequest, ExecuteToolResponse, IntelligentRouteRequest,
+        IntelligentRouteResponse, MethodSchemaResponse, RouteExecutionResult, SelectedRoute,
+        ToolVectorRecord,
     },
     pool::{DiscoveredTool, McpConnectionPool},
 };
@@ -259,6 +260,42 @@ impl IntelligentRouter {
             annotations,
             message: None,
         })
+    }
+
+    /// Execute a specific tool with confirmed parameters.
+    /// Used in two-phase negotiation mode (fallback for clients without dynamic registration).
+    pub async fn execute_tool(&self, request: ExecuteToolRequest) -> Result<ExecuteToolResponse> {
+        let start = Instant::now();
+        let execution = self
+            .connection_pool
+            .call_tool(&request.mcp_server, &request.tool_name, request.arguments.clone())
+            .await;
+        let duration = start.elapsed().as_millis();
+
+        // Record in conversation history if session_id provided
+        if let Some(session_id) = request.session_id {
+            // We don't have the original user request here, so we'll skip history for now
+            // This could be enhanced by passing the original query
+        }
+
+        match execution {
+            Ok(output) => Ok(ExecuteToolResponse {
+                success: true,
+                message: "Tool executed successfully".to_string(),
+                result: Some(RouteExecutionResult {
+                    mcp_server: request.mcp_server,
+                    tool_name: request.tool_name,
+                    duration_ms: duration,
+                    output,
+                    raw_stdout: None,
+                }),
+            }),
+            Err(err) => Ok(ExecuteToolResponse {
+                success: false,
+                message: format!("Tool execution failed: {err}"),
+                result: None,
+            }),
+        }
     }
 }
 

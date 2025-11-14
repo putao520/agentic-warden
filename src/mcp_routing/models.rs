@@ -95,12 +95,32 @@ pub struct MethodSchemaResponse {
     pub message: Option<String>,
 }
 
+/// Request to execute a specific tool with confirmed parameters.
+/// Used in two-phase negotiation mode after AI reviews the suggestion.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ExecuteToolRequest {
+    pub mcp_server: String,
+    pub tool_name: String,
+    pub arguments: Value,
+    #[serde(default)]
+    pub session_id: Option<String>,
+}
+
+/// Response from executing a specific tool.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ExecuteToolResponse {
+    pub success: bool,
+    pub message: String,
+    pub result: Option<RouteExecutionResult>,
+}
+
 impl Default for IntelligentRouteRequest {
     fn default() -> Self {
         Self {
             user_request: String::new(),
             session_id: None,
             max_candidates: None,
+            mode: RouteMode::Auto,
             metadata: HashMap::new(),
         }
     }
