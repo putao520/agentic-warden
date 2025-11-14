@@ -26,6 +26,13 @@ pub enum McpAction {
     Status,
 }
 
+/// Claude Code Hooks 处理动作
+#[derive(Subcommand, Debug, Clone)]
+pub enum HooksAction {
+    /// 处理 Claude Code hook 事件（从 stdin 读取）
+    Handle,
+}
+
 /// Agentic-Warden - AI CLI 工具的统一管理和进程监控平台
 #[derive(Parser, Debug, Clone)]
 #[command(
@@ -114,6 +121,10 @@ pub enum Commands {
     /// MCP (Model Context Protocol) 服务器
     #[command(subcommand)]
     Mcp(McpAction),
+
+    /// Claude Code Hooks 处理
+    #[command(subcommand)]
+    Hooks(HooksAction),
 
     /// 捕获未显式声明的子命令（用于 AI CLI 选择器）
     #[command(external_subcommand)]

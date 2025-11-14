@@ -4,7 +4,7 @@ mod mcp;
 
 use agentic_warden::cli_type::{parse_cli_selector_strict, parse_cli_type};
 use agentic_warden::commands::ai_cli::AiCliCommand;
-use agentic_warden::commands::{parse_external_as_ai_cli, parser::McpAction, Cli, Commands};
+use agentic_warden::commands::{parse_external_as_ai_cli, parser::{HooksAction, McpAction}, Cli, Commands};
 use agentic_warden::error::ErrorCategory;
 use agentic_warden::execute_update;
 use agentic_warden::provider::network_detector::NetworkDetector;
@@ -204,6 +204,7 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
             }
         }
         Commands::Mcp(action) => handle_mcp_command(action).await,
+        Commands::Hooks(action) => handle_hooks_command(action).await,
         Commands::External(tokens) => handle_external_command(tokens).await,
     }
 }
@@ -405,6 +406,35 @@ async fn handle_mcp_command(action: McpAction) -> Result<ExitCode, String> {
             println!("🛠️  Tools: 5 available");
 
             Ok(ExitCode::from(0))
+        }
+    }
+}
+
+/// Handle Claude Code hooks commands
+async fn handle_hooks_command(action: HooksAction) -> Result<ExitCode, String> {
+    match action {
+        HooksAction::Handle => {
+            // Handle hook event from stdin
+            match agentic_warden::hooks::handle_hook_from_stdin().await {
+                Ok(_) => Ok(ExitCode::from(0)),
+                Err(e) => {
+                    // Log error for debugging
+                    eprintln!("❌ Hook processing failed: {}", e);
+
+                    // Return exit code 2 for critical errors (blocks Claude Code)
+                    // Return exit code 1 for non-critical errors (logged but doesn't block)
+                    if e.to_string().contains("stdin")
+                        || e.to_string().contains("vector database")
+                        || e.to_string().contains("FastEmbed")
+                    {
+                        // Critical errors that should block
+                        Ok(ExitCode::from(2))
+                    } else {
+                        // Non-critical errors (e.g., already indexed, empty transcript)
+                        Ok(ExitCode::from(1))
+                    }
+                }
+            }
         }
     }
 }

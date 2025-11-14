@@ -8,6 +8,7 @@ pub mod common;
 pub mod config;
 pub mod core;
 pub mod error;
+pub mod hooks;
 pub mod logging;
 pub mod mcp_routing;
 pub mod memory;

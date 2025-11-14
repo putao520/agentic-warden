@@ -2,6 +2,7 @@ use agentic_warden::mcp_routing::{
     models::{IntelligentRouteRequest, IntelligentRouteResponse, MethodSchemaResponse},
     IntelligentRouter,
 };
+use agentic_warden::memory::{ConversationHistoryStore, ConversationSearchResult};
 use std::future::Future;
 use rmcp::{
     handler::server::tool::{Parameters, ToolRouter},
@@ -11,6 +12,8 @@ use rmcp::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::path::PathBuf;
+use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct MethodSchemaParams {
@@ -18,10 +21,25 @@ pub struct MethodSchemaParams {
     pub tool_name: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SearchHistoryParams {
+    /// The search query to find relevant conversation history.
+    pub query: String,
+    /// Maximum number of results to return (default: 10).
+    #[serde(default = "default_search_limit")]
+    pub limit: usize,
+}
+
+fn default_search_limit() -> usize {
+    10
+}
+
 #[derive(Clone)]
 pub struct AgenticWardenMcpServer {
     router: Arc<IntelligentRouter>,
     tool_router: ToolRouter<Self>,
+    embedder: Arc<TextEmbedding>,
+    history_store: Arc<ConversationHistoryStore>,
 }
 
 #[tool_router]
@@ -30,10 +48,38 @@ impl AgenticWardenMcpServer {
         let router = IntelligentRouter::initialize()
             .await
             .map_err(|e| format!("Failed to initialise intelligent router: {e}"))?;
+
+        // Initialize FastEmbed for conversation search
+        let embedder = TextEmbedding::try_new(InitOptions {
+            model_name: EmbeddingModel::AllMiniLML6V2,
+            show_download_progress: false,
+            ..Default::default()
+        })
+        .map_err(|e| format!("Failed to initialize FastEmbed: {e}"))?;
+
+        // Initialize conversation history store
+        let db_path = Self::get_history_db_path()
+            .map_err(|e| format!("Failed to get history DB path: {e}"))?;
+        let history_store = ConversationHistoryStore::new(&db_path, 384)
+            .map_err(|e| format!("Failed to initialize conversation history store: {e}"))?;
+
         Ok(Self {
             router: Arc::new(router),
             tool_router: Self::tool_router(),
+            embedder: Arc::new(embedder),
+            history_store: Arc::new(history_store),
         })
+    }
+
+    fn get_history_db_path() -> Result<PathBuf, String> {
+        let config_dir = dirs::config_dir()
+            .ok_or_else(|| "Failed to get config directory".to_string())?
+            .join("agentic-warden");
+
+        std::fs::create_dir_all(&config_dir)
+            .map_err(|e| format!("Failed to create config directory: {e}"))?;
+
+        Ok(config_dir.join("conversation_history.db"))
     }
 
     #[tool(
@@ -64,6 +110,37 @@ impl AgenticWardenMcpServer {
             .await
             .map(Json)
             .map_err(|err| err.to_string())
+    }
+
+    #[tool(
+        name = "search_history",
+        description = "Search conversation history using semantic similarity. Returns relevant past conversations based on the query."
+    )]
+    pub async fn search_history_tool(
+        &self,
+        params: Parameters<SearchHistoryParams>,
+    ) -> Result<Json<Vec<ConversationSearchResult>>, String> {
+        // Generate embedding for the query
+        let query = &params.0.query;
+        let limit = params.0.limit;
+
+        let embeddings = self
+            .embedder
+            .embed(vec![query.clone()], None)
+            .map_err(|e| format!("Failed to generate embedding: {e}"))?;
+
+        let query_embedding = embeddings
+            .into_iter()
+            .next()
+            .ok_or_else(|| "No embedding generated".to_string())?;
+
+        // Search conversation history
+        let results = self
+            .history_store
+            .search_with_scores(query_embedding, limit)
+            .map_err(|e| format!("Failed to search conversation history: {e}"))?;
+
+        Ok(Json(results))
     }
 
     pub async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
