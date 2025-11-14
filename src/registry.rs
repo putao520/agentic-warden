@@ -1,15 +1,13 @@
 #![allow(dead_code)] // 任务注册表，部分API函数当前未使用
 
-use crate::config::{MAX_RECORD_AGE, SHARED_MEMORY_SIZE, SHARED_NAMESPACE};
+use crate::config::{MAX_RECORD_AGE, SHARED_NAMESPACE};
 use crate::core::process_tree::get_root_parent_pid_cached;
-use crate::core::shared_map::open_or_create;
 use crate::error::RegistryError;
 use crate::logging::{debug, warn};
 use crate::task_record::{TaskRecord, TaskStatus};
 use crate::utils::get_instance_id;
 use chrono::{DateTime, Duration, Utc};
-use parking_lot::Mutex as ParkingMutex;
-use shared_hashmap::SharedMemoryHashMap;
+use dashmap::DashMap;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex, OnceLock, Weak};
@@ -42,7 +40,7 @@ pub struct TaskRegistry {
 struct RegistryInner {
     #[allow(dead_code)]
     namespace: String,
-    map: ParkingMutex<SharedMemoryHashMap<String, String>>,
+    map: Arc<DashMap<String, String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -77,14 +75,16 @@ fn get_current_process_pid() -> u32 {
 /// Test if a registry contains valid agentic-warden task entries
 #[allow(dead_code)]
 fn test_registry_validity(
-    map: &SharedMemoryHashMap<String, String>,
+    map: &DashMap<String, String>,
 ) -> Result<Vec<(String, String)>, RegistryError> {
     let mut valid_entries = Vec::new();
 
     // Sample a few entries to check if they look like task records
-    for (key, value) in map.iter().take(10) {
+    for entry in map.iter().take(10) {
+        let key = entry.key();
+        let value = entry.value();
         // Try to parse as a task record
-        if serde_json::from_str::<TaskRecord>(&value).is_ok() {
+        if serde_json::from_str::<TaskRecord>(value).is_ok() {
             valid_entries.push((key.clone(), value.clone()));
         }
     }
@@ -109,10 +109,11 @@ impl TaskRegistry {
             return Ok(Self { inner: existing });
         }
 
-        let map = open_or_create(&namespace, SHARED_MEMORY_SIZE)?;
+        // Use DashMap instead of SharedMemoryHashMap for better performance and safety
+        let map = DashMap::new();
         let inner = Arc::new(RegistryInner {
             namespace: namespace.clone(),
-            map: ParkingMutex::new(map),
+            map: Arc::new(map),
         });
 
         let pool = registry_pool();
@@ -155,10 +156,8 @@ impl TaskRegistry {
     pub fn register(&self, pid: u32, record: &TaskRecord) -> Result<(), RegistryError> {
         let key = pid.to_string();
         let value = serde_json::to_string(record)?;
-        self.with_map(|map| {
-            map.try_insert(key.clone(), value)?;
-            Ok(())
-        })
+        self.inner.map.insert(key, value);
+        Ok(())
     }
 
     pub fn mark_completed(
@@ -169,23 +168,19 @@ impl TaskRegistry {
         completed_at: DateTime<Utc>,
     ) -> Result<(), RegistryError> {
         let key = pid.to_string();
-        self.with_map(move |map| {
-            let existing = map
-                .get(&key)
-                .ok_or_else(|| RegistryError::Map(format!("no task found for pid {pid}")))?;
-            let record: TaskRecord = serde_json::from_str(&existing)?;
-            let updated_record = record.mark_completed(result, exit_code, completed_at);
-            let updated_value = serde_json::to_string(&updated_record)?;
-            let _ = map.insert(key.clone(), updated_value);
-            Ok(())
-        })
+        let existing = self.inner.map.get(&key)
+            .ok_or_else(|| RegistryError::Map(format!("no task found for pid {pid}")))?;
+        let record: TaskRecord = serde_json::from_str(existing.value())?;
+        let updated_record = record.mark_completed(result, exit_code, completed_at);
+        let updated_value = serde_json::to_string(&updated_record)?;
+        self.inner.map.insert(key, updated_value);
+        Ok(())
     }
 
     pub fn remove(&self, pid: u32) -> Result<Option<TaskRecord>, RegistryError> {
         let key = pid.to_string();
-        let removed = self.with_map(|map| Ok(map.remove(&key)))?;
-        match removed {
-            Some(text) => Ok(Some(serde_json::from_str(&text)?)),
+        match self.inner.map.remove(&key) {
+            Some((_, text)) => Ok(Some(serde_json::from_str(&text)?)),
             None => Ok(None),
         }
     }
@@ -196,8 +191,7 @@ impl TaskRegistry {
 
     pub fn entries(&self) -> Result<Vec<RegistryEntry>, RegistryError> {
         let snapshot: Vec<(String, String)> = {
-            let guard = self.inner.map.lock();
-            guard.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+            self.inner.map.iter().map(|entry| (entry.key().clone(), entry.value().clone())).collect()
         };
 
         let mut entries = Vec::new();
@@ -316,10 +310,9 @@ impl TaskRegistry {
 
     fn with_map<T>(
         &self,
-        f: impl FnOnce(&mut SharedMemoryHashMap<String, String>) -> Result<T, RegistryError>,
+        f: impl FnOnce(&DashMap<String, String>) -> Result<T, RegistryError>,
     ) -> Result<T, RegistryError> {
-        let mut guard = self.inner.map.lock();
-        f(&mut guard)
+        f(&self.inner.map)
     }
 
     /// 发现所有可用的注册表（全局扫描）

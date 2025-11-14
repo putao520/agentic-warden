@@ -17,8 +17,7 @@ path = "src/lib.rs"
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-shared_hashmap = "0.1.2"      # Current implementation (production-ready with safety checks)
-shared_memory = "0.12"         # Current implementation (production-ready with safety checks)
+dashmap = "6.1.0"              # Modern concurrent HashMap for task registry
 thiserror = "1.0"
 uuid = { version = "1", features = ["v4"] }
 raw_sync = "0.1.5"
