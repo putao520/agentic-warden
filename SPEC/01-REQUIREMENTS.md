@@ -300,45 +300,103 @@ agentic-warden gemini --provider custom-proxy
 
 ---
 
-### REQ-010: 内存集成与语义搜索
-**Status**: 🟢 Done
+### REQ-010: Claude Code会话历史集成（Hook-Based）
+**Status**: 🔄 In Progress
 **Priority**: P1 (High)
-**Version**: v0.1.0
-**Related**: ARCH-010, DATA-003, API-005
+**Version**: v0.2.0
+**Related**: ARCH-010, DATA-010, API-010
 
 **Description**:
-Agentic-Warden MUST integrate gmemory functionality to provide semantic conversation memory and session-based TODO management with vector database storage.
+Agentic-Warden MUST integrate with Claude Code hooks mechanism to automatically capture and index conversation history for semantic search via MCP tools.
+
+**Architecture**:
+Hook-driven design using Claude Code's `SessionEnd` and `PreCompact` hooks to trigger conversation history ingestion.
 
 **Acceptance Criteria**:
-- [x] Integrate Qdrant vector database for semantic search
-- [x] Integrate Ollama embedding service for text vectorization
-- [x] Provide session_id-based conversation storage in metadata
-- [x] Provide MCP tools for memory operations:
-  - `search_history`: 查询历史对话（带session_id过滤）
-  - `get_session_todos`: 通过session_id查询未完成TODO
-- [x] Support TODO management with session association
-- [x] Configurable embedding model (default: qwen3-embedding:0.6b)
-- [x] Configurable LLM model (default: qwen3:8b, future use)
+- [ ] Implement `agentic-warden hooks handle` CLI command
+- [ ] Read hook input from stdin (session_id, transcript_path, hook_event_name)
+- [ ] Parse Claude Code JSONL transcript format
+- [ ] Generate embeddings using FastEmbed (AllMiniLML6V2)
+- [ ] Store conversations in SahomeDB vector database
+- [ ] Provide MCP tool: `search_history` for semantic conversation search
+- [ ] Support session_id-based filtering
+- [ ] Handle incremental updates (avoid duplicates)
+
+**Hook Integration Flow**:
+```
+Claude Code Session End/PreCompact
+    ↓ (trigger hook)
+agentic-warden hooks handle
+    ↓ (read stdin)
+Hook Input JSON: {session_id, transcript_path, hook_event_name}
+    ↓ (read JSONL file)
+Parse Claude Code JSONL transcript
+    ↓ (generate embeddings)
+FastEmbed (local, no network)
+    ↓ (save to vector DB)
+SahomeDB: conversation_history collection
+    ↓ (MCP query)
+search_history MCP tool
+```
+
+**Claude Code Configuration** (~/.claude/settings.json):
+```json
+{
+  "hooks": {
+    "SessionEnd": [{
+      "hooks": [{
+        "type": "command",
+        "command": "agentic-warden hooks handle"
+      }]
+    }],
+    "PreCompact": [{
+      "hooks": [{
+        "type": "command",
+        "command": "agentic-warden hooks handle"
+      }]
+    }]
+  }
+}
+```
+
+**Hook Input Format** (stdin):
+```json
+{
+  "session_id": "session-abc123",
+  "transcript_path": "/home/user/.claude/sessions/2025-11-14.jsonl",
+  "hook_event_name": "SessionEnd",
+  "cwd": "/home/user/project",
+  "permission_mode": "normal"
+}
+```
+
+**Claude Code JSONL Format**:
+```jsonl
+{"session_id":"xxx","timestamp":"2025-11-14T10:30:00Z","message_id":"msg-001","role":"user","content":"Help me implement auth"}
+{"session_id":"xxx","timestamp":"2025-11-14T10:30:05Z","message_id":"msg-002","role":"assistant","content":"I'll help..."}
+```
 
 **Technical Constraints**:
-- Vector database: Qdrant with dual-mode architecture:
-  - Persistent mode: `http://localhost:6333` for long-term memory storage
-  - Memory mode: `:memory:` embedded for MCP routing index
-- Embedding service: Ollama (configurable URL)
-- Session storage: Qdrant metadata with single collection design
-- Semantic search: cosine similarity
-- Memory cleanup: automatic for stale sessions
+- Vector database: SahomeDB (file-based persistent storage)
+- Embedding service: FastEmbed (AllMiniLML6V2, 384 dimensions, local generation)
+- Session ID source: Hook stdin input (not parsed from JSONL)
+- Semantic search: cosine similarity with configurable threshold
+- Storage location: ~/.config/agentic-warden/conversation_history.db
+- Duplicate detection: Check existing session_id before insertion
 
-**Qdrant Collections Architecture:**
-- **Persistent Collection**: `agentic_warden_memory`
-  - Stores both conversations and TODOs in single collection
-  - Differentiated by metadata.type: "conversation" or "todo"
-  - Session-based filtering via metadata.session_id
-  - Persistent storage for long-term memory
-- **Memory Collections**: `mcp_tools`, `mcp_methods` (REQ-012)
-  - Embedded memory mode for MCP routing
-  - Rebuilt on startup from .mcp.json configuration
-  - Tool-level and method-level indexing for intelligent routing
+**Performance Requirements**:
+- Hook processing: < 2s for typical session (~100 messages)
+- Embedding generation: < 100ms for batch of 10 messages (FastEmbed local)
+- Vector insertion: < 500ms for batch of 100 vectors
+- MCP search_history: < 200ms for typical query
+- Zero network dependency for embeddings
+
+**Error Handling**:
+- Hook must return exit code 0 on success
+- Hook must return exit code 2 on critical errors (blocks Claude Code)
+- Log errors to ~/.config/agentic-warden/hooks.log
+- Gracefully handle missing transcript files
+- Skip already-processed sessions
 
 ---
 

@@ -657,6 +657,163 @@ AI WARDEN的核心系统由三大功能模块组成，每个模块负责独立�
 
 ---
 
+### ARCH-010: Claude Code会话历史Hook集成架构
+**Date**: 2025-11-14
+**Status**: 🔄 In Progress
+**Version**: v0.2.0
+**Related Requirements**: REQ-010
+
+#### Background
+Claude Code provides hooks mechanism for session lifecycle events. We need to capture conversation history automatically without manual CLI commands, enabling seamless semantic search via MCP tools.
+
+#### Decision
+Use Claude Code's `SessionEnd` and `PreCompact` hooks to trigger automatic conversation history ingestion into vector database.
+
+#### Options Compared
+| Approach | Pros | Cons | User Experience |
+|----------|------|------|-----------------|
+| **Hook-based (Selected)** | Automatic, zero user effort, real-time | Requires Claude Code setup | **Excellent** (invisible) |
+| Manual CLI import | Simple, no dependencies | User must remember to run | Poor (friction) |
+| File watcher | Automatic detection | Complex, resource-heavy | Good (automatic) |
+| Periodic cron job | Scheduled, reliable | Delayed ingestion, overhead | Fair (not real-time) |
+
+#### Rationale
+- **Zero Friction**: Users configure hooks once, then forget about it
+- **Real-Time**: Conversations indexed immediately after session ends
+- **Native Integration**: Leverages Claude Code's official hook mechanism
+- **Session Context**: Hook provides session_id directly from stdin
+- **Idempotent**: Can re-run on same session without duplicates
+
+#### Architecture Diagram
+
+```mermaid
+sequenceDiagram
+    participant CC as Claude Code
+    participant Hook as agentic-warden hooks handle
+    participant Parser as JSONL Parser
+    participant Embed as FastEmbed
+    participant DB as SahomeDB
+
+    Note over CC: User ends session or<br/>PreCompact triggered
+
+    CC->>Hook: Execute hook (stdio)
+    Note over CC,Hook: stdin: {session_id, transcript_path, hook_event_name}
+
+    Hook->>Hook: Read stdin JSON
+    Hook->>Hook: Extract session_id & transcript_path
+
+    Hook->>Parser: Parse JSONL file
+    Parser->>Parser: Read ~/.claude/sessions/xxx.jsonl
+    Parser->>Parser: Parse each line<br/>(role, content, timestamp)
+    Parser-->>Hook: Vec<ConversationMessage>
+
+    Hook->>DB: Check if session_id exists
+    DB-->>Hook: false (new session)
+
+    Hook->>Embed: Generate embeddings(batch)
+    Note over Embed: AllMiniLML6V2<br/>384-dim<br/>Local, no network
+    Embed-->>Hook: Vec<Vec<f32>>
+
+    Hook->>DB: Insert batch with metadata
+    Note over DB: session_id (from stdin)<br/>timestamp, role, content
+
+    DB-->>Hook: Success
+
+    Hook->>CC: Exit code 0
+    Note over Hook,CC: stdout: "Indexed N messages"
+```
+
+#### Component Design
+
+```rust
+// Hook input from Claude Code (stdin)
+#[derive(Deserialize)]
+struct ClaudeCodeHookInput {
+    session_id: String,           // From hook stdin
+    transcript_path: String,      // JSONL file path
+    hook_event_name: String,      // "SessionEnd" | "PreCompact"
+    cwd: Option<String>,
+    permission_mode: Option<String>,
+}
+
+// JSONL parser for Claude Code format
+pub struct ClaudeCodeTranscriptParser;
+
+impl ClaudeCodeTranscriptParser {
+    pub fn parse_file(path: &Path) -> Result<Vec<ConversationMessage>> {
+        // Stream parse JSONL
+        // Extract role, content, timestamp from each line
+    }
+}
+
+// Hook handler orchestrator
+pub struct HookHandler {
+    parser: ClaudeCodeTranscriptParser,
+    embedder: FastEmbedGenerator,
+    store: ConversationHistoryStore,
+}
+
+impl HookHandler {
+    pub async fn handle_from_stdin() -> Result<()> {
+        // 1. Read stdin JSON
+        let input: ClaudeCodeHookInput = serde_json::from_reader(std::io::stdin())?;
+
+        // 2. Check if already processed
+        if self.store.has_session(&input.session_id).await? {
+            eprintln!("Session {} already indexed, skipping", input.session_id);
+            return Ok(());
+        }
+
+        // 3. Parse JSONL transcript
+        let messages = self.parser.parse_file(&input.transcript_path)?;
+
+        // 4. Generate embeddings (batch of 10)
+        let embeddings = self.embedder.generate_batch(
+            messages.iter().map(|m| &m.content).collect()
+        ).await?;
+
+        // 5. Store with session_id from stdin
+        for (msg, embedding) in messages.iter().zip(embeddings) {
+            let record = ConversationRecord {
+                id: Uuid::new_v4().to_string(),
+                session_id: Some(input.session_id.clone()),  // From stdin!
+                role: msg.role.clone(),
+                content: msg.content.clone(),
+                timestamp: msg.timestamp,
+                tools_used: vec![],
+            };
+            self.store.append(record, embedding).await?;
+        }
+
+        println!("✅ Indexed {} messages for session {}", messages.len(), input.session_id);
+        Ok(())
+    }
+}
+```
+
+#### Data Flow
+
+| Stage | Component | Input | Output | Performance |
+|-------|-----------|-------|--------|-------------|
+| **Hook Trigger** | Claude Code | Session ends | Executes hook command | Instant |
+| **Stdin Read** | Hook CLI | JSON from stdin | ClaudeCodeHookInput | < 1ms |
+| **JSONL Parse** | Parser | transcript_path file | Vec<ConversationMessage> | 10ms per 1000 lines |
+| **Dedup Check** | SahomeDB | session_id | boolean (exists?) | < 20ms |
+| **Embedding** | FastEmbed | Batch of messages | Vec<Vec<f32>> (384-dim) | 10ms per 10 messages |
+| **Vector Insert** | SahomeDB | Records + embeddings | Success | 5ms per 10 records |
+| **Hook Exit** | Hook CLI | - | Exit code 0 | Instant |
+
+**Total Time**: < 2s for typical session (100 messages)
+
+#### Impact
+- **User Experience**: Completely transparent, zero manual intervention
+- **Data Freshness**: Conversations available for search immediately after session
+- **Resource Usage**: Minimal (FastEmbed local, no network calls)
+- **Reliability**: Idempotent design prevents duplicate entries
+- **Integration**: Native Claude Code hooks, no polling or file watchers
+
+---
+
 ## [v0] Intelligent MCP Routing Architecture
 
 ### ARCH-012: 智能MCP路由系统架构设计

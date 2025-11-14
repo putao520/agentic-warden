@@ -565,6 +565,136 @@ pub enum AgenticWardenError {
 
 ---
 
+## Hooks API
+
+### API-010: Claude Code Hooks Handler
+**Version**: v0.2.0
+**Status**: 🔄 In Progress
+**Related**: REQ-010, ARCH-010
+
+#### Command: `agentic-warden hooks handle`
+**Description**: Handle Claude Code hook events from stdin, parse transcript, and index to vector database
+
+**Input Source**: stdin (JSON)
+
+**Hook Input Format**:
+```json
+{
+  "session_id": "session-abc123",
+  "transcript_path": "/home/user/.claude/sessions/2025-11-14.jsonl",
+  "hook_event_name": "SessionEnd",
+  "cwd": "/home/user/project",
+  "permission_mode": "normal"
+}
+```
+
+**Processing Flow**:
+1. Read JSON from stdin
+2. Extract `session_id` and `transcript_path`
+3. Check if session already indexed (dedup)
+4. Parse JSONL transcript file
+5. Generate embeddings (FastEmbed batch)
+6. Insert to SahomeDB with metadata
+7. Print success message to stdout
+8. Return exit code
+
+**Success Response** (stdout):
+```
+✅ Indexed 127 messages for session session-abc123
+```
+
+**Exit Codes**:
+- `0` - Success (conversation indexed)
+- `1` - Non-critical error (logged, session skipped)
+- `2` - Critical error (blocks Claude Code, stderr shown)
+
+**Error Handling**:
+```
+Exit 1 scenarios (non-blocking):
+- Session already indexed (idempotent)
+- Transcript file not found (session may not exist yet)
+- Empty transcript (no messages to index)
+
+Exit 2 scenarios (blocking):
+- Invalid JSON from stdin
+- Vector database connection failure
+- FastEmbed initialization error
+```
+
+**Log File**: `~/.config/agentic-warden/hooks.log`
+
+**Usage Examples**:
+```bash
+# Manually test hook (simulate Claude Code)
+echo '{"session_id":"test-123","transcript_path":"~/.claude/sessions/test.jsonl","hook_event_name":"SessionEnd"}' | \
+  agentic-warden hooks handle
+
+# Check hook logs
+tail -f ~/.config/agentic-warden/hooks.log
+```
+
+---
+
+## MCP Tools API
+
+### API-010-MCP: search_history MCP Tool
+**Version**: v0.2.0
+**Status**: 🔄 In Progress
+**Related**: REQ-010, ARCH-010
+
+#### Tool Definition
+
+**MCP Tool Name**: `search_history`
+
+**Description**: Search Claude Code conversation history using semantic similarity
+
+**Input Schema**:
+```json
+{
+  "type": "object",
+  "properties": {
+    "query": {
+      "type": "string",
+      "description": "Search query (will be embedded and compared)"
+    },
+    "session_id": {
+      "type": "string",
+      "description": "Optional: filter by specific session ID"
+    },
+    "limit": {
+      "type": "integer",
+      "default": 10,
+      "description": "Maximum number of results to return"
+    },
+    "min_similarity": {
+      "type": "number",
+      "default": 0.7,
+      "description": "Minimum cosine similarity threshold (0.0-1.0)"
+    }
+  },
+  "required": ["query"]
+}
+```
+
+**Output Format**:
+```json
+{
+  "results": [
+    {
+      "session_id": "session-abc123",
+      "role": "user",
+      "content": "Can you help me implement authentication?",
+      "timestamp": "2025-11-14T10:30:00Z",
+      "similarity_score": 0.92
+    }
+  ],
+  "total_results": 1,
+  "query_time_ms": 145
+}
+```
+
+---
+
 ## [v0] Intelligent MCP Routing APIs
 
 ### API-012: 智能MCP路由系统API设计
