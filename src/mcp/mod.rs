@@ -1,4 +1,5 @@
 mod capability_detector;
+mod dynamic_tools;
 
 use agentic_warden::mcp_routing::{
     models::{IntelligentRouteRequest, IntelligentRouteResponse, MethodSchemaResponse},
@@ -6,6 +7,7 @@ use agentic_warden::mcp_routing::{
 };
 use agentic_warden::memory::{ConversationHistoryStore, ConversationSearchResult};
 use capability_detector::ClientCapabilities;
+use dynamic_tools::DynamicToolManager;
 use std::future::Future;
 use rmcp::{
     handler::server::tool::{Parameters, ToolRouter},
@@ -47,6 +49,8 @@ pub struct AgenticWardenMcpServer {
     history_store: Arc<ConversationHistoryStore>,
     // Client capability detection
     client_capabilities: Arc<RwLock<Option<ClientCapabilities>>>,
+    // Dynamic tool registration manager
+    dynamic_tools: DynamicToolManager,
 }
 
 #[tool_router]
@@ -76,6 +80,7 @@ impl AgenticWardenMcpServer {
             embedder: Arc::new(embedder),
             history_store: Arc::new(history_store),
             client_capabilities: Arc::new(RwLock::new(None)),
+            dynamic_tools: DynamicToolManager::new(),
         })
     }
 
