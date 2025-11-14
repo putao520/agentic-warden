@@ -77,4 +77,3 @@ integration*.log
 # Schema and temporary config
 /schema/
 *.schema.json
-vendor/
