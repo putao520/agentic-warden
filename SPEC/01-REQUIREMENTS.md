@@ -489,22 +489,34 @@ Agentic-Warden MUST provide an intelligent MCP (Model Context Protocol) routing 
 - [x] Log client connection details and supported features
 - [x] Graceful fallback for unknown or legacy clients
 
-#### 4.4 智能路由算法 (三种模式)
-- [x] **Auto模式** (默认/传统): Two-stage vector search + LLM decision + immediate execution
-  - [x] Tool-level search → Method-level search → LLM selection → Execute → Return result
-  - [x] Used for backward compatibility and simple workflows
-- [x] **Dynamic模式** (主模式): Dynamic tool registration for capable clients
-  - [x] Route + LLM decision → Get schema → Register tool → Return schema
+#### 4.4 智能路由算法 (双层架构)
+
+**决策层** (选择最佳工具，2选1):
+- [x] `DecisionMode::LlmReact` - LLM ReAct决策（主模式）
+  - [x] Two-stage vector search: tool-level → method-level semantic search
+  - [x] LLM final selection with confidence scoring and rationale
+  - [x] Used when LLM endpoint is configured
+- [x] `DecisionMode::Vector` - 向量搜索决策（fallback）
+  - [x] Pure vector similarity matching using FastEmbed
+  - [x] Used when LLM endpoint is not available
+- [x] `DecisionMode::Auto` - 自动选择决策方式（默认）
+  - [x] Auto-select LlmReact if endpoint available, otherwise Vector
+
+**执行层** (如何提供工具给主AI，自动根据客户端能力选择):
+- [x] `ExecutionMode::Dynamic` - 动态注册模式（主模式，98% token reduction）
+  - [x] Route + decision → Get schema → Register tool → Send notification
   - [x] Main AI calls registered tool with full context for accurate parameters
   - [x] 98% token reduction (50k → 900 tokens) by exposing minimal base tools
   - [x] Auto-enabled when client supports notifications/tools/list_changed
-- [x] **Query模式** (回退): Two-phase negotiation for legacy clients
+- [x] `ExecutionMode::Query` - 两阶段协商模式（fallback）
   - [x] Phase 1: Route + return suggestions (no execution)
-  - [x] Phase 2: AI reviews → calls execute_tool with confirmed parameters
-  - [x] Fallback for clients without dynamic registration support
-- [x] Two-stage vector search: tool-level then method-level
-- [x] LLM-powered final selection with confidence scoring
-- [x] FastEmbed for local text embedding generation (AllMiniLML6V2)
+  - [x] Phase 2: Main AI reviews → calls execute_tool with confirmed parameters
+  - [x] Auto-enabled when client doesn't support dynamic registration
+
+**关键原则**:
+- [x] `intelligent_route` **永不执行工具**，只返回选择和schema
+- [x] 主AI使用完整上下文生成准确参数（而非路由系统猜测）
+- [x] FastEmbed for local text embedding generation (AllMiniLML6V2, 384-dim)
 
 #### 4.5 动态工具管理
 - [x] DynamicToolManager for runtime tool registration

@@ -1,0 +1,52 @@
+{
+  "version": "1.0",
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user"],
+      "description": "Filesystem operations (read, write, search files)",
+      "category": "system",
+      "enabled": true,
+      "healthCheck": {
+        "enabled": true,
+        "interval": 60,
+        "timeout": 10
+      }
+    },
+    "git": {
+      "command": "uvx",
+      "args": ["mcp-server-git", "--repository", "/home/user/project"],
+      "description": "Git version control operations",
+      "category": "development",
+      "enabled": true,
+      "healthCheck": {
+        "enabled": true,
+        "interval": 60,
+        "timeout": 10
+      }
+    },
+    "brave-search": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+      "description": "Web search using Brave Search API",
+      "category": "search",
+      "enabled": false,
+      "healthCheck": {
+        "enabled": true,
+        "interval": 120,
+        "timeout": 15
+      }
+    }
+  },
+  "routing": {
+    "max_tools_per_request": 10,
+    "clustering_threshold": 0.7,
+    "rerank_top_k": 5,
+    "similarity_threshold": 0.6
+  },
+  "llm": {
+    "endpoint": "http://localhost:11434",
+    "model": "qwen2.5:7b",
+    "timeout": 30
+  }
+}
