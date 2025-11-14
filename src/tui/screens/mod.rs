@@ -12,7 +12,6 @@ mod render_helpers;
 pub mod dashboard;
 pub mod oauth;
 pub mod provider;
-pub mod provider_add_wizard;
 pub mod pull;
 pub mod push;
 pub mod status;
@@ -21,7 +20,6 @@ pub mod status;
 pub use dashboard::DashboardScreen;
 pub use oauth::OAuthScreen;
 pub use provider::ProviderScreen;
-pub use provider_add_wizard::ProviderAddWizard;
 pub use pull::PullScreen;
 pub use push::PushScreen;
 pub use status::StatusScreen;
@@ -45,7 +43,6 @@ pub enum ScreenType {
     Dashboard,
     Status,
     Provider,
-    ProviderAddWizard,
     OAuth,
     Push(Vec<String>),
     Pull,
@@ -58,7 +55,6 @@ impl ScreenType {
             ScreenType::Dashboard => Ok(Box::new(DashboardScreen::new()?)),
             ScreenType::Status => Ok(Box::new(StatusScreen::new()?)),
             ScreenType::Provider => Ok(Box::new(ProviderScreen::new()?)),
-            ScreenType::ProviderAddWizard => Ok(Box::new(ProviderAddWizard::new()?)),
             ScreenType::OAuth => Ok(Box::new(OAuthScreen::new()?)),
             ScreenType::Push(dirs) => Ok(Box::new(PushScreen::new(dirs.clone())?)),
             ScreenType::Pull => Ok(Box::new(PullScreen::new()?)),
@@ -72,7 +68,6 @@ impl fmt::Display for ScreenType {
             ScreenType::Dashboard => write!(f, "Dashboard"),
             ScreenType::Status => write!(f, "System Status"),
             ScreenType::Provider => write!(f, "Provider Management"),
-            ScreenType::ProviderAddWizard => write!(f, "Add Provider"),
             ScreenType::OAuth => write!(f, "OAuth Configuration"),
             ScreenType::Push(dirs) => write!(f, "Push: {} directories", dirs.len()),
             ScreenType::Pull => write!(f, "Pull from Remote"),

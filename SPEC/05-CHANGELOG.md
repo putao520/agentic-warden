@@ -1,13 +1,13 @@
-# Change Log - v5.0.x
+# Change Log - v0.1.x
 
 ## Version Information
-- Current version: v5.0.1
+- Current version: v0.1.0
 - Start date: 2025-11-08
-- Last updated: 2025-11-13
+- Last updated: 2025-11-14
 
 ---
 
-## v5.0.1 - Memory Integration & Optimization (2025-11-13)
+## v0.1.0 - Initial Release (2025-11-14)
 
 ### 🆕 New Features
 
@@ -81,37 +81,10 @@ llm_model = "qwen3:8b"
 
 ---
 
-## v5.0.0 - Initial Release (2025-11-08)
-
-### 🎯 Core Features
-- **Process Tree Tracking**: AI CLI process identification and grouping
-- **Third-Party Provider Management**: Unified provider configuration system
-- **Interactive CLI Mode**: Direct AI CLI interaction
-- **MCP Server**: Model Context Protocol integration
-- **Wait Mode**: Enhanced task waiting with real-time updates
-- **Cross-Process Communication**: Shared memory-based task coordination
-
-### 🏗️ Architecture
-- **Storage Abstraction**: Unified task storage interface
-- **Process Tree Analysis**: Multi-platform process relationship detection
-- **Registry Factory**: Centralized registry management
-- **TUI System**: Terminal user interface with rich interaction
-
-### 📦 Dependencies
-- Rust ecosystem libraries (tokio, serde, clap, etc.)
-- System integration libraries (winapi, procfs, etc.)
-- UI libraries (ratatui, crossterm)
-- MCP implementation (rmcp)
-
----
-
-## Historical Notes
-
-### Previous Versions
-- No prior versions - this is the initial public release
+##  Historical Notes
 
 ### Development Philosophy
 - **SPEC-Driven Development**: All features documented in SPEC before implementation
-- **DRY Principle**: Unified codebase with minimal duplication
+- **Simplified Design**: Removed complex features like regionalization and recommendation engines
 - **Type Safety**: Extensive use of Rust's type system for error prevention
 - **Performance Optimization**: Shared memory and efficient process tracking

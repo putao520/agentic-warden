@@ -16,7 +16,7 @@ use ratatui::{
 };
 
 use super::{Screen, ScreenAction, ScreenType};
-use crate::provider::config::{AiType, Provider, SupportMode};
+use crate::provider::config::{AiType, Provider};
 use crate::provider::manager::ProviderManager;
 use crate::tui::app_state::AppState;
 
@@ -36,11 +36,6 @@ struct ProviderMeta {
     official: bool,
     protected: bool,
     custom: bool,
-    support_modes: Vec<SupportMode>,
-    validation_endpoint: Option<String>,
-    category: Option<String>,
-    website: Option<String>,
-    regions: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -608,7 +603,7 @@ impl ProviderScreen {
             }
             KeyCode::Enter => self.set_default_provider(),
             KeyCode::Char('a') | KeyCode::Char('A') => {
-                return Ok(ScreenAction::SwitchTo(ScreenType::ProviderAddWizard));
+                self.message = Some("Provider wizard removed. Use 'M' to manually add providers.".to_string());
             }
             KeyCode::Char('m') | KeyCode::Char('M') => self.start_add(),
             KeyCode::Char('e') | KeyCode::Char('E') => self.start_edit(),
@@ -889,11 +884,6 @@ impl EditState {
                 official: false,
                 protected: false,
                 custom: true,
-                support_modes: Vec::new(),
-                validation_endpoint: None,
-                category: None,
-                website: None,
-                regions: Vec::new(),
             },
             description: String::new(),
             compat: [false, false, false],
@@ -924,11 +914,6 @@ impl EditState {
                 official: provider.official,
                 protected: provider.protected,
                 custom: provider.custom,
-                support_modes: provider.support_modes.clone(),
-                validation_endpoint: provider.validation_endpoint.clone(),
-                category: provider.category.clone(),
-                website: provider.website.clone(),
-                regions: provider.regions.clone(),
             },
             description: provider.description.clone(),
             compat: [
@@ -963,12 +948,7 @@ impl EditState {
             official: self.meta.official,
             protected: self.meta.protected,
             custom: self.meta.custom,
-            support_modes: self.meta.support_modes.clone(),
             compatible_with: self.compatibility_vec(),
-            validation_endpoint: self.meta.validation_endpoint.clone(),
-            category: self.meta.category.clone(),
-            website: self.meta.website.clone(),
-            regions: self.meta.regions.clone(),
             env,
         };
 
@@ -1205,9 +1185,8 @@ mod tests {
         let action = screen
             .handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))
             .expect("handle key");
-        assert!(matches!(
-            action,
-            ScreenAction::SwitchTo(ScreenType::ProviderAddWizard)
-        ));
+        // 'a' key now shows a message instead of switching to wizard
+        assert!(matches!(action, ScreenAction::None));
+        assert!(screen.message.is_some());
     }
 }

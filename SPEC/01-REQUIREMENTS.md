@@ -1,7 +1,7 @@
-# Requirements Specification - v0.x.x
+# Requirements Specification - v0.1.0
 
 ## Version Information
-- Current version: v0.1.0-dev
+- Current version: v0.1.0
 - Start date: 2025-11-08
 - Based on: Initial development
 

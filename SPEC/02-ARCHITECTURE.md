@@ -1,9 +1,9 @@
-# System Architecture Design - v0.x.x
+# System Architecture Design - v0.1.0
 
 ## Version Information
-- Current architecture version: v0
-- Last updated: 2025-11-12
-- Based on: Initial development (v0.1.0)
+- Current architecture version: v0.1.0
+- Last updated: 2025-11-14
+- Based on: Initial development
 
 ---
 

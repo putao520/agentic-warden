@@ -196,11 +196,13 @@ Summary: 2 completed, 1 failed, 0 running
 
 ## MCP (Model Context Protocol) API
 
-### API-006: MCP Server Interface
+### API-006: MCP Server Interface (Intelligent Routing)
 **Version**: v0.1.0+
 **Status**: 🟢 Implemented
-**Related**: REQ-007, ARCH-007
+**Related**: REQ-012, ARCH-012
 **Protocol**: JSON-RPC 2.0 over stdio
+
+**Note**: The MCP server implements intelligent routing to underlying MCP servers, not direct process management tools.
 
 #### Server Capabilities
 ```json
@@ -213,85 +215,44 @@ Summary: 2 completed, 1 failed, 0 running
   },
   "tools": [
     {
-      "name": "monitor_processes",
-      "description": "Monitor AI CLI processes",
+      "name": "intelligent_route",
+      "description": "Intelligently route user requests to the best MCP tool",
       "inputSchema": {
         "type": "object",
         "properties": {
-          "filter": {
+          "user_request": {
             "type": "string",
-            "description": "Filter by AI CLI type (optional)"
-          }
-        }
-      }
-    },
-    {
-      "name": "get_process_tree",
-      "description": "Get process tree information",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "pid": {
+            "description": "Natural language user request describing what to do"
+          },
+          "session_id": {
+            "type": "string",
+            "description": "Optional session ID for context"
+          },
+          "max_candidates": {
             "type": "integer",
-            "description": "Process ID to analyze"
+            "description": "Maximum number of tool candidates to consider",
+            "default": 5
           }
         },
-        "required": ["pid"]
+        "required": ["user_request"]
       }
     },
     {
-      "name": "terminate_process",
-      "description": "Terminate AI CLI process",
+      "name": "get_method_schema",
+      "description": "Get the JSON schema for a specific MCP method",
       "inputSchema": {
         "type": "object",
         "properties": {
-          "pid": {
-            "type": "integer",
-            "description": "Process ID to terminate"
+          "mcp_server": {
+            "type": "string",
+            "description": "MCP server name"
           },
-          "graceful": {
-            "type": "boolean",
-            "description": "Attempt graceful termination",
-            "default": true
+          "tool_name": {
+            "type": "string",
+            "description": "Tool/method name to query"
           }
         },
-        "required": ["pid"]
-      }
-    },
-    {
-      "name": "get_provider_status",
-      "description": "Get provider configuration status",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "provider": {
-            "type": "string",
-            "description": "Specific provider name (optional)"
-          }
-        }
-      }
-    },
-    {
-      "name": "start_ai_cli",
-      "description": "Start AI CLI with prompt",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "ai_type": {
-            "type": "string",
-            "enum": ["codex", "claude", "gemini"],
-            "description": "AI CLI type"
-          },
-          "prompt": {
-            "type": "string",
-            "description": "Task prompt"
-          },
-          "provider": {
-            "type": "string",
-            "description": "Provider name (optional)"
-          }
-        },
-        "required": ["ai_type", "prompt"]
+        "required": ["mcp_server", "tool_name"]
       }
     }
   ]
@@ -300,16 +261,17 @@ Summary: 2 completed, 1 failed, 0 running
 
 #### Tool Call Examples
 
-**monitor_processes**:
+**intelligent_route** - Route request to appropriate MCP tool:
 ```json
 {
   "jsonrpc": "2.0",
   "id": "req-001",
   "method": "tools/call",
   "params": {
-    "name": "monitor_processes",
+    "name": "intelligent_route",
     "arguments": {
-      "filter": "claude"
+      "user_request": "Check git status and commit all changes",
+      "session_id": "session-123"
     }
   }
 }
@@ -324,26 +286,41 @@ Summary: 2 completed, 1 failed, 0 running
     "content": [
       {
         "type": "text",
-        "text": "Found 2 running claude processes:\n- PID 1234: claude ask \"Write code\" (Provider: openrouter)\n- PID 5678: claude --help (Interactive mode)"
+        "text": "{\"success\": true, \"message\": \"Successfully executed git operations\", \"selected_tool\": {\"mcp_server\": \"git-server\", \"tool_name\": \"git_status\"}, \"result\": {\"output\": \"On branch main\\nChanges not staged for commit:\\n  modified:   src/main.rs\"}}"
       }
     ]
   }
 }
 ```
 
-**start_ai_cli**:
+**get_method_schema** - Get tool schema:
 ```json
 {
   "jsonrpc": "2.0",
   "id": "req-002",
   "method": "tools/call",
   "params": {
-    "name": "start_ai_cli",
+    "name": "get_method_schema",
     "arguments": {
-      "ai_type": "gemini",
-      "prompt": "Explain machine learning",
-      "provider": "litellm"
+      "mcp_server": "git-server",
+      "tool_name": "git_commit"
     }
+  }
+}
+```
+
+**Response**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-002",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"name\": \"git_commit\", \"description\": \"Commit changes to git repository\", \"inputSchema\": {\"type\": \"object\", \"properties\": {\"message\": {\"type\": \"string\"}}, \"required\": [\"message\"]}}"
+      }
+    ]
   }
 }
 ```
