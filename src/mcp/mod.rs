@@ -1,5 +1,5 @@
-mod capability_detector;
-mod dynamic_tools;
+pub mod capability_detector;
+pub mod dynamic_tools;
 
 use agentic_warden::mcp_routing::{
     models::{

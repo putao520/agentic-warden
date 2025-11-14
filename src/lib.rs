@@ -10,6 +10,7 @@ pub mod core;
 pub mod error;
 pub mod hooks;
 pub mod logging;
+pub mod mcp;
 pub mod mcp_routing;
 pub mod memory;
 pub mod platform;
