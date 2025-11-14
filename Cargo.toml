@@ -17,8 +17,10 @@ path = "src/lib.rs"
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-shared_hashmap = "0.1.2"
-shared_memory = "0.12"
+shared_hashmap = "0.1.2"      # TODO: Replace with file-based shared state implementation
+shared_memory = "0.12"         # TODO: Replace with file-based shared state implementation
+memmap2 = "0.9.4"              # Safe memory-mapped files (for future migration)
+fs4 = "0.8.1"                  # Cross-platform file locking (for future migration)
 thiserror = "1.0"
 uuid = { version = "1", features = ["v4"] }
 raw_sync = "0.1.5"

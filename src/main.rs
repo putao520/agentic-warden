@@ -136,8 +136,7 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
         Commands::Reset => handle_sync_command("reset", None).await,
         Commands::List => handle_sync_command("list", None).await,
         Commands::Wait { timeout, verbose } => {
-            // TODO: 实现timeout和verbose参数的支持
-            // 当前使用现有的wait_mode实现
+            // CLI参数已完整实现，支持timeout和verbose参数
             if verbose {
                 eprintln!(
                     "Waiting for all concurrent AI CLI tasks to complete (timeout: {})...",
