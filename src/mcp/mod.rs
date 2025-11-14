@@ -97,17 +97,71 @@ impl AgenticWardenMcpServer {
 
     #[tool(
         name = "intelligent_route",
-        description = "Route the user request to the best MCP tool and execute it automatically."
+        description = "Route the user request to the best MCP tool. Supports dynamic registration, auto-execution, or query modes."
     )]
     pub async fn intelligent_route_tool(
         &self,
         params: Parameters<IntelligentRouteRequest>,
     ) -> Result<Json<IntelligentRouteResponse>, String> {
-        self.router
-            .intelligent_route(params.0)
+        use rmcp::model::ToolListChangedNotification;
+
+        let mut request = params.0;
+
+        // Auto-detect mode based on client capabilities if not explicitly set
+        if matches!(request.mode, crate::mcp_routing::models::RouteMode::Auto) {
+            if let Some(caps) = self.client_capabilities.read().await.as_ref() {
+                if caps.supports_dynamic_tools {
+                    // Client supports dynamic tools, use dynamic mode
+                    request.mode = crate::mcp_routing::models::RouteMode::Dynamic;
+                }
+            }
+        }
+
+        let mut response = self.router
+            .intelligent_route(request)
             .await
-            .map(Json)
-            .map_err(|err| err.to_string())
+            .map_err(|err| err.to_string())?;
+
+        // Handle dynamic registration mode
+        if matches!(params.0.mode, crate::mcp_routing::models::RouteMode::Dynamic) {
+            if let Some(ref selected) = response.selected_tool {
+                // Get the tool schema
+                let schema_response = self.router
+                    .get_method_schema(&selected.mcp_server, &selected.tool_name)
+                    .await
+                    .map_err(|err| err.to_string())?;
+
+                if let Some(schema) = schema_response.schema {
+                    // Register the tool dynamically
+                    let description = schema_response.description
+                        .unwrap_or_else(|| selected.rationale.clone());
+
+                    let is_new = self.dynamic_tools.register_tool(
+                        selected.mcp_server.clone(),
+                        selected.tool_name.clone(),
+                        description.clone(),
+                        schema.clone(),
+                    ).await;
+
+                    // Send notification if this is a new tool
+                    if is_new {
+                        // Note: We can't send notification here because we don't have access to peer
+                        // This will be handled by implementing a list_tools handler that
+                        // returns dynamic tools, and the notification will be sent from there
+                        eprintln!("📝 Dynamically registered tool: {}", selected.tool_name);
+                    }
+
+                    response.tool_schema = Some(schema);
+                    response.dynamically_registered = true;
+                    response.message = format!(
+                        "Tool '{}' has been registered. You can now call it with the provided schema.",
+                        selected.tool_name
+                    );
+                }
+            }
+        }
+
+        Ok(Json(response))
     }
 
     #[tool(

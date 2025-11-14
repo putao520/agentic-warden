@@ -98,6 +98,8 @@ impl IntelligentRouter {
                 result: None,
                 alternatives: Vec::new(),
                 conversation_context: Vec::new(),
+                tool_schema: None,
+                dynamically_registered: false,
             });
         }
 
@@ -122,6 +124,8 @@ impl IntelligentRouter {
                 result: None,
                 alternatives: Vec::new(),
                 conversation_context: Vec::new(),
+                tool_schema: None,
+                dynamically_registered: false,
             });
         }
 
@@ -140,12 +144,54 @@ impl IntelligentRouter {
             })
             .await?;
 
-        let start = Instant::now();
-        let execution = self
-            .connection_pool
-            .call_tool(&decision.server, &decision.tool, decision.arguments.clone())
-            .await;
-        let duration = start.elapsed().as_millis();
+        use models::RouteMode;
+
+        // For Query and Dynamic modes, don't execute the tool
+        let (result, execute_message) = match request.mode {
+            RouteMode::Auto => {
+                // Execute the tool in auto mode
+                let start = Instant::now();
+                let execution = self
+                    .connection_pool
+                    .call_tool(&decision.server, &decision.tool, decision.arguments.clone())
+                    .await;
+                let duration = start.elapsed().as_millis();
+
+                match execution {
+                    Ok(output) => (
+                        Some(RouteExecutionResult {
+                            mcp_server: decision.server.clone(),
+                            tool_name: decision.tool.clone(),
+                            duration_ms: duration,
+                            output,
+                            raw_stdout: None,
+                        }),
+                        "Tool executed successfully".to_string(),
+                    ),
+                    Err(err) => {
+                        return Ok(IntelligentRouteResponse {
+                            success: false,
+                            confidence: decision.confidence,
+                            message: format!("Tool execution failed: {err}"),
+                            selected_tool: None,
+                            result: None,
+                            alternatives: Vec::new(),
+                            conversation_context,
+                            tool_schema: None,
+                            dynamically_registered: false,
+                        });
+                    }
+                }
+            }
+            RouteMode::Dynamic => (
+                None,
+                format!("Selected tool: {}::{}", decision.server, decision.tool),
+            ),
+            RouteMode::Query => (
+                None,
+                "Tool suggestion ready (not executed)".to_string(),
+            ),
+        };
 
         if let Some(session) = request.session_id.as_ref() {
             let record = ConversationRecord::new(
@@ -157,47 +203,32 @@ impl IntelligentRouter {
             self.history.append(record, embed.clone())?;
         }
 
-        match execution {
-            Ok(output) => Ok(IntelligentRouteResponse {
-                success: true,
-                confidence: decision.confidence,
-                message: "Tool executed successfully".into(),
-                selected_tool: Some(SelectedRoute {
-                    mcp_server: decision.server.clone(),
-                    tool_name: decision.tool.clone(),
-                    arguments: decision.arguments,
-                    rationale: decision.rationale.clone(),
-                }),
-                result: Some(RouteExecutionResult {
-                    mcp_server: decision.server,
-                    tool_name: decision.tool,
-                    duration_ms: duration,
-                    output,
-                    raw_stdout: None,
-                }),
-                alternatives: candidate_infos
-                    .into_iter()
-                    .skip(1)
-                    .take(2)
-                    .map(|cand| SelectedRoute {
-                        mcp_server: cand.server,
-                        tool_name: cand.tool,
-                        arguments: Value::Null,
-                        rationale: cand.description,
-                    })
-                    .collect(),
-                conversation_context,
+        Ok(IntelligentRouteResponse {
+            success: true,
+            confidence: decision.confidence,
+            message: execute_message,
+            selected_tool: Some(SelectedRoute {
+                mcp_server: decision.server.clone(),
+                tool_name: decision.tool.clone(),
+                arguments: decision.arguments,
+                rationale: decision.rationale.clone(),
             }),
-            Err(err) => Ok(IntelligentRouteResponse {
-                success: false,
-                confidence: decision.confidence,
-                message: format!("Tool execution failed: {err}"),
-                selected_tool: None,
-                result: None,
-                alternatives: Vec::new(),
-                conversation_context,
-            }),
-        }
+            result,
+            alternatives: candidate_infos
+                .into_iter()
+                .skip(1)
+                .take(2)
+                .map(|cand| SelectedRoute {
+                    mcp_server: cand.server,
+                    tool_name: cand.tool,
+                    arguments: Value::Null,
+                    rationale: cand.description,
+                })
+                .collect(),
+            conversation_context,
+            tool_schema: None,
+            dynamically_registered: false,
+        })
     }
 
     pub async fn get_method_schema(
