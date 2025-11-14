@@ -459,7 +459,7 @@ Agentic-Warden MUST provide `update` command to manage AI CLI tools (codex, clau
 **Related**: ARCH-012, DATA-012, API-012
 
 **Description**:
-Agentic-Warden MUST provide an intelligent MCP (Model Context Protocol) routing system that acts as a meta-MCP gateway, using rmcp client functionality to connect to multiple MCP servers and provide intelligent tool discovery, clustering-based routing, and LLM-powered tool selection. This system minimizes context usage for the main AI while maximizing tool discovery and routing efficiency.
+Agentic-Warden MUST provide an intelligent MCP (Model Context Protocol) routing system that acts as a meta-MCP gateway with dual-mode architecture: (1) **Dynamic registration mode** for clients supporting notifications/tools/list_changed (primary, 98% token reduction), and (2) **Two-phase negotiation mode** for legacy clients (fallback). The system uses rmcp client functionality to connect to multiple MCP servers, provides intelligent tool discovery, LLM-powered tool selection, and minimizes context usage while maximizing routing efficiency.
 
 **Acceptance Criteria**:
 
@@ -481,42 +481,63 @@ Agentic-Warden MUST provide an intelligent MCP (Model Context Protocol) routing 
 - [x] Provide semantic search capabilities with configurable similarity thresholds
 - [x] Memory-only MCP index rebuilt on startup from .mcp.json configuration
 
-#### 4.3 智能路由算法
-- [x] Implement two-stage vector search: tool-level then method-level
-- [x] Provide clustering algorithm for grouping similar tools/methods (top-k + threshold)
-- [x] Support configurable clustering thresholds and ranking parameters
-- [x] Integrate internal LLM for final tool/method selection decisions
-- [x] Support ambiguous case handling with multiple option presentation
-- [x] Provide route caching and performance optimization
+#### 4.3 客户端能力检测
+- [x] Detect MCP client capabilities at initialization via test-based approach
+- [x] Test support for dynamic tool registration (notifications/tools/list_changed)
+- [x] Store client name, version, and capability flags
+- [x] Auto-select routing mode based on detected capabilities
+- [x] Log client connection details and supported features
+- [x] Graceful fallback for unknown or legacy clients
 
-#### 4.4 RMCP客户端集成
+#### 4.4 智能路由算法 (三种模式)
+- [x] **Auto模式** (默认/传统): Two-stage vector search + LLM decision + immediate execution
+  - [x] Tool-level search → Method-level search → LLM selection → Execute → Return result
+  - [x] Used for backward compatibility and simple workflows
+- [x] **Dynamic模式** (主模式): Dynamic tool registration for capable clients
+  - [x] Route + LLM decision → Get schema → Register tool → Return schema
+  - [x] Main AI calls registered tool with full context for accurate parameters
+  - [x] 98% token reduction (50k → 900 tokens) by exposing minimal base tools
+  - [x] Auto-enabled when client supports notifications/tools/list_changed
+- [x] **Query模式** (回退): Two-phase negotiation for legacy clients
+  - [x] Phase 1: Route + return suggestions (no execution)
+  - [x] Phase 2: AI reviews → calls execute_tool with confirmed parameters
+  - [x] Fallback for clients without dynamic registration support
+- [x] Two-stage vector search: tool-level then method-level
+- [x] LLM-powered final selection with confidence scoring
+- [x] FastEmbed for local text embedding generation (AllMiniLML6V2)
+
+#### 4.5 动态工具管理
+- [x] DynamicToolManager for runtime tool registration
+- [x] Register/unregister tools on-demand based on routing decisions
+- [x] Track tool → MCP server mappings
+- [x] Send notifications/tools/list_changed to capable clients
+- [x] Maintain minimal base tool set to reduce token consumption
+- [x] Clear registered tools when no longer needed
+
+#### 4.6 统一MCP接口 (4个工具)
+- [x] **intelligent_route**: Multi-mode routing with auto/dynamic/query support
+  - [x] Accepts: user_request, session_id, mode, max_candidates
+  - [x] Returns: selected_tool, result (Auto), tool_schema (Dynamic), alternatives
+- [x] **execute_tool**: Execute specific tool with confirmed parameters (Query mode)
+  - [x] Accepts: mcp_server, tool_name, arguments, session_id
+  - [x] Returns: execution result with timing and output
+- [x] **get_method_schema**: Return JSON schema for specific tool
+- [x] **search_history**: Semantic search over conversation history
+
+#### 4.7 RMCP客户端集成
 - [x] Use rmcp library for dynamic MCP server connections
 - [x] Maintain connection pool with health monitoring and auto-reconnection
 - [x] Support concurrent MCP server operations with proper isolation
 - [x] Provide tool schema discovery and caching from connected MCPs
 - [x] Handle MCP server lifecycle (start, stop, restart, health checks)
 
-#### 4.5 内部LLM集成
-- [x] Integrate Ollama for internal LLM operations (separate from embedding service)
-- [x] Support configurable LLM endpoint via environment variable (`AGENTIC_WARDEN_LLM_ENDPOINT`)
-- [x] Support configurable LLM model via environment variable (`AGENTIC_WARDEN_LLM_MODEL`)
+#### 4.8 内部LLM集成
+- [x] Integrate Ollama for internal LLM operations (tool selection decisions)
+- [x] Support configurable LLM endpoint via environment variable
+- [x] Support configurable LLM model via environment variable
 - [x] Implement tool selection prompt engineering and response parsing
 - [x] Provide clustering analysis and decision-making capabilities
 - [x] Handle LLM fallback and error scenarios gracefully
-
-#### 4.6 统一MCP接口
-- [x] Expose only two methods to external AI: `intelligent_route` and `get_method_schema`
-- [x] Provide transparent tool execution - external AI only sees final results
-- [x] Support automatic method execution after routing decision
-- [x] Provide method schema query for complex cases requiring manual selection
-- [x] Maintain MCP protocol compliance for external integration
-
-#### 4.7 监控和维护
-- [x] Provide MCP server health monitoring and status reporting
-- [x] Support route decision logging and performance metrics
-- [x] Provide configuration validation and error reporting
-- [x] Support hot-reload of MCP configurations without service restart
-- [x] Provide diagnostic tools for troubleshooting routing decisions
 
 **Technical Constraints**:
 
