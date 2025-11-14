@@ -1,12 +1,16 @@
+mod capability_detector;
+
 use agentic_warden::mcp_routing::{
     models::{IntelligentRouteRequest, IntelligentRouteResponse, MethodSchemaResponse},
     IntelligentRouter,
 };
 use agentic_warden::memory::{ConversationHistoryStore, ConversationSearchResult};
+use capability_detector::ClientCapabilities;
 use std::future::Future;
 use rmcp::{
     handler::server::tool::{Parameters, ToolRouter},
     handler::server::ServerHandler,
+    model::{Implementation, InitializeRequestParam, InitializeResult, ServerCapabilities},
     tool, tool_handler, tool_router, Json, ServiceExt,
 };
 use schemars::JsonSchema;
@@ -14,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::path::PathBuf;
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+use tokio::sync::RwLock;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct MethodSchemaParams {
@@ -40,6 +45,8 @@ pub struct AgenticWardenMcpServer {
     tool_router: ToolRouter<Self>,
     embedder: Arc<TextEmbedding>,
     history_store: Arc<ConversationHistoryStore>,
+    // Client capability detection
+    client_capabilities: Arc<RwLock<Option<ClientCapabilities>>>,
 }
 
 #[tool_router]
@@ -68,6 +75,7 @@ impl AgenticWardenMcpServer {
             tool_router: Self::tool_router(),
             embedder: Arc::new(embedder),
             history_store: Arc::new(history_store),
+            client_capabilities: Arc::new(RwLock::new(None)),
         })
     }
 
@@ -152,4 +160,41 @@ impl AgenticWardenMcpServer {
 }
 
 #[tool_handler(router = self.tool_router)]
-impl ServerHandler for AgenticWardenMcpServer {}
+impl ServerHandler for AgenticWardenMcpServer {
+    async fn initialize(
+        &self,
+        request: InitializeRequestParam,
+        _context: rmcp::handler::RequestContext<rmcp::service::RoleServer>,
+    ) -> Result<InitializeResult, rmcp::McpError> {
+        // Detect client capabilities
+        let capabilities = ClientCapabilities::from_init_request(&request);
+
+        eprintln!("🔌 MCP Client connected:");
+        eprintln!("   Name: {}", capabilities.client_name);
+        eprintln!("   Version: {}", capabilities.client_version);
+        eprintln!("   Dynamic tools: {}",
+            if capabilities.supports_dynamic_tools {
+                "✅ Supported (using dynamic registration)"
+            } else {
+                "⚠️  Not supported (using fallback mode)"
+            }
+        );
+
+        // Save capabilities
+        *self.client_capabilities.write().await = Some(capabilities);
+
+        // Return server info and capabilities
+        Ok(InitializeResult {
+            protocol_version: request.protocol_version,
+            capabilities: ServerCapabilities::builder()
+                .enable_tools()
+                .enable_tool_list_changed()
+                .build(),
+            server_info: Implementation {
+                name: "agentic-warden".to_string(),
+                version: env!("CARGO_PKG_VERSION").to_string(),
+            },
+            instructions: None,
+        })
+    }
+}
