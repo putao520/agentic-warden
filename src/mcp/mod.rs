@@ -54,6 +54,8 @@ pub struct AgenticWardenMcpServer {
     client_capabilities: Arc<RwLock<Option<ClientCapabilities>>>,
     // Dynamic tool registration manager
     dynamic_tools: DynamicToolManager,
+    // Store peer for sending notifications
+    peer: Arc<RwLock<Option<rmcp::service::server::ClientSink>>>,
 }
 
 #[tool_router]
@@ -84,6 +86,7 @@ impl AgenticWardenMcpServer {
             history_store: Arc::new(history_store),
             client_capabilities: Arc::new(RwLock::new(None)),
             dynamic_tools: DynamicToolManager::new(),
+            peer: Arc::new(RwLock::new(None)),
         })
     }
 
@@ -150,10 +153,17 @@ impl AgenticWardenMcpServer {
 
                     // Send notification if this is a new tool
                     if is_new {
-                        // Note: We can't send notification here because we don't have access to peer
-                        // This will be handled by implementing a list_tools handler that
-                        // returns dynamic tools, and the notification will be sent from there
                         eprintln!("📝 Dynamically registered tool: {}", selected.tool_name);
+
+                        // Send ToolListChangedNotification to client
+                        if let Some(peer) = self.peer.read().await.as_ref() {
+                            let notification = rmcp::model::ToolListChangedNotification::default();
+                            if let Err(e) = peer.send_notification(notification.into()).await {
+                                eprintln!("   ⚠️  Failed to send ToolListChangedNotification: {}", e);
+                            } else {
+                                eprintln!("   ✅ Sent ToolListChangedNotification to client");
+                            }
+                        }
                     }
 
                     response.tool_schema = Some(schema);
@@ -240,6 +250,59 @@ impl AgenticWardenMcpServer {
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for AgenticWardenMcpServer {
+    async fn list_tools(
+        &self,
+        _request: Option<rmcp::model::PaginatedRequestParam>,
+        _context: rmcp::handler::RequestContext<rmcp::service::RoleServer>,
+    ) -> Result<rmcp::model::ListToolsResult, rmcp::McpError> {
+        // Get base tools from tool_router
+        let mut tools: Vec<rmcp::model::Tool> = self.tool_router.tools().to_vec();
+
+        // Add dynamically registered tools
+        let dynamic_tools = self.dynamic_tools.list_tools().await;
+        tools.extend(dynamic_tools);
+
+        Ok(rmcp::model::ListToolsResult {
+            tools,
+            next_cursor: None,
+        })
+    }
+
+    async fn call_tool(
+        &self,
+        request: rmcp::model::CallToolRequestParam,
+        _context: rmcp::handler::RequestContext<rmcp::service::RoleServer>,
+    ) -> Result<rmcp::model::CallToolResult, rmcp::McpError> {
+        // Check if this is a dynamically registered tool
+        if let Some(mcp_server) = self.dynamic_tools.get_server(&request.name).await {
+            // Proxy call to the underlying MCP server
+            let result = self
+                .router
+                .execute_tool(crate::mcp_routing::models::ExecuteToolRequest {
+                    mcp_server,
+                    tool_name: request.name.clone(),
+                    arguments: request.arguments.unwrap_or(serde_json::Value::Object(Default::default())),
+                    session_id: None,
+                })
+                .await
+                .map_err(|e| rmcp::McpError::internal_error(&e.to_string()))?;
+
+            if result.success {
+                Ok(rmcp::model::CallToolResult {
+                    content: vec![rmcp::model::Content::text(
+                        serde_json::to_string_pretty(&result.result).unwrap_or_default()
+                    )],
+                    is_error: None,
+                })
+            } else {
+                Err(rmcp::McpError::internal_error(&result.message))
+            }
+        } else {
+            // Not a dynamic tool, shouldn't happen (base tools handled by tool_router)
+            Err(rmcp::McpError::method_not_found::<rmcp::model::CallToolRequestMethod>())
+        }
+    }
+
     async fn initialize(
         &self,
         request: InitializeRequestParam,
@@ -282,6 +345,9 @@ impl ServerHandler for AgenticWardenMcpServer {
 
         // Save initial capabilities
         *self.client_capabilities.write().await = Some(capabilities);
+
+        // Save peer for sending notifications later
+        *self.peer.write().await = Some(context.peer.clone());
 
         // Return server info and capabilities
         Ok(InitializeResult {
