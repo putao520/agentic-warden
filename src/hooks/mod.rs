@@ -3,10 +3,12 @@
 //! This module handles Claude Code hook events (SessionEnd, PreCompact) to automatically
 //! capture and index conversation history into the vector database for semantic search.
 
+mod config;
 mod handler;
 mod input;
 mod parser;
 
+pub use config::{install_hooks, uninstall_hooks, ClaudeHooksConfig};
 pub use handler::HookHandler;
 pub use input::ClaudeCodeHookInput;
 pub use parser::ClaudeCodeTranscriptParser;

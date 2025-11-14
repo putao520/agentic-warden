@@ -355,6 +355,23 @@ async fn handle_mcp_command(action: McpAction) -> Result<ExitCode, String> {
                 .with_target(false)
                 .init();
 
+            // Install Claude Code hooks before starting MCP server
+            if let Err(e) = agentic_warden::hooks::install_hooks() {
+                eprintln!("⚠️  Failed to install Claude Code hooks: {}", e);
+                eprintln!("    The MCP server will still work, but conversation history won't be automatically captured.");
+            }
+
+            // Setup cleanup guard to ensure hooks are uninstalled even on panic/signal
+            struct HooksGuard;
+            impl Drop for HooksGuard {
+                fn drop(&mut self) {
+                    if let Err(e) = agentic_warden::hooks::uninstall_hooks() {
+                        eprintln!("⚠️  Failed to uninstall Claude Code hooks: {}", e);
+                    }
+                }
+            }
+            let _hooks_guard = HooksGuard;
+
             // 创建MCP服务器（使用InProcessRegistry）
             // Provider配置通过supervisor模块管理，不需要在MCP server中直接管理
             let mcp_server = AgenticWardenMcpServer::bootstrap()
@@ -382,6 +399,7 @@ async fn handle_mcp_command(action: McpAction) -> Result<ExitCode, String> {
                     transport
                 )),
             }
+            // HooksGuard automatically uninstalls hooks when dropped
         }
         McpAction::Test => {
             // 测试MCP配置
