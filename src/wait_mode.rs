@@ -6,7 +6,7 @@ use crate::core::process_tree::ProcessTreeError;
 use crate::error::RegistryError;
 use crate::logging::warn;
 use crate::platform;
-use crate::registry_factory::RegistryFactory;
+use crate::registry_factory::{create_cli_registry, create_mcp_registry};
 use crate::storage::{CleanupReason, RegistryEntry};
 use crate::task_record::TaskRecord;
 use crate::task_record::TaskStatus;
@@ -26,9 +26,8 @@ pub enum WaitError {
 }
 
 pub fn run() -> Result<(), WaitError> {
-    let factory = RegistryFactory::instance();
-    let cli_registry = factory.get_cli_registry()?;
-    let mcp_registry = factory.get_mcp_registry();
+    let cli_registry = create_cli_registry()?;
+    let mcp_registry = create_mcp_registry();
     let interval = read_interval();
     let start = Instant::now();
     let mut processed_pids: HashSet<u32> = HashSet::new();

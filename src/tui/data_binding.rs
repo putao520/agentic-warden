@@ -11,7 +11,7 @@ use anyhow::{Context, Error, Result};
 
 use crate::{
     logging::debug, provider::manager::ProviderManager, registry_factory::CliRegistry,
-    registry_factory::RegistryFactory,
+    registry_factory::create_cli_registry,
 };
 
 use super::app_state::AppState;
@@ -77,7 +77,7 @@ impl DataBindingController {
         registry: &mut Option<CliRegistry>,
     ) -> Result<()> {
         if registry.is_none() {
-            match RegistryFactory::instance().get_cli_registry() {
+            match create_cli_registry() {
                 Ok(connected) => *registry = Some(connected),
                 Err(err) => {
                     return Err(Error::new(err).context("failed to connect CliRegistry"));

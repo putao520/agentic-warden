@@ -7,9 +7,9 @@ use crate::{
     task_record::{TaskRecord, TaskStatus},
 };
 use chrono::{DateTime, Duration, Utc};
+use dashmap::DashMap;
 use parking_lot::Mutex;
 use shared_hashmap::SharedMemoryHashMap;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 /// 任务注册表条目
@@ -74,15 +74,16 @@ pub trait TaskStorage: Send + Sync {
 
 /// 进程内任务存储（线程安全）
 /// 用于MCP启动的任务，不跨进程共享
-#[derive(Debug)]
+/// 使用DashMap提供高性能的并发访问
+#[derive(Debug, Clone)]
 pub struct InProcessStorage {
-    tasks: Arc<Mutex<HashMap<u32, TaskRecord>>>,
+    tasks: Arc<DashMap<u32, TaskRecord>>,
 }
 
 impl InProcessStorage {
     pub fn new() -> Self {
         Self {
-            tasks: Arc::new(Mutex::new(HashMap::new())),
+            tasks: Arc::new(DashMap::new()),
         }
     }
 }
@@ -95,8 +96,7 @@ impl Default for InProcessStorage {
 
 impl TaskStorage for InProcessStorage {
     fn register(&self, pid: u32, record: &TaskRecord) -> Result<(), RegistryError> {
-        let mut tasks = self.tasks.lock();
-        tasks.insert(pid, record.clone());
+        self.tasks.insert(pid, record.clone());
         Ok(())
     }
 
@@ -107,8 +107,7 @@ impl TaskStorage for InProcessStorage {
         exit_code: Option<i32>,
         completed_at: DateTime<Utc>,
     ) -> Result<(), RegistryError> {
-        let mut tasks = self.tasks.lock();
-        if let Some(record) = tasks.get_mut(&pid) {
+        if let Some(mut record) = self.tasks.get_mut(&pid) {
             record.status = TaskStatus::CompletedButUnread;
             record.result = result;
             record.exit_code = exit_code;
@@ -120,13 +119,13 @@ impl TaskStorage for InProcessStorage {
     }
 
     fn entries(&self) -> Result<Vec<RegistryEntry>, RegistryError> {
-        let tasks = self.tasks.lock();
-        Ok(tasks
+        Ok(self
+            .tasks
             .iter()
-            .map(|(&pid, record)| RegistryEntry {
-                pid,
-                key: pid.to_string(),
-                record: record.clone(),
+            .map(|entry| RegistryEntry {
+                pid: *entry.key(),
+                key: entry.key().to_string(),
+                record: entry.value().clone(),
             })
             .collect())
     }
@@ -144,12 +143,15 @@ impl TaskStorage for InProcessStorage {
         const MAX_AGE_HOURS: i64 = 12;
         let max_age = Duration::hours(MAX_AGE_HOURS);
 
-        let mut tasks = self.tasks.lock();
         let mut cleanup_events = Vec::new();
 
-        let pids_to_cleanup: Vec<(u32, CleanupReason)> = tasks
+        let pids_to_cleanup: Vec<(u32, CleanupReason)> = self
+            .tasks
             .iter()
-            .filter_map(|(&pid, record)| {
+            .filter_map(|entry| {
+                let pid = *entry.key();
+                let record = entry.value();
+
                 // 如果进程已不存在
                 if !is_process_alive(pid) {
                     // 如果任务未标记完成，补标记
@@ -173,7 +175,7 @@ impl TaskStorage for InProcessStorage {
             .collect();
 
         for (pid, cleanup_reason) in pids_to_cleanup {
-            if let Some(mut record) = tasks.remove(&pid) {
+            if let Some(mut record) = self.tasks.get_mut(&pid) {
                 record.status = TaskStatus::CompletedButUnread;
                 record.completed_at = Some(now);
                 record.cleanup_reason = Some(
@@ -185,12 +187,9 @@ impl TaskStorage for InProcessStorage {
                     .to_string(),
                 );
 
-                // 重新插入标记为完成
-                tasks.insert(pid, record.clone());
-
                 cleanup_events.push(CleanupEvent {
                     _pid: pid,
-                    record,
+                    record: record.clone(),
                     reason: cleanup_reason,
                 });
             }
@@ -200,10 +199,13 @@ impl TaskStorage for InProcessStorage {
     }
 
     fn get_completed_unread_tasks(&self) -> Result<Vec<(u32, TaskRecord)>, RegistryError> {
-        let mut tasks = self.tasks.lock();
-        let completed: Vec<(u32, TaskRecord)> = tasks
-            .iter_mut()
-            .filter_map(|(&pid, record)| {
+        let completed: Vec<(u32, TaskRecord)> = self
+            .tasks
+            .iter()
+            .filter_map(|entry| {
+                let pid = *entry.key();
+                let record = entry.value();
+
                 if record.status == TaskStatus::CompletedButUnread {
                     // 标记为已读（从映射中移除）
                     Some((pid, record.clone()))
@@ -215,17 +217,16 @@ impl TaskStorage for InProcessStorage {
 
         // 移除已读的任务
         for (pid, _) in &completed {
-            tasks.remove(pid);
+            self.tasks.remove(pid);
         }
 
         Ok(completed)
     }
 
     fn has_running_tasks(&self, filter: Option<&ProcessTreeInfo>) -> Result<bool, RegistryError> {
-        let tasks = self.tasks.lock();
-
         if let Some(tree_filter) = filter {
-            Ok(tasks.values().any(|record| {
+            Ok(self.tasks.iter().any(|entry| {
+                let record = entry.value();
                 record.status == TaskStatus::Running
                     && record
                         .process_tree
@@ -234,18 +235,20 @@ impl TaskStorage for InProcessStorage {
                         .unwrap_or(false)
             }))
         } else {
-            Ok(tasks
-                .values()
-                .any(|record| record.status == TaskStatus::Running))
+            Ok(self
+                .tasks
+                .iter()
+                .any(|entry| entry.value().status == TaskStatus::Running))
         }
     }
 }
 
 /// 跨进程任务存储（SharedMemory）
 /// 用于CLI启动的任务，支持跨进程共享
+#[derive(Debug, Clone)]
 pub struct SharedMemoryStorage {
     namespace: String,
-    map: Mutex<SharedMemoryHashMap<String, String>>,
+    map: Arc<Mutex<SharedMemoryHashMap<String, String>>>,
 }
 
 impl SharedMemoryStorage {
@@ -268,7 +271,7 @@ impl SharedMemoryStorage {
         let map = open_or_create(&namespace, SHARED_MEMORY_SIZE)?;
         Ok(Self {
             namespace,
-            map: Mutex::new(map),
+            map: Arc::new(Mutex::new(map)),
         })
     }
 
@@ -560,5 +563,158 @@ mod tests {
 
         assert_eq!(events.len(), 1);
         assert_eq!(events[0]._pid, 789);
+    }
+
+    #[cfg(test)]
+    mod concurrency_tests {
+        use super::*;
+        use std::collections::HashMap;
+        use std::sync::{Arc, Mutex as StdMutex};
+        use std::thread;
+        use std::time::Instant;
+
+        // 为了比较性能，创建一个使用Mutex<HashMap>的旧版InProcessStorage
+        #[derive(Debug)]
+        struct LegacyInProcessStorage {
+            tasks: Arc<StdMutex<HashMap<u32, TaskRecord>>>,
+        }
+
+        impl LegacyInProcessStorage {
+            fn new() -> Self {
+                Self {
+                    tasks: Arc::new(StdMutex::new(HashMap::new())),
+                }
+            }
+        }
+
+        impl TaskStorage for LegacyInProcessStorage {
+            fn register(&self, pid: u32, record: &TaskRecord) -> Result<(), RegistryError> {
+                let mut tasks = self.tasks.lock().unwrap();
+                tasks.insert(pid, record.clone());
+                Ok(())
+            }
+
+            fn entries(&self) -> Result<Vec<RegistryEntry>, RegistryError> {
+                let tasks = self.tasks.lock().unwrap();
+                Ok(tasks
+                    .iter()
+                    .map(|(&pid, record)| RegistryEntry {
+                        pid,
+                        key: pid.to_string(),
+                        record: record.clone(),
+                    })
+                    .collect())
+            }
+
+            // 简化的其他方法实现用于性能测试
+            fn mark_completed(
+                &self,
+                _pid: u32,
+                _result: Option<String>,
+                _exit_code: Option<i32>,
+                _completed_at: DateTime<Utc>,
+            ) -> Result<(), RegistryError> {
+                Ok(())
+            }
+
+            fn sweep_stale_entries<F, G>(
+                &self,
+                _now: DateTime<Utc>,
+                _is_process_alive: F,
+                _terminate_process: &G,
+            ) -> Result<Vec<CleanupEvent>, RegistryError> {
+                Ok(Vec::new())
+            }
+
+            fn get_completed_unread_tasks(&self) -> Result<Vec<(u32, TaskRecord)>, RegistryError> {
+                Ok(Vec::new())
+            }
+
+            fn has_running_tasks(&self, _filter: Option<&ProcessTreeInfo>) -> Result<bool, RegistryError> {
+                Ok(false)
+            }
+        }
+
+        #[test]
+        fn test_concurrent_performance_comparison() {
+            const NUM_THREADS: usize = 8;
+            const OPERATIONS_PER_THREAD: usize = 1000;
+            const NUM_PIDS: usize = NUM_THREADS * OPERATIONS_PER_THREAD;
+
+            let dashmap_storage = Arc::new(InProcessStorage::new());
+            let legacy_storage = Arc::new(LegacyInProcessStorage::new());
+
+            // 测试DashMap性能
+            let start = Instant::now();
+            let mut handles = Vec::new();
+
+            for thread_id in 0..NUM_THREADS {
+                let storage = Arc::clone(&dashmap_storage);
+                let handle = thread::spawn(move || {
+                    for i in 0..OPERATIONS_PER_THREAD {
+                        let pid = (thread_id * OPERATIONS_PER_THREAD + i) as u32;
+                        let record = TaskRecord::new(
+                            Utc::now(),
+                            format!("cmd_{}", pid),
+                            format!("/tmp/log_{}.log", pid),
+                            Some(pid),
+                        );
+                        storage.register(pid, &record).unwrap();
+                    }
+                });
+                handles.push(handle);
+            }
+
+            for handle in handles {
+                handle.join().unwrap();
+            }
+            let dashmap_duration = start.elapsed();
+
+            // 测试Mutex<HashMap>性能
+            let start = Instant::now();
+            let mut handles = Vec::new();
+
+            for thread_id in 0..NUM_THREADS {
+                let storage = Arc::clone(&legacy_storage);
+                let handle = thread::spawn(move || {
+                    for i in 0..OPERATIONS_PER_THREAD {
+                        let pid = (thread_id * OPERATIONS_PER_THREAD + i) as u32;
+                        let record = TaskRecord::new(
+                            Utc::now(),
+                            format!("cmd_{}", pid),
+                            format!("/tmp/log_{}.log", pid),
+                            Some(pid),
+                        );
+                        storage.register(pid, &record).unwrap();
+                    }
+                });
+                handles.push(handle);
+            }
+
+            for handle in handles {
+                handle.join().unwrap();
+            }
+            let legacy_duration = start.elapsed();
+
+            // 验证结果
+            let dashmap_entries = dashmap_storage.entries().unwrap();
+            let legacy_entries = legacy_storage.entries().unwrap();
+
+            assert_eq!(dashmap_entries.len(), NUM_PIDS);
+            assert_eq!(legacy_entries.len(), NUM_PIDS);
+
+            println!("=== 并发性能测试结果 ===");
+            println!("DashMap:   {:?} ({} 操作)", dashmap_duration, NUM_PIDS);
+            println!("Mutex<HashMap>: {:?} ({} 操作)", legacy_duration, NUM_PIDS);
+
+            if dashmap_duration < legacy_duration {
+                let speedup = legacy_duration.as_nanos() as f64 / dashmap_duration.as_nanos() as f64;
+                println!("DashMap 速度提升: {:.2}x", speedup);
+            }
+
+            // DashMap应该更快或至少不相差太大
+            assert!(dashmap_duration <= legacy_duration * 2,
+                   "DashMap performance regression detected");
+        }
     }
 }

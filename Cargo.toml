@@ -17,7 +17,10 @@ path = "src/lib.rs"
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-dashmap = "6.1.0"              # Modern concurrent HashMap for task registry
+shared_hashmap = "0.1.2"      # Current cross-process shared memory implementation
+shared_memory = "0.12"         # Shared memory backend
+crossbeam = "0.8.2"           # Modern concurrency primitives for safer implementation
+dashmap = "6.0"               # High-performance concurrent HashMap for in-process storage
 thiserror = "1.0"
 uuid = { version = "1", features = ["v4"] }
 raw_sync = "0.1.5"

@@ -3,7 +3,7 @@
 //! 澶勭悊 codex銆乧laude銆乬emini 绛?AI CLI 鐨勫惎鍔ㄥ拰绠＄悊
 
 use crate::cli_type::{parse_cli_selector_strict, CliType};
-use crate::registry_factory::RegistryFactory;
+use crate::registry_factory::create_cli_registry;
 use crate::supervisor;
 use anyhow::{anyhow, Result};
 use std::ffi::OsString;
@@ -28,7 +28,7 @@ impl AiCliCommand {
 
     /// 鎵ц AI CLI 鍛戒护
     pub async fn execute(&self) -> Result<ExitCode> {
-        let registry = RegistryFactory::instance().get_cli_registry()?;
+        let registry = create_cli_registry()?;
 
         // 妫€鏌ユ槸鍚︽槸浜や簰妯″紡锛堟棤鎻愮ず璇嶏級
         if self.prompt.is_empty() {

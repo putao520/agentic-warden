@@ -19,24 +19,40 @@ graph TB
         TUI[TUI Interface]
     end
 
-    subgraph "Agentic-Warden Core"
-        Parser[Command Parser]
-        Router[Command Router]
-        Supervisor[Process Supervisor]
-        Registry[Task Registry]
+    subgraph "AI WARDEN - Three Core Modules"
+
+        subgraph "1. External AI CLI Management"
+            ProcTracker[Process Tree Tracker]
+            ProviderMgr[Provider Manager]
+            TaskRegistry[Task Registry]
+        end
+
+        subgraph "2. CC Session Management"
+            MemoryMgr[Memory Manager]
+            ConvHistory[Conversation History]
+            SearchEngine[Semantic Search]
+        end
+
+        subgraph "3. MCP Proxy Routing"
+            MCPRouter[MCP Router]
+            ToolIndex[Tools Index]
+            LLMEngine[LLM Decision Engine]
+        end
     end
 
-    subgraph "Core Services"
-        ProcTracker[Process Tree Tracker]
-        ProviderMgr[Provider Manager]
+    subgraph "Supporting Services"
         SyncMgr[Sync Manager]
-        MCPsrv[MCP Server]
+        TUIEngine[TUI Engine]
+        CLIEngine[CLI Engine]
     end
 
     subgraph "External Services"
         AICLI1[codex CLI]
         AICLI2[claude CLI]
         AICLI3[gemini CLI]
+        MCPsrv1[MCP Server 1]
+        MCPsrv2[MCP Server 2]
+        ClaudeCode[Claude Code User]
         GoogleDrive[Google Drive API]
     end
 
@@ -68,6 +84,59 @@ graph TB
     Registry --> SharedMem
     SyncMgr --> LocalFS
 ```
+
+### Three Core Modules Architecture
+
+#### Module Independence and Relationships
+
+AI WARDEN的三大核心模块在功能上相互独立，各自服务于不同的业务场景：
+
+##### Module 1: External AI CLI Management
+**服务对象**: AI CLI用户和开发者
+**主要职责**:
+- 管理外部AI CLI工具（Claude、Gemini、Codex等）的生命周期
+- 提供商配置管理和环境变量注入
+- 跨进程任务跟踪和状态监控
+- 多AI CLI并发执行协调
+
+**数据流**:
+```
+用户命令 → CLI解析 → 提供商配置 → AI CLI启动 → 进程监控 → 任务完成
+```
+
+##### Module 2: CC Session Management
+**服务对象**: Claude Code用户
+**主要职责**:
+- 存储Claude Code的JSONL格式对话历史
+- 基于向量嵌入的语义搜索
+- session_id分组的会话管理
+- 提供历史对话检索MCP工具
+
+**数据流**:
+```
+Claude Code会话 → JSONL存储 → 向量化 → 语义索引 → 搜索检索 → 上下文返回
+```
+
+##### Module 3: MCP Proxy Routing
+**服务对象**: AI助手（Claude/Gemini/Codex）
+**主要职责**:
+- MCP服务器工具的向量化索引
+- 智能工具选择和路由决策
+- 两阶段搜索算法（工具级→方法级）
+- 统一的MCP接口对外提供服务
+
+**数据流**:
+```
+AI助手请求 → 语义搜索 → 工具聚类 → LLM决策 → 工具执行 → 结果返回
+```
+
+#### Module Integration Points
+
+虽然三大模块功能独立，但通过以下方式进行协作：
+
+1. **进程管理模块**为其他模块提供进程隔离和资源管理
+2. **会话管理模块**通过MCP接口向用户提供历史检索服务
+3. **路由模块**为AI助手提供智能工具选择能力
 
 ### Core Business Flows
 
@@ -439,31 +508,48 @@ impl ConfigPacker {
 
 ### [v0] Current Module Architecture
 
-#### Core Modules
+#### Three Core System Modules
 
-##### 1. Process Tracking (`src/core/process_tree.rs`)
-**Responsibility**: Identify AI CLI root processes and provide process isolation
-**Dependencies**: Platform-specific process APIs (winapi/procfs)
+AI WARDEN的核心系统由三大功能模块组成，每个模块负责独立的业务领域：
+
+##### 1. External AI CLI Management Module
+**Responsibility**: 外部AI CLI工具的启动、监控和管理
+**Core Components**:
+- Process Tracking (`src/core/process_tree.rs`) - AI CLI进程识别和隔离
+- Provider Management (`src/provider/`) - 第三方API提供商配置
+- Task Coordination (`src/storage/`, `src/registry/`) - 跨进程任务跟踪
+
 **Key Functions**:
-- `get_process_tree_info(pid)` - Build process chain with AI CLI detection
-- `detect_npm_ai_cli_type(pid)` - Identify NPM-based AI CLI tools
-- `find_ai_cli_root(process_chain)` - Locate AI CLI root process
+- AI CLI进程启动和生命周期管理
+- 提供商配置管理和环境变量注入
+- 任务状态监控和进程树跟踪
+- 多AI CLI并发执行协调
 
-##### 2. Provider Management (`src/provider/`)
-**Responsibility**: Manage third-party API provider configurations and injection
-**Dependencies**: Configuration files, environment variable APIs
-**Key Components**:
-- `ProviderManager` - Central provider registry and validation
-- `EnvInjector` - Environment variable injection for AI CLI processes
-- `NetworkDetector` - Network availability and proxy detection
+##### 2. CC (Claude Code) Session Management Module
+**Responsibility**: Claude Code用户会话历史的存储和语义搜索
+**Core Components**:
+- Conversation History Storage (`src/memory/history.rs`) - SahomeDB文件数据库
+- Semantic Search (`src/memory/`) - 向量化会话检索
+- MCP Tools - `search_history`, `get_session_todos`
 
-##### 3. Task Coordination (`src/storage/`, `src/registry/`)
-**Responsibility**: Cross-process task tracking and status management
-**Dependencies**: Shared memory, atomic operations
-**Key Components**:
-- `SharedMemoryStorage` - High-performance cross-process storage
-- `TaskRegistry` - Task lifecycle management
-- `UnifiedRegistry` - Unified interface for different storage backends
+**Key Features**:
+- JSONL格式会话记录存储
+- 基于session_id的会话分组管理
+- 语义相似度搜索历史对话
+- 工具使用记录和模式分析
+
+##### 3. MCP Proxy Routing Module
+**Responsibility**: 为AI助手提供智能MCP工具选择和路由服务
+**Core Components**:
+- MCP Tools Indexing (`src/mcp_routing/`) - MemVDB内存向量数据库
+- Intelligent Routing (`src/mcp_routing/`) - LLM辅助工具选择决策
+- RMCP Client Pool (`src/mcp_routing/`) - 动态MCP服务器连接管理
+
+**Key Features**:
+- 两阶段搜索：工具级→方法级精确匹配
+- 智能聚类算法和相似度阈值配置
+- 自动从.mcp.json重建路由索引
+- 统一的MCP接口对外提供服务
 
 ##### 4. Synchronization (`src/sync/`)
 **Responsibility**: Google Drive integration and configuration backup/restore
@@ -579,20 +665,26 @@ impl ConfigPacker {
 
 ```mermaid
 graph TB
-    subgraph "External AI Interface"
-        MainAI[Main AI CLI]
-        MCPInterface[MCP Interface]
+    subgraph "External Users"
+        MainAI[AI Assistant<br/>Claude/Gemini/Codex]
+        ClaudeUser[Claude Code User]
     end
 
-    subgraph "Agentic-Warden Core"
+    subgraph "AI WARDEN - Module 3: MCP Proxy Routing"
         IntelligentRouter[Intelligent MCP Router]
         LLMEngine[LLM Decision Engine]
-        FastEmbed[FastEmbed Service]
+        FastEmbedRouter[FastEmbed - Router]
     end
 
-    subgraph "Vector Storage Layer"
+    subgraph "AI WARDEN - Module 2: CC Session Management"
+        ConvHistory[Conversation History Store]
+        SearchEngine[Semantic Search Engine]
+        FastEmbedCC[FastEmbed - CC]
+    end
+
+    subgraph "Vector Storage Layers"
         MemVDB[MemVDB In-Memory<br/>MCP Tools/Methods]
-        SahomeDB[SahomeDB File Storage<br/>Conversation History]
+        SahomeDB[SahomeDB File Storage<br/>CC Conversation History]
     end
 
     subgraph "MCP Client Layer"
@@ -605,18 +697,35 @@ graph TB
         ConfigValidator[Schema Validator]
     end
 
-    MainAI --> MCPInterface
-    MCPInterface --> IntelligentRouter
+    %% MCP Routing Flow
+    MainAI --> IntelligentRouter
     IntelligentRouter --> MemVDB
     IntelligentRouter --> LLMEngine
-    IntelligentRouter --> FastEmbed
+    IntelligentRouter --> FastEmbedRouter
     IntelligentRouter --> RMCPClientPool
     RMCPClientPool --> MCPServers
-    FastEmbed --> MemVDB
-    FastEmbed --> SahomeDB
+    FastEmbedRouter --> MemVDB
+
+    %% CC Session Management Flow (Independent)
+    ClaudeUser --> ConvHistory
+    ClaudeUser --> SearchEngine
+    ConvHistory --> SahomeDB
+    SearchEngine --> FastEmbedCC
+    FastEmbedCC --> SahomeDB
+
+    %% Configuration
     MCPConfig --> ConfigValidator
     ConfigValidator --> IntelligentRouter
 ```
+
+#### Module Independence
+
+**重要说明**: CC会话管理模块与MCP路由模块在功能上完全独立：
+
+- **CC会话管理**: 服务于Claude Code用户，存储和检索历史对话
+- **MCP路由模块**: 服务于AI助手，智能选择和调用MCP工具
+- **无直接依赖**: 两个模块使用独立的向量存储和嵌入服务
+- **独立数据流**: 各自有不同的服务对象和数据用途
 
 #### Component Architecture Details
 

@@ -474,7 +474,11 @@ pub enum RegistryError {
     ProcessTree(String),
 }
 
-// Note: Removed shared_hashmap::Error conversion as we now use DashMap
+impl From<shared_hashmap::Error> for RegistryError {
+    fn from(value: shared_hashmap::Error) -> Self {
+        RegistryError::Map(value.to_string())
+    }
+}
 
 impl From<crate::core::process_tree::ProcessTreeError> for RegistryError {
     fn from(value: crate::core::process_tree::ProcessTreeError) -> Self {

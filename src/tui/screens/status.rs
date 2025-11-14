@@ -19,7 +19,7 @@ use ratatui::{
 
 use super::{Screen, ScreenAction};
 use crate::platform;
-use crate::registry_factory::{CliRegistry, RegistryFactory};
+use crate::registry_factory::{CliRegistry, create_cli_registry};
 use crate::task_record::{TaskRecord, TaskStatus};
 use crate::tui::app_state::{AppState, TaskSnapshot};
 
@@ -63,7 +63,7 @@ enum GroupKey {
 
 impl StatusScreen {
     pub fn new() -> Result<Self> {
-        let registry = RegistryFactory::instance().get_cli_registry()?;
+        let registry = create_cli_registry()?;
         let mut screen = Self {
             registry,
             app_state: AppState::global(),
