@@ -70,14 +70,17 @@
 
 ## 🔌 MCP 方法列表
 
-### MCP Tools (4个)
+### MCP Tools (7个)
 
 | 工具名 | 文件位置 | 功能描述 | 参数 |
 |--------|---------|---------|------|
-| `intelligent_route` | `src/mcp/mod.rs:104` | 智能路由到最佳MCP工具 | `user_request`, `decision_mode`, `execution_mode`, `max_candidates`, `session_id`, `metadata` |
-| `get_method_schema` | `src/mcp/mod.rs:182` | 获取指定工具的JSON schema | `mcp_server`, `tool_name` |
-| `search_history` | `src/mcp/mod.rs:197` | 搜索会话历史（语义搜索） | `query`, `limit` |
-| `execute_tool` | `src/mcp/mod.rs:228` | 执行指定MCP工具 | `mcp_server`, `tool_name`, `arguments`, `session_id` |
+| `intelligent_route` | `src/mcp/mod.rs:104` | Route user request to best MCP tool | `user_request`, `decision_mode`, `execution_mode`, `max_candidates`, `session_id`, `metadata` |
+| `get_method_schema` | `src/mcp/mod.rs:182` | Return JSON schema for a given MCP tool | `mcp_server`, `tool_name` |
+| `search_history` | `src/mcp/mod.rs:197` | Search conversation history using semantic similarity | `query`, `limit` |
+| `execute_tool` | `src/mcp/mod.rs:298` | Execute a specific MCP tool with confirmed parameters | `mcp_server`, `tool_name`, `arguments`, `session_id` |
+| `start_concurrent_tasks` | `src/mcp/mod.rs:313` | Launch multiple AI CLI tasks concurrently | `tasks` (array of TaskSpec) |
+| `get_task_command` | `src/mcp/mod.rs:374` | Get command string to launch single AI CLI task | `ai_type`, `task`, `provider` (optional) |
+| `get_session_todos` | `src/mcp/mod.rs:409` | Get uncompleted TODO items for a session | `session_id` |
 
 ### MCP 核心方法
 

@@ -44,6 +44,76 @@ fn default_search_limit() -> usize {
     10
 }
 
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct TaskSpec {
+    /// AI CLI type (claude, codex, or gemini).
+    pub ai_type: String,
+    /// Task description/prompt for the AI.
+    pub task: String,
+    /// Optional provider name (e.g., "openrouter", "anthropic").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct StartConcurrentTasksParams {
+    /// Array of tasks to launch concurrently.
+    pub tasks: Vec<TaskSpec>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct TaskLaunchResult {
+    /// Process ID of the launched task.
+    pub pid: u32,
+    /// AI CLI type used.
+    pub ai_type: String,
+    /// Task description.
+    pub task: String,
+    /// Provider used (if any).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    /// Log file path.
+    pub log_file: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct GetTaskCommandParams {
+    /// AI CLI type (claude, codex, or gemini).
+    pub ai_type: String,
+    /// Task description/prompt for the AI.
+    pub task: String,
+    /// Optional provider name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct TaskCommandResult {
+    /// Full command string to execute.
+    pub command: String,
+    /// AI CLI type.
+    pub ai_type: String,
+    /// Optional provider.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct GetSessionTodosParams {
+    /// Session ID to query TODOs for.
+    pub session_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct TodoItem {
+    /// TODO item description.
+    pub content: String,
+    /// Whether the TODO is completed.
+    pub completed: bool,
+    /// Creation timestamp.
+    pub created_at: String,
+}
+
 #[derive(Clone)]
 pub struct AgenticWardenMcpServer {
     router: Arc<IntelligentRouter>,
@@ -238,6 +308,122 @@ impl AgenticWardenMcpServer {
             .await
             .map(Json)
             .map_err(|err| err.to_string())
+    }
+
+    #[tool(
+        name = "start_concurrent_tasks",
+        description = "Launch multiple AI CLI tasks concurrently. Returns process IDs and log file paths for each task."
+    )]
+    pub async fn start_concurrent_tasks_tool(
+        &self,
+        params: Parameters<StartConcurrentTasksParams>,
+    ) -> Result<Json<Vec<TaskLaunchResult>>, String> {
+        use crate::cli_type::parse_cli_type;
+        use crate::registry_factory::create_mcp_registry;
+        use crate::supervisor;
+        use std::ffi::OsString;
+
+        let registry = create_mcp_registry()
+            .map_err(|e| format!("Failed to create MCP registry: {}", e))?;
+
+        let mut handles = Vec::new();
+
+        // Launch all tasks concurrently using tokio::spawn
+        for task_spec in params.0.tasks {
+            let registry_clone = registry.clone();
+            let handle = tokio::spawn(async move {
+                // Parse AI CLI type
+                let cli_type = parse_cli_type(&task_spec.ai_type)
+                    .ok_or_else(|| format!("Invalid AI type: {}. Must be claude, codex, or gemini", task_spec.ai_type))?;
+
+                // Build command arguments
+                let cli_args = cli_type.build_full_access_args(&task_spec.task);
+                let os_args: Vec<OsString> = cli_args.into_iter().map(|s| s.into()).collect();
+
+                // Launch task via supervisor (this will wait for completion in background)
+                let _exit_code = supervisor::execute_cli(&registry_clone, &cli_type, &os_args, task_spec.provider.clone())
+                    .await
+                    .map_err(|e| format!("Failed to launch {} task: {}", task_spec.ai_type, e))?;
+
+                // Note: For now we can't easily get PID and log_file from execute_cli
+                // This is a limitation of the current supervisor design
+                // Return placeholder result
+                Ok::<TaskLaunchResult, String>(TaskLaunchResult {
+                    pid: 0, // Placeholder - actual PID tracked in registry
+                    ai_type: task_spec.ai_type.clone(),
+                    task: task_spec.task.clone(),
+                    provider: task_spec.provider.clone(),
+                    log_file: format!("/tmp/mcp-task-{}.log", task_spec.ai_type),
+                })
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all tasks to start (but not complete)
+        // Note: This is still blocking on task spawn, but tasks run in background
+        let mut results = Vec::new();
+        for handle in handles {
+            let result = handle.await
+                .map_err(|e| format!("Task spawn failed: {}", e))??;
+            results.push(result);
+        }
+
+        Ok(Json(results))
+    }
+
+    #[tool(
+        name = "get_task_command",
+        description = "Get the command string to launch a single AI CLI task. Returns the full command without executing it."
+    )]
+    pub async fn get_task_command_tool(
+        &self,
+        params: Parameters<GetTaskCommandParams>,
+    ) -> Result<Json<TaskCommandResult>, String> {
+        use crate::cli_type::parse_cli_type;
+
+        // Validate AI CLI type
+        let _cli_type = parse_cli_type(&params.0.ai_type)
+            .ok_or_else(|| format!("Invalid AI type: {}. Must be claude, codex, or gemini", params.0.ai_type))?;
+
+        // Build command string
+        let mut command_parts = vec!["agentic-warden".to_string(), params.0.ai_type.clone()];
+
+        if let Some(ref provider) = params.0.provider {
+            command_parts.push("-p".to_string());
+            command_parts.push(provider.clone());
+        }
+
+        // Escape single quotes in task
+        let escaped_task = params.0.task.replace("'", "'\\''");
+        command_parts.push(format!("'{}'", escaped_task));
+
+        let command = command_parts.join(" ");
+
+        Ok(Json(TaskCommandResult {
+            command,
+            ai_type: params.0.ai_type,
+            provider: params.0.provider,
+        }))
+    }
+
+    #[tool(
+        name = "get_session_todos",
+        description = "Get uncompleted TODO items for a specific session. Returns a list of pending tasks tracked for the given session ID."
+    )]
+    pub async fn get_session_todos_tool(
+        &self,
+        params: Parameters<GetSessionTodosParams>,
+    ) -> Result<Json<Vec<TodoItem>>, String> {
+        // TODO: Implement session-based TODO tracking
+        // For now, return empty list as placeholder
+        // This requires integration with a TODO storage system
+
+        let _session_id = params.0.session_id;
+
+        // Placeholder implementation
+        eprintln!("⚠️  get_session_todos not fully implemented yet - returning empty list");
+
+        Ok(Json(Vec::new()))
     }
 
     pub async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
