@@ -342,16 +342,43 @@ agentic-warden/
 
 ### Building
 
+#### 1. Setup ONNX Runtime (First Time Only)
+
+Download ONNX Runtime library:
+
 ```bash
+./scripts/setup-ort.sh
+```
+
+#### 2. Build
+
+Set environment variable and build:
+
+```bash
+# Set ORT library location
+export ORT_LIB_LOCATION="$(pwd)/vendor/onnxruntime-linux-x64-1.20.0"
+
 # Development build
 cargo build
 
-# Release build with optimizations
+# Release build
 cargo build --release
 
 # Run with logging
 RUST_LOG=debug cargo run -- mcp
 ```
+
+#### 3. Package for Distribution
+
+Create a distributable package with bundled ORT library:
+
+```bash
+./scripts/package.sh
+```
+
+This creates `dist/aiw-<platform>-<arch>.tar.gz` with the binary and all required libraries.
+
+**Note:** See [docs/ORT_BUNDLING.md](./docs/ORT_BUNDLING.md) for detailed bundling information.
 
 ## 🤝 Contributing
 

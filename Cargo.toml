@@ -118,9 +118,7 @@ schemars = { version = "1.1", features = ["derive"] }
 # Memory integration dependencies
 ollama-rs = "0.3.1"
 regex = "1.10"
-fastembed = "4.0.0"
-# Explicitly configure ort for bundling - use load-dynamic instead of download-binaries
-ort = { version = "2.0.0-rc", default-features = false, features = ["load-dynamic", "copy-dylibs"] }
+fastembed = "5"
 memvdb = "0.1.1"
 sahomedb = "0.4.0"
 ndarray = { version = "0.15", features = ["serde"] }
