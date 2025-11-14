@@ -24,35 +24,18 @@ pub struct ProvidersConfig {
     pub memory: Option<crate::memory::MemoryConfig>,
 }
 
-/// Single Provider configuration
+/// Single Provider configuration - 最简化版本
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Provider {
-    /// Display name
-    pub name: String,
-
-    /// Provider description
-    pub description: String,
-
-    /// Provider icon (emoji)
+    /// API Token
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub icon: Option<String>,
+    pub token: Option<String>,
 
-    /// Official provider (predefined)
-    #[serde(default)]
-    pub official: bool,
+    /// Base URL for API
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
 
-    /// Protected status (cannot be deleted)
-    #[serde(default)]
-    pub protected: bool,
-
-    /// Custom provider (user created)
-    #[serde(default)]
-    pub custom: bool,
-
-    /// Compatible AI types
-    pub compatible_with: Vec<AiType>,
-
-    /// Environment variables for this provider
+    /// All environment variables (includes token and base_url mappings)
     #[serde(default)]
     pub env: HashMap<String, String>,
 }
@@ -120,39 +103,59 @@ impl ProvidersConfig {
             ));
         }
 
-        for (provider_id, provider) in &self.providers {
-            self.validate_provider_entry(provider_id, provider)?;
-        }
-
-        Ok(())
-    }
-
-    /// Validate a single provider entry
-    fn validate_provider_entry(&self, provider_id: &str, provider: &Provider) -> Result<()> {
-        if provider.name.is_empty() {
-            return Err(anyhow!("Provider '{}' has empty name", provider_id));
-        }
-
-        if provider.compatible_with.is_empty() {
-            return Err(anyhow!(
-                "Provider '{}' must specify at least one compatible AI type",
-                provider_id
-            ));
-        }
-
         Ok(())
     }
 }
 
 impl Provider {
-    /// Check if this provider is compatible with the given AI type
-    pub fn is_compatible_with(&self, ai_type: &AiType) -> bool {
-        self.compatible_with.contains(ai_type)
+    /// Get all environment variables including token and base_url
+    pub fn get_all_env_vars(&self) -> HashMap<String, String> {
+        let mut env = self.env.clone();
+
+        // Add token if present
+        if let Some(token) = &self.token {
+            // Try to infer the token env var name, default to ANTHROPIC_API_KEY
+            if !env.contains_key("ANTHROPIC_API_KEY") && !env.contains_key("OPENAI_API_KEY") {
+                env.insert("ANTHROPIC_API_KEY".to_string(), token.clone());
+            }
+        }
+
+        // Add base_url if present
+        if let Some(base_url) = &self.base_url {
+            if !env.contains_key("ANTHROPIC_BASE_URL") && !env.contains_key("OPENAI_BASE_URL") {
+                env.insert("ANTHROPIC_BASE_URL".to_string(), base_url.clone());
+            }
+        }
+
+        env
     }
 
-    /// Get environment variables for this provider
-    pub fn get_env_vars(&self) -> &HashMap<String, String> {
-        &self.env
+    /// Create a default provider with only env vars (for backward compatibility)
+    pub fn from_env(env: HashMap<String, String>) -> Self {
+        Self {
+            token: None,
+            base_url: None,
+            env,
+        }
+    }
+
+    /// Get a summary string for display
+    pub fn summary(&self) -> String {
+        let mut parts = Vec::new();
+        if self.token.is_some() {
+            parts.push("token: ✓");
+        }
+        if self.base_url.is_some() {
+            parts.push(format!("url: {}", self.base_url.as_ref().unwrap()).as_str());
+        }
+        if !self.env.is_empty() {
+            parts.push(format!("env: {} vars", self.env.len()).as_str());
+        }
+        if parts.is_empty() {
+            "empty".to_string()
+        } else {
+            parts.join(", ")
+        }
     }
 }
 
@@ -161,21 +164,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_provider_compatibility() {
+    fn test_provider_env_vars() {
         let provider = Provider {
-            name: "Test Provider".to_string(),
-            description: "Test description".to_string(),
-            icon: None,
-            official: false,
-            protected: false,
-            custom: true,
-            compatible_with: vec![AiType::Claude, AiType::Codex],
-            env: HashMap::new(),
+            token: Some("sk-test-token".to_string()),
+            base_url: Some("https://api.example.com".to_string()),
+            env: {
+                let mut map = HashMap::new();
+                map.insert("CUSTOM_VAR".to_string(), "value".to_string());
+                map
+            },
         };
 
-        assert!(provider.is_compatible_with(&AiType::Claude));
-        assert!(provider.is_compatible_with(&AiType::Codex));
-        assert!(!provider.is_compatible_with(&AiType::Gemini));
+        let all_env = provider.get_all_env_vars();
+        assert!(all_env.contains_key("ANTHROPIC_API_KEY"));
+        assert!(all_env.contains_key("ANTHROPIC_BASE_URL"));
+        assert!(all_env.contains_key("CUSTOM_VAR"));
+        assert_eq!(all_env.get("ANTHROPIC_API_KEY").unwrap(), "sk-test-token");
     }
 
     #[test]
@@ -204,13 +208,8 @@ mod tests {
         config.providers.insert(
             "test".to_string(),
             Provider {
-                name: "Test".to_string(),
-                description: "Test provider".to_string(),
-                icon: None,
-                official: false,
-                protected: false,
-                custom: true,
-                compatible_with: vec![AiType::Claude],
+                token: Some("sk-test".to_string()),
+                base_url: Some("https://api.test.com".to_string()),
                 env: HashMap::new(),
             },
         );
