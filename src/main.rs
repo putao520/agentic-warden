@@ -4,7 +4,7 @@ mod mcp;
 
 use agentic_warden::cli_type::{parse_cli_selector_strict, parse_cli_type};
 use agentic_warden::commands::ai_cli::AiCliCommand;
-use agentic_warden::commands::{parse_external_as_ai_cli, parser::{HooksAction, McpAction}, Cli, Commands};
+use agentic_warden::commands::{parse_external_as_ai_cli, parser::HooksAction, Cli, Commands};
 use agentic_warden::error::ErrorCategory;
 use agentic_warden::execute_update;
 use agentic_warden::provider::network_detector::NetworkDetector;
@@ -203,7 +203,10 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
                 }
             }
         }
-        Commands::Mcp(action) => handle_mcp_command(action).await,
+        Commands::Mcp {
+            transport,
+            log_level,
+        } => handle_mcp_command(transport, log_level).await,
         Commands::Hooks(action) => handle_hooks_command(action).await,
         Commands::External(tokens) => handle_external_command(tokens).await,
     }
@@ -335,97 +338,66 @@ fn handle_help_command(topic: Option<String>) -> Result<ExitCode, String> {
 }
 
 /// 处理MCP命令
-async fn handle_mcp_command(action: McpAction) -> Result<ExitCode, String> {
-    match action {
-        McpAction::Server {
-            transport,
-            log_level,
-        } => {
-            // 初始化日志
-            let log_level_filter = match log_level.to_lowercase().as_str() {
-                "debug" => tracing::Level::DEBUG,
-                "info" => tracing::Level::INFO,
-                "warn" => tracing::Level::WARN,
-                "error" => tracing::Level::ERROR,
-                _ => tracing::Level::INFO,
-            };
+async fn handle_mcp_command(transport: String, log_level: String) -> Result<ExitCode, String> {
+    // 初始化日志
+    let log_level_filter = match log_level.to_lowercase().as_str() {
+        "debug" => tracing::Level::DEBUG,
+        "info" => tracing::Level::INFO,
+        "warn" => tracing::Level::WARN,
+        "error" => tracing::Level::ERROR,
+        _ => tracing::Level::INFO,
+    };
 
-            tracing_subscriber::fmt()
-                .with_max_level(log_level_filter)
-                .with_target(false)
-                .init();
+    tracing_subscriber::fmt()
+        .with_max_level(log_level_filter)
+        .with_target(false)
+        .init();
 
-            // Install Claude Code hooks before starting MCP server
-            if let Err(e) = agentic_warden::hooks::install_hooks() {
-                eprintln!("⚠️  Failed to install Claude Code hooks: {}", e);
-                eprintln!("    The MCP server will still work, but conversation history won't be automatically captured.");
+    // Install Claude Code hooks before starting MCP server
+    if let Err(e) = agentic_warden::hooks::install_hooks() {
+        eprintln!("⚠️  Failed to install Claude Code hooks: {}", e);
+        eprintln!("    The MCP server will still work, but conversation history won't be automatically captured.");
+    }
+
+    // Setup cleanup guard to ensure hooks are uninstalled even on panic/signal
+    struct HooksGuard;
+    impl Drop for HooksGuard {
+        fn drop(&mut self) {
+            if let Err(e) = agentic_warden::hooks::uninstall_hooks() {
+                eprintln!("⚠️  Failed to uninstall Claude Code hooks: {}", e);
             }
-
-            // Setup cleanup guard to ensure hooks are uninstalled even on panic/signal
-            struct HooksGuard;
-            impl Drop for HooksGuard {
-                fn drop(&mut self) {
-                    if let Err(e) = agentic_warden::hooks::uninstall_hooks() {
-                        eprintln!("⚠️  Failed to uninstall Claude Code hooks: {}", e);
-                    }
-                }
-            }
-            let _hooks_guard = HooksGuard;
-
-            // 创建MCP服务器（使用InProcessRegistry）
-            // Provider配置通过supervisor模块管理，不需要在MCP server中直接管理
-            let mcp_server = AgenticWardenMcpServer::bootstrap()
-                .await
-                .map_err(|e| format!("Failed to initialise MCP server: {e}"))?;
-
-            match transport.as_str() {
-                "stdio" => {
-                    // 使用stdio传输启动MCP服务器
-                    eprintln!("Starting Agentic-Warden MCP server with stdio transport...");
-
-                    match run_mcp_server_stdio(mcp_server).await {
-                        Ok(_) => {
-                            eprintln!("MCP server stopped gracefully");
-                            Ok(ExitCode::from(0))
-                        }
-                        Err(e) => {
-                            eprintln!("MCP server error: {}", e);
-                            Ok(ExitCode::from(1))
-                        }
-                    }
-                }
-                _ => Err(format!(
-                    "Unsupported transport: {}. Supported: stdio",
-                    transport
-                )),
-            }
-            // HooksGuard automatically uninstalls hooks when dropped
-        }
-        McpAction::Test => {
-            // 测试MCP配置
-            println!("Testing Agentic-Warden MCP server configuration...");
-
-            // 这里可以添加配置测试逻辑
-            println!("✅ MCP server configuration is valid");
-            println!("📋 Available tools:");
-            println!("   - monitor_processes: Monitor AI CLI processes");
-            println!("   - get_process_tree: Get process tree information");
-            println!("   - terminate_process: Safely terminate AI CLI processes");
-            println!("   - get_provider_status: Get provider configuration");
-            println!("   - start_ai_cli: Start AI CLI with prompt");
-
-            Ok(ExitCode::from(0))
-        }
-        McpAction::Status => {
-            // 显示MCP服务器状态
-            println!("Agentic-Warden MCP Server Status:");
-            println!("🔧 Server: Not running (use 'agentic-warden mcp server' to start)");
-            println!("📋 Transport: stdio");
-            println!("🛠️  Tools: 5 available");
-
-            Ok(ExitCode::from(0))
         }
     }
+    let _hooks_guard = HooksGuard;
+
+    // 创建MCP服务器（使用InProcessRegistry）
+    // Provider配置通过supervisor模块管理，不需要在MCP server中直接管理
+    let mcp_server = AgenticWardenMcpServer::bootstrap()
+        .await
+        .map_err(|e| format!("Failed to initialise MCP server: {e}"))?;
+
+    match transport.as_str() {
+        "stdio" => {
+            // 使用stdio传输启动MCP服务器
+            eprintln!("Starting Agentic-Warden MCP server with stdio transport...");
+
+            match run_mcp_server_stdio(mcp_server).await {
+                Ok(_) => {
+                    eprintln!("MCP server stopped gracefully");
+                    Ok(ExitCode::from(0))
+                }
+                Err(e) => {
+                    eprintln!("MCP server error: {}", e);
+                    Ok(ExitCode::from(1))
+                }
+            }
+        }
+        _ => Err(format!(
+            "Unsupported transport: {}. Supported: stdio",
+            transport
+        )),
+    }
+    // HooksGuard automatically uninstalls hooks when dropped
 }
 
 /// Handle Claude Code hooks commands
