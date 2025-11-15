@@ -13,11 +13,12 @@ use capability_detector::ClientCapabilities;
 use dynamic_tools::DynamicToolManager;
 use std::future::Future;
 use rmcp::{
-    handler::server::tool::{Parameters, ToolCallContext, ToolRouter},
+    handler::server::tool::{ToolCallContext, ToolRouter},
+    handler::server::wrapper::Parameters,
     handler::server::ServerHandler,
     model::{Implementation, InitializeRequestParam, InitializeResult, ServerCapabilities},
     service::{Peer, RequestContext, RoleServer},
-    tool, tool_router, Json, ServiceExt,
+    tool, Json, ServiceExt,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -129,7 +130,7 @@ pub struct AgenticWardenMcpServer {
     peer: Arc<RwLock<Option<rmcp::service::Peer<RoleServer>>>>,
 }
 
-#[tool_router]
+#[rmcp::tool_router(router = tool_router)]
 impl AgenticWardenMcpServer {
     pub async fn bootstrap() -> Result<Self, String> {
         let router = IntelligentRouter::initialize()
@@ -477,12 +478,16 @@ impl ServerHandler for AgenticWardenMcpServer {
                 .map_err(|e| rmcp::ErrorData::internal_error(&e.to_string(), None))?;
 
             if result.success {
+                let content_str = result.result.as_ref()
+                    .map(|r| serde_json::to_string_pretty(&r.output).unwrap_or_default())
+                    .unwrap_or_default();
+                let structured = result.result.map(|r| r.output);
+
                 Ok(rmcp::model::CallToolResult {
-                    content: Some(vec![rmcp::model::Content::text(
-                        serde_json::to_string_pretty(&result.result).unwrap_or_default()
-                    )]),
-                    structured_content: Some(result.result),
+                    content: vec![rmcp::model::Content::text(content_str)],
+                    structured_content: structured,
                     is_error: None,
+                    meta: None,
                 })
             } else {
                 Err(rmcp::ErrorData::internal_error(&result.message, None))
@@ -496,7 +501,7 @@ impl ServerHandler for AgenticWardenMcpServer {
     async fn initialize(
         &self,
         request: InitializeRequestParam,
-        context: rmcp::handler::RequestContext<rmcp::service::RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<InitializeResult, rmcp::ErrorData> {
         // Create initial capabilities (before testing)
         let mut capabilities = ClientCapabilities::from_init_request(&request);
@@ -549,6 +554,9 @@ impl ServerHandler for AgenticWardenMcpServer {
             server_info: Implementation {
                 name: "agentic-warden".to_string(),
                 version: env!("CARGO_PKG_VERSION").to_string(),
+                title: Some("Agentic Warden MCP Server".to_string()),
+                icons: None,
+                website_url: Some("https://github.com/putao520/agentic-warden".to_string()),
             },
             instructions: None,
         })

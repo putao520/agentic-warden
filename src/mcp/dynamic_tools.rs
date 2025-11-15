@@ -38,9 +38,11 @@ impl DynamicToolManager {
 
         let tool = Tool {
             name: tool_name.clone().into(),
+            title: None,
             description: Some(description.into()),
             input_schema: Arc::new(schema_object),
             output_schema: None,
+            icons: None,
             annotations: None,
         };
 
