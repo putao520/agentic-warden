@@ -5,25 +5,11 @@
 use clap::{Parser, Subcommand};
 use std::{ffi::OsString, path::PathBuf};
 
-/// MCP (Model Context Protocol) 服务器动作
+/// Claude Code Hooks 处理动作
 #[derive(Subcommand, Debug, Clone)]
-pub enum McpAction {
-    /// 启动 MCP 服务器
-    Server {
-        /// 传输协议
-        #[arg(long, default_value = "stdio")]
-        transport: String,
-
-        /// 日志级别
-        #[arg(long, default_value = "info")]
-        log_level: String,
-    },
-
-    /// 测试 MCP 服务器配置
-    Test,
-
-    /// 显示 MCP 服务器状态
-    Status,
+pub enum HooksAction {
+    /// 处理 Claude Code hook 事件（从 stdin 读取）
+    Handle,
 }
 
 /// Agentic-Warden - AI CLI 工具的统一管理和进程监控平台
@@ -111,9 +97,20 @@ pub enum Commands {
         tool: Option<String>,
     },
 
-    /// MCP (Model Context Protocol) 服务器
+    /// 启动 MCP (Model Context Protocol) 服务器
+    Mcp {
+        /// 传输协议
+        #[arg(long, default_value = "stdio")]
+        transport: String,
+
+        /// 日志级别
+        #[arg(long, default_value = "info")]
+        log_level: String,
+    },
+
+    /// Claude Code Hooks 处理
     #[command(subcommand)]
-    Mcp(McpAction),
+    Hooks(HooksAction),
 
     /// 捕获未显式声明的子命令（用于 AI CLI 选择器）
     #[command(external_subcommand)]

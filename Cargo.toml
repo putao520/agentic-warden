@@ -112,13 +112,13 @@ tempfile = "3.0"
 
 # MCP Server support
 env_logger = "0.11"
-rmcp = { version = "0.5", features = ["client", "server", "transport-io", "transport-child-process", "macros"] }
+rmcp = { version = "0.8", features = ["client", "server", "transport-io", "transport-child-process", "macros"] }
 schemars = { version = "1.1", features = ["derive"] }
 
 # Memory integration dependencies
 ollama-rs = "0.3.1"
 regex = "1.10"
-fastembed = "4.0.0"
+fastembed = "5.2"
 memvdb = "0.1.1"
 sahomedb = "0.4.0"
 ndarray = { version = "0.15", features = ["serde"] }

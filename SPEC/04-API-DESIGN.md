@@ -196,11 +196,13 @@ Summary: 2 completed, 1 failed, 0 running
 
 ## MCP (Model Context Protocol) API
 
-### API-006: MCP Server Interface
+### API-006: MCP Server Interface (Intelligent Routing)
 **Version**: v0.1.0+
 **Status**: 🟢 Implemented
-**Related**: REQ-007, ARCH-007
+**Related**: REQ-012, ARCH-012
 **Protocol**: JSON-RPC 2.0 over stdio
+
+**Note**: The MCP server implements intelligent routing to underlying MCP servers, not direct process management tools.
 
 #### Server Capabilities
 ```json
@@ -213,85 +215,44 @@ Summary: 2 completed, 1 failed, 0 running
   },
   "tools": [
     {
-      "name": "monitor_processes",
-      "description": "Monitor AI CLI processes",
+      "name": "intelligent_route",
+      "description": "Intelligently route user requests to the best MCP tool",
       "inputSchema": {
         "type": "object",
         "properties": {
-          "filter": {
+          "user_request": {
             "type": "string",
-            "description": "Filter by AI CLI type (optional)"
-          }
-        }
-      }
-    },
-    {
-      "name": "get_process_tree",
-      "description": "Get process tree information",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "pid": {
+            "description": "Natural language user request describing what to do"
+          },
+          "session_id": {
+            "type": "string",
+            "description": "Optional session ID for context"
+          },
+          "max_candidates": {
             "type": "integer",
-            "description": "Process ID to analyze"
+            "description": "Maximum number of tool candidates to consider",
+            "default": 5
           }
         },
-        "required": ["pid"]
+        "required": ["user_request"]
       }
     },
     {
-      "name": "terminate_process",
-      "description": "Terminate AI CLI process",
+      "name": "get_method_schema",
+      "description": "Get the JSON schema for a specific MCP method",
       "inputSchema": {
         "type": "object",
         "properties": {
-          "pid": {
-            "type": "integer",
-            "description": "Process ID to terminate"
+          "mcp_server": {
+            "type": "string",
+            "description": "MCP server name"
           },
-          "graceful": {
-            "type": "boolean",
-            "description": "Attempt graceful termination",
-            "default": true
+          "tool_name": {
+            "type": "string",
+            "description": "Tool/method name to query"
           }
         },
-        "required": ["pid"]
-      }
-    },
-    {
-      "name": "get_provider_status",
-      "description": "Get provider configuration status",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "provider": {
-            "type": "string",
-            "description": "Specific provider name (optional)"
-          }
-        }
-      }
-    },
-    {
-      "name": "start_ai_cli",
-      "description": "Start AI CLI with prompt",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "ai_type": {
-            "type": "string",
-            "enum": ["codex", "claude", "gemini"],
-            "description": "AI CLI type"
-          },
-          "prompt": {
-            "type": "string",
-            "description": "Task prompt"
-          },
-          "provider": {
-            "type": "string",
-            "description": "Provider name (optional)"
-          }
-        },
-        "required": ["ai_type", "prompt"]
+        "required": ["mcp_server", "tool_name"]
       }
     }
   ]
@@ -300,16 +261,17 @@ Summary: 2 completed, 1 failed, 0 running
 
 #### Tool Call Examples
 
-**monitor_processes**:
+**intelligent_route** - Route request to appropriate MCP tool:
 ```json
 {
   "jsonrpc": "2.0",
   "id": "req-001",
   "method": "tools/call",
   "params": {
-    "name": "monitor_processes",
+    "name": "intelligent_route",
     "arguments": {
-      "filter": "claude"
+      "user_request": "Check git status and commit all changes",
+      "session_id": "session-123"
     }
   }
 }
@@ -324,26 +286,41 @@ Summary: 2 completed, 1 failed, 0 running
     "content": [
       {
         "type": "text",
-        "text": "Found 2 running claude processes:\n- PID 1234: claude ask \"Write code\" (Provider: openrouter)\n- PID 5678: claude --help (Interactive mode)"
+        "text": "{\"success\": true, \"message\": \"Successfully executed git operations\", \"selected_tool\": {\"mcp_server\": \"git-server\", \"tool_name\": \"git_status\"}, \"result\": {\"output\": \"On branch main\\nChanges not staged for commit:\\n  modified:   src/main.rs\"}}"
       }
     ]
   }
 }
 ```
 
-**start_ai_cli**:
+**get_method_schema** - Get tool schema:
 ```json
 {
   "jsonrpc": "2.0",
   "id": "req-002",
   "method": "tools/call",
   "params": {
-    "name": "start_ai_cli",
+    "name": "get_method_schema",
     "arguments": {
-      "ai_type": "gemini",
-      "prompt": "Explain machine learning",
-      "provider": "litellm"
+      "mcp_server": "git-server",
+      "tool_name": "git_commit"
     }
+  }
+}
+```
+
+**Response**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-002",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"name\": \"git_commit\", \"description\": \"Commit changes to git repository\", \"inputSchema\": {\"type\": \"object\", \"properties\": {\"message\": {\"type\": \"string\"}}, \"required\": [\"message\"]}}"
+      }
+    ]
   }
 }
 ```
@@ -585,6 +562,136 @@ pub enum AgenticWardenError {
 - Internal API contracts defined for implementation
 - Error handling standardized across all components
 - Authentication and security model documented
+
+---
+
+## Hooks API
+
+### API-010: Claude Code Hooks Handler
+**Version**: v0.2.0
+**Status**: 🟢 Done
+**Related**: REQ-010, ARCH-010
+
+#### Command: `agentic-warden hooks handle`
+**Description**: Handle Claude Code hook events from stdin, parse transcript, and index to vector database
+
+**Input Source**: stdin (JSON)
+
+**Hook Input Format**:
+```json
+{
+  "session_id": "session-abc123",
+  "transcript_path": "/home/user/.claude/sessions/2025-11-14.jsonl",
+  "hook_event_name": "SessionEnd",
+  "cwd": "/home/user/project",
+  "permission_mode": "normal"
+}
+```
+
+**Processing Flow**:
+1. Read JSON from stdin
+2. Extract `session_id` and `transcript_path`
+3. Check if session already indexed (dedup)
+4. Parse JSONL transcript file
+5. Generate embeddings (FastEmbed batch)
+6. Insert to SahomeDB with metadata
+7. Print success message to stdout
+8. Return exit code
+
+**Success Response** (stdout):
+```
+✅ Indexed 127 messages for session session-abc123
+```
+
+**Exit Codes**:
+- `0` - Success (conversation indexed)
+- `1` - Non-critical error (logged, session skipped)
+- `2` - Critical error (blocks Claude Code, stderr shown)
+
+**Error Handling**:
+```
+Exit 1 scenarios (non-blocking):
+- Session already indexed (idempotent)
+- Transcript file not found (session may not exist yet)
+- Empty transcript (no messages to index)
+
+Exit 2 scenarios (blocking):
+- Invalid JSON from stdin
+- Vector database connection failure
+- FastEmbed initialization error
+```
+
+**Log File**: `~/.config/agentic-warden/hooks.log`
+
+**Usage Examples**:
+```bash
+# Manually test hook (simulate Claude Code)
+echo '{"session_id":"test-123","transcript_path":"~/.claude/sessions/test.jsonl","hook_event_name":"SessionEnd"}' | \
+  agentic-warden hooks handle
+
+# Check hook logs
+tail -f ~/.config/agentic-warden/hooks.log
+```
+
+---
+
+## MCP Tools API
+
+### API-010-MCP: search_history MCP Tool
+**Version**: v0.2.0
+**Status**: 🟢 Done
+**Related**: REQ-010, ARCH-010
+
+#### Tool Definition
+
+**MCP Tool Name**: `search_history`
+
+**Description**: Search Claude Code conversation history using semantic similarity
+
+**Input Schema**:
+```json
+{
+  "type": "object",
+  "properties": {
+    "query": {
+      "type": "string",
+      "description": "Search query (will be embedded and compared)"
+    },
+    "session_id": {
+      "type": "string",
+      "description": "Optional: filter by specific session ID"
+    },
+    "limit": {
+      "type": "integer",
+      "default": 10,
+      "description": "Maximum number of results to return"
+    },
+    "min_similarity": {
+      "type": "number",
+      "default": 0.7,
+      "description": "Minimum cosine similarity threshold (0.0-1.0)"
+    }
+  },
+  "required": ["query"]
+}
+```
+
+**Output Format**:
+```json
+{
+  "results": [
+    {
+      "session_id": "session-abc123",
+      "role": "user",
+      "content": "Can you help me implement authentication?",
+      "timestamp": "2025-11-14T10:30:00Z",
+      "similarity_score": 0.92
+    }
+  ],
+  "total_results": 1,
+  "query_time_ms": 145
+}
+```
 
 ---
 

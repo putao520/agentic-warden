@@ -14,7 +14,7 @@ use uuid::Uuid;
 const COLLECTION_NAME: &str = "conversation_history";
 
 /// Canonical structure for recorded Claude Code conversations.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ConversationRecord {
     pub id: String,
     pub session_id: Option<String>,
@@ -40,6 +40,15 @@ impl ConversationRecord {
             tools_used,
         }
     }
+}
+
+/// Search result containing a conversation record and its similarity score.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ConversationSearchResult {
+    pub record: ConversationRecord,
+    /// Similarity score (0.0 to 1.0, higher is more similar).
+    /// Calculated as (1.0 - distance) for cosine distance.
+    pub similarity_score: f32,
 }
 
 struct HistoryState {
@@ -150,6 +159,42 @@ impl ConversationHistoryStore {
             .filter_map(record_from_search)
             .collect();
         Ok(records)
+    }
+
+    /// Search for conversations with similarity scores.
+    pub fn search_with_scores(
+        &self,
+        embedding: Vec<f32>,
+        limit: usize,
+    ) -> Result<Vec<ConversationSearchResult>> {
+        let state = self.state.lock();
+        if embedding.len() != state.dimension {
+            return Err(anyhow!(
+                "Embedding dimension mismatch: expected {}, got {}",
+                state.dimension,
+                embedding.len()
+            ));
+        }
+        let results = state
+            .collection
+            .search(&Vector::from(embedding), limit)
+            .map_err(|e| anyhow!(e.message().to_string()))?;
+
+        let search_results: Vec<ConversationSearchResult> = results
+            .into_iter()
+            .filter_map(|result| {
+                let distance = result.distance;
+                let record = record_from_search(result)?;
+                // Convert distance to similarity (cosine distance: 0 = identical, 2 = opposite)
+                // Similarity: 1.0 - (distance / 2.0) gives range [0.0, 1.0]
+                let similarity_score = 1.0 - (distance / 2.0).min(1.0).max(0.0);
+                Some(ConversationSearchResult {
+                    record,
+                    similarity_score,
+                })
+            })
+            .collect();
+        Ok(search_results)
     }
 }
 

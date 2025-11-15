@@ -1,7 +1,7 @@
-# Requirements Specification - v0.x.x
+# Requirements Specification - v0.1.0
 
 ## Version Information
-- Current version: v0.1.0-dev
+- Current version: v0.1.0
 - Start date: 2025-11-08
 - Based on: Initial development
 
@@ -300,45 +300,102 @@ agentic-warden gemini --provider custom-proxy
 
 ---
 
-### REQ-010: 内存集成与语义搜索
+### REQ-010: Claude Code会话历史集成（Hook-Based）
 **Status**: 🟢 Done
 **Priority**: P1 (High)
-**Version**: v0.1.0
-**Related**: ARCH-010, DATA-003, API-005
+**Version**: v0.2.0
+**Related**: ARCH-010, DATA-010, API-010
 
 **Description**:
-Agentic-Warden MUST integrate gmemory functionality to provide semantic conversation memory and session-based TODO management with vector database storage.
+Agentic-Warden MUST integrate with Claude Code hooks mechanism to automatically capture and index conversation history for semantic search via MCP tools.
+
+**Architecture**:
+Hook-driven design using Claude Code's `SessionEnd` and `PreCompact` hooks to trigger conversation history ingestion. MCP server automatically manages hooks installation/uninstallation.
 
 **Acceptance Criteria**:
-- [x] Integrate Qdrant vector database for semantic search
-- [x] Integrate Ollama embedding service for text vectorization
-- [x] Provide session_id-based conversation storage in metadata
-- [x] Provide MCP tools for memory operations:
-  - `search_history`: 查询历史对话（带session_id过滤）
-  - `get_session_todos`: 通过session_id查询未完成TODO
-- [x] Support TODO management with session association
-- [x] Configurable embedding model (default: qwen3-embedding:0.6b)
-- [x] Configurable LLM model (default: qwen3:8b, future use)
+- [x] Implement `agentic-warden hooks handle` CLI command
+- [x] Read hook input from stdin (session_id, transcript_path, hook_event_name)
+- [x] Parse Claude Code JSONL transcript format
+- [x] Generate embeddings using FastEmbed (AllMiniLML6V2)
+- [x] Store conversations in SahomeDB vector database
+- [x] Provide MCP tool: `search_history` for semantic conversation search
+- [x] Support session_id-based filtering
+- [x] Handle incremental updates (avoid duplicates)
+- [x] Auto-install hooks when MCP server starts
+- [x] Auto-uninstall hooks when MCP server stops
+- [x] RAII cleanup guard for signal/panic safety
+
+**Hook Integration Flow**:
+```
+Claude Code Session End/PreCompact
+    ↓ (trigger hook)
+agentic-warden hooks handle
+    ↓ (read stdin)
+Hook Input JSON: {session_id, transcript_path, hook_event_name}
+    ↓ (read JSONL file)
+Parse Claude Code JSONL transcript
+    ↓ (generate embeddings)
+FastEmbed (local, no network)
+    ↓ (save to vector DB)
+SahomeDB: conversation_history collection
+    ↓ (MCP query)
+search_history MCP tool
+```
+
+**Claude Code Configuration** (~/.config/claude/hooks.json):
+```json
+{
+  "SessionEnd": {
+    "command": "agentic-warden hooks handle",
+    "stdin": true
+  },
+  "PreCompact": {
+    "command": "agentic-warden hooks handle",
+    "stdin": true
+  }
+}
+```
+
+**Note**: This configuration is automatically managed by `agentic-warden mcp` (installs on start, uninstalls on stop). Manual configuration is not required.
+
+**Hook Input Format** (stdin):
+```json
+{
+  "session_id": "session-abc123",
+  "transcript_path": "/home/user/.claude/sessions/2025-11-14.jsonl",
+  "hook_event_name": "SessionEnd",
+  "cwd": "/home/user/project",
+  "permission_mode": "normal"
+}
+```
+
+**Claude Code JSONL Format**:
+```jsonl
+{"session_id":"xxx","timestamp":"2025-11-14T10:30:00Z","message_id":"msg-001","role":"user","content":"Help me implement auth"}
+{"session_id":"xxx","timestamp":"2025-11-14T10:30:05Z","message_id":"msg-002","role":"assistant","content":"I'll help..."}
+```
 
 **Technical Constraints**:
-- Vector database: Qdrant with dual-mode architecture:
-  - Persistent mode: `http://localhost:6333` for long-term memory storage
-  - Memory mode: `:memory:` embedded for MCP routing index
-- Embedding service: Ollama (configurable URL)
-- Session storage: Qdrant metadata with single collection design
-- Semantic search: cosine similarity
-- Memory cleanup: automatic for stale sessions
+- Vector database: SahomeDB (file-based persistent storage)
+- Embedding service: FastEmbed (AllMiniLML6V2, 384 dimensions, local generation)
+- Session ID source: Hook stdin input (not parsed from JSONL)
+- Semantic search: cosine similarity with configurable threshold
+- Storage location: ~/.config/agentic-warden/conversation_history.db
+- Duplicate detection: Check existing session_id before insertion
 
-**Qdrant Collections Architecture:**
-- **Persistent Collection**: `agentic_warden_memory`
-  - Stores both conversations and TODOs in single collection
-  - Differentiated by metadata.type: "conversation" or "todo"
-  - Session-based filtering via metadata.session_id
-  - Persistent storage for long-term memory
-- **Memory Collections**: `mcp_tools`, `mcp_methods` (REQ-012)
-  - Embedded memory mode for MCP routing
-  - Rebuilt on startup from .mcp.json configuration
-  - Tool-level and method-level indexing for intelligent routing
+**Performance Requirements**:
+- Hook processing: < 2s for typical session (~100 messages)
+- Embedding generation: < 100ms for batch of 10 messages (FastEmbed local)
+- Vector insertion: < 500ms for batch of 100 vectors
+- MCP search_history: < 200ms for typical query
+- Zero network dependency for embeddings
+
+**Error Handling**:
+- Hook must return exit code 0 on success
+- Hook must return exit code 2 on critical errors (blocks Claude Code)
+- Log errors to ~/.config/agentic-warden/hooks.log
+- Gracefully handle missing transcript files
+- Skip already-processed sessions
 
 ---
 
@@ -402,7 +459,7 @@ Agentic-Warden MUST provide `update` command to manage AI CLI tools (codex, clau
 **Related**: ARCH-012, DATA-012, API-012
 
 **Description**:
-Agentic-Warden MUST provide an intelligent MCP (Model Context Protocol) routing system that acts as a meta-MCP gateway, using rmcp client functionality to connect to multiple MCP servers and provide intelligent tool discovery, clustering-based routing, and LLM-powered tool selection. This system minimizes context usage for the main AI while maximizing tool discovery and routing efficiency.
+Agentic-Warden MUST provide an intelligent MCP (Model Context Protocol) routing system that acts as a meta-MCP gateway with dual-mode architecture: (1) **Dynamic registration mode** for clients supporting notifications/tools/list_changed (primary, 98% token reduction), and (2) **Two-phase negotiation mode** for legacy clients (fallback). The system uses rmcp client functionality to connect to multiple MCP servers, provides intelligent tool discovery, LLM-powered tool selection, and minimizes context usage while maximizing routing efficiency.
 
 **Acceptance Criteria**:
 
@@ -424,42 +481,75 @@ Agentic-Warden MUST provide an intelligent MCP (Model Context Protocol) routing 
 - [x] Provide semantic search capabilities with configurable similarity thresholds
 - [x] Memory-only MCP index rebuilt on startup from .mcp.json configuration
 
-#### 4.3 智能路由算法
-- [x] Implement two-stage vector search: tool-level then method-level
-- [x] Provide clustering algorithm for grouping similar tools/methods (top-k + threshold)
-- [x] Support configurable clustering thresholds and ranking parameters
-- [x] Integrate internal LLM for final tool/method selection decisions
-- [x] Support ambiguous case handling with multiple option presentation
-- [x] Provide route caching and performance optimization
+#### 4.3 客户端能力检测
+- [x] Detect MCP client capabilities at initialization via test-based approach
+- [x] Test support for dynamic tool registration (notifications/tools/list_changed)
+- [x] Store client name, version, and capability flags
+- [x] Auto-select routing mode based on detected capabilities
+- [x] Log client connection details and supported features
+- [x] Graceful fallback for unknown or legacy clients
 
-#### 4.4 RMCP客户端集成
+#### 4.4 智能路由算法 (双层架构)
+
+**决策层** (选择最佳工具，2选1):
+- [x] `DecisionMode::LlmReact` - LLM ReAct决策（主模式）
+  - [x] Two-stage vector search: tool-level → method-level semantic search
+  - [x] LLM final selection with confidence scoring and rationale
+  - [x] Used when LLM endpoint is configured
+- [x] `DecisionMode::Vector` - 向量搜索决策（fallback）
+  - [x] Pure vector similarity matching using FastEmbed
+  - [x] Used when LLM endpoint is not available
+- [x] `DecisionMode::Auto` - 自动选择决策方式（默认）
+  - [x] Auto-select LlmReact if endpoint available, otherwise Vector
+
+**执行层** (如何提供工具给主AI，自动根据客户端能力选择):
+- [x] `ExecutionMode::Dynamic` - 动态注册模式（主模式，98% token reduction）
+  - [x] Route + decision → Get schema → Register tool → Send notification
+  - [x] Main AI calls registered tool with full context for accurate parameters
+  - [x] 98% token reduction (50k → 900 tokens) by exposing minimal base tools
+  - [x] Auto-enabled when client supports notifications/tools/list_changed
+- [x] `ExecutionMode::Query` - 两阶段协商模式（fallback）
+  - [x] Phase 1: Route + return suggestions (no execution)
+  - [x] Phase 2: Main AI reviews → calls execute_tool with confirmed parameters
+  - [x] Auto-enabled when client doesn't support dynamic registration
+
+**关键原则**:
+- [x] `intelligent_route` **永不执行工具**，只返回选择和schema
+- [x] 主AI使用完整上下文生成准确参数（而非路由系统猜测）
+- [x] FastEmbed for local text embedding generation (AllMiniLML6V2, 384-dim)
+
+#### 4.5 动态工具管理
+- [x] DynamicToolManager for runtime tool registration
+- [x] Register/unregister tools on-demand based on routing decisions
+- [x] Track tool → MCP server mappings
+- [x] Send notifications/tools/list_changed to capable clients
+- [x] Maintain minimal base tool set to reduce token consumption
+- [x] Clear registered tools when no longer needed
+
+#### 4.6 统一MCP接口 (4个工具)
+- [x] **intelligent_route**: Multi-mode routing with auto/dynamic/query support
+  - [x] Accepts: user_request, session_id, mode, max_candidates
+  - [x] Returns: selected_tool, result (Auto), tool_schema (Dynamic), alternatives
+- [x] **execute_tool**: Execute specific tool with confirmed parameters (Query mode)
+  - [x] Accepts: mcp_server, tool_name, arguments, session_id
+  - [x] Returns: execution result with timing and output
+- [x] **get_method_schema**: Return JSON schema for specific tool
+- [x] **search_history**: Semantic search over conversation history
+
+#### 4.7 RMCP客户端集成
 - [x] Use rmcp library for dynamic MCP server connections
 - [x] Maintain connection pool with health monitoring and auto-reconnection
 - [x] Support concurrent MCP server operations with proper isolation
 - [x] Provide tool schema discovery and caching from connected MCPs
 - [x] Handle MCP server lifecycle (start, stop, restart, health checks)
 
-#### 4.5 内部LLM集成
-- [x] Integrate Ollama for internal LLM operations (separate from embedding service)
-- [x] Support configurable LLM endpoint via environment variable (`AGENTIC_WARDEN_LLM_ENDPOINT`)
-- [x] Support configurable LLM model via environment variable (`AGENTIC_WARDEN_LLM_MODEL`)
+#### 4.8 内部LLM集成
+- [x] Integrate Ollama for internal LLM operations (tool selection decisions)
+- [x] Support configurable LLM endpoint via environment variable
+- [x] Support configurable LLM model via environment variable
 - [x] Implement tool selection prompt engineering and response parsing
 - [x] Provide clustering analysis and decision-making capabilities
 - [x] Handle LLM fallback and error scenarios gracefully
-
-#### 4.6 统一MCP接口
-- [x] Expose only two methods to external AI: `intelligent_route` and `get_method_schema`
-- [x] Provide transparent tool execution - external AI only sees final results
-- [x] Support automatic method execution after routing decision
-- [x] Provide method schema query for complex cases requiring manual selection
-- [x] Maintain MCP protocol compliance for external integration
-
-#### 4.7 监控和维护
-- [x] Provide MCP server health monitoring and status reporting
-- [x] Support route decision logging and performance metrics
-- [x] Provide configuration validation and error reporting
-- [x] Support hot-reload of MCP configurations without service restart
-- [x] Provide diagnostic tools for troubleshooting routing decisions
 
 **Technical Constraints**:
 

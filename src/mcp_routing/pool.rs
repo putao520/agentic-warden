@@ -163,8 +163,8 @@ impl McpServerHandle {
         if let Some(structured) = result.structured_content {
             return Ok(structured);
         }
-        if let Some(content) = result.content {
-            let aggregated = content
+        if !result.content.is_empty() {
+            let aggregated = result.content
                 .into_iter()
                 .map(|chunk| to_value(&chunk).unwrap_or(Value::Null).to_string())
                 .collect::<Vec<_>>()

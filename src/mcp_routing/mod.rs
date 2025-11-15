@@ -11,8 +11,9 @@ use self::{
     embedding::FastEmbedder,
     index::{MemRoutingIndex, MethodEmbedding, ScoredMethod, ScoredTool, ToolEmbedding},
     models::{
-        IntelligentRouteRequest, IntelligentRouteResponse, MethodSchemaResponse,
-        RouteExecutionResult, SelectedRoute, ToolVectorRecord,
+        ExecuteToolRequest, ExecuteToolResponse, IntelligentRouteRequest,
+        IntelligentRouteResponse, MethodSchemaResponse, RouteExecutionResult, SelectedRoute,
+        ToolVectorRecord,
     },
     pool::{DiscoveredTool, McpConnectionPool},
 };
@@ -98,6 +99,8 @@ impl IntelligentRouter {
                 result: None,
                 alternatives: Vec::new(),
                 conversation_context: Vec::new(),
+                tool_schema: None,
+                dynamically_registered: false,
             });
         }
 
@@ -122,6 +125,8 @@ impl IntelligentRouter {
                 result: None,
                 alternatives: Vec::new(),
                 conversation_context: Vec::new(),
+                tool_schema: None,
+                dynamically_registered: false,
             });
         }
 
@@ -140,12 +145,18 @@ impl IntelligentRouter {
             })
             .await?;
 
-        let start = Instant::now();
-        let execution = self
-            .connection_pool
-            .call_tool(&decision.server, &decision.tool, decision.arguments.clone())
-            .await;
-        let duration = start.elapsed().as_millis();
+        // Never execute tools - only return suggestions/schema
+        // Execution mode (Dynamic vs Query) determines how the response is used:
+        // - Dynamic: Tool will be registered for client to call
+        // - Query: Client will call execute_tool after reviewing suggestion
+        let execute_message = match request.execution_mode {
+            models::ExecutionMode::Dynamic => {
+                format!("Selected tool: {}::{} (will be dynamically registered)", decision.server, decision.tool)
+            }
+            models::ExecutionMode::Query => {
+                format!("Suggested tool: {}::{} (review and call execute_tool)", decision.server, decision.tool)
+            }
+        };
 
         if let Some(session) = request.session_id.as_ref() {
             let record = ConversationRecord::new(
@@ -157,47 +168,32 @@ impl IntelligentRouter {
             self.history.append(record, embed.clone())?;
         }
 
-        match execution {
-            Ok(output) => Ok(IntelligentRouteResponse {
-                success: true,
-                confidence: decision.confidence,
-                message: "Tool executed successfully".into(),
-                selected_tool: Some(SelectedRoute {
-                    mcp_server: decision.server.clone(),
-                    tool_name: decision.tool.clone(),
-                    arguments: decision.arguments,
-                    rationale: decision.rationale.clone(),
-                }),
-                result: Some(RouteExecutionResult {
-                    mcp_server: decision.server,
-                    tool_name: decision.tool,
-                    duration_ms: duration,
-                    output,
-                    raw_stdout: None,
-                }),
-                alternatives: candidate_infos
-                    .into_iter()
-                    .skip(1)
-                    .take(2)
-                    .map(|cand| SelectedRoute {
-                        mcp_server: cand.server,
-                        tool_name: cand.tool,
-                        arguments: Value::Null,
-                        rationale: cand.description,
-                    })
-                    .collect(),
-                conversation_context,
+        Ok(IntelligentRouteResponse {
+            success: true,
+            confidence: decision.confidence,
+            message: execute_message,
+            selected_tool: Some(SelectedRoute {
+                mcp_server: decision.server.clone(),
+                tool_name: decision.tool.clone(),
+                arguments: decision.arguments,
+                rationale: decision.rationale.clone(),
             }),
-            Err(err) => Ok(IntelligentRouteResponse {
-                success: false,
-                confidence: decision.confidence,
-                message: format!("Tool execution failed: {err}"),
-                selected_tool: None,
-                result: None,
-                alternatives: Vec::new(),
-                conversation_context,
-            }),
-        }
+            result: None, // Never execute, always None
+            alternatives: candidate_infos
+                .into_iter()
+                .skip(1)
+                .take(2)
+                .map(|cand| SelectedRoute {
+                    mcp_server: cand.server,
+                    tool_name: cand.tool,
+                    arguments: Value::Null,
+                    rationale: cand.description,
+                })
+                .collect(),
+            conversation_context,
+            tool_schema: None,
+            dynamically_registered: false,
+        })
     }
 
     pub async fn get_method_schema(
@@ -228,6 +224,42 @@ impl IntelligentRouter {
             annotations,
             message: None,
         })
+    }
+
+    /// Execute a specific tool with confirmed parameters.
+    /// Used in two-phase negotiation mode (fallback for clients without dynamic registration).
+    pub async fn execute_tool(&self, request: ExecuteToolRequest) -> Result<ExecuteToolResponse> {
+        let start = Instant::now();
+        let execution = self
+            .connection_pool
+            .call_tool(&request.mcp_server, &request.tool_name, request.arguments.clone())
+            .await;
+        let duration = start.elapsed().as_millis();
+
+        // Record in conversation history if session_id provided
+        if let Some(session_id) = request.session_id {
+            // We don't have the original user request here, so we'll skip history for now
+            // This could be enhanced by passing the original query
+        }
+
+        match execution {
+            Ok(output) => Ok(ExecuteToolResponse {
+                success: true,
+                message: "Tool executed successfully".to_string(),
+                result: Some(RouteExecutionResult {
+                    mcp_server: request.mcp_server,
+                    tool_name: request.tool_name,
+                    duration_ms: duration,
+                    output,
+                    raw_stdout: None,
+                }),
+            }),
+            Err(err) => Ok(ExecuteToolResponse {
+                success: false,
+                message: format!("Tool execution failed: {err}"),
+                result: None,
+            }),
+        }
     }
 }
 
