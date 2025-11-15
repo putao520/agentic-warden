@@ -468,7 +468,7 @@ Agentic-Warden MUST provide `update` command to manage AI CLI tools (codex, clau
 **Related**: ARCH-012, DATA-012, API-012
 
 **Description**:
-Agentic-Warden MUST provide an intelligent MCP (Model Context Protocol) routing system that acts as a meta-MCP gateway with dual-mode architecture: (1) **Dynamic registration mode** for clients supporting notifications/tools/list_changed (primary, 98% token reduction), and (2) **Two-phase negotiation mode** for legacy clients (fallback). The system uses rmcp client functionality to connect to multiple MCP servers, provides intelligent tool discovery, LLM-powered tool selection, and minimizes context usage while maximizing routing efficiency.
+Agentic-Warden MUST provide an intelligent MCP (Model Context Protocol) routing system that acts as a meta-MCP gateway with **dynamic tool registration architecture**. The system leverages Claude Code's automatic tool list refresh mechanism: before each tool use, Claude Code calls `list_tools` to get the current tool list. By maintaining an internal thread-safe tools registry (`DynamicToolManager`), we can dynamically expose only relevant tools to Claude Code, achieving **98% token reduction** (50k → 900 tokens) while maintaining full MCP ecosystem access.
 
 **Acceptance Criteria**:
 
@@ -490,67 +490,73 @@ Agentic-Warden MUST provide an intelligent MCP (Model Context Protocol) routing 
 - [x] Provide semantic search capabilities with configurable similarity thresholds
 - [x] Memory-only MCP index rebuilt on startup from .mcp.json configuration
 
-#### 4.3 客户端能力检测
-- [x] Detect MCP client capabilities at initialization via test-based approach
-- [x] Test support for dynamic tool registration (notifications/tools/list_changed)
-- [x] Store client name, version, and capability flags
-- [x] Auto-select routing mode based on detected capabilities
-- [x] Log client connection details and supported features
-- [x] Graceful fallback for unknown or legacy clients
+#### 4.3 Claude Code工具刷新机制利用
+- [x] Leverage Claude Code's automatic `list_tools` refresh before each tool use
+- [x] No need for notifications/tools/list_changed - Claude Code pulls updates naturally
+- [x] Maintain thread-safe global tools registry (DynamicToolManager)
+- [x] Return base tools + dynamically registered tools in `list_tools` response
+- [x] Tools become visible to Claude Code on next refresh (typically < 1s)
+- [x] Zero client capability detection needed - works universally
 
-#### 4.4 智能路由算法 (双层架构)
+#### 4.4 智能路由算法 (单层简化架构)
 
-**决策层** (选择最佳工具，2选1):
-- [x] `DecisionMode::LlmReact` - LLM ReAct决策（主模式）
-  - [x] Two-stage vector search: tool-level → method-level semantic search
-  - [x] LLM final selection with confidence scoring and rationale
-  - [x] Used when LLM endpoint is configured
-- [x] `DecisionMode::Vector` - 向量搜索决策（fallback）
-  - [x] Pure vector similarity matching using FastEmbed
-  - [x] Used when LLM endpoint is not available
-- [x] `DecisionMode::Auto` - 自动选择决策方式（默认）
-  - [x] Auto-select LlmReact if endpoint available, otherwise Vector
-
-**执行层** (如何提供工具给主AI，自动根据客户端能力选择):
-- [x] `ExecutionMode::Dynamic` - 动态注册模式（主模式，98% token reduction）
-  - [x] Route + decision → Get schema → Register tool → Send notification
-  - [x] Main AI calls registered tool with full context for accurate parameters
-  - [x] 98% token reduction (50k → 900 tokens) by exposing minimal base tools
-  - [x] Auto-enabled when client supports notifications/tools/list_changed
-- [x] `ExecutionMode::Query` - 两阶段协商模式（fallback）
-  - [x] Phase 1: Route + return suggestions (no execution)
-  - [x] Phase 2: Main AI reviews → calls execute_tool with confirmed parameters
-  - [x] Auto-enabled when client doesn't support dynamic registration
-
-**关键原则**:
-- [x] `intelligent_route` **永不执行工具**，只返回选择和schema
-- [x] 主AI使用完整上下文生成准确参数（而非路由系统猜测）
+**工具选择决策** (选择最佳MCP工具):
+- [x] Two-stage vector search: tool-level → method-level semantic search
+- [x] LLM-powered decision with confidence scoring (when Ollama available)
+- [x] Fallback to pure vector similarity when LLM unavailable
 - [x] FastEmbed for local text embedding generation (AllMiniLML6V2, 384-dim)
 
-#### 4.5 动态工具管理
-- [x] DynamicToolManager for runtime tool registration
-- [x] Register/unregister tools on-demand based on routing decisions
-- [x] Track tool → MCP server mappings
-- [x] Send notifications/tools/list_changed to capable clients
-- [x] Maintain minimal base tool set to reduce token consumption
-- [x] Clear registered tools when no longer needed
+**动态工具暴露流程**:
+1. **用户请求** → `intelligent_route` tool called by Claude Code
+2. **智能选择** → Vector search + LLM decision finds best MCP tool
+3. **动态注册** → Register selected tool to DynamicToolManager (thread-safe global registry)
+4. **自动刷新** → Claude Code calls `list_tools` before next action (< 1s)
+5. **工具可见** → Claude Code sees new tool + full schema, calls it with accurate parameters
+6. **代理执行** → Our MCP server proxies call to target MCP server
+7. **清理优化** → Unregister unused tools to keep token count minimal
 
-#### 4.6 统一MCP接口 (路由工具 + 记忆工具)
-**路由相关工具 (3个)**:
-- [x] **intelligent_route**: Multi-mode routing with auto/dynamic/query support
-  - [x] Accepts: user_request, session_id, mode, max_candidates
-  - [x] Returns: selected_tool, result (Auto), tool_schema (Dynamic), alternatives
-- [x] **execute_tool**: Execute specific tool with confirmed parameters (Query mode)
-  - [x] Accepts: mcp_server, tool_name, arguments, session_id
-  - [x] Returns: execution result with timing and output
-- [x] **get_method_schema**: Return JSON schema for specific tool
+**关键优势**:
+- ✅ **98% token reduction**: Only expose base tools (intelligent_route, search_history) until needed
+- ✅ **零延迟感知**: Claude Code's natural refresh cycle (< 1s) provides seamless UX
+- ✅ **无需通知**: No notifications/tools/list_changed required - pull model works perfectly
+- ✅ **准确参数**: Claude Code generates parameters with full context, not router guessing
+- ✅ **通用兼容**: Works with any MCP client that implements `list_tools` (standard behavior)
 
-**会话历史工具 (1个)**:
-- [x] **search_history**: Semantic search over conversation history with TODO context
-  - [x] Accepts: query, session_id (optional), limit
-  - [x] Returns: Conversation records with embedded TODO items extracted from content
-  - [x] TODO extraction patterns: `- [ ]`, `TODO:`, `Action Items:`, markdown checkboxes
+#### 4.5 动态工具管理 (DynamicToolManager)
+- [x] Thread-safe global registry for dynamically registered tools
+- [x] Register tools on-demand when `intelligent_route` selects them
+- [x] Track tool → MCP server mappings for proxy execution
+- [x] Integrated with `list_tools` - returns base + dynamic tools
+- [x] Maintain minimal base tool set (2 tools) to reduce token consumption
+- [x] Auto-cleanup: Clear unused tools after configurable timeout
+- [x] No notifications needed - Claude Code pulls updates via `list_tools`
+
+#### 4.6 统一MCP接口 (2个基础工具 + 动态代理)
+
+**基础工具 (始终可见)**:
+- [x] **intelligent_route**: 智能MCP工具选择和动态注册
+  - [x] Accepts: `user_request` (用户需求描述), `session_id` (可选)
+  - [x] Returns:
+    - `selected_tool`: 选中的工具名称
+    - `mcp_server`: 所属MCP服务器
+    - `description`: 工具功能说明
+    - `registered`: 是否已注册到动态工具列表
+  - [x] Side effect: 将选中的工具注册到DynamicToolManager
+  - [x] Next step: Claude Code refreshes tools, sees new tool, calls it directly
+
+- [x] **search_history**: 会话历史语义搜索（带TODO上下文）
+  - [x] Accepts: `query`, `session_id` (optional), `limit`
+  - [x] Returns: Conversation records with embedded TODO items
+  - [x] TODO extraction patterns: `- [ ]`, `TODO:`, `Action Items:`
   - [x] Each result includes: conversation context + associated TODO list
+
+**动态代理工具** (按需注册):
+- [x] 从.mcp.json发现的所有MCP工具
+- [x] 通过`intelligent_route`选择后动态注册
+- [x] 以原始工具名+schema暴露给Claude Code
+- [x] 调用时代理到目标MCP服务器
+- [x] 支持参数验证和错误处理
+- [x] 执行后自动记录到会话历史
 
 #### 4.7 RMCP客户端集成
 - [x] Use rmcp library for dynamic MCP server connections
@@ -646,23 +652,36 @@ Agentic-Warden MUST provide an intelligent MCP (Model Context Protocol) routing 
 - MCP connection pool: Support 10+ concurrent connections
 - Vector indexing: Batch operations for 1000+ items efficiently
 
-**Usage Examples**:
+**Usage Examples** (Claude Code Workflow):
 
-```bash
-# Main AI calls only one method - everything else is transparent
+```javascript
+// Step 1: Claude Code calls intelligent_route to find the right tool
 mcp_call("intelligent_route", {
-  "user_request": "I want to check git status and commit all changes"
+  "user_request": "I want to check git status and commit all changes",
+  "session_id": "session-abc123"
 })
 
-# Returns direct execution result:
-# "On branch main\nChanges not staged for commit:\n  modified:   src/main.rs\n"
+// Returns:
+// {
+//   "selected_tool": "git_status",
+//   "mcp_server": "git-server",
+//   "description": "Get current git repository status",
+//   "registered": true  // Tool now in DynamicToolManager
+// }
 
-# For complex cases, AI can query method details:
-mcp_call("get_method_schema", {
-  "mcp_name": "git-server",
-  "method_name": "git_commit"
+// Step 2: Claude Code automatically calls list_tools (< 1s later)
+// Our list_tools returns: ["intelligent_route", "search_history", "git_status"]
+
+// Step 3: Claude Code sees git_status tool with full schema, calls it directly
+mcp_call("git_status", {
+  "path": "."
 })
+
+// Step 4: Our server proxies to git-server MCP, returns result:
+// "On branch main\nChanges not staged for commit:\n  modified:   src/main.rs\n"
 ```
+
+**Key Insight**: Claude Code handles the tool refresh automatically. We just maintain the global tools registry, and Claude Code discovers new tools via its natural `list_tools` polling.
 
 **Integration Points**:
 - rmcp client library for MCP server connections

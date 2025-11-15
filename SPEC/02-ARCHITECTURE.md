@@ -887,9 +887,14 @@ graph TB
 #### Component Architecture Details
 
 ##### 1. Intelligent MCP Router (Core Component)
-- **Purpose**: Meta-MCP gateway providing intelligent tool discovery and routing
-- **Interface**: Two public methods - `intelligent_route`, `get_method_schema`
-- **Internal Components**: Vector search engine, clustering algorithm, request dispatcher
+- **Purpose**: Meta-MCP gateway with dynamic tool registration architecture
+- **Interface**: Two base tools - `intelligent_route`, `search_history`
+- **Key Mechanism**: Leverages Claude Code's automatic `list_tools` refresh (< 1s before each tool use)
+- **Internal Components**:
+  - Vector search engine (FastEmbed + MemVDB)
+  - LLM decision engine (Ollama)
+  - DynamicToolManager (thread-safe global tools registry)
+  - RMCP client pool (proxy to target MCP servers)
 
 ##### 2. Dual-Mode Vector Database Layer
 - **MemVDB (In-Memory)**:
@@ -918,27 +923,44 @@ graph TB
 - **Models**: qwen2.5:7b (default), configurable via environment
 - **Capabilities**: Clustering analysis, ambiguity handling, confidence scoring
 
-#### Data Flow Architecture
+#### Data Flow Architecture (Dynamic Tool Registration)
 
 ```mermaid
 sequenceDiagram
-    participant MainAI
-    participant Router
+    participant ClaudeCode as Claude Code
+    participant Router as MCP Router
     participant MemVDB
-    participant LLMEngine
-    participant RMCPClient
-    participant MCPServer
+    participant LLM as Ollama LLM
+    participant DynMgr as DynamicToolManager
+    participant RMCP as RMCP Client Pool
+    participant TargetMCP as Target MCP Server
 
-    MainAI->>Router: intelligent_route(user_request)
+    Note over ClaudeCode: User: "Check git status"
+
+    ClaudeCode->>Router: intelligent_route("check git status")
     Router->>MemVDB: semantic_search(tools)
-    MemVDB-->>Router: candidate_tools[top_k]
-    Router->>LLMEngine: analyze_and_select(tools, request)
-    LLMEngine-->>Router: selected_tool_with_confidence
-    Router->>RMCPClient: connect_to_mcp(tool.mcp_server)
-    RMCPClient->>MCPServer: execute_method(tool.method)
-    MCPServer-->>RMCPClient: execution_result
-    RMCPClient-->>Router: processed_result
-    Router-->>MainAI: final_result
+    MemVDB-->>Router: candidates[git_status, git_log, ...]
+    Router->>LLM: decide_best_tool(candidates, request)
+    LLM-->>Router: {tool: "git_status", confidence: 0.95}
+    Router->>DynMgr: register_tool("git_status", schema)
+    DynMgr-->>Router: registered=true
+    Router-->>ClaudeCode: {selected_tool: "git_status", registered: true}
+
+    Note over ClaudeCode: Auto calls list_tools (< 1s)
+    ClaudeCode->>Router: list_tools()
+    Router->>DynMgr: get_all_tools()
+    DynMgr-->>Router: [intelligent_route, search_history, git_status]
+    Router-->>ClaudeCode: tools with full schemas
+
+    Note over ClaudeCode: Sees git_status, calls it
+    ClaudeCode->>Router: git_status({path: "."})
+    Router->>DynMgr: lookup("git_status")
+    DynMgr-->>Router: {mcp_server: "git-server"}
+    Router->>RMCP: proxy_call("git-server", "git_status", params)
+    RMCP->>TargetMCP: git_status({path: "."})
+    TargetMCP-->>RMCP: "On branch main\n..."
+    RMCP-->>Router: result
+    Router-->>ClaudeCode: "On branch main\n..."
 ```
 
 #### Technology Stack Integration
