@@ -6,7 +6,7 @@
 //! - pwait等待MCP任务完成
 //! - 验证与CLI任务的存储隔离
 
-use agentic_warden::registry_factory::RegistryFactory;
+use agentic_warden::registry_factory::{create_cli_registry, create_mcp_registry};
 use agentic_warden::task_record::TaskRecord;
 use chrono::Utc;
 use serial_test::serial;
@@ -20,7 +20,7 @@ use std::time::Duration;
 #[serial]
 fn test_mcp_registry_task_registration() {
     // 1. 获取MCP注册表（模拟MCP Server的行为）
-    let mcp_registry = RegistryFactory::instance().get_mcp_registry();
+    let mcp_registry = create_mcp_registry();
 
     // 2. Spawn一个真实进程
     let mut child = Command::new("sleep")
@@ -68,15 +68,14 @@ fn test_mcp_concurrent_task_launching() {
     use agentic_warden::pwait_mode;
 
     // 1. 获取MCP注册表
-    let mcp_registry = RegistryFactory::instance().get_mcp_registry();
+    let mcp_registry = create_mcp_registry();
 
     // 2. 并发启动3个任务（模拟MCP Server行为）
-    let mut children = vec![];
     let mut pids = vec![];
 
     for i in 0..3 {
         let mut child = Command::new("sleep")
-            .arg("1")
+            .arg("0.5")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
@@ -97,35 +96,18 @@ fn test_mcp_concurrent_task_launching() {
             .register(real_pid, &task)
             .expect("Failed to register task");
 
-        children.push(child);
         println!("✅ MCP started task #{} with PID: {}", i + 1, real_pid);
+
+        // 重要：不持有Child，让进程自然运行
+        // pwait的sweep_stale_entries会自动检测进程退出并标记完成
+        std::mem::forget(child);
     }
 
-    // 3. 在后台等待进程完成并标记（模拟supervisor监控行为）
-    let registry_clone = mcp_registry.clone();
-    std::thread::spawn(move || {
-        for mut child in children {
-            let pid = child.id();
-            let status = child.wait().expect("Failed to wait");
-            let exit_code = status.code().unwrap_or(-1);
-
-            registry_clone
-                .mark_completed(
-                    pid,
-                    Some(format!("completed with code {}", exit_code)),
-                    Some(exit_code),
-                    Utc::now(),
-                )
-                .expect("Failed to mark completed");
-
-            println!("✅ Task PID {} completed", pid);
-        }
-    });
-
-    // 4. 使用pwait等待所有MCP任务（模拟Claude Code执行pwait命令）
+    // 3. 使用pwait等待所有MCP任务（模拟Claude Code执行pwait命令）
+    // pwait会自动通过sweep_stale_entries检测进程退出并标记完成
     let result = pwait_mode::run_with_registry(&mcp_registry);
 
-    // 5. 验证所有任务完成
+    // 4. 验证所有任务完成
     assert!(result.is_ok(), "pwait should succeed");
     let report = result.unwrap();
 
@@ -160,10 +142,8 @@ fn test_mcp_concurrent_task_launching() {
 #[serial]
 fn test_mcp_cli_storage_isolation_during_launch() {
     // 1. 获取两个注册表
-    let mcp_registry = RegistryFactory::instance().get_mcp_registry();
-    let cli_registry = RegistryFactory::instance()
-        .get_cli_registry()
-        .expect("Failed to get CLI registry");
+    let mcp_registry = create_mcp_registry();
+    let cli_registry = create_cli_registry().expect("Failed to get CLI registry");
 
     // 2. MCP启动一个任务
     let mut mcp_child = Command::new("sleep")
@@ -242,7 +222,7 @@ fn test_mcp_cli_storage_isolation_during_launch() {
 fn test_mcp_task_quick_completion() {
     use agentic_warden::pwait_mode;
 
-    let mcp_registry = RegistryFactory::instance().get_mcp_registry();
+    let mcp_registry = create_mcp_registry();
 
     // 1. 启动一个立即退出的任务
     let mut child = Command::new("sleep")
@@ -301,7 +281,7 @@ fn test_mcp_task_quick_completion() {
 fn test_mcp_registry_concurrent_access() {
     use std::thread;
 
-    let mcp_registry = RegistryFactory::instance().get_mcp_registry();
+    let mcp_registry = create_mcp_registry();
 
     // 启动5个线程，每个线程注册一个任务
     let handles: Vec<_> = (0..5)
@@ -309,7 +289,7 @@ fn test_mcp_registry_concurrent_access() {
             let registry = mcp_registry.clone();
             thread::spawn(move || {
                 // Spawn真实进程
-                let mut child = Command::new("sleep")
+                let child = Command::new("sleep")
                     .arg("0.2")
                     .stdout(Stdio::null())
                     .stderr(Stdio::null())
@@ -328,28 +308,34 @@ fn test_mcp_registry_concurrent_access() {
 
                 registry.register(pid, &task).expect("Failed to register");
 
-                // 等待完成
-                let _ = child.wait();
-                registry
-                    .mark_completed(pid, Some("done".to_string()), Some(0), Utc::now())
-                    .expect("Failed to mark completed");
+                // 不持有Child，让进程自然运行和退出
+                std::mem::forget(child);
 
                 pid
             })
         })
         .collect();
 
-    // 等待所有线程完成
+    // 等待所有线程完成注册
     let pids: Vec<_> = handles
         .into_iter()
         .map(|h| h.join().expect("Thread panicked"))
         .collect();
 
+    // 等待一小段时间让进程退出
+    std::thread::sleep(Duration::from_millis(500));
+
     // 验证所有任务都已注册
     let entries = mcp_registry.entries().expect("Failed to get entries");
 
-    // 所有PID都应该被追踪（可能已完成）
+    // 所有PID都应该被追踪
     for &pid in &pids {
+        let found = entries.iter().any(|e| e.pid == pid);
+        assert!(
+            found,
+            "Thread-registered task PID {} should be in registry",
+            pid
+        );
         println!("✅ Thread registered MCP task PID: {}", pid);
     }
 
