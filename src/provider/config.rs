@@ -72,9 +72,77 @@ impl std::str::FromStr for AiType {
     }
 }
 
+impl Default for ProvidersConfig {
+    fn default() -> Self {
+        Self::create_default()
+    }
+}
+
 impl ProvidersConfig {
     fn default_schema() -> String {
         DEFAULT_SCHEMA_URL.to_string()
+    }
+
+    /// Create a default configuration with official provider
+    pub fn create_default() -> Self {
+        let mut providers = HashMap::new();
+        providers.insert(
+            "official".to_string(),
+            Provider {
+                token: None,
+                base_url: None,
+                env: HashMap::new(),
+            },
+        );
+
+        Self {
+            schema: Some(Self::default_schema()),
+            providers,
+            default_provider: "official".to_string(),
+            memory: None,
+        }
+    }
+
+    /// Load configuration from file (placeholder - use manager for actual loading)
+    pub fn load(path: &std::path::Path) -> Result<Self> {
+        let content = std::fs::read_to_string(path)?;
+        let mut config: Self = serde_json::from_str(&content)?;
+        config.ensure_defaults_and_validate()?;
+        Ok(config)
+    }
+
+    /// Add a provider to the configuration
+    pub fn add_provider(&mut self, id: String, provider: Provider) {
+        self.providers.insert(id, provider);
+    }
+
+    /// Remove a provider from the configuration
+    pub fn remove_provider(&mut self, id: &str) -> Result<()> {
+        if id == self.default_provider {
+            return Err(anyhow!(
+                "Cannot remove the default provider '{}'",
+                id
+            ));
+        }
+        if !self.can_delete_provider(id) {
+            return Err(anyhow!(
+                "Provider '{}' is protected and cannot be deleted",
+                id
+            ));
+        }
+        self.providers.remove(id);
+        Ok(())
+    }
+
+    /// Get a provider by ID
+    pub fn get_provider(&self, id: &str) -> Option<&Provider> {
+        self.providers.get(id)
+    }
+
+    /// Check if a provider can be deleted
+    pub fn can_delete_provider(&self, id: &str) -> bool {
+        // Protect the "official" provider
+        id != "official" && id != self.default_provider
     }
 
     /// Ensure optional fields have defaults applied
@@ -143,13 +211,13 @@ impl Provider {
     pub fn summary(&self) -> String {
         let mut parts = Vec::new();
         if self.token.is_some() {
-            parts.push("token: ✓");
+            parts.push("token: ✓".to_string());
         }
-        if self.base_url.is_some() {
-            parts.push(format!("url: {}", self.base_url.as_ref().unwrap()).as_str());
+        if let Some(url) = &self.base_url {
+            parts.push(format!("url: {}", url));
         }
         if !self.env.is_empty() {
-            parts.push(format!("env: {} vars", self.env.len()).as_str());
+            parts.push(format!("env: {} vars", self.env.len()));
         }
         if parts.is_empty() {
             "empty".to_string()

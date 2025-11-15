@@ -40,8 +40,8 @@ impl ProviderScreen {
     }
 
     fn refresh_providers(&mut self) -> Result<()> {
-        let manager = ProviderManager::load()?;
-        let config = manager.get_config();
+        let manager = ProviderManager::new()?;
+        let config = manager.get_providers_config();
 
         self.default_provider = Some(config.default_provider.clone());
         self.providers = config

@@ -148,15 +148,11 @@ pub async fn execute_cli<S: TaskStorage>(
         CliType::Gemini => AiType::Gemini,
     };
 
-    provider_manager
-        .validate_compatibility(&provider_name, ai_type)
-        .map_err(|e| ProcessError::Other(e.to_string()))?;
-
     // Display provider info if not using official
     if provider_name != *"official" {
         eprintln!(
             "Using provider: {} ({})",
-            provider_name, provider_config.description
+            provider_name, provider_config.summary()
         );
     }
 
@@ -492,15 +488,11 @@ pub async fn start_interactive_cli<S: TaskStorage>(
         CliType::Gemini => AiType::Gemini,
     };
 
-    provider_manager
-        .validate_compatibility(&provider_name, ai_type)
-        .map_err(|e| ProcessError::Other(e.to_string()))?;
-
     // Display provider info if not using official
     if provider_name != *"official" {
         eprintln!(
             "Using provider: {} ({})",
-            provider_name, provider_config.description
+            provider_name, provider_config.summary()
         );
     }
 

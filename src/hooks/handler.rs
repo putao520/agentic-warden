@@ -5,6 +5,7 @@ use crate::memory::{ConversationHistoryStore, ConversationRecord};
 use anyhow::{Context, Result};
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 /// Handler for Claude Code hook events.
 ///
@@ -14,7 +15,7 @@ use std::path::PathBuf;
 /// 3. Generate embeddings via FastEmbed
 /// 4. Store in SahomeDB vector database
 pub struct HookHandler {
-    embedder: TextEmbedding,
+    embedder: Mutex<TextEmbedding>,
     store: ConversationHistoryStore,
 }
 
@@ -22,17 +23,16 @@ impl HookHandler {
     /// Initialize hook handler with FastEmbed and vector database.
     pub async fn new() -> Result<Self> {
         // Initialize FastEmbed with AllMiniLML6V2 model (384 dimensions)
-        let embedder = TextEmbedding::try_new(InitOptions {
-            model_name: EmbeddingModel::AllMiniLML6V2,
-            show_download_progress: false,
-            ..Default::default()
-        })?;
+        let mut init_options = InitOptions::default();
+        init_options.model_name = EmbeddingModel::AllMiniLML6V2;
+        init_options.show_download_progress = false;
+        let embedder = TextEmbedding::try_new(init_options)?;
 
         // Initialize conversation history store
         let db_path = Self::get_db_path()?;
         let store = ConversationHistoryStore::new(&db_path, 384)?;
 
-        Ok(Self { embedder, store })
+        Ok(Self { embedder: Mutex::new(embedder), store })
     }
 
     /// Get the vector database path from config directory.
@@ -83,6 +83,8 @@ impl HookHandler {
         eprintln!("🔮 Generating embeddings...");
         let embeddings = self
             .embedder
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
             .embed(contents.clone(), None)
             .context("Failed to generate embeddings")?;
 

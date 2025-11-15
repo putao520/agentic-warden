@@ -123,10 +123,11 @@ impl DashboardScreen {
         if let Some(provider) = self.app_state.default_provider() {
             return Some(provider);
         }
-        ProvidersConfig::load()
-            .or_else(|_| ProvidersConfig::create_default())
+        // Use ProviderManager to load or create default config
+        use crate::provider::manager::ProviderManager;
+        ProviderManager::new()
             .ok()
-            .map(|cfg| cfg.default_provider)
+            .map(|manager| manager.get_providers_config().default_provider.clone())
     }
 
     fn collect_running_tasks(&self) -> (Vec<TaskSummary>, usize) {

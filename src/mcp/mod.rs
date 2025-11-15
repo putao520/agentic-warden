@@ -120,7 +120,7 @@ pub struct TodoItem {
 pub struct AgenticWardenMcpServer {
     router: Arc<IntelligentRouter>,
     tool_router: ToolRouter<Self>,
-    embedder: Arc<TextEmbedding>,
+    embedder: Arc<tokio::sync::Mutex<TextEmbedding>>,
     history_store: Arc<ConversationHistoryStore>,
     // Client capability detection
     client_capabilities: Arc<RwLock<Option<ClientCapabilities>>>,
@@ -153,7 +153,7 @@ impl AgenticWardenMcpServer {
         Ok(Self {
             router: Arc::new(router),
             tool_router: Self::tool_router(),
-            embedder: Arc::new(embedder),
+            embedder: Arc::new(tokio::sync::Mutex::new(embedder)),
             history_store: Arc::new(history_store),
             client_capabilities: Arc::new(RwLock::new(None)),
             dynamic_tools: DynamicToolManager::new(),
@@ -276,6 +276,8 @@ impl AgenticWardenMcpServer {
 
         let embeddings = self
             .embedder
+            .lock()
+            .await
             .embed(vec![query.clone()], None)
             .map_err(|e| format!("Failed to generate embedding: {e}"))?;
 
@@ -321,8 +323,7 @@ impl AgenticWardenMcpServer {
         use crate::supervisor;
         use std::ffi::OsString;
 
-        let registry = create_mcp_registry()
-            .map_err(|e| format!("Failed to create MCP registry: {}", e))?;
+        let registry = create_mcp_registry();
 
         let mut handles = Vec::new();
 
@@ -475,7 +476,9 @@ impl ServerHandler for AgenticWardenMcpServer {
                     session_id: None,
                 })
                 .await
-                .map_err(|e| rmcp::ErrorData::internal_error(&e.to_string(), None))?;
+                .map_err(|e| {
+                    rmcp::ErrorData::internal_error(format!("Tool execution failed: {}", e), None)
+                })?;
 
             if result.success {
                 let content_str = result.result.as_ref()
@@ -490,7 +493,7 @@ impl ServerHandler for AgenticWardenMcpServer {
                     meta: None,
                 })
             } else {
-                Err(rmcp::ErrorData::internal_error(&result.message, None))
+                Err(rmcp::ErrorData::internal_error(result.message, None))
             }
         } else {
             // Tool not found in either base or dynamic tools

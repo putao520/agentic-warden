@@ -73,102 +73,27 @@ impl ProviderManager {
             )));
         }
 
-        // Validate provider name
-        const MAX_NAME_LENGTH: usize = 200;
-        if provider.name.trim().is_empty() {
-            return Err(ProviderError::InvalidConfig(format!(
-                "Display name for provider '{}' cannot be empty",
-                provider_id
-            )));
-        }
-        if provider.name.len() > MAX_NAME_LENGTH {
-            return Err(ProviderError::InvalidConfig(format!(
-                "Display name for provider '{}' exceeds maximum length of {} characters",
-                provider_id, MAX_NAME_LENGTH
-            )));
-        }
-
-        // Validate description length
-        const MAX_DESC_LENGTH: usize = 1000;
-        if provider.description.len() > MAX_DESC_LENGTH {
-            return Err(ProviderError::InvalidConfig(format!(
-                "Description for provider '{}' exceeds maximum length of {} characters",
-                provider_id, MAX_DESC_LENGTH
-            )));
-        }
-
-        // Validate website URL format
-        if let Some(website) = &provider.website {
-            if !website.starts_with("http://") && !website.starts_with("https://") {
+        // Validate base_url format if present
+        if let Some(base_url) = &provider.base_url {
+            if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
                 return Err(ProviderError::InvalidConfig(format!(
-                    "Website URL for provider '{}' must start with http:// or https://",
+                    "Base URL for provider '{}' must start with http:// or https://",
                     provider_id
                 )));
             }
             // Basic URL validation - check for suspicious patterns
-            if website.contains("..")
-                || website.contains("javascript:")
-                || website.contains("data:")
+            if base_url.contains("..")
+                || base_url.contains("javascript:")
+                || base_url.contains("data:")
             {
                 return Err(ProviderError::InvalidConfig(format!(
-                    "Website URL for provider '{}' contains suspicious patterns",
+                    "Base URL for provider '{}' contains suspicious patterns",
                     provider_id
                 )));
             }
         }
 
-        // Validate AI type compatibility
-        if provider.compatible_with.is_empty() {
-            return Err(ProviderError::InvalidConfig(format!(
-                "Provider '{}' must be compatible with at least one AI type",
-                provider_id
-            )));
-        }
-
-        // Check for duplicate AI types
-        let mut seen = Vec::new();
-        for ai_type in &provider.compatible_with {
-            if seen.contains(ai_type) {
-                return Err(ProviderError::InvalidConfig(format!(
-                    "Provider '{}' has duplicate AI compatibility entry '{}'",
-                    provider_id, ai_type
-                )));
-            }
-            seen.push(ai_type.clone());
-
-            // Validate required environment variables
-            let required_vars = get_env_vars_for_ai_type(ai_type.clone());
-            for mapping in required_vars.into_iter().filter(|m| m.required) {
-                let value = provider.env.get(mapping.key).map(|s| s.trim());
-                if value.is_none() || value == Some("") {
-                    return Err(ProviderError::InvalidConfig(format!(
-                        "Provider '{}' missing required environment variable '{}' for {}",
-                        provider_id, mapping.key, ai_type
-                    )));
-                }
-
-                // Validate environment variable values
-                if let Some(val) = value {
-                    const MAX_ENV_VAR_LENGTH: usize = 10000;
-                    if val.len() > MAX_ENV_VAR_LENGTH {
-                        return Err(ProviderError::InvalidConfig(format!(
-                            "Environment variable '{}' for provider '{}' exceeds maximum length",
-                            mapping.key, provider_id
-                        )));
-                    }
-
-                    // Check for null bytes (security issue)
-                    if val.contains('\0') {
-                        return Err(ProviderError::InvalidConfig(format!(
-                            "Environment variable '{}' for provider '{}' contains null bytes",
-                            mapping.key, provider_id
-                        )));
-                    }
-                }
-            }
-        }
-
-        // Validate environment variable keys
+        // Validate environment variable keys and values
         for (key, value) in &provider.env {
             // Check for valid environment variable names
             if key.is_empty() || key.starts_with(char::is_numeric) {
@@ -193,6 +118,15 @@ impl ProviderManager {
                     key
                 )));
             }
+
+            // Validate environment variable value length
+            const MAX_ENV_VAR_LENGTH: usize = 10000;
+            if value.len() > MAX_ENV_VAR_LENGTH {
+                return Err(ProviderError::InvalidConfig(format!(
+                    "Environment variable '{}' for provider '{}' exceeds maximum length",
+                    key, provider_id
+                )));
+            }
         }
 
         Ok(())
@@ -206,7 +140,7 @@ impl ProviderManager {
         let providers_config = if config_path.exists() {
             Self::load_from_file(&config_path)?
         } else {
-            let providers_config = ProvidersConfig::create_default()?;
+            let providers_config = ProvidersConfig::create_default();
             Self::save_to_file(&config_path, &providers_config)?;
             providers_config
         };
@@ -315,32 +249,6 @@ impl ProviderManager {
         Some((name, provider))
     }
 
-    /// Validate provider compatibility with AI type
-    pub fn validate_compatibility(
-        &self,
-        provider_name: &str,
-        ai_type: AiType,
-    ) -> ProviderResult<()> {
-        let provider = self.get_provider(provider_name)?;
-
-        if !provider.compatible_with.contains(&ai_type) {
-            let compatible = provider
-                .compatible_with
-                .iter()
-                .map(|t| t.to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-
-            return Err(ProviderError::IncompatibleProvider {
-                provider: provider_name.to_string(),
-                ai_type: ai_type.to_string(),
-                compatible,
-            });
-        }
-
-        Ok(())
-    }
-
     /// Add new provider
     pub fn add_provider(&mut self, name: String, provider: Provider) -> ProviderResult<()> {
         self.ensure_mutable_id(&name)?;
@@ -372,7 +280,7 @@ impl ProviderManager {
 
         self.providers_config
             .remove_provider(name)
-            .ok_or_else(|| ProviderError::ProviderNotFound(name.to_string()))?;
+            .map_err(|e| ProviderError::InvalidConfig(e.to_string()))?;
         self.save()?;
         Ok(())
     }
@@ -419,36 +327,6 @@ impl ProviderManager {
     }
 
     // ===== SPEC-Compliant Advanced Methods =====
-
-    /// Get all providers compatible with specified AI type
-    ///
-    /// Returns a list of (provider_id, provider) tuples for providers that
-    /// support the given AI CLI type.
-    ///
-    /// # Arguments
-    /// * `ai_type` - The AI type to filter by (Codex, Claude, Gemini)
-    ///
-    /// # Returns
-    /// Vector of tuples containing provider ID and provider reference
-    ///
-    /// # Example
-    /// ```no_run
-    /// use agentic_warden::provider::manager::ProviderManager;
-    /// use agentic_warden::provider::config::AiType;
-    ///
-    /// let manager = ProviderManager::new().unwrap();
-    /// let claude_providers = manager.get_compatible_providers(&AiType::Claude);
-    /// for (id, provider) in claude_providers {
-    ///     println!("{}: {}", id, provider.name);
-    /// }
-    /// ```
-    pub fn get_compatible_providers(&self, ai_type: &AiType) -> Vec<(&String, &Provider)> {
-        self.providers_config
-            .providers
-            .iter()
-            .filter(|(_, provider)| provider.compatible_with.contains(ai_type))
-            .collect()
-    }
 
     /// Validate all providers in configuration
     ///
@@ -501,22 +379,6 @@ impl ProviderManager {
             ));
         }
 
-        // Check for providers without tokens (optional warning)
-        for (provider_id, provider) in &self.providers_config.providers {
-            if !provider.custom && !self.providers_config.user_tokens.contains_key(provider_id) {
-                let needs_token = provider
-                    .env
-                    .values()
-                    .any(|v| v.contains("{{token}}") || v.contains("${TOKEN}"));
-                if needs_token {
-                    warnings.push(format!(
-                        "Provider '{}' may require token configuration",
-                        provider_id
-                    ));
-                }
-            }
-        }
-
         Ok(warnings)
     }
 
@@ -536,7 +398,7 @@ impl ProviderManager {
     /// manager.reset_to_defaults().unwrap();
     /// ```
     pub fn reset_to_defaults(&mut self) -> ProviderResult<()> {
-        self.providers_config = ProvidersConfig::create_default()?;
+        self.providers_config = ProvidersConfig::create_default();
         self.save()?;
         Ok(())
     }
@@ -602,28 +464,6 @@ impl ProviderManager {
                 // Add or update provider
                 self.providers_config
                     .add_provider(provider_id.clone(), provider);
-            }
-
-            // Merge tokens
-            for (provider_id, imported_regional_tokens) in imported_config.user_tokens {
-                if let Some(existing_tokens) =
-                    self.providers_config.user_tokens.get_mut(&provider_id)
-                {
-                    // Merge regional tokens - update non-None values
-                    if imported_regional_tokens.mainland_china.is_some() {
-                        existing_tokens.mainland_china = imported_regional_tokens.mainland_china;
-                    }
-                    if imported_regional_tokens.international.is_some() {
-                        existing_tokens.international = imported_regional_tokens.international;
-                    }
-                    if imported_regional_tokens.last_updated.is_some() {
-                        existing_tokens.last_updated = imported_regional_tokens.last_updated;
-                    }
-                } else {
-                    self.providers_config
-                        .user_tokens
-                        .insert(provider_id, imported_regional_tokens);
-                }
             }
 
             // Keep existing default provider if imported default doesn't exist locally

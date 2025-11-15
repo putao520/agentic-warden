@@ -37,7 +37,7 @@ impl FastEmbedder {
         if inputs.is_empty() {
             return Ok(Vec::new());
         }
-        let encoder = self.encoder.lock();
+        let mut encoder = self.encoder.lock();
         let embeddings = encoder.embed(inputs.to_vec(), None)?;
         Ok(embeddings
             .into_iter()

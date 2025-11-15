@@ -1,20 +1,19 @@
 // Binary-specific modules
 mod help;
-mod mcp;
 
 use agentic_warden::cli_type::{parse_cli_selector_strict, parse_cli_type};
 use agentic_warden::commands::ai_cli::AiCliCommand;
 use agentic_warden::commands::{parse_external_as_ai_cli, parser::HooksAction, Cli, Commands};
 use agentic_warden::error::ErrorCategory;
 use agentic_warden::execute_update;
-use agentic_warden::provider::network_detector::NetworkDetector;
+use agentic_warden::mcp::AgenticWardenMcpServer;
+// Network detector module removed - functionality deprecated
 use agentic_warden::pwait_mode;
 use agentic_warden::sync;
 use agentic_warden::sync::sync_config::save_network_status;
 use agentic_warden::tui;
 use agentic_warden::wait_mode;
 use help::{print_command_help, print_general_help, print_quick_examples};
-use mcp::AgenticWardenMcpServer;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -437,12 +436,12 @@ async fn run_mcp_server_stdio(
 }
 
 /// Perform background network detection to update cached network status (non-blocking)
+/// NOTE: Network detection has been deprecated - now using Unknown status
 async fn perform_background_network_detection() -> anyhow::Result<()> {
-    let detector = NetworkDetector::new();
-    let status = detector.detect().await?;
+    use agentic_warden::sync::sync_config::NetworkStatus;
 
-    // Save network status to sync configuration for future use
-    if let Err(e) = save_network_status(status) {
+    // Network detector removed - save Unknown status
+    if let Err(e) = save_network_status(NetworkStatus::Unknown) {
         eprintln!("Warning: Failed to save network status: {}", e);
     }
 

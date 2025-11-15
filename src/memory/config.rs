@@ -41,8 +41,9 @@ impl Default for MemoryConfig {
 impl MemoryConfig {
     /// Loads the configuration that is embedded inside the providers config file.
     pub fn load_from_provider_config() -> Result<Self> {
-        match crate::provider::config::ProvidersConfig::load() {
-            Ok(provider_config) => Ok(provider_config.get_memory_config()),
+        use crate::provider::manager::ProviderManager;
+        match ProviderManager::new() {
+            Ok(manager) => Ok(manager.get_providers_config().memory.clone().unwrap_or_default()),
             Err(_) => Ok(Self::default()),
         }
     }
