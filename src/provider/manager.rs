@@ -601,18 +601,8 @@ mod tests {
         };
 
         let provider = Provider {
-            name: "test".to_string(),
-            description: "Test".to_string(),
-            icon: None,
-            official: false,
-            protected: false,
-            custom: false,
-            support_modes: vec![],
-            compatible_with: vec![AiType::Codex],
-            validation_endpoint: None,
-            category: None,
-            website: None,
-            regions: vec![],
+            token: None,
+            base_url: None,
             env: HashMap::new(),
         };
 
