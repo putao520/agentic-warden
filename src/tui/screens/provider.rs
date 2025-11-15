@@ -19,7 +19,7 @@ use crate::provider::manager::ProviderManager;
 
 pub struct ProviderScreen {
     list_state: ListState,
-    providers: Vec<(String, String)>,  // (id, summary)
+    providers: Vec<(String, String)>, // (id, summary)
     default_provider: Option<String>,
     message: Option<String>,
 }
@@ -67,16 +67,20 @@ impl Screen for ProviderScreen {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3),  // Header
-                Constraint::Min(0),     // Provider list
-                Constraint::Length(4),  // Footer
+                Constraint::Length(3), // Header
+                Constraint::Min(0),    // Provider list
+                Constraint::Length(4), // Footer
             ])
             .split(area);
 
         // Header
         let header = Paragraph::new("Provider Configuration (View-Only)")
             .block(Block::default().borders(Borders::ALL))
-            .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+            .style(
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            );
         frame.render_widget(header, chunks[0]);
 
         // Provider list
@@ -90,7 +94,7 @@ impl Screen for ProviderScreen {
                     .map(|d| d == id)
                     .unwrap_or(false);
 
-                let mut line = vec![
+                let line = vec![
                     Span::raw(if is_default { "✓ " } else { "  " }),
                     Span::styled(id, Style::default().fg(Color::Yellow)),
                     Span::raw(": "),

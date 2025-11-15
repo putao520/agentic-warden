@@ -1,7 +1,6 @@
 //! Provider configuration manager
 
-use super::config::{AiType, Provider, ProvidersConfig};
-use super::env_mapping::get_env_vars_for_ai_type;
+use super::config::{Provider, ProvidersConfig};
 use super::error::{ProviderError, ProviderResult};
 use crate::common::constants::files::PROVIDERS_JSON;
 use crate::config::AUTH_DIRECTORY;
@@ -510,86 +509,6 @@ mod tests {
         let path = ProviderManager::get_config_path().unwrap();
         assert!(path.to_string_lossy().contains(".aiw"));
         assert!(path.to_string_lossy().contains("providers.json"));
-    }
-
-    #[test]
-    fn test_validate_compatibility_success() {
-        let mut providers = HashMap::new();
-        providers.insert(
-            "test".to_string(),
-            Provider {
-                name: "test".to_string(),
-                description: "Test".to_string(),
-                icon: None,
-                official: false,
-                protected: false,
-                custom: false,
-                support_modes: vec![],
-                compatible_with: vec![AiType::Codex],
-                validation_endpoint: None,
-                category: None,
-                website: None,
-                regions: vec![],
-                env: HashMap::new(),
-            },
-        );
-
-        let providers_config = ProvidersConfig {
-            schema: None,
-            providers,
-            default_provider: "test".to_string(),
-            user_tokens: HashMap::new(),
-            memory: None,
-        };
-
-        let manager = ProviderManager {
-            config_path: PathBuf::new(),
-            providers_config,
-        };
-
-        assert!(manager
-            .validate_compatibility("test", AiType::Codex)
-            .is_ok());
-    }
-
-    #[test]
-    fn test_validate_compatibility_failure() {
-        let mut providers = HashMap::new();
-        providers.insert(
-            "test".to_string(),
-            Provider {
-                name: "test".to_string(),
-                description: "Test".to_string(),
-                icon: None,
-                official: false,
-                protected: false,
-                custom: false,
-                support_modes: vec![],
-                compatible_with: vec![AiType::Codex],
-                validation_endpoint: None,
-                category: None,
-                website: None,
-                regions: vec![],
-                env: HashMap::new(),
-            },
-        );
-
-        let providers_config = ProvidersConfig {
-            schema: None,
-            providers,
-            default_provider: "test".to_string(),
-            user_tokens: HashMap::new(),
-            memory: None,
-        };
-
-        let manager = ProviderManager {
-            config_path: PathBuf::new(),
-            providers_config,
-        };
-
-        assert!(manager
-            .validate_compatibility("test", AiType::Gemini)
-            .is_err());
     }
 
     #[test]

@@ -10,8 +10,8 @@ use std::{
 use anyhow::{Context, Error, Result};
 
 use crate::{
-    logging::debug, provider::manager::ProviderManager, registry_factory::CliRegistry,
-    registry_factory::create_cli_registry,
+    logging::debug, provider::manager::ProviderManager, registry_factory::create_cli_registry,
+    registry_factory::CliRegistry,
 };
 
 use super::app_state::AppState;

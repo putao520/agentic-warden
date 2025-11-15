@@ -101,7 +101,8 @@ impl ConversationRecord {
                 if trimmed.is_empty() || trimmed.starts_with('#') {
                     break; // End of action items section
                 }
-                if trimmed.starts_with('-') || trimmed.starts_with('*') || trimmed.starts_with('+') {
+                if trimmed.starts_with('-') || trimmed.starts_with('*') || trimmed.starts_with('+')
+                {
                     let desc = trimmed.trim_start_matches(&['-', '*', '+'][..]).trim();
                     if !desc.is_empty() {
                         todos.push(TodoItem {
@@ -230,10 +231,8 @@ impl ConversationHistoryStore {
             .collection
             .search(&Vector::from(embedding), limit)
             .map_err(|e| anyhow!(e.message().to_string()))?;
-        let records: Vec<ConversationRecord> = results
-            .into_iter()
-            .filter_map(record_from_search)
-            .collect();
+        let records: Vec<ConversationRecord> =
+            results.into_iter().filter_map(record_from_search).collect();
         Ok(records)
     }
 
@@ -366,7 +365,10 @@ impl From<ConversationRecord> for Metadata {
             .map(|todo| {
                 let mut todo_map = HashMap::new();
                 todo_map.insert("description".into(), Metadata::from(todo.description));
-                todo_map.insert("completed".into(), Metadata::Integer(if todo.completed { 1 } else { 0 }));
+                todo_map.insert(
+                    "completed".into(),
+                    Metadata::Integer(if todo.completed { 1 } else { 0 }),
+                );
                 if let Some(priority) = todo.priority {
                     todo_map.insert("priority".into(), Metadata::from(priority));
                 }

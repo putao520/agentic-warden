@@ -23,6 +23,7 @@ async fn test_conversation_history_roundtrip() {
         content: "integration test conversation".into(),
         timestamp: Utc::now(),
         tools_used: vec!["mcp::echo".into()],
+        todo_items: Vec::new(),
     };
 
     store

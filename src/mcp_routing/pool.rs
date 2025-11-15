@@ -52,9 +52,7 @@ impl McpConnectionPool {
             .iter()
             .filter(|(_, cfg)| cfg.enabled)
         {
-            let handle = self
-                .ensure_handle(name.clone(), server.clone())
-                .await?;
+            let handle = self.ensure_handle(name.clone(), server.clone()).await?;
             let mut tools = handle.list_tools().await?;
             all.append(&mut tools);
         }
@@ -164,7 +162,8 @@ impl McpServerHandle {
             return Ok(structured);
         }
         if !result.content.is_empty() {
-            let aggregated = result.content
+            let aggregated = result
+                .content
                 .into_iter()
                 .map(|chunk| to_value(&chunk).unwrap_or(Value::Null).to_string())
                 .collect::<Vec<_>>()

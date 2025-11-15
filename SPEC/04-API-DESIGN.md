@@ -216,7 +216,7 @@ Summary: 2 completed, 1 failed, 0 running
   "tools": [
     {
       "name": "intelligent_route",
-      "description": "Intelligently route user requests to the best MCP tool",
+      "description": "Intelligently route user requests to the best MCP tool (Module 3)",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -258,6 +258,35 @@ Summary: 2 completed, 1 failed, 0 running
   ]
 }
 ```
+
+**`listChanged` Capability说明** (Pull模式 vs Push模式):
+
+| 方面 | Pull模式 (我们使用) | Push模式 (不使用) |
+|-----|------------------|-----------------|
+| **Capability声明** | ✅ `"listChanged": true` | ✅ `"listChanged": true` |
+| **工具列表更新方式** | ✅ 客户端主动调用`list_tools` | ❌ 服务端发送`notifications/tools/list_changed` |
+| **更新触发** | 客户端行为(每次工具调用前) | 服务端推送事件 |
+| **实现复杂度** | 简单(无需推送机制) | 复杂(需要通知系统) |
+| **适用场景** | Claude Code等支持自动刷新的客户端 | 需要实时通知的场景 |
+
+**关键区别**:
+- ✅ **声明`listChanged`能力**: 告诉客户端"工具列表可能动态变化,请定期刷新"
+- ✅ **Pull模式**: 客户端(如Claude Code)主动定期调用`list_tools`获取最新列表
+- ❌ **无需Push**: 我们**不主动发送**`notifications/tools/list_changed`消息
+- 📌 **Claude Code行为**: 每次调用工具前自动刷新(< 1s),无需我们推送通知
+
+**数据流**:
+```
+Claude Code: 准备调用工具
+  ↓ (自动触发)
+Claude Code: 调用 list_tools
+  ↓
+MCP Server: 返回 [intelligent_route, search_history, ...动态注册的工具]
+  ↓
+Claude Code: 发现新工具,选择并调用
+```
+
+**参考**: 详见`SPEC/01-REQUIREMENTS.md § 4.3 Claude Code工具刷新机制利用`
 
 #### Tool Call Examples
 

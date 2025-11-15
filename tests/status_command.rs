@@ -97,7 +97,7 @@ fn test_status_workflow() {
 
     // 1. 初始状态：没有任务
     let entries = registry.entries().unwrap();
-    let initial_running = entries
+    let _initial_running = entries
         .iter()
         .filter(|e| e.record.status == agentic_warden::task_record::TaskStatus::Running)
         .count();

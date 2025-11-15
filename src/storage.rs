@@ -630,7 +630,10 @@ mod tests {
                 Ok(Vec::new())
             }
 
-            fn has_running_tasks(&self, _filter: Option<&ProcessTreeInfo>) -> Result<bool, RegistryError> {
+            fn has_running_tasks(
+                &self,
+                _filter: Option<&ProcessTreeInfo>,
+            ) -> Result<bool, RegistryError> {
                 Ok(false)
             }
         }
@@ -708,13 +711,16 @@ mod tests {
             println!("Mutex<HashMap>: {:?} ({} 操作)", legacy_duration, NUM_PIDS);
 
             if dashmap_duration < legacy_duration {
-                let speedup = legacy_duration.as_nanos() as f64 / dashmap_duration.as_nanos() as f64;
+                let speedup =
+                    legacy_duration.as_nanos() as f64 / dashmap_duration.as_nanos() as f64;
                 println!("DashMap 速度提升: {:.2}x", speedup);
             }
 
             // DashMap应该更快或至少不相差太大
-            assert!(dashmap_duration <= legacy_duration * 2,
-                   "DashMap performance regression detected");
+            assert!(
+                dashmap_duration <= legacy_duration * 2,
+                "DashMap performance regression detected"
+            );
         }
     }
 }

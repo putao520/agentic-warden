@@ -2,23 +2,28 @@ pub mod config;
 mod decision;
 mod embedding;
 mod index;
+pub mod js_orchestrator; // REQ-013: JS orchestration
 pub mod models;
 mod pool;
+pub mod registry; // REQ-013: Dynamic tool registry
+
+pub use embedding::{FastEmbedder, MockEmbeddingBackend};
+pub use index::{MemRoutingIndex, MethodEmbedding, ToolEmbedding};
+pub use pool::McpConnectionPool;
+
+pub use decision::{CandidateToolInfo, DecisionEngine, DecisionInput, DecisionOutcome, LlmClient};
 
 use self::{
     config::McpConfigManager,
-    decision::{CandidateToolInfo, DecisionEngine, DecisionInput},
-    embedding::FastEmbedder,
-    index::{MemRoutingIndex, MethodEmbedding, ScoredMethod, ScoredTool, ToolEmbedding},
+    index::{ScoredMethod, ScoredTool},
     models::{
-        ExecuteToolRequest, ExecuteToolResponse, IntelligentRouteRequest,
-        IntelligentRouteResponse, MethodSchemaResponse, RouteExecutionResult, SelectedRoute,
-        ToolVectorRecord,
+        ExecuteToolRequest, ExecuteToolResponse, IntelligentRouteRequest, IntelligentRouteResponse,
+        MethodSchemaResponse, RouteExecutionResult, SelectedRoute, ToolVectorRecord,
     },
-    pool::{DiscoveredTool, McpConnectionPool},
+    pool::DiscoveredTool,
 };
 use crate::memory::{ConversationHistoryStore, ConversationRecord, MemoryConfig};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use parking_lot::Mutex;
 use rmcp::model::Tool;
 use serde_json::{json, Value};
@@ -32,9 +37,11 @@ pub struct IntelligentRouter {
     embedder: FastEmbedder,
     index: Mutex<MemRoutingIndex>,
     history: ConversationHistoryStore,
-    decision_engine: DecisionEngine,
-    connection_pool: McpConnectionPool,
+    decision_engine: Arc<DecisionEngine>,
+    connection_pool: Arc<McpConnectionPool>,
     tool_registry: RwLock<HashMap<String, Tool>>,
+    dynamic_registry: Option<Arc<registry::DynamicToolRegistry>>, // REQ-013
+    js_orchestrator: Option<Arc<js_orchestrator::WorkflowOrchestrator>>, // REQ-013
 }
 
 impl IntelligentRouter {
@@ -63,11 +70,33 @@ impl IntelligentRouter {
             .unwrap_or(&memory_config.llm_model)
             .to_string();
         let decision_timeout = config_arc.llm.timeout.unwrap_or(30);
-        let decision_engine =
-            DecisionEngine::new(&decision_endpoint, &decision_model, decision_timeout)?;
+        let decision_engine = Arc::new(DecisionEngine::new(
+            &decision_endpoint,
+            &decision_model,
+            decision_timeout,
+        )?);
+
+        let dynamic_registry = Arc::new(registry::DynamicToolRegistry::new(Vec::new()));
+        let _cleanup_task = dynamic_registry.start_cleanup_task();
+
+        // Enable orchestrator if LLM endpoint is explicitly configured
+        // Priority: config file > environment variable
+        // Only enable if user explicitly sets either one (not using defaults)
+        let llm_explicitly_configured = config_arc.llm.endpoint.is_some()
+            || std::env::var("AGENTIC_WARDEN_LLM_ENDPOINT").is_ok();
+
+        let js_orchestrator = if llm_explicitly_configured {
+            eprintln!("🤖 LLM orchestration enabled: {}", decision_endpoint);
+            Some(Arc::new(js_orchestrator::WorkflowOrchestrator::new(
+                decision_engine.clone(),
+            )))
+        } else {
+            eprintln!("🔍 LLM orchestration disabled, vector-only mode");
+            None
+        };
 
         let mut index = MemRoutingIndex::new(embedder.dimension())?;
-        let connection_pool = McpConnectionPool::new(config_arc.clone());
+        let connection_pool = Arc::new(McpConnectionPool::new(config_arc.clone()));
         let discovered = connection_pool.warm_up().await?;
         let tool_registry = RwLock::new(HashMap::new());
         let embeddings = build_embeddings(&embedder, &discovered, config_arc.as_ref())?;
@@ -83,7 +112,34 @@ impl IntelligentRouter {
             decision_engine,
             connection_pool,
             tool_registry,
+            dynamic_registry: Some(dynamic_registry),
+            js_orchestrator,
         })
+    }
+
+    /// Build a router from explicit dependencies (used for deterministic testing).
+    pub fn new_with_components(
+        routing: config::RoutingConfig,
+        embedder: FastEmbedder,
+        index: MemRoutingIndex,
+        history: ConversationHistoryStore,
+        decision_engine: Arc<DecisionEngine>,
+        connection_pool: Arc<McpConnectionPool>,
+        tool_registry: RwLock<HashMap<String, Tool>>,
+        dynamic_registry: Option<Arc<registry::DynamicToolRegistry>>,
+        js_orchestrator: Option<Arc<js_orchestrator::WorkflowOrchestrator>>,
+    ) -> Self {
+        Self {
+            routing,
+            embedder,
+            index: Mutex::new(index),
+            history,
+            decision_engine,
+            connection_pool,
+            tool_registry,
+            dynamic_registry,
+            js_orchestrator,
+        }
     }
 
     pub async fn intelligent_route(
@@ -105,14 +161,45 @@ impl IntelligentRouter {
         }
 
         let embed = self.embedder.embed(&request.user_request)?;
+
+        match self.js_orchestrator.as_ref() {
+            None => {
+                eprintln!("🔍 LLM not configured, using vector search mode");
+                self.vector_mode(&request, &embed).await
+            }
+            Some(orchestrator) => {
+                eprintln!("🤖 Trying LLM orchestration mode...");
+                match self
+                    .try_orchestrate(orchestrator.as_ref(), &request, &embed)
+                    .await
+                {
+                    Ok(response) => {
+                        eprintln!("✅ LLM orchestration succeeded");
+                        Ok(response)
+                    }
+                    Err(err) => {
+                        eprintln!("⚠️  LLM failed: {}, falling back to vector mode", err);
+                        self.vector_mode(&request, &embed).await
+                    }
+                }
+            }
+        }
+    }
+
+    /// Execute the vector-search routing pipeline when LLM orchestration is unavailable.
+    async fn vector_mode(
+        &self,
+        request: &IntelligentRouteRequest,
+        embed: &[f32],
+    ) -> Result<IntelligentRouteResponse> {
         let max_tools = request
             .max_candidates
             .unwrap_or(self.routing.max_tools_per_request);
 
         let (tool_scores, method_scores) = {
             let index = self.index.lock();
-            let tools = index.search_tools(&embed, max_tools)?;
-            let methods = index.search_methods(&embed, max_tools * 2)?;
+            let tools = index.search_tools(embed, max_tools)?;
+            let methods = index.search_methods(embed, max_tools * 2)?;
             (tools, methods)
         };
 
@@ -133,7 +220,7 @@ impl IntelligentRouter {
         let candidate_infos = build_candidates(&tool_scores, &method_scores);
         let mut conversation_context = Vec::new();
         if request.session_id.is_some() {
-            conversation_context = self.history.top_conversations(embed.clone(), 5)?;
+            conversation_context = self.history.top_conversations(embed.to_vec(), 5)?;
         }
 
         let decision = self
@@ -145,16 +232,18 @@ impl IntelligentRouter {
             })
             .await?;
 
-        // Never execute tools - only return suggestions/schema
-        // Execution mode (Dynamic vs Query) determines how the response is used:
-        // - Dynamic: Tool will be registered for client to call
-        // - Query: Client will call execute_tool after reviewing suggestion
         let execute_message = match request.execution_mode {
             models::ExecutionMode::Dynamic => {
-                format!("Selected tool: {}::{} (will be dynamically registered)", decision.server, decision.tool)
+                format!(
+                    "Selected tool: {}::{} (will be dynamically registered)",
+                    decision.server, decision.tool
+                )
             }
             models::ExecutionMode::Query => {
-                format!("Suggested tool: {}::{} (review and call execute_tool)", decision.server, decision.tool)
+                format!(
+                    "Suggested tool: {}::{} (review and call execute_tool)",
+                    decision.server, decision.tool
+                )
             }
         };
 
@@ -165,7 +254,7 @@ impl IntelligentRouter {
                 request.user_request.clone(),
                 vec![format!("{}::{}", decision.server, decision.tool)],
             );
-            self.history.append(record, embed.clone())?;
+            self.history.append(record, embed.to_vec())?;
         }
 
         Ok(IntelligentRouteResponse {
@@ -178,7 +267,7 @@ impl IntelligentRouter {
                 arguments: decision.arguments,
                 rationale: decision.rationale.clone(),
             }),
-            result: None, // Never execute, always None
+            result: None,
             alternatives: candidate_infos
                 .into_iter()
                 .skip(1)
@@ -193,6 +282,67 @@ impl IntelligentRouter {
             conversation_context,
             tool_schema: None,
             dynamically_registered: false,
+        })
+    }
+
+    /// Attempt to orchestrate a workflow via the JS orchestrator (LLM-first path).
+    async fn try_orchestrate(
+        &self,
+        orchestrator: &js_orchestrator::WorkflowOrchestrator,
+        request: &IntelligentRouteRequest,
+        embed: &[f32],
+    ) -> Result<IntelligentRouteResponse> {
+        let (tool_scores, method_scores) = {
+            let index = self.index.lock();
+            let max_tools = request
+                .max_candidates
+                .unwrap_or(self.routing.max_tools_per_request);
+            let tools = index.search_tools(embed, max_tools)?;
+            let methods = index.search_methods(embed, max_tools * 2)?;
+            (tools, methods)
+        };
+
+        if tool_scores.is_empty() {
+            return Err(anyhow!("No candidate tools for orchestration"));
+        }
+
+        let candidate_infos = build_candidates(&tool_scores, &method_scores);
+        let orchestrated_tool = orchestrator
+            .orchestrate(&request.user_request, &candidate_infos)
+            .await?;
+
+        let Some(registry) = self.dynamic_registry.as_ref() else {
+            return Err(anyhow!("Dynamic registry not initialized"));
+        };
+
+        registry
+            .register_js_tool(
+                orchestrated_tool.name.clone(),
+                orchestrated_tool.description.clone(),
+                orchestrated_tool.input_schema.clone(),
+                orchestrated_tool.js_code.clone(),
+                orchestrated_tool.mcp_dependencies.clone(),
+            )
+            .await?;
+
+        Ok(IntelligentRouteResponse {
+            success: true,
+            message: format!(
+                "Created orchestrated workflow '{}'. Use this tool to solve your request.",
+                orchestrated_tool.name
+            ),
+            confidence: 1.0,
+            selected_tool: Some(SelectedRoute {
+                mcp_server: "orchestrated".into(),
+                tool_name: orchestrated_tool.name.clone(),
+                arguments: Value::Object(Default::default()),
+                rationale: orchestrated_tool.description.clone(),
+            }),
+            result: None,
+            alternatives: Vec::new(),
+            conversation_context: Vec::new(),
+            tool_schema: Some(orchestrated_tool.input_schema),
+            dynamically_registered: true,
         })
     }
 
@@ -232,15 +382,13 @@ impl IntelligentRouter {
         let start = Instant::now();
         let execution = self
             .connection_pool
-            .call_tool(&request.mcp_server, &request.tool_name, request.arguments.clone())
+            .call_tool(
+                &request.mcp_server,
+                &request.tool_name,
+                request.arguments.clone(),
+            )
             .await;
         let duration = start.elapsed().as_millis();
-
-        // Record in conversation history if session_id provided
-        if let Some(session_id) = request.session_id {
-            // We don't have the original user request here, so we'll skip history for now
-            // This could be enhanced by passing the original query
-        }
 
         match execution {
             Ok(output) => Ok(ExecuteToolResponse {
@@ -260,6 +408,10 @@ impl IntelligentRouter {
                 result: None,
             }),
         }
+    }
+
+    pub fn connection_pool(&self) -> Arc<McpConnectionPool> {
+        Arc::clone(&self.connection_pool)
     }
 }
 

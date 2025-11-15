@@ -8,8 +8,6 @@ use agentic_warden::task_record::TaskRecord;
 use agentic_warden::unified_registry::Registry;
 use chrono::Utc;
 use serial_test::serial;
-use std::process::{Command, Stdio};
-use std::time::Duration;
 
 /// 测试pwait命令需要PID参数
 #[test]

@@ -211,6 +211,43 @@ The system **auto-detects client capabilities** at startup and adapts accordingl
 └─────────────────┘ Returns results
 ```
 
+### JavaScript Workflow Orchestration
+
+When an explicit LLM endpoint is configured, Agentic-Warden can synthesize short-lived **JS workflows** that orchestrate multiple MCP functions into a single tool (`REQ-013`). The `intelligent_route` helper performs these steps automatically:
+
+1. Rank candidate MCP tools via embeddings
+2. Ask the LLM to plan + generate `async function workflow(input)` JavaScript
+3. Validate and sandbox the code inside the warmed Boa runtime pool (5 instances)
+4. Register the workflow as a dynamic MCP tool with cached metadata
+
+Example CLI session:
+
+```bash
+$ agentic-warden route "Create a weekly git report for /srv/app"
+{
+  "message": "Created orchestrated workflow 'git_weekly_report'. Use this tool to solve your request.",
+  "selected_tool": {
+    "mcp_server": "orchestrated",
+    "tool_name": "git_weekly_report"
+  },
+  "tool_schema": { "type": "object", "required": ["repo_path", "week"] }
+}
+
+# Claude Code now sees git_weekly_report in list_tools and can call it directly
+```
+
+The generated workflow can call injected helpers such as `mcpGitStatus` and `mcpWriteReport`:
+
+```javascript
+async function workflow(input) {
+  const status = await mcpGitStatus({ repo: input.repo_path });
+  const report = await mcpWriteReport({ repo: input.repo_path, summary: status.branch });
+  return { ok: true, status, report_path: report.path };
+}
+```
+
+See [`examples/js_orchestrated_workflow.md`](./examples/js_orchestrated_workflow.md) for a complete end-to-end example covering the `intelligent_route` request, generated JS, and follow-up invocation.
+
 ### Client Capability Detection
 
 On initialization, Agentic-Warden **tests** if the client supports dynamic tools:
@@ -293,7 +330,7 @@ cargo test
 cargo test -- --nocapture
 
 # Run specific test module
-cargo test dynamic_tools
+cargo test dynamic_tool_registry
 cargo test capability_detector
 cargo test routing_integration
 
@@ -303,7 +340,7 @@ cargo tarpaulin --out Html
 
 ### Test Coverage
 
-- **Unit Tests**: DynamicToolManager, ClientCapabilities, routing logic
+- **Unit Tests**: DynamicToolRegistry, ClientCapabilities, routing logic
 - **Integration Tests**: End-to-end routing workflows, dynamic registration flow
 - **Mock Tests**: MCP client simulation for both Dynamic and Query modes
 
@@ -372,6 +409,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 - **rmcp**: Rust MCP SDK by [pkolaczk](https://github.com/pkolaczk/rmcp)
 - **FastEmbed**: Fast embedding generation
 - **Claude Code**: Anthropic's official CLI for Claude
+- **Anthropic Code Execution**: This project's JavaScript orchestration system was inspired by Anthropic's article on [Code Execution with MCP](https://www.anthropic.com/engineering/code-execution-with-mcp), which demonstrated innovative approaches to executing code within MCP environments
 
 ---
 

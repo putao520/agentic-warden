@@ -32,7 +32,10 @@ impl HookHandler {
         let db_path = Self::get_db_path()?;
         let store = ConversationHistoryStore::new(&db_path, 384)?;
 
-        Ok(Self { embedder: Mutex::new(embedder), store })
+        Ok(Self {
+            embedder: Mutex::new(embedder),
+            store,
+        })
     }
 
     /// Get the vector database path from config directory.
@@ -51,8 +54,8 @@ impl HookHandler {
     /// This is the main entry point called by `agentic-warden hooks handle`.
     pub async fn handle_from_stdin(&self) -> Result<()> {
         // 1. Read hook input from stdin
-        let input = ClaudeCodeHookInput::from_stdin()
-            .context("Failed to parse hook input from stdin")?;
+        let input =
+            ClaudeCodeHookInput::from_stdin().context("Failed to parse hook input from stdin")?;
 
         eprintln!(
             "📥 Received hook: {} for session {}",

@@ -4,25 +4,34 @@ use memvdb::normalize;
 use parking_lot::Mutex;
 use std::sync::Arc;
 
+/// Backend interface for embedding generation (allows mocking in tests).
+pub trait EmbeddingBackend: Send + Sync {
+    fn dimension(&self) -> usize;
+    fn embed_batch(&self, inputs: &[String]) -> Result<Vec<Vec<f32>>>;
+}
+
 /// Thread-safe wrapper around FastEmbed text embeddings.
 pub struct FastEmbedder {
-    encoder: Arc<Mutex<TextEmbedding>>,
-    dimension: usize,
+    backend: Arc<dyn EmbeddingBackend>,
 }
 
 impl FastEmbedder {
     pub fn new(model_name: &str) -> Result<Self> {
         let model = resolve_model(model_name)?;
-        let dimension = TextEmbedding::get_model_info(&model)?.dim;
+        let info = TextEmbedding::get_model_info(&model)?;
         let encoder = TextEmbedding::try_new(InitOptions::new(model.clone()))?;
         Ok(Self {
-            encoder: Arc::new(Mutex::new(encoder)),
-            dimension,
+            backend: Arc::new(FastEmbedBackend::new(encoder, info.dim)),
         })
     }
 
+    /// Construct an embedder from a custom backend (used for deterministic tests).
+    pub fn with_backend(backend: Arc<dyn EmbeddingBackend>) -> Self {
+        Self { backend }
+    }
+
     pub fn dimension(&self) -> usize {
-        self.dimension
+        self.backend.dimension()
     }
 
     pub fn embed(&self, text: &str) -> Result<Vec<f32>> {
@@ -34,6 +43,30 @@ impl FastEmbedder {
     }
 
     pub fn embed_batch(&self, inputs: &[String]) -> Result<Vec<Vec<f32>>> {
+        self.backend.embed_batch(inputs)
+    }
+}
+
+struct FastEmbedBackend {
+    encoder: Arc<Mutex<TextEmbedding>>,
+    dimension: usize,
+}
+
+impl FastEmbedBackend {
+    fn new(encoder: TextEmbedding, dimension: usize) -> Self {
+        Self {
+            encoder: Arc::new(Mutex::new(encoder)),
+            dimension,
+        }
+    }
+}
+
+impl EmbeddingBackend for FastEmbedBackend {
+    fn dimension(&self) -> usize {
+        self.dimension
+    }
+
+    fn embed_batch(&self, inputs: &[String]) -> Result<Vec<Vec<f32>>> {
         if inputs.is_empty() {
             return Ok(Vec::new());
         }
@@ -43,6 +76,46 @@ impl FastEmbedder {
             .into_iter()
             .map(|vector| normalize(&vector))
             .collect())
+    }
+}
+
+/// Simple embedding backend that returns deterministic vectors for tests.
+pub struct MockEmbeddingBackend {
+    dimension: usize,
+    generator: Arc<dyn Fn(&str) -> Vec<f32> + Send + Sync>,
+}
+
+impl MockEmbeddingBackend {
+    pub fn new<F>(dimension: usize, generator: F) -> Self
+    where
+        F: Fn(&str) -> Vec<f32> + Send + Sync + 'static,
+    {
+        Self {
+            dimension,
+            generator: Arc::new(generator),
+        }
+    }
+}
+
+impl EmbeddingBackend for MockEmbeddingBackend {
+    fn dimension(&self) -> usize {
+        self.dimension
+    }
+
+    fn embed_batch(&self, inputs: &[String]) -> Result<Vec<Vec<f32>>> {
+        let mut results = Vec::with_capacity(inputs.len());
+        for text in inputs {
+            let vector = (self.generator)(text);
+            if vector.len() != self.dimension {
+                return Err(anyhow!(
+                    "Mock embedding generated {}-dim vector, expected {}",
+                    vector.len(),
+                    self.dimension
+                ));
+            }
+            results.push(normalize(&vector));
+        }
+        Ok(results)
     }
 }
 

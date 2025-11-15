@@ -2,17 +2,31 @@
 //!
 //! Tests the complete routing pipeline from request to tool selection.
 
-use agentic_warden::mcp::dynamic_tools::DynamicToolManager;
-use agentic_warden::mcp_routing::models::{
-    DecisionMode, ExecutionMode, IntelligentRouteRequest,
-};
-use serde_json::json;
+use agentic_warden::mcp_routing::models::{DecisionMode, ExecutionMode, IntelligentRouteRequest};
+use agentic_warden::mcp_routing::registry::{DynamicToolRegistry, RegisteredTool, RegistryConfig};
+use rmcp::model::Tool;
+use std::sync::Arc;
+use std::time::Duration;
+
+fn build_tool(name: &str, description: &str) -> Tool {
+    let mut schema = serde_json::Map::new();
+    schema.insert("type".into(), serde_json::Value::String("object".into()));
+
+    Tool {
+        name: name.to_string().into(),
+        title: None,
+        description: Some(description.to_string().into()),
+        input_schema: Arc::new(schema),
+        output_schema: None,
+        icons: None,
+        annotations: None,
+    }
+}
 
 #[tokio::test]
-async fn test_dynamic_tool_manager_integration() {
-    let manager = DynamicToolManager::new();
+async fn test_dynamic_tool_registry_integration() {
+    let registry = DynamicToolRegistry::new(vec![]);
 
-    // Simulate routing workflow: register filesystem tools
     let filesystem_tools = vec![
         ("read_file", "Read file contents"),
         ("write_file", "Write to a file"),
@@ -20,39 +34,22 @@ async fn test_dynamic_tool_manager_integration() {
     ];
 
     for (name, desc) in filesystem_tools {
-        let is_new = manager
-            .register_tool(
-                "filesystem".to_string(),
-                name.to_string(),
-                desc.to_string(),
-                json!({
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string"}
-                    }
-                }),
-            )
-            .await;
+        let tool = build_tool(name, desc);
+        let is_new = registry
+            .register_proxied_tool("filesystem".to_string(), name.to_string(), tool)
+            .await
+            .unwrap();
         assert!(is_new, "First registration should be new");
     }
 
-    // Verify all tools registered
-    let tools = manager.list_tools().await;
+    let tools = registry.get_all_tool_definitions().await;
     assert_eq!(tools.len(), 3);
 
-    // Verify server routing works
-    assert_eq!(
-        manager.get_server("read_file").await,
-        Some("filesystem".to_string())
-    );
-    assert_eq!(
-        manager.get_server("write_file").await,
-        Some("filesystem".to_string())
-    );
-
-    // Simulate tool usage - unregister after use
-    manager.unregister_tool("read_file").await;
-    assert_eq!(manager.list_tools().await.len(), 2);
+    let tool = registry.get_tool("read_file").await.expect("tool missing");
+    match tool {
+        RegisteredTool::ProxiedMcp(proxy) => assert_eq!(proxy.server, "filesystem"),
+        _ => panic!("unexpected tool type"),
+    }
 }
 
 #[tokio::test]
@@ -115,33 +112,30 @@ async fn test_routing_request_construction() {
 
 #[tokio::test]
 async fn test_concurrent_tool_operations() {
-    let manager = DynamicToolManager::new();
-    let manager_clone = manager.clone();
+    let registry = Arc::new(DynamicToolRegistry::new(vec![]));
+    let registry_clone = Arc::clone(&registry);
 
     // Spawn concurrent registration tasks
-    let handle1 = tokio::spawn(async move {
-        for i in 0..10 {
-            manager
-                .register_tool(
-                    "server1".to_string(),
-                    format!("tool_{}", i),
-                    format!("Tool {}", i),
-                    json!({"type": "object"}),
-                )
-                .await;
-        }
-    });
+    let handle1 = {
+        let registry = Arc::clone(&registry);
+        tokio::spawn(async move {
+            for i in 0..10 {
+                let tool = build_tool(&format!("tool_{}", i), &format!("Tool {}", i));
+                registry
+                    .register_proxied_tool("server1".to_string(), format!("tool_{}", i), tool)
+                    .await
+                    .unwrap();
+            }
+        })
+    };
 
     let handle2 = tokio::spawn(async move {
         for i in 10..20 {
-            manager_clone
-                .register_tool(
-                    "server2".to_string(),
-                    format!("tool_{}", i),
-                    format!("Tool {}", i),
-                    json!({"type": "object"}),
-                )
-                .await;
+            let tool = build_tool(&format!("tool_{}", i), &format!("Tool {}", i));
+            registry_clone
+                .register_proxied_tool("server2".to_string(), format!("tool_{}", i), tool)
+                .await
+                .unwrap();
         }
     });
 
@@ -149,53 +143,45 @@ async fn test_concurrent_tool_operations() {
     let _ = tokio::join!(handle1, handle2);
 
     // Verify all tools registered
-    let tools = manager.list_tools().await;
+    let tools = registry.get_all_tool_definitions().await;
     assert_eq!(tools.len(), 20);
 }
 
 #[tokio::test]
 async fn test_tool_lifecycle() {
-    let manager = DynamicToolManager::new();
+    let registry = DynamicToolRegistry::with_config(
+        vec![],
+        RegistryConfig {
+            default_ttl_seconds: 1,
+            ..RegistryConfig::default()
+        },
+    );
 
-    // Phase 1: Initial state - no tools
-    assert_eq!(manager.list_tools().await.len(), 0);
-    assert!(!manager.has_tool("read_file").await);
+    assert!(!registry.has_tool("read_file").await);
 
-    // Phase 2: Register a tool
-    let is_new = manager
-        .register_tool(
-            "filesystem".to_string(),
-            "read_file".to_string(),
-            "Read a file".to_string(),
-            json!({"type": "object"}),
-        )
-        .await;
+    let tool = build_tool("read_file", "Read a file");
+    let is_new = registry
+        .register_proxied_tool("filesystem".to_string(), "read_file".to_string(), tool)
+        .await
+        .unwrap();
     assert!(is_new);
-    assert_eq!(manager.list_tools().await.len(), 1);
-    assert!(manager.has_tool("read_file").await);
+    assert!(registry.has_tool("read_file").await);
 
-    // Phase 3: Update same tool (not new)
-    let is_new = manager
-        .register_tool(
-            "filesystem".to_string(),
-            "read_file".to_string(),
-            "Read a file (updated)".to_string(),
-            json!({"type": "object"}),
-        )
-        .await;
+    let tool = build_tool("read_file", "Read a file (updated)");
+    let is_new = registry
+        .register_proxied_tool("filesystem".to_string(), "read_file".to_string(), tool)
+        .await
+        .unwrap();
     assert!(!is_new);
-    assert_eq!(manager.list_tools().await.len(), 1);
 
-    // Phase 4: Remove the tool
-    let removed = manager.unregister_tool("read_file").await;
-    assert!(removed);
-    assert_eq!(manager.list_tools().await.len(), 0);
-    assert!(!manager.has_tool("read_file").await);
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    registry.cleanup_expired_tools().await;
+    assert!(!registry.has_tool("read_file").await);
 }
 
 #[tokio::test]
 async fn test_multi_server_routing() {
-    let manager = DynamicToolManager::new();
+    let registry = DynamicToolRegistry::new(vec![]);
 
     // Register tools from multiple servers
     let servers = vec![
@@ -206,40 +192,45 @@ async fn test_multi_server_routing() {
 
     for (server, tools) in servers {
         for tool in tools {
-            manager
-                .register_tool(
-                    server.to_string(),
-                    tool.to_string(),
-                    format!("{} from {}", tool, server),
-                    json!({"type": "object"}),
-                )
-                .await;
+            let definition = build_tool(tool, &format!("{} from {}", tool, server));
+            registry
+                .register_proxied_tool(server.to_string(), tool.to_string(), definition)
+                .await
+                .unwrap();
         }
     }
 
     // Verify total tool count
-    assert_eq!(manager.list_tools().await.len(), 7);
+    assert_eq!(registry.get_all_tool_definitions().await.len(), 7);
 
     // Verify correct server routing
-    assert_eq!(
-        manager.get_server("read_file").await,
-        Some("filesystem".to_string())
-    );
-    assert_eq!(
-        manager.get_server("commit").await,
-        Some("git".to_string())
-    );
-    assert_eq!(
-        manager.get_server("web_search").await,
-        Some("search".to_string())
-    );
+    let server = registry
+        .get_tool("read_file")
+        .await
+        .and_then(|tool| match tool {
+            RegisteredTool::ProxiedMcp(proxy) => Some(proxy.server),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(server, "filesystem");
 
-    // Clear filesystem tools
-    manager.unregister_tool("read_file").await;
-    manager.unregister_tool("write_file").await;
-    assert_eq!(manager.list_tools().await.len(), 5);
+    let server = registry
+        .get_tool("commit")
+        .await
+        .and_then(|tool| match tool {
+            RegisteredTool::ProxiedMcp(proxy) => Some(proxy.server),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(server, "git");
 
-    // Clear all tools
-    manager.clear().await;
-    assert_eq!(manager.list_tools().await.len(), 0);
+    let server = registry
+        .get_tool("web_search")
+        .await
+        .and_then(|tool| match tool {
+            RegisteredTool::ProxiedMcp(proxy) => Some(proxy.server),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(server, "search");
 }

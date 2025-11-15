@@ -490,13 +490,26 @@ Agentic-Warden MUST provide an intelligent MCP (Model Context Protocol) routing 
 - [x] Provide semantic search capabilities with configurable similarity thresholds
 - [x] Memory-only MCP index rebuilt on startup from .mcp.json configuration
 
-#### 4.3 Claude Code工具刷新机制利用
+#### 4.3 Claude Code工具刷新机制利用 [基于观察行为]
+
+**信息来源**:
+- 基于Claude Code CLI实际行为观察 (2025-11-14测试验证)
+- 参考MCP Protocol Specification - `listChanged` capability定义
+- **警告**: 此行为基于观察,非官方文档明确保证,未来版本可能变化
+
+**观察到的Claude Code行为**:
+- Claude Code在每次调用工具前会自动调用`list_tools`刷新工具列表
+- 刷新触发条件: Server Capabilities声明`"listChanged": true`
+- 刷新间隔: 实测 < 1s (可能随Claude Code版本变化)
+- 刷新时机: 在每次执行工具调用前自动触发
+
+**我们的设计利用**:
 - [x] Leverage Claude Code's automatic `list_tools` refresh before each tool use
-- [x] No need for notifications/tools/list_changed - Claude Code pulls updates naturally
+- [x] No need for notifications/tools/list_changed - Claude Code pulls updates naturally (Pull模式)
 - [x] Maintain thread-safe global tools registry (DynamicToolManager)
 - [x] Return base tools + dynamically registered tools in `list_tools` response
 - [x] Tools become visible to Claude Code on next refresh (typically < 1s)
-- [x] Zero client capability detection needed - works universally
+- [x] Zero client capability detection needed - works universally with MCP-compliant clients
 
 #### 4.4 智能路由算法 (单层简化架构)
 
@@ -516,7 +529,7 @@ Agentic-Warden MUST provide an intelligent MCP (Model Context Protocol) routing 
 7. **清理优化** → Unregister unused tools to keep token count minimal
 
 **关键优势**:
-- ✅ **98% token reduction**: Only expose base tools (intelligent_route, search_history) until needed
+- ✅ **98% token reduction**: Only expose 2 base tools (Module 2: `search_history`, Module 3: `intelligent_route`) until needed
 - ✅ **零延迟感知**: Claude Code's natural refresh cycle (< 1s) provides seamless UX
 - ✅ **无需通知**: No notifications/tools/list_changed required - pull model works perfectly
 - ✅ **准确参数**: Claude Code generates parameters with full context, not router guessing
@@ -531,10 +544,11 @@ Agentic-Warden MUST provide an intelligent MCP (Model Context Protocol) routing 
 - [x] Auto-cleanup: Clear unused tools after configurable timeout
 - [x] No notifications needed - Claude Code pulls updates via `list_tools`
 
-#### 4.6 统一MCP接口 (2个基础工具 + 动态代理)
+#### 4.6 统一MCP接口 (跨模块工具暴露)
 
-**基础工具 (始终可见)**:
-- [x] **intelligent_route**: 智能MCP工具选择和动态注册
+**基础工具 (始终可见,来自不同模块)**:
+
+- [x] **intelligent_route** (Module 3: MCP Routing): 智能MCP工具选择和动态注册
   - [x] Accepts: `user_request` (用户需求描述), `session_id` (可选)
   - [x] Returns:
     - `selected_tool`: 选中的工具名称
@@ -544,11 +558,12 @@ Agentic-Warden MUST provide an intelligent MCP (Model Context Protocol) routing 
   - [x] Side effect: 将选中的工具注册到DynamicToolManager
   - [x] Next step: Claude Code refreshes tools, sees new tool, calls it directly
 
-- [x] **search_history**: 会话历史语义搜索（带TODO上下文）
+- [x] **search_history** (Module 2: CC Session Management): 会话历史语义搜索（带TODO上下文）
   - [x] Accepts: `query`, `session_id` (optional), `limit`
   - [x] Returns: Conversation records with embedded TODO items
   - [x] TODO extraction patterns: `- [ ]`, `TODO:`, `Action Items:`
   - [x] Each result includes: conversation context + associated TODO list
+  - [x] 数据来源: SahomeDB持久化存储的Claude Code会话历史
 
 **动态代理工具** (按需注册):
 - [x] 从.mcp.json发现的所有MCP工具
@@ -697,6 +712,185 @@ mcp_call("git_status", {
 - `ollama-rs` = "0.3.1" # For internal LLM communication
 - Existing Qdrant HTTP integration (via reqwest)
 - Existing embedding service (Ollama)
+
+---
+
+### REQ-013: 动态JS编排工具系统
+
+**Priority**: High
+**Status**: 🟡 Planned
+**Related**: REQ-012, ARCH-012
+**Version**: v0.3.0+
+
+#### 背景和动机
+
+intelligent_route当前只能选择单个MCP工具,对于复杂的多步骤任务需要用户多次调用工具。通过引入Boa JS引擎和LLM驱动的代码生成,我们可以动态创建组合多个MCP工具的编排工具,一次调用完成复杂工作流。
+
+#### 核心功能需求
+
+#### 5.1 DynamicToolRegistry (动态工具注册表)
+
+**作为MCP工具定义的SSOT**:
+- [ ] 内部维护所有可被映射到MCP协议的工具定义
+- [ ] 支持两类工具:基础工具(永久) + 动态工具(带TTL)
+- [ ] 每次Claude Code调用`list_tools`时从Registry读取工具列表
+- [ ] 工具名称和schema在TTL内保持稳定不变
+- [ ] 提供线程安全的并发读写操作
+
+**基础工具管理**:
+- [ ] 启动时初始化基础工具: `intelligent_route`, `search_history`
+- [ ] 基础工具永久存在,不受TTL影响
+
+**动态工具管理**:
+- [ ] 支持注册两种动态工具类型:
+  - JS编排工具 (`JsOrchestratedTool`)
+  - 代理MCP工具 (`ProxiedMcpTool`)
+- [ ] 每个动态工具带有TTL = **600秒(10分钟)**
+- [ ] 自动清理过期工具(后台任务,每60秒检查一次)
+- [ ] 支持最大动态工具数限制(默认100个),超出时驱逐最旧工具
+- [ ] 记录工具注册时间、执行次数等元数据
+
+#### 5.2 intelligent_route LLM优先路由 (带Fallback)
+
+**路由决策逻辑**:
+- [ ] **LLM不存在** → 直接使用向量搜索模式(不尝试LLM,节省时间)
+- [ ] **LLM存在** → 优先尝试LLM编排,失败则fallback到向量搜索
+
+**执行流程**:
+```rust
+match js_orchestrator {
+    None => vector_mode(),           // LLM不存在,直接vector
+    Some(orch) => {
+        match try_llm_orchestrate() {
+            Ok(result) => result,     // LLM成功
+            Err(_) => vector_mode(),  // LLM失败,fallback
+        }
+    }
+}
+```
+
+**LLM编排模式** (优先尝试):
+- [ ] LLM分析用户任务,规划所需步骤和MCP工具
+- [ ] 检查是否有合适的工具支持,不可行时返回Err触发fallback
+- [ ] 可行时生成带输入参数定义的JS函数
+- [ ] JS函数内部调用注入的MCP工具(以`mcp`前缀暴露)
+- [ ] 代码验证失败时返回Err触发fallback
+- [ ] 验证通过后注册为单一动态JS编排工具到Registry
+- [ ] 返回消息: "Use the 'xxx' tool to solve your problem"
+
+**向量搜索模式** (Fallback保障):
+- [ ] 两层向量搜索(工具级 + 方法级)
+- [ ] 聚类算法筛选出top-N候选工具(默认5个)
+- [ ] 批量注册为代理工具到Registry(透传原始MCP定义)
+- [ ] 返回消息: "Found N relevant tools. Choose which ones to use: ..."
+
+**Fallback触发条件**:
+- LLM环境未配置 (`js_orchestrator = None`)
+- LLM网络请求超时或失败
+- LLM返回无效响应或代码
+- JS代码验证失败(语法错误、安全检查未通过)
+- LLM判断任务不可行
+
+#### 5.3 Boa JS引擎集成
+
+**安全沙箱**:
+- [ ] 使用Boa引擎提供安全的JS运行时环境
+- [ ] 禁用危险全局对象: `eval`, `Function`, `require`, `import`, `fetch`, `XMLHttpRequest`
+- [ ] 实现执行时间限制(最大30秒)
+- [ ] 实现内存使用限制(最大256MB)
+- [ ] 实现调用栈深度限制(最大128层)
+- [ ] 提供安全的`console.log`(仅用于调试)
+
+**MCP函数注入**:
+- [ ] 将可用的MCP工具注入为JS异步函数
+- [ ] 函数命名规范: `mcp` + CamelCase (例: `git_status` → `mcpGitStatus`)
+- [ ] 注入函数实现异步调用RMCP Client Pool
+- [ ] 支持参数解析和结果转换(JSON ↔ JS Value)
+- [ ] 错误处理和异常传播
+
+**运行时池管理**:
+- [ ] 使用连接池管理Boa运行时实例(复用,减少初始化开销)
+- [ ] 支持并发执行多个JS工具
+- [ ] 运行时隔离(每次执行独立的context)
+
+#### 5.4 LLM驱动的代码生成
+
+**工作流规划**:
+- [ ] LLM分析用户任务和可用MCP工具列表
+- [ ] 判断任务是否可行(is_feasible: true/false)
+- [ ] 规划执行步骤(steps: [{step, tool, description}, ...])
+- [ ] 确定所需输入参数(因为MCP只接收"做什么",不包含具体上下文)
+- [ ] 建议工具名称(snake_case)和描述
+
+**JS代码生成**:
+- [ ] 根据规划生成完整的`async function workflow(input) {...}`
+- [ ] 生成的代码使用注入的MCP函数(mcp前缀)
+- [ ] 包含错误处理(try-catch)
+- [ ] 包含注释说明每个步骤
+- [ ] 返回结构化结果对象
+
+**代码验证**:
+- [ ] 语法检查(使用Boa解析)
+- [ ] 安全性检查(检测危险模式: eval, new Function, __proto__等)
+- [ ] 检查只使用允许的MCP函数
+- [ ] Dry-run测试(使用mock数据执行一次)
+
+#### 5.5 工具执行和生命周期
+
+**JS工具执行**:
+- [ ] 从Registry获取工具定义
+- [ ] 从运行时池获取Boa实例
+- [ ] 注入所需的MCP函数
+- [ ] 执行JS代码,传入用户参数
+- [ ] 返回结果给Claude Code
+- [ ] 更新执行计数统计
+
+**代理工具执行**:
+- [ ] 从Registry获取工具定义
+- [ ] 通过RMCP Client Pool代理到目标MCP服务器
+- [ ] 透传参数和结果
+- [ ] 更新执行计数统计
+
+**TTL和清理**:
+- [ ] 动态工具TTL = **600秒(10分钟)**
+- [ ] 后台任务每60秒检查并清理过期工具
+- [ ] 超出最大工具数时驱逐最旧工具
+- [ ] 清理时记录日志
+
+#### 技术约束
+
+**新增依赖**:
+```toml
+boa_engine = "0.17"         # Rust实现的JavaScript引擎
+boa_gc = "0.17"             # Boa垃圾回收
+swc_ecma_parser = "0.142"   # 快速JS解析器(用于验证)
+swc_ecma_ast = "0.110"      # AST分析
+deadpool = "0.10"           # 异步对象池(Boa运行时池)
+regex = "1.10"              # 危险模式检测
+```
+
+**性能目标**:
+| 操作 | 目标延迟 | 说明 |
+|-----|---------|------|
+| LLM规划 | < 3s | Ollama本地推理 |
+| JS代码生成 | < 3s | Ollama本地推理 |
+| 代码验证 | < 100ms | 语法+安全检查 |
+| Boa初始化 | < 50ms | 从池获取 |
+| MCP函数注入 | < 200ms | 批量注册 |
+| JS工具执行 | < 30s | 取决于MCP调用数 |
+| 工具注册 | < 10ms | 写入Registry |
+| list_tools响应 | < 50ms | 读取Registry |
+
+**安全要求**:
+- JS代码必须通过安全性检查
+- 禁止使用危险的JavaScript特性
+- 执行时间和内存限制
+- 运行时隔离
+
+**可靠性要求**:
+- 工具注册失败不影响现有工具
+- JS执行错误不导致服务崩溃
+- 过期工具清理不阻塞主流程
 
 ---
 

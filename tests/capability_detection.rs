@@ -1,16 +1,19 @@
 //! Tests for MCP client capability detection.
 
 use agentic_warden::mcp::capability_detector::ClientCapabilities;
-use rmcp::model::{ClientInfo, InitializeRequestParam, ProtocolVersion};
+use rmcp::model::{Implementation, InitializeRequestParam, ProtocolVersion};
 
 #[test]
 fn test_from_init_request() {
     let init_request = InitializeRequestParam {
-        protocol_version: ProtocolVersion::latest(),
+        protocol_version: ProtocolVersion::LATEST,
         capabilities: Default::default(),
-        client_info: ClientInfo {
+        client_info: Implementation {
             name: "claude-code".to_string(),
+            title: None,
             version: "2.0.1".to_string(),
+            icons: None,
+            website_url: None,
         },
     };
 
@@ -33,11 +36,14 @@ fn test_from_init_request_different_clients() {
 
     for (name, version) in clients {
         let init_request = InitializeRequestParam {
-            protocol_version: ProtocolVersion::latest(),
+            protocol_version: ProtocolVersion::LATEST,
             capabilities: Default::default(),
-            client_info: ClientInfo {
+            client_info: Implementation {
                 name: name.to_string(),
+                title: None,
                 version: version.to_string(),
+                icons: None,
+                website_url: None,
             },
         };
 

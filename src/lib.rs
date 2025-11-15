@@ -35,7 +35,10 @@ pub use cli_manager::{execute_update, CliTool, CliToolDetector, InstallType};
 pub use core::models::*;
 pub use core::process_tree::{get_process_tree, ProcessTreeError};
 pub use error::RegistryError;
-pub use registry_factory::{CliRegistry, McpRegistry, create_cli_registry, create_mcp_registry, create_cli_registry_for_pid, create_cli_registry_with_namespace};
+pub use registry_factory::{
+    create_cli_registry, create_cli_registry_for_pid, create_cli_registry_with_namespace,
+    create_mcp_registry, CliRegistry, McpRegistry,
+};
 pub use storage::{CleanupEvent, CleanupReason, RegistryEntry, TaskStorage};
 pub use supervisor::ProcessError;
 pub use task_record::{TaskRecord, TaskStatus};

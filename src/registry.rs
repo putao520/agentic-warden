@@ -3,10 +3,10 @@
 //! This module contains utility functions for working with shared memory registries.
 //! The main TaskRegistry implementation has been moved to unified_registry to avoid duplication.
 
-use shared_hashmap::SharedMemoryHashMap;
 use crate::error::RegistryError;
 use crate::task_record::TaskRecord;
 use serde_json;
+use shared_hashmap::SharedMemoryHashMap;
 
 /// Get current process PID
 #[allow(dead_code)]
@@ -47,7 +47,7 @@ mod tests {
     #[test]
     fn test_registry_validity_with_empty_registry() {
         let namespace = format!("test_validity_empty_{}", std::process::id());
-        let mut map = open_or_create(&namespace, SHARED_MEMORY_SIZE).unwrap();
+        let map = open_or_create(&namespace, SHARED_MEMORY_SIZE).unwrap();
 
         let valid_entries = test_registry_validity(&map).unwrap();
         assert_eq!(valid_entries.len(), 0);
@@ -80,7 +80,10 @@ mod tests {
 
         // Insert invalid data (not a task record)
         map.insert("invalid".to_string(), "not a json".to_string());
-        map.insert("wrong_type".to_string(), r#"{"type":"not_task_record"}"#.to_string());
+        map.insert(
+            "wrong_type".to_string(),
+            r#"{"type":"not_task_record"}"#.to_string(),
+        );
 
         let valid_entries = test_registry_validity(&map).unwrap();
         assert_eq!(valid_entries.len(), 0);

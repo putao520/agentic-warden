@@ -119,10 +119,7 @@ impl ProvidersConfig {
     /// Remove a provider from the configuration
     pub fn remove_provider(&mut self, id: &str) -> Result<()> {
         if id == self.default_provider {
-            return Err(anyhow!(
-                "Cannot remove the default provider '{}'",
-                id
-            ));
+            return Err(anyhow!("Cannot remove the default provider '{}'", id));
         }
         if !self.can_delete_provider(id) {
             return Err(anyhow!(

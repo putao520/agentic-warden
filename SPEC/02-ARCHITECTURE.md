@@ -130,13 +130,80 @@ Claude Code会话 → JSONL存储 → 向量化 → 语义索引 → 搜索检�
 AI助手请求 → 语义搜索 → 工具聚类 → LLM决策 → 工具执行 → 结果返回
 ```
 
+#### MCP Server对外接口 (跨模块统一暴露)
+
+AI WARDEN通过**单一MCP Server**对外暴露工具,但工具来自不同的功能模块:
+
+| 工具名 | 所属模块 | 功能描述 | 数据存储 | 服务对象 |
+|-------|---------|---------|---------|---------|
+| `search_history` | Module 2: CC Session Management | 语义搜索Claude Code历史对话 | SahomeDB (持久化) | Claude Code用户 |
+| `intelligent_route` | Module 3: MCP Proxy Routing | 智能选择和路由到最佳MCP工具 | MemVDB (内存) | AI助手 |
+| 动态代理工具 | Module 3: MCP Proxy Routing | 按需注册,代理到外部MCP服务器 | - | AI助手 |
+
+**架构模式**: Facade Pattern
+- **统一入口**: 单一MCP Server进程对外提供服务
+- **内部路由**: 根据工具名路由到对应模块的handler
+- **模块解耦**: 各模块独立实现,通过接口协作
+- **动态扩展**: Module 3支持运行时动态注册新工具
+
+**MCP对外接口层架构**:
+
+```mermaid
+graph TB
+    subgraph "External Client"
+        ClaudeCode[Claude Code / AI Assistant]
+    end
+
+    subgraph "AI WARDEN - Unified MCP Interface"
+        MCPServer[MCP Server<br/>统一对外接口<br/>Facade Pattern]
+    end
+
+    subgraph "Module 2: CC Session Management"
+        SearchHistory[search_history<br/>Handler]
+        SahomeDB[(SahomeDB<br/>Persistent Storage)]
+    end
+
+    subgraph "Module 3: MCP Proxy Routing"
+        IntelligentRoute[intelligent_route<br/>Handler]
+        DynamicProxy[Dynamic Proxy<br/>Tools Handler]
+        MemVDB[(MemVDB<br/>In-Memory Index)]
+        RMCPPool[RMCP Client Pool]
+        ExternalMCP[External MCP<br/>Servers]
+    end
+
+    ClaudeCode -->|list_tools| MCPServer
+    ClaudeCode -->|call: search_history| MCPServer
+    ClaudeCode -->|call: intelligent_route| MCPServer
+    ClaudeCode -->|call: dynamic_tool_xxx| MCPServer
+
+    MCPServer -->|route Module 2| SearchHistory
+    MCPServer -->|route Module 3| IntelligentRoute
+    MCPServer -->|route Module 3| DynamicProxy
+
+    SearchHistory --> SahomeDB
+    IntelligentRoute --> MemVDB
+    DynamicProxy --> RMCPPool
+    RMCPPool --> ExternalMCP
+```
+
+**关键设计决策**:
+1. **为什么单一MCP Server而非多MCP进程?**
+   - 减少Claude Code配置复杂度(只需配置一个MCP服务器)
+   - 统一管理连接和生命周期
+   - 便于跨模块数据共享(如会话上下文)
+
+2. **为什么跨模块暴露工具?**
+   - 用户视角: 统一的MCP工具集,无需关心内部模块划分
+   - 实现视角: 模块内聚,各自管理独立的数据和逻辑
+   - 扩展性: 未来可无缝添加新模块的工具
+
 #### Module Integration Points
 
 虽然三大模块功能独立，但通过以下方式进行协作：
 
 1. **进程管理模块**为其他模块提供进程隔离和资源管理
-2. **会话管理模块**通过MCP接口向用户提供历史检索服务
-3. **路由模块**为AI助手提供智能工具选择能力
+2. **会话管理模块**(Module 2)通过统一MCP接口向用户提供历史检索服务(`search_history`)
+3. **路由模块**(Module 3)通过统一MCP接口为AI助手提供智能工具选择能力(`intelligent_route`及动态代理工具)
 
 ### Core Business Flows
 
@@ -886,9 +953,10 @@ graph TB
 
 #### Component Architecture Details
 
-##### 1. Intelligent MCP Router (Core Component)
+##### 1. Intelligent MCP Router (Module 3 Core Component)
 - **Purpose**: Meta-MCP gateway with dynamic tool registration architecture
-- **Interface**: Two base tools - `intelligent_route`, `search_history`
+- **Module 3提供的MCP工具**: `intelligent_route` (智能路由工具选择和动态注册)
+- **Note**: `search_history`工具由Module 2提供,与此组件独立(详见前文"MCP Server对外接口"章节)
 - **Key Mechanism**: Leverages Claude Code's automatic `list_tools` refresh (< 1s before each tool use)
 - **Internal Components**:
   - Vector search engine (FastEmbed + MemVDB)
@@ -996,6 +1064,527 @@ sequenceDiagram
 - **Memory Management**: Efficient MemVDB data structures, automatic cleanup
 - **Caching Strategy**: Route result caching with TTL-based invalidation
 - **Load Balancing**: Connection pool distribution and health-based routing
+
+---
+
+### ARCH-013: 动态JS编排工具系统架构
+**Date**: 2025-11-15
+**Status**: 🟡 Planned
+**Version**: v0.3.0
+**Related Requirements**: REQ-013, ARCH-012
+
+#### Background
+
+intelligent_route当前通过向量搜索选择单个MCP工具,对于复杂多步骤任务效率低下。通过引入Boa JS引擎和LLM驱动的代码生成,我们可以动态创建组合多个MCP工具的编排函数,一次调用完成复杂工作流。
+
+#### Decision
+
+使用DynamicToolRegistry作为MCP工具定义的SSOT,配合Boa JS引擎和LLM代码生成能力,实现intelligent_route的双模式路由(LLM编排 vs 向量搜索)。
+
+#### Architecture Overview
+
+```mermaid
+graph TB
+    subgraph "Claude Code Client"
+        User[用户请求]
+    end
+
+    subgraph "MCP Protocol Layer"
+        ListTools[list_tools<br/>读取Registry]
+        ToolCall[tools/call<br/>查找&执行]
+    end
+
+    subgraph "DynamicToolRegistry (SSOT)"
+        BaseTools[Base Tools<br/>永久]
+        DynamicTools[Dynamic Tools<br/>TTL=600s]
+
+        BaseTools --> IT[intelligent_route]
+        BaseTools --> SH[search_history]
+
+        DynamicTools --> JSTools[JS编排工具]
+        DynamicTools --> ProxyTools[代理工具]
+    end
+
+    subgraph "intelligent_route LLM优先路由"
+        Router{LLM<br/>环境?}
+        TryLLM[尝试LLM编排]
+        LLMSuccess{成功?}
+        VectorFallback[Vector Fallback]
+    end
+
+    subgraph "LLM编排组件"
+        LLMPlan[工作流规划器]
+        LLMCodeGen[JS代码生成器]
+        CodeValidator[代码验证器]
+    end
+
+    subgraph "向量搜索组件 (Fallback)"
+        VectorSearch[向量搜索引擎]
+        Cluster[聚类算法]
+    end
+
+    subgraph "Execution Layer"
+        JSExec[JS执行器<br/>Boa Runtime Pool]
+        ProxyExec[代理执行器<br/>RMCP Client Pool]
+    end
+
+    User --> ListTools
+    User --> ToolCall
+
+    ListTools --> DynamicTools
+    ListTools --> BaseTools
+
+    ToolCall --> IT
+    IT --> Router
+
+    Router -->|None<br/>直接fallback| VectorFallback
+    Router -->|Some<br/>优先尝试| TryLLM
+
+    TryLLM --> LLMPlan
+    LLMPlan --> LLMCodeGen
+    LLMCodeGen --> CodeValidator
+    CodeValidator --> LLMSuccess
+
+    LLMSuccess -->|成功| JSTools
+    LLMSuccess -->|失败| VectorFallback
+
+    VectorFallback --> VectorSearch
+    VectorSearch --> Cluster
+    Cluster --> ProxyTools
+
+    JSTools --> JSExec
+    ProxyTools --> ProxyExec
+```
+
+#### Core Components Design
+
+##### 1. DynamicToolRegistry
+
+**数据结构**:
+```rust
+pub struct DynamicToolRegistry {
+    // 基础工具(启动时初始化,永久存在)
+    base_tools: HashMap<String, BaseToolDefinition>,
+
+    // 动态工具(运行时注册,带TTL)
+    dynamic_tools: Arc<RwLock<HashMap<String, RegisteredTool>>>,
+
+    config: RegistryConfig,
+}
+
+pub struct RegistryConfig {
+    default_ttl_seconds: u64,      // 默认TTL = 600秒(10分钟)
+    max_dynamic_tools: usize,       // 最大100个动态工具
+    cleanup_interval_seconds: u64,  // 清理间隔60秒
+}
+
+pub enum RegisteredTool {
+    JsOrchestrated(JsOrchestratedTool),  // JS编排工具
+    ProxiedMcp(ProxiedMcpTool),          // 代理MCP工具
+}
+```
+
+**关键操作**:
+- `register_js_tool()`: 注册JS编排工具
+- `register_proxied_tools()`: 批量注册代理工具
+- `get_all_tool_definitions()`: list_tools读取所有工具
+- `get_tool()`: tools/call查找工具定义
+- `cleanup_expired_tools()`: 后台清理过期工具
+
+**TTL管理**:
+```rust
+// 后台清理任务
+tokio::spawn(async move {
+    let mut interval = tokio::time::interval(Duration::from_secs(60));
+    loop {
+        interval.tick().await;
+        registry.cleanup_expired_tools().await;
+    }
+});
+```
+
+##### 2. intelligent_route LLM优先路由 (带Fallback)
+
+**路由决策逻辑**:
+```rust
+impl IntelligentRouter {
+    pub async fn intelligent_route(
+        &self,
+        request: IntelligentRouteRequest,
+    ) -> Result<IntelligentRouteResponse> {
+        // 前置检查
+        if request.user_request.trim().is_empty() {
+            return Ok(IntelligentRouteResponse { success: false, ... });
+        }
+
+        let embed = self.embedder.embed(&request.user_request)?;
+
+        // LLM优先策略
+        match &self.js_orchestrator {
+            None => {
+                // LLM不存在 - 直接用vector，不尝试
+                eprintln!("🔍 LLM not configured, using vector search mode");
+                self.vector_mode(&request, &embed).await
+            }
+            Some(orchestrator) => {
+                // LLM存在 - 优先尝试，失败则fallback
+                eprintln!("🤖 Trying LLM orchestration mode...");
+                match self.try_orchestrate(orchestrator, &request, &embed).await {
+                    Ok(response) => {
+                        eprintln!("✅ LLM orchestration succeeded");
+                        Ok(response)
+                    }
+                    Err(err) => {
+                        // LLM失败 - fallback到vector
+                        eprintln!("⚠️  LLM failed: {}, falling back to vector mode", err);
+                        self.vector_mode(&request, &embed).await
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+**LLM编排模式流程** (优先尝试):
+```
+1. 获取候选MCP工具(通过向量搜索)
+2. LLM规划工作流 → {is_feasible, steps, input_params}
+3. 不可行? → 返回Err触发fallback
+4. 可行? → LLM生成JS函数代码
+5. 验证JS代码(语法+安全性)
+6. 验证失败? → 返回Err触发fallback
+7. 验证通过 → 注册到Registry为单一JS编排工具
+8. 返回: "Use the 'xxx' tool to solve your problem"
+```
+
+**向量搜索模式流程** (Fallback保障):
+```
+1. 两层向量搜索(工具级+方法级)
+2. 聚类算法筛选top-5候选
+3. 批量注册到Registry为代理工具(透传schema)
+4. 返回: "Found 5 tools. Choose which ones to use: ..."
+```
+
+**Fallback触发条件**:
+- `js_orchestrator = None` (LLM未配置)
+- LLM网络请求超时或失败
+- LLM返回无效响应
+- JS代码验证失败(语法错误、安全检查未通过)
+- LLM判断任务不可行
+
+##### 3. Boa JS Engine Integration
+
+**安全沙箱配置**:
+```rust
+pub struct BoaEngineConfig {
+    max_execution_time_ms: u64,      // 30秒超时
+    max_memory_mb: usize,             // 256MB内存限制
+    max_call_stack_depth: usize,      // 128层调用栈
+    disabled_globals: Vec<String>,    // 禁用eval, Function, etc.
+}
+
+impl SecureBoaRuntime {
+    fn disable_dangerous_globals(ctx: &mut Context) -> Result<()> {
+        let dangerous = ["eval", "Function", "require", "import",
+                        "fetch", "XMLHttpRequest", "WebSocket"];
+        for api in dangerous {
+            ctx.eval(&format!("delete globalThis.{}", api))?;
+        }
+        Ok(())
+    }
+}
+```
+
+**MCP函数注入**:
+```rust
+pub struct McpFunctionInjector {
+    rmcp_pool: Arc<RmcpClientPool>,
+}
+
+impl McpFunctionInjector {
+    /// 注入 MCP 工具为 JS 异步函数(带缓存)
+    pub fn inject_all(
+        &self,
+        context: &mut Context,
+        tools: &[InjectedMcpFunction],
+        handle: Handle,
+    ) -> Result<()> {
+        for tool in tools {
+            let name = format!("mcp{}", to_camel_case(&tool.name));
+            // 已注入的函数直接跳过，避免重复注册
+            if context.global_object().has_property(name.clone(), context)? {
+                continue;
+            }
+
+            let invoker = Arc::clone(&self.rmcp_pool);
+            let server = tool.server.clone();
+            let method = tool.name.clone();
+
+            let native = NativeFunction::from_async(move |args, ctx| {
+                let request = args_to_json(args, ctx)?;
+                let invoker = Arc::clone(&invoker);
+                let server = server.clone();
+                let method = method.clone();
+                handle.spawn(async move {
+                    invoker.call_tool(&server, &method, request).await
+                })
+            });
+
+            context.register_global_property(name, native, Attribute::all())?;
+        }
+        Ok(())
+    }
+}
+```
+
+**运行时池**:
+```rust
+pub struct BoaRuntimePool {
+    pool: deadpool::managed::Pool<BoaRuntimeManager>,
+    config: BoaEngineConfig,
+}
+
+impl BoaRuntimePool {
+    const MIN_WARM_INSTANCES: usize = 5;
+
+    pub async fn acquire(&self) -> Result<PooledBoaRuntime> {
+        let runtime = self.pool.get().await?;
+        Ok(PooledBoaRuntime { runtime })
+    }
+
+    pub async fn prime_minimum_runtimes(&self) -> Result<()> {
+        // 启动时预热5个实例，避免首次调用冷启动延迟
+        let mut guards = Vec::with_capacity(Self::MIN_WARM_INSTANCES);
+        for _ in 0..Self::MIN_WARM_INSTANCES {
+            guards.push(self.pool.get().await?);
+        }
+        drop(guards);
+        Ok(())
+    }
+}
+```
+
+##### 4. LLM-Driven Code Generation
+
+**工作流规划Prompt**:
+```rust
+fn build_planning_prompt(user_request: &str, tools: &[McpToolInfo]) -> String {
+    format!(r#"
+## User Request: "{}"
+
+## Available MCP Tools:
+{}
+
+## Task:
+1. Analyze if request can be accomplished
+2. If YES: Plan steps and required tools
+3. If NO: Explain why
+
+## Output JSON:
+{{
+  "is_feasible": true/false,
+  "reason": "...",
+  "steps": [{{"step": 1, "tool": "git_diff", "description": "..."}}],
+  "required_input_params": [{{"name": "pr_id", "type": "number", "description": "..."}}],
+  "tool_name_suggestion": "review_pr_workflow"
+}}
+    "#, user_request, format_tools(tools))
+}
+```
+
+**JS代码生成Prompt**:
+```rust
+fn build_codegen_prompt(plan: &WorkflowPlan) -> String {
+    format!(r#"
+## Workflow Plan:
+{}
+
+## Generate async function workflow(input) {{...}}
+- Use injected MCP functions: mcp{}()
+- Access params via input.paramName
+- Include try-catch error handling
+- Return structured result
+
+Output only JavaScript code.
+    "#, serde_json::to_string_pretty(&plan.steps))
+}
+```
+
+**代码验证**:
+```rust
+pub struct JsCodeValidator;
+
+impl JsCodeValidator {
+    pub fn validate(&self, code: &str) -> Result<()> {
+        // 1. 语法检查(Boa解析)
+        let _ = boa_engine::Context::default().eval(code)?;
+
+        // 2. 危险模式检测
+        let dangerous_patterns = [
+            r"eval\s*\(", r"new\s+Function\s*\(",
+            r"__proto__", r"constructor\.constructor",
+        ];
+        for pattern in dangerous_patterns {
+            if regex::Regex::new(pattern)?.is_match(code) {
+                return Err(anyhow!("Dangerous pattern: {}", pattern));
+            }
+        }
+
+        Ok(())
+    }
+}
+```
+
+#### MCP Protocol Integration
+
+**list_tools响应**:
+```rust
+impl McpServer {
+    pub async fn handle_list_tools(&self) -> Result<ListToolsResponse> {
+        // Registry内部缓存Arc<Vec<Tool>>，保证list_tools < 50ms
+        let snapshot = self.registry.get_all_tool_definitions().await?;
+        Ok(ListToolsResponse {
+            tools: snapshot.as_ref().clone(),
+        })
+    }
+}
+```
+
+**tools/call路由**:
+```rust
+impl McpServer {
+    pub async fn handle_tool_call(&self, request: ToolCallRequest) -> Result<ToolCallResponse> {
+        match request.name.as_str() {
+            "intelligent_route" => self.intelligent_router.handle(request.arguments).await,
+            "search_history" => self.search_history.handle(request.arguments).await,
+
+            // 动态工具
+            _ => {
+                let tool = self.registry.get_tool(&request.name).await?;
+                match tool {
+                    RegisteredTool::JsOrchestrated(js) => {
+                        // BoaRuntimePool + MCP注入器执行JS编排工具
+                        let report = self.js_executor.execute(js, request.arguments).await?;
+                        Ok(ToolCallResponse::from(report))
+                    }
+                    RegisteredTool::ProxiedMcp(proxy) =>
+                        self.proxy_executor.execute(proxy, request.arguments).await,
+                }
+            }
+        }
+    }
+}
+```
+
+#### Data Flow Example
+
+**模式A完整流程**:
+```
+1. Claude Code: intelligent_route({user_request: "Review PR and generate report"})
+   ↓
+2. intelligent_route检测LLM环境存在 → 模式A
+   ↓
+3. LLM规划:
+   {
+     is_feasible: true,
+     steps: [
+       {step:1, tool:"git_diff", description:"Get PR changes"},
+       {step:2, tool:"read_file", description:"Read changed files"},
+       {step:3, tool:"write_file", description:"Write report"}
+     ],
+     required_input_params: [
+       {name:"base_branch", type:"string"},
+       {name:"pr_branch", type:"string"}
+     ],
+     tool_name_suggestion: "review_pr_and_report"
+   }
+   ↓
+4. LLM生成JS:
+   async function workflow(input) {
+     const diff = await mcpGitDiff({base: input.base_branch, head: input.pr_branch});
+     const files = await mcpReadFile({paths: diff.files});
+     const report = generateMarkdown(diff, files);
+     await mcpWriteFile({path: "REVIEW.md", content: report});
+     return {success: true, report_path: "REVIEW.md"};
+   }
+   ↓
+5. 验证JS代码(语法+安全性) ✓
+   ↓
+6. Registry.register_js_tool({
+     name: "review_pr_and_report",
+     input_schema: {...},
+     js_code: "...",
+     mcp_dependencies: [
+        {server: "git", name: "git_diff"},
+        {server: "filesystem", name: "read_file"},
+        {server: "filesystem", name: "write_file"}
+     ],
+     ttl_seconds: 600
+   })   // 同时刷新list_tools缓存
+   ↓
+7. 返回: {message: "Use the 'review_pr_and_report' tool to solve your problem"}
+   ↓
+8. Claude Code刷新list_tools (< 1s)
+   ↓
+9. 看到新工具: review_pr_and_report
+   ↓
+10. Claude Code调用: review_pr_and_report({base_branch: "main", pr_branch: "feat"})
+    ↓
+11. Registry.get_tool("review_pr_and_report") → JsOrchestratedTool
+    ↓
+12. JsExecutor.execute:
+    - 获取Boa运行时
+    - 注入MCP函数(mcpGitDiff, mcpReadFile, mcpWriteFile)
+    - 执行JS脚本
+    - JS内部调用MCP函数 → RMCP Pool → 外部MCP服务器
+    - 返回结果
+    ↓
+13. 返回给Claude Code
+```
+
+#### Impact Analysis
+
+**优势**:
+- ✅ **单一入口**: intelligent_route统一处理,用户体验一致
+- ✅ **自动降级**: 无LLM环境时回退到向量搜索模式
+- ✅ **工作流复用**: 生成的JS工具可在TTL内重复使用
+- ✅ **灵活扩展**: 轻松添加新的工具类型(只需实现RegisteredTool)
+- ✅ **性能优化**: 运行时池复用,减少初始化开销
+
+**挑战**:
+- ⚠️ **LLM质量依赖**: 代码生成质量取决于LLM能力
+- ⚠️ **调试复杂度**: JS执行错误需要友好的错误信息
+- ⚠️ **安全风险**: 必须严格验证生成的JS代码
+- ⚠️ **TTL管理**: 过期工具清理需要合理的策略
+
+**风险缓解**:
+- Dry-run测试: 生成代码后先用mock数据测试
+- 多层验证: 语法检查 + 安全检查 + 执行测试
+- 详细日志: 记录所有工具注册/执行/清理事件
+- 降级机制: JS执行失败时提供清晰的错误信息
+
+#### Technology Stack
+
+**新增依赖**:
+```toml
+boa_engine = "0.17"         # JavaScript引擎
+boa_gc = "0.17"             # 垃圾回收
+swc_ecma_parser = "0.142"   # JS解析器(验证)
+swc_ecma_ast = "0.110"      # AST分析
+deadpool = "0.10"           # 运行时池
+regex = "1.10"              # 安全检查
+```
+
+**性能目标**:
+- Registry读取: < 50ms
+- LLM规划: < 3s
+- JS代码生成: < 3s
+- 代码验证: < 100ms
+- Boa初始化: < 50ms
+- MCP注入: < 200ms
+- JS执行: < 30s(取决于MCP调用)
+- 工具注册: < 10ms
 
 ---
 

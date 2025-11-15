@@ -43,7 +43,11 @@ impl MemoryConfig {
     pub fn load_from_provider_config() -> Result<Self> {
         use crate::provider::manager::ProviderManager;
         match ProviderManager::new() {
-            Ok(manager) => Ok(manager.get_providers_config().memory.clone().unwrap_or_default()),
+            Ok(manager) => Ok(manager
+                .get_providers_config()
+                .memory
+                .clone()
+                .unwrap_or_default()),
             Err(_) => Ok(Self::default()),
         }
     }

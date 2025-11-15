@@ -5,8 +5,6 @@
 
 use rmcp::model::InitializeRequestParam;
 use rmcp::service::{Peer, RoleServer};
-use std::time::Duration;
-use tokio::time::timeout;
 
 #[derive(Debug, Clone)]
 pub struct ClientCapabilities {

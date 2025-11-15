@@ -117,7 +117,7 @@ fn test_pwait_waits_for_multiple_real_processes() {
     let mut real_pids = vec![];
 
     for i in 0..3 {
-        let mut child = Command::new("sleep")
+        let child = Command::new("sleep")
             .arg("1")
             .stdout(Stdio::null())
             .stderr(Stdio::null())

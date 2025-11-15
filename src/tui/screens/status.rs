@@ -19,7 +19,7 @@ use ratatui::{
 
 use super::{Screen, ScreenAction};
 use crate::platform;
-use crate::registry_factory::{CliRegistry, create_cli_registry};
+use crate::registry_factory::{create_cli_registry, CliRegistry};
 use crate::task_record::{TaskRecord, TaskStatus};
 use crate::tui::app_state::{AppState, TaskSnapshot};
 

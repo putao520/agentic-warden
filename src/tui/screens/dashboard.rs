@@ -14,7 +14,6 @@ use ratatui::{
 use std::time::{Duration as StdDuration, Instant};
 
 use crate::cli_manager::{CliToolDetector, InstallType};
-use crate::provider::config::ProvidersConfig;
 use crate::tui::app_state::{
     AppState, AuthStatus, GoogleDriveAuthSnapshot, SyncPhase, TaskUiState, TransferKind,
     TransferProgress,

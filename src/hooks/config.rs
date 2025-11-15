@@ -3,7 +3,7 @@
 //! Automatically installs and uninstalls hooks to Claude Code's configuration
 //! when agentic-warden starts/stops.
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -53,8 +53,8 @@ impl ClaudeHooksConfig {
                 .with_context(|| format!("Failed to create config directory: {:?}", parent))?;
         }
 
-        let content = serde_json::to_string_pretty(self)
-            .context("Failed to serialize hooks config")?;
+        let content =
+            serde_json::to_string_pretty(self).context("Failed to serialize hooks config")?;
 
         fs::write(&path, content)
             .with_context(|| format!("Failed to write Claude hooks config: {:?}", path))?;
@@ -73,10 +73,13 @@ impl ClaudeHooksConfig {
 
     /// Check if agentic-warden hooks are already installed.
     pub fn is_installed(&self) -> bool {
-        self.hooks.get("SessionEnd")
+        self.hooks
+            .get("SessionEnd")
             .map(|h| h.command.contains("agentic-warden"))
             .unwrap_or(false)
-            || self.hooks.get("PreCompact")
+            || self
+                .hooks
+                .get("PreCompact")
                 .map(|h| h.command.contains("agentic-warden"))
                 .unwrap_or(false)
     }
@@ -89,7 +92,8 @@ impl ClaudeHooksConfig {
         };
 
         // Install SessionEnd hook
-        self.hooks.insert("SessionEnd".to_string(), hook_config.clone());
+        self.hooks
+            .insert("SessionEnd".to_string(), hook_config.clone());
 
         // Install PreCompact hook
         self.hooks.insert("PreCompact".to_string(), hook_config);
@@ -120,18 +124,20 @@ impl ClaudeHooksConfig {
 ///
 /// This is idempotent - if hooks are already installed, it does nothing.
 pub fn install_hooks() -> Result<()> {
-    let mut config = ClaudeHooksConfig::load()
-        .context("Failed to load Claude Code hooks config")?;
+    let mut config =
+        ClaudeHooksConfig::load().context("Failed to load Claude Code hooks config")?;
 
     if config.is_installed() {
         // Already installed, nothing to do
         return Ok(());
     }
 
-    config.install_hooks()
+    config
+        .install_hooks()
         .context("Failed to install hooks to config")?;
 
-    config.save()
+    config
+        .save()
         .context("Failed to save Claude Code hooks config")?;
 
     eprintln!("✅ Installed agentic-warden hooks to Claude Code");
@@ -142,18 +148,20 @@ pub fn install_hooks() -> Result<()> {
 ///
 /// This is idempotent - if hooks are not installed, it does nothing.
 pub fn uninstall_hooks() -> Result<()> {
-    let mut config = ClaudeHooksConfig::load()
-        .context("Failed to load Claude Code hooks config")?;
+    let mut config =
+        ClaudeHooksConfig::load().context("Failed to load Claude Code hooks config")?;
 
     if !config.is_installed() {
         // Not installed, nothing to do
         return Ok(());
     }
 
-    config.uninstall_hooks()
+    config
+        .uninstall_hooks()
         .context("Failed to uninstall hooks from config")?;
 
-    config.save()
+    config
+        .save()
         .context("Failed to save Claude Code hooks config")?;
 
     eprintln!("✅ Uninstalled agentic-warden hooks from Claude Code");

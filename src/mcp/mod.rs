@@ -1,31 +1,35 @@
 pub mod capability_detector;
-pub mod dynamic_tools;
+mod js_executor;
+pub use js_executor::{JsExecutionReport, JsToolExecutor};
 
+use anyhow::Error;
+
+use crate::mcp_routing::js_orchestrator::{BoaRuntimePool, McpFunctionInjector};
+use crate::mcp_routing::registry::{DynamicToolRegistry, RegisteredTool, RegistryConfig};
 use crate::mcp_routing::{
     models::{
-        ExecuteToolRequest, ExecuteToolResponse, IntelligentRouteRequest,
-        IntelligentRouteResponse, MethodSchemaResponse,
+        ExecuteToolRequest, ExecuteToolResponse, IntelligentRouteRequest, IntelligentRouteResponse,
+        MethodSchemaResponse,
     },
     IntelligentRouter,
 };
 use crate::memory::{ConversationHistoryStore, ConversationSearchResult};
 use capability_detector::ClientCapabilities;
-use dynamic_tools::DynamicToolManager;
-use std::future::Future;
+use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use rmcp::{
     handler::server::tool::{ToolCallContext, ToolRouter},
     handler::server::wrapper::Parameters,
     handler::server::ServerHandler,
-    model::{Implementation, InitializeRequestParam, InitializeResult, ServerCapabilities},
-    service::{Peer, RequestContext, RoleServer},
+    model::{Implementation, InitializeRequestParam, InitializeResult, ServerCapabilities, Tool},
+    service::{RequestContext, RoleServer},
     tool, Json, ServiceExt,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use std::path::PathBuf;
-use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+use std::sync::Arc;
 use tokio::sync::RwLock;
+
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct MethodSchemaParams {
@@ -108,10 +112,11 @@ pub struct AgenticWardenMcpServer {
     history_store: Arc<ConversationHistoryStore>,
     // Client capability detection
     client_capabilities: Arc<RwLock<Option<ClientCapabilities>>>,
-    // Dynamic tool registration manager
-    dynamic_tools: DynamicToolManager,
+    // Dynamic tool registry (SSOT for MCP tools)
+    tool_registry: Arc<DynamicToolRegistry>,
     // Store peer for sending notifications
     peer: Arc<RwLock<Option<rmcp::service::Peer<RoleServer>>>>,
+    js_executor: Arc<JsToolExecutor>,
 }
 
 #[rmcp::tool_router(router = tool_router)]
@@ -120,11 +125,23 @@ impl AgenticWardenMcpServer {
         let router = IntelligentRouter::initialize()
             .await
             .map_err(|e| format!("Failed to initialise intelligent router: {e}"))?;
+        let connection_pool = router.connection_pool();
+
+        let tool_router = Self::tool_router();
+        let base_tools = tool_router.list_all();
+        let registry = Arc::new(DynamicToolRegistry::with_config(
+            base_tools,
+            RegistryConfig {
+                default_ttl_seconds: 600,
+                max_dynamic_tools: 100,
+                cleanup_interval_seconds: 60,
+            },
+        ));
+        let _cleanup_task = registry.start_cleanup_task();
 
         // Initialize FastEmbed for conversation search
         let embedder = TextEmbedding::try_new(
-            InitOptions::new(EmbeddingModel::AllMiniLML6V2)
-                .with_show_download_progress(false)
+            InitOptions::new(EmbeddingModel::AllMiniLML6V2).with_show_download_progress(false),
         )
         .map_err(|e| format!("Failed to initialize FastEmbed: {e}"))?;
 
@@ -134,14 +151,23 @@ impl AgenticWardenMcpServer {
         let history_store = ConversationHistoryStore::new(&db_path, 384)
             .map_err(|e| format!("Failed to initialize conversation history store: {e}"))?;
 
+        let boa_pool = Arc::new(
+            BoaRuntimePool::new()
+                .await
+                .map_err(|e| format!("Failed to initialize Boa runtime pool: {e}"))?,
+        );
+        let injector = Arc::new(McpFunctionInjector::new(connection_pool));
+        let js_executor = Arc::new(JsToolExecutor::new(Arc::clone(&boa_pool), injector));
+
         Ok(Self {
             router: Arc::new(router),
-            tool_router: Self::tool_router(),
+            tool_router,
             embedder: Arc::new(tokio::sync::Mutex::new(embedder)),
             history_store: Arc::new(history_store),
             client_capabilities: Arc::new(RwLock::new(None)),
-            dynamic_tools: DynamicToolManager::new(),
+            tool_registry: registry,
             peer: Arc::new(RwLock::new(None)),
+            js_executor,
         })
     }
 
@@ -154,6 +180,27 @@ impl AgenticWardenMcpServer {
             .map_err(|e| format!("Failed to create config directory: {e}"))?;
 
         Ok(config_dir.join("conversation_history.db"))
+    }
+
+    fn build_dynamic_tool_definition(
+        name: &str,
+        description: &str,
+        input_schema: serde_json::Value,
+    ) -> Tool {
+        let schema_map = match input_schema {
+            serde_json::Value::Object(map) => map,
+            _ => serde_json::Map::new(),
+        };
+
+        Tool {
+            name: name.to_string().into(),
+            title: None,
+            description: Some(description.to_string().into()),
+            input_schema: Arc::new(schema_map),
+            output_schema: None,
+            icons: None,
+            annotations: None,
+        }
     }
 
     #[tool(
@@ -175,12 +222,15 @@ impl AgenticWardenMcpServer {
                 if !caps.supports_dynamic_tools {
                     // Client doesn't support dynamic registration, use query mode
                     request.execution_mode = ExecutionMode::Query;
-                    eprintln!("   ⚠️  Switching to Query mode (client doesn't support dynamic tools)");
+                    eprintln!(
+                        "   ⚠️  Switching to Query mode (client doesn't support dynamic tools)"
+                    );
                 }
             }
         }
 
-        let mut response = self.router
+        let mut response = self
+            .router
             .intelligent_route(request.clone())
             .await
             .map_err(|err| err.to_string())?;
@@ -189,32 +239,46 @@ impl AgenticWardenMcpServer {
         if request.execution_mode == ExecutionMode::Dynamic {
             if let Some(ref selected) = response.selected_tool {
                 // Get the tool schema
-                let schema_response = self.router
+                let schema_response = self
+                    .router
                     .get_method_schema(&selected.mcp_server, &selected.tool_name)
                     .await
                     .map_err(|err| err.to_string())?;
 
                 if let Some(schema) = schema_response.schema {
                     // Register the tool dynamically
-                    let description = schema_response.description
+                    let description = schema_response
+                        .description
                         .unwrap_or_else(|| selected.rationale.clone());
 
-                    let is_new = self.dynamic_tools.register_tool(
-                        selected.mcp_server.clone(),
-                        selected.tool_name.clone(),
-                        description.clone(),
+                    let tool_definition = Self::build_dynamic_tool_definition(
+                        &selected.tool_name,
+                        &description,
                         schema.clone(),
-                    ).await;
+                    );
+
+                    let is_new = self
+                        .tool_registry
+                        .register_proxied_tool(
+                            selected.mcp_server.clone(),
+                            selected.tool_name.clone(),
+                            tool_definition,
+                        )
+                        .await
+                        .map_err(|err| err.to_string())?;
 
                     // Send notification if this is a new tool
                     if is_new {
                         eprintln!("📝 Dynamically registered tool: {}", selected.tool_name);
 
                         // Send ToolListChangedNotification to client
-                        if let Some(peer) = self.peer.read().await.as_ref() {
+                        if self.peer.read().await.is_some() {
                             // Note: Notification sending disabled due to rmcp API constraints
                             // The client should re-query tools after receiving intelligent_route response
-                            eprintln!("   📝 Tool '{}' registered - client should re-query tool list", selected.tool_name);
+                            eprintln!(
+                                "   📝 Tool '{}' registered - client should re-query tool list",
+                                selected.tool_name
+                            );
                         }
                     }
 
@@ -316,17 +380,26 @@ impl AgenticWardenMcpServer {
             let registry_clone = registry.clone();
             let handle = tokio::spawn(async move {
                 // Parse AI CLI type
-                let cli_type = parse_cli_type(&task_spec.ai_type)
-                    .ok_or_else(|| format!("Invalid AI type: {}. Must be claude, codex, or gemini", task_spec.ai_type))?;
+                let cli_type = parse_cli_type(&task_spec.ai_type).ok_or_else(|| {
+                    format!(
+                        "Invalid AI type: {}. Must be claude, codex, or gemini",
+                        task_spec.ai_type
+                    )
+                })?;
 
                 // Build command arguments
                 let cli_args = cli_type.build_full_access_args(&task_spec.task);
                 let os_args: Vec<OsString> = cli_args.into_iter().map(|s| s.into()).collect();
 
                 // Launch task via supervisor (this will wait for completion in background)
-                let _exit_code = supervisor::execute_cli(&registry_clone, &cli_type, &os_args, task_spec.provider.clone())
-                    .await
-                    .map_err(|e| format!("Failed to launch {} task: {}", task_spec.ai_type, e))?;
+                let _exit_code = supervisor::execute_cli(
+                    &registry_clone,
+                    &cli_type,
+                    &os_args,
+                    task_spec.provider.clone(),
+                )
+                .await
+                .map_err(|e| format!("Failed to launch {} task: {}", task_spec.ai_type, e))?;
 
                 // Note: For now we can't easily get PID and log_file from execute_cli
                 // This is a limitation of the current supervisor design
@@ -346,7 +419,8 @@ impl AgenticWardenMcpServer {
         // Note: This is still blocking on task spawn, but tasks run in background
         let mut results = Vec::new();
         for handle in handles {
-            let result = handle.await
+            let result = handle
+                .await
                 .map_err(|e| format!("Task spawn failed: {}", e))??;
             results.push(result);
         }
@@ -365,8 +439,12 @@ impl AgenticWardenMcpServer {
         use crate::cli_type::parse_cli_type;
 
         // Validate AI CLI type
-        let _cli_type = parse_cli_type(&params.0.ai_type)
-            .ok_or_else(|| format!("Invalid AI type: {}. Must be claude, codex, or gemini", params.0.ai_type))?;
+        let _cli_type = parse_cli_type(&params.0.ai_type).ok_or_else(|| {
+            format!(
+                "Invalid AI type: {}. Must be claude, codex, or gemini",
+                params.0.ai_type
+            )
+        })?;
 
         // Build command string
         let mut command_parts = vec!["agentic-warden".to_string(), params.0.ai_type.clone()];
@@ -389,7 +467,6 @@ impl AgenticWardenMcpServer {
         }))
     }
 
-
     pub async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("🚀 Agentic-Warden intelligent MCP router ready (stdio transport)");
         let transport = (tokio::io::stdin(), tokio::io::stdout());
@@ -404,12 +481,8 @@ impl ServerHandler for AgenticWardenMcpServer {
         _request: Option<rmcp::model::PaginatedRequestParam>,
         _context: RequestContext<RoleServer>,
     ) -> Result<rmcp::model::ListToolsResult, rmcp::ErrorData> {
-        // Get base tools from tool_router
-        let mut tools: Vec<rmcp::model::Tool> = self.tool_router.list_all();
-
-        // Add dynamically registered tools
-        let dynamic_tools = self.dynamic_tools.list_tools().await;
-        tools.extend(dynamic_tools);
+        let tools_snapshot = self.tool_registry.get_all_tool_definitions().await;
+        let tools = (*tools_snapshot).clone();
 
         Ok(rmcp::model::ListToolsResult {
             tools,
@@ -430,39 +503,76 @@ impl ServerHandler for AgenticWardenMcpServer {
         }
 
         // Check if this is a dynamically registered tool
-        if let Some(mcp_server) = self.dynamic_tools.get_server(&request.name).await {
-            // Proxy call to the underlying MCP server
-            let result = self
-                .router
-                .execute_tool(crate::mcp_routing::models::ExecuteToolRequest {
-                    mcp_server,
-                    tool_name: request.name.to_string(),
-                    arguments: serde_json::Value::Object(request.arguments.unwrap_or_default()),
-                    session_id: None,
-                })
-                .await
-                .map_err(|e| {
-                    rmcp::ErrorData::internal_error(format!("Tool execution failed: {}", e), None)
-                })?;
+        if let Some(registered) = self.tool_registry.get_tool(&request.name).await {
+            match registered {
+                RegisteredTool::ProxiedMcp(proxy) => {
+                    let result = self
+                        .router
+                        .execute_tool(crate::mcp_routing::models::ExecuteToolRequest {
+                            mcp_server: proxy.server.clone(),
+                            tool_name: proxy.original_name.clone(),
+                            arguments: serde_json::Value::Object(
+                                request.arguments.unwrap_or_default(),
+                            ),
+                            session_id: None,
+                        })
+                        .await
+                        .map_err(|e| {
+                            rmcp::ErrorData::internal_error(
+                                format!("Tool execution failed: {}", e),
+                                None,
+                            )
+                        })?;
 
-            if result.success {
-                let content_str = result.result.as_ref()
-                    .map(|r| serde_json::to_string_pretty(&r.output).unwrap_or_default())
-                    .unwrap_or_default();
-                let structured = result.result.map(|r| r.output);
+                    if result.success {
+                        self.tool_registry.record_execution(&request.name).await;
+                        let content_str = result
+                            .result
+                            .as_ref()
+                            .map(|r| serde_json::to_string_pretty(&r.output).unwrap_or_default())
+                            .unwrap_or_default();
+                        let structured = result.result.map(|r| r.output);
 
-                Ok(rmcp::model::CallToolResult {
-                    content: vec![rmcp::model::Content::text(content_str)],
-                    structured_content: structured,
-                    is_error: None,
-                    meta: None,
-                })
-            } else {
-                Err(rmcp::ErrorData::internal_error(result.message, None))
+                        Ok(rmcp::model::CallToolResult {
+                            content: vec![rmcp::model::Content::text(content_str)],
+                            structured_content: structured,
+                            is_error: None,
+                            meta: None,
+                        })
+                    } else {
+                        Err(rmcp::ErrorData::internal_error(result.message, None))
+                    }
+                }
+                RegisteredTool::JsOrchestrated(js_tool) => {
+                    let input = serde_json::Value::Object(request.arguments.unwrap_or_default());
+                    let execution = self
+                        .js_executor
+                        .execute(&js_tool, input)
+                        .await
+                        .map_err(|err| Self::map_js_tool_error(err))?;
+
+                    self.tool_registry.record_execution(&request.name).await;
+                    eprintln!(
+                        "⚙️  JS workflow '{}' completed in {} ms",
+                        request.name, execution.duration_ms
+                    );
+
+                    let output_str = serde_json::to_string_pretty(&execution.output)
+                        .unwrap_or_else(|_| execution.output.to_string());
+
+                    Ok(rmcp::model::CallToolResult {
+                        content: vec![rmcp::model::Content::text(output_str)],
+                        structured_content: Some(execution.output),
+                        is_error: None,
+                        meta: None,
+                    })
+                }
             }
         } else {
             // Tool not found in either base or dynamic tools
-            Err(rmcp::ErrorData::method_not_found::<rmcp::model::CallToolRequestMethod>())
+            Err(rmcp::ErrorData::method_not_found::<
+                rmcp::model::CallToolRequestMethod,
+            >())
         }
     }
 
@@ -472,7 +582,7 @@ impl ServerHandler for AgenticWardenMcpServer {
         context: RequestContext<RoleServer>,
     ) -> Result<InitializeResult, rmcp::ErrorData> {
         // Create initial capabilities (before testing)
-        let mut capabilities = ClientCapabilities::from_init_request(&request);
+        let capabilities = ClientCapabilities::from_init_request(&request);
 
         eprintln!("🔌 MCP Client connected:");
         eprintln!("   Name: {}", capabilities.client_name);
@@ -496,7 +606,8 @@ impl ServerHandler for AgenticWardenMcpServer {
             if let Some(caps) = client_capabilities.write().await.as_mut() {
                 caps.supports_dynamic_tools = supports;
 
-                eprintln!("   Mode: {}",
+                eprintln!(
+                    "   Mode: {}",
                     if supports {
                         "✅ Dynamic registration (primary mode)"
                     } else {
@@ -528,5 +639,21 @@ impl ServerHandler for AgenticWardenMcpServer {
             },
             instructions: None,
         })
+    }
+}
+
+impl AgenticWardenMcpServer {
+    fn map_js_tool_error(err: Error) -> rmcp::ErrorData {
+        let message = err.to_string();
+        let lowered = message.to_ascii_lowercase();
+        let prefix = if lowered.contains("timed out") {
+            "JS workflow timed out"
+        } else if lowered.contains("syntax") {
+            "JS workflow syntax error"
+        } else {
+            "JS workflow execution failed"
+        };
+
+        rmcp::ErrorData::internal_error(format!("{prefix}: {message}"), None)
     }
 }

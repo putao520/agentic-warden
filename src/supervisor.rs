@@ -4,9 +4,9 @@ use crate::core::process_tree::ProcessTreeError;
 use crate::error::RegistryError;
 use crate::logging::debug;
 use crate::logging::warn;
-use crate::platform::{self};
 #[cfg(windows)]
 use crate::platform::ChildResources;
+use crate::platform::{self};
 use crate::provider::{AiType, ProviderManager};
 use crate::signal;
 use crate::storage::TaskStorage;
@@ -142,7 +142,7 @@ pub async fn execute_cli<S: TaskStorage>(
     };
 
     // Validate compatibility
-    let ai_type = match cli_type {
+    let _ai_type = match cli_type {
         CliType::Claude => AiType::Claude,
         CliType::Codex => AiType::Codex,
         CliType::Gemini => AiType::Gemini,
@@ -152,7 +152,8 @@ pub async fn execute_cli<S: TaskStorage>(
     if provider_name != *"official" {
         eprintln!(
             "Using provider: {} ({})",
-            provider_name, provider_config.summary()
+            provider_name,
+            provider_config.summary()
         );
     }
 
@@ -482,7 +483,7 @@ pub async fn start_interactive_cli<S: TaskStorage>(
     };
 
     // Validate compatibility
-    let ai_type = match cli_type {
+    let _ai_type = match cli_type {
         CliType::Claude => AiType::Claude,
         CliType::Codex => AiType::Codex,
         CliType::Gemini => AiType::Gemini,
@@ -492,7 +493,8 @@ pub async fn start_interactive_cli<S: TaskStorage>(
     if provider_name != *"official" {
         eprintln!(
             "Using provider: {} ({})",
-            provider_name, provider_config.summary()
+            provider_name,
+            provider_config.summary()
         );
     }
 

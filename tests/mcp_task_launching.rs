@@ -74,7 +74,7 @@ fn test_mcp_concurrent_task_launching() {
     let mut pids = vec![];
 
     for i in 0..3 {
-        let mut child = Command::new("sleep")
+        let child = Command::new("sleep")
             .arg("0.5")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
