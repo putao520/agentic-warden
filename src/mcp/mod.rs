@@ -100,22 +100,6 @@ pub struct TaskCommandResult {
     pub provider: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct GetSessionTodosParams {
-    /// Session ID to query TODOs for.
-    pub session_id: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct TodoItem {
-    /// TODO item description.
-    pub content: String,
-    /// Whether the TODO is completed.
-    pub completed: bool,
-    /// Creation timestamp.
-    pub created_at: String,
-}
-
 #[derive(Clone)]
 pub struct AgenticWardenMcpServer {
     router: Arc<IntelligentRouter>,
@@ -264,7 +248,7 @@ impl AgenticWardenMcpServer {
 
     #[tool(
         name = "search_history",
-        description = "Search conversation history using semantic similarity. Returns relevant past conversations based on the query."
+        description = "Search conversation history using semantic similarity. Returns relevant past conversations with extracted TODO items. Each result includes conversation context and associated TODO list (markdown checkboxes, TODO: markers, Action Items)."
     )]
     pub async fn search_history_tool(
         &self,
@@ -405,25 +389,6 @@ impl AgenticWardenMcpServer {
         }))
     }
 
-    #[tool(
-        name = "get_session_todos",
-        description = "Get uncompleted TODO items for a specific session. Returns a list of pending tasks tracked for the given session ID."
-    )]
-    pub async fn get_session_todos_tool(
-        &self,
-        params: Parameters<GetSessionTodosParams>,
-    ) -> Result<Json<Vec<TodoItem>>, String> {
-        // TODO: Implement session-based TODO tracking
-        // For now, return empty list as placeholder
-        // This requires integration with a TODO storage system
-
-        let _session_id = params.0.session_id;
-
-        // Placeholder implementation
-        eprintln!("⚠️  get_session_todos not fully implemented yet - returning empty list");
-
-        Ok(Json(Vec::new()))
-    }
 
     pub async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("🚀 Agentic-Warden intelligent MCP router ready (stdio transport)");

@@ -4,4 +4,6 @@ mod config;
 mod history;
 
 pub use config::MemoryConfig;
-pub use history::{ConversationHistoryStore, ConversationRecord, ConversationSearchResult};
+pub use history::{
+    ConversationHistoryStore, ConversationRecord, ConversationSearchResult, TodoItem,
+};

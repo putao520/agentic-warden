@@ -91,14 +91,12 @@ impl HookHandler {
         // 5. Store in vector database
         eprintln!("💾 Storing to vector database...");
         for (message, embedding) in messages.iter().zip(embeddings.iter()) {
-            let record = ConversationRecord {
-                id: uuid::Uuid::new_v4().to_string(),
-                session_id: Some(input.session_id.clone()), // Use session_id from stdin
-                role: message.role.clone(),
-                content: message.content.clone(),
-                timestamp: message.timestamp,
-                tools_used: vec![],
-            };
+            let record = ConversationRecord::new(
+                Some(input.session_id.clone()), // Use session_id from stdin
+                message.role.clone(),
+                message.content.clone(),
+                vec![],
+            );
 
             self.store.append(record, embedding.to_vec())?;
         }

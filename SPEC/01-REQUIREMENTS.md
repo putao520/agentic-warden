@@ -190,8 +190,7 @@ Agentic-Warden MUST provide MCP server to enable external AI assistants to acces
   - `start_concurrent_tasks`: 并发启动多个AI CLI任务
   - `get_task_command`: 获取单个AI CLI任务的启动命令
 - [x] Provide memory-related tools:
-  - `search_history`: 查询历史对话（带session_id过滤）
-  - `get_session_todos`: 通过session_id查询未完成TODO
+  - `search_history`: 查询历史对话（带session_id过滤，返回TODO items）
 - [x] Compatible with Claude Code and other MCP clients
 
 **Technical Constraints**:
@@ -316,9 +315,11 @@ Hook-driven design using Claude Code's `SessionEnd` and `PreCompact` hooks to tr
 - [x] Implement `agentic-warden hooks handle` CLI command
 - [x] Read hook input from stdin (session_id, transcript_path, hook_event_name)
 - [x] Parse Claude Code JSONL transcript format
+- [x] Extract and parse TODO items from conversation content
 - [x] Generate embeddings using FastEmbed (AllMiniLML6V2)
-- [x] Store conversations in SahomeDB vector database
-- [x] Provide MCP tool: `search_history` for semantic conversation search
+- [x] Store conversations in SahomeDB vector database with TODO metadata
+- [x] Provide MCP tool: `search_history` for semantic conversation search with TODO context
+- [x] Return TODO items alongside conversation results (no separate get_session_todos tool)
 - [x] Support session_id-based filtering
 - [x] Handle incremental updates (avoid duplicates)
 - [x] Auto-install hooks when MCP server starts
@@ -375,6 +376,12 @@ search_history MCP tool
 {"session_id":"xxx","timestamp":"2025-11-14T10:30:05Z","message_id":"msg-002","role":"assistant","content":"I'll help..."}
 ```
 
+**TODO Extraction**:
+- Parse TODO markers from assistant messages: `- [ ]`, `TODO:`, `Action Items:`
+- Extract task description, priority (if present), and context
+- Store TODO items as structured metadata alongside conversation records
+- `search_history` returns conversations with associated TODO items in response
+
 **Technical Constraints**:
 - Vector database: SahomeDB (file-based persistent storage)
 - Embedding service: FastEmbed (AllMiniLML6V2, 384 dimensions, local generation)
@@ -382,6 +389,8 @@ search_history MCP tool
 - Semantic search: cosine similarity with configurable threshold
 - Storage location: ~/.config/agentic-warden/conversation_history.db
 - Duplicate detection: Check existing session_id before insertion
+- TODO extraction: Pattern matching on assistant messages (markdown checkboxes, TODO keywords)
+- TODO metadata: Stored as JSON in conversation record metadata field
 
 **Performance Requirements**:
 - Hook processing: < 2s for typical session (~100 messages)
@@ -526,7 +535,8 @@ Agentic-Warden MUST provide an intelligent MCP (Model Context Protocol) routing 
 - [x] Maintain minimal base tool set to reduce token consumption
 - [x] Clear registered tools when no longer needed
 
-#### 4.6 统一MCP接口 (4个工具)
+#### 4.6 统一MCP接口 (路由工具 + 记忆工具)
+**路由相关工具 (3个)**:
 - [x] **intelligent_route**: Multi-mode routing with auto/dynamic/query support
   - [x] Accepts: user_request, session_id, mode, max_candidates
   - [x] Returns: selected_tool, result (Auto), tool_schema (Dynamic), alternatives
@@ -534,7 +544,13 @@ Agentic-Warden MUST provide an intelligent MCP (Model Context Protocol) routing 
   - [x] Accepts: mcp_server, tool_name, arguments, session_id
   - [x] Returns: execution result with timing and output
 - [x] **get_method_schema**: Return JSON schema for specific tool
-- [x] **search_history**: Semantic search over conversation history
+
+**会话历史工具 (1个)**:
+- [x] **search_history**: Semantic search over conversation history with TODO context
+  - [x] Accepts: query, session_id (optional), limit
+  - [x] Returns: Conversation records with embedded TODO items extracted from content
+  - [x] TODO extraction patterns: `- [ ]`, `TODO:`, `Action Items:`, markdown checkboxes
+  - [x] Each result includes: conversation context + associated TODO list
 
 #### 4.7 RMCP客户端集成
 - [x] Use rmcp library for dynamic MCP server connections

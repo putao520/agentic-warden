@@ -13,6 +13,14 @@ use uuid::Uuid;
 
 const COLLECTION_NAME: &str = "conversation_history";
 
+/// TODO item extracted from conversation content
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TodoItem {
+    pub description: String,
+    pub completed: bool,
+    pub priority: Option<String>,
+}
+
 /// Canonical structure for recorded Claude Code conversations.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ConversationRecord {
@@ -22,6 +30,9 @@ pub struct ConversationRecord {
     pub content: String,
     pub timestamp: DateTime<Utc>,
     pub tools_used: Vec<String>,
+    /// TODO items extracted from assistant messages
+    #[serde(default)]
+    pub todo_items: Vec<TodoItem>,
 }
 
 impl ConversationRecord {
@@ -31,14 +42,79 @@ impl ConversationRecord {
         content: impl Into<String>,
         tools_used: Vec<String>,
     ) -> Self {
+        let role_str = role.into();
+        let content_str = content.into();
+
+        // Extract TODO items if this is an assistant message
+        let todo_items = if role_str == "assistant" {
+            Self::extract_todos(&content_str)
+        } else {
+            Vec::new()
+        };
+
         Self {
             id: Uuid::new_v4().to_string(),
             session_id,
-            role: role.into(),
-            content: content.into(),
+            role: role_str,
+            content: content_str,
             timestamp: Utc::now(),
             tools_used,
+            todo_items,
         }
+    }
+
+    /// Extract TODO items from text content
+    /// Supports patterns: - [ ], TODO:, Action Items:, etc.
+    fn extract_todos(content: &str) -> Vec<TodoItem> {
+        use regex::Regex;
+        let mut todos = Vec::new();
+
+        // Pattern 1: Markdown checkboxes - [ ] or - [x]
+        let checkbox_re = Regex::new(r"(?m)^\s*-\s*\[([ xX])\]\s*(.+)$").unwrap();
+        for cap in checkbox_re.captures_iter(content) {
+            let completed = cap[1].trim().to_lowercase() == "x";
+            let description = cap[2].trim().to_string();
+            todos.push(TodoItem {
+                description,
+                completed,
+                priority: None,
+            });
+        }
+
+        // Pattern 2: TODO: style markers
+        let todo_re = Regex::new(r"(?i)TODO\s*:\s*(.+?)(?:\n|$)").unwrap();
+        for cap in todo_re.captures_iter(content) {
+            let description = cap[1].trim().to_string();
+            todos.push(TodoItem {
+                description,
+                completed: false,
+                priority: None,
+            });
+        }
+
+        // Pattern 3: Action Items: section
+        if let Some(action_start) = content.to_lowercase().find("action items:") {
+            let action_section = &content[action_start..];
+            let lines: Vec<&str> = action_section.lines().skip(1).collect();
+            for line in lines {
+                let trimmed = line.trim();
+                if trimmed.is_empty() || trimmed.starts_with('#') {
+                    break; // End of action items section
+                }
+                if trimmed.starts_with('-') || trimmed.starts_with('*') || trimmed.starts_with('+') {
+                    let desc = trimmed.trim_start_matches(&['-', '*', '+'][..]).trim();
+                    if !desc.is_empty() {
+                        todos.push(TodoItem {
+                            description: desc.to_string(),
+                            completed: false,
+                            priority: None,
+                        });
+                    }
+                }
+            }
+        }
+
+        todos
     }
 }
 
@@ -209,6 +285,7 @@ fn record_from_search(result: SearchResult) -> Option<ConversationRecord> {
                 .and_then(|ts| ts.parse::<DateTime<Utc>>().ok())
                 .unwrap_or_else(Utc::now),
             tools_used: as_array(&map, "tools_used"),
+            todo_items: as_todo_array(&map, "todo_items"),
         }),
         _ => None,
     }
@@ -238,6 +315,32 @@ fn as_array(map: &HashMap<String, Metadata>, key: &str) -> Vec<String> {
     }
 }
 
+fn as_todo_array(map: &HashMap<String, Metadata>, key: &str) -> Vec<TodoItem> {
+    match map.get(key) {
+        Some(Metadata::Array(values)) => values
+            .iter()
+            .filter_map(|item| match item {
+                Metadata::Object(todo_map) => {
+                    let description = as_string(todo_map, "description")?;
+                    let completed = match todo_map.get("completed") {
+                        Some(Metadata::Integer(1)) => true,
+                        Some(Metadata::Text(s)) if s == "true" => true,
+                        _ => false,
+                    };
+                    let priority = as_string(todo_map, "priority");
+                    Some(TodoItem {
+                        description,
+                        completed,
+                        priority,
+                    })
+                }
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
 impl From<ConversationRecord> for Metadata {
     fn from(value: ConversationRecord) -> Self {
         let mut map: HashMap<String, Metadata> = HashMap::new();
@@ -255,6 +358,23 @@ impl From<ConversationRecord> for Metadata {
             "tools_used".into(),
             Metadata::from(value.tools_used.clone()),
         );
+
+        // Convert TODO items to metadata
+        let todo_metadata: Vec<Metadata> = value
+            .todo_items
+            .into_iter()
+            .map(|todo| {
+                let mut todo_map = HashMap::new();
+                todo_map.insert("description".into(), Metadata::from(todo.description));
+                todo_map.insert("completed".into(), Metadata::Integer(if todo.completed { 1 } else { 0 }));
+                if let Some(priority) = todo.priority {
+                    todo_map.insert("priority".into(), Metadata::from(priority));
+                }
+                Metadata::Object(todo_map)
+            })
+            .collect();
+        map.insert("todo_items".into(), Metadata::from(todo_metadata));
+
         Metadata::Object(map)
     }
 }
