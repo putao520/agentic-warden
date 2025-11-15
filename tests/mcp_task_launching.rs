@@ -72,6 +72,7 @@ fn test_mcp_concurrent_task_launching() {
 
     // 2. 并发启动3个任务（模拟MCP Server行为）
     let mut pids = vec![];
+    let mut children = vec![];
 
     for i in 0..3 {
         let child = Command::new("sleep")
@@ -83,6 +84,7 @@ fn test_mcp_concurrent_task_launching() {
 
         let real_pid = child.id();
         pids.push(real_pid);
+        children.push(child);
 
         // 注册到MCP Registry（模拟supervisor行为）
         let task = TaskRecord::new(
@@ -97,10 +99,11 @@ fn test_mcp_concurrent_task_launching() {
             .expect("Failed to register task");
 
         println!("✅ MCP started task #{} with PID: {}", i + 1, real_pid);
+    }
 
-        // 重要：不持有Child，让进程自然运行
-        // pwait的sweep_stale_entries会自动检测进程退出并标记完成
-        std::mem::forget(child);
+    // 等待所有进程完成并回收(避免僵尸进程)
+    for child in children {
+        let _ = child.wait_with_output();
     }
 
     // 3. 使用pwait等待所有MCP任务（模拟Claude Code执行pwait命令）
