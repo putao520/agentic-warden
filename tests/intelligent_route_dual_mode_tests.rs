@@ -13,8 +13,7 @@ use agentic_warden::mcp_routing::models::{
 use agentic_warden::mcp_routing::registry::{DynamicToolRegistry, RegisteredTool};
 use agentic_warden::mcp_routing::{
     CandidateToolInfo, DecisionEngine, FastEmbedder, IntelligentRouter, LlmClient,
-    McpConnectionPool, MemRoutingIndex, MethodEmbedding, MockEmbeddingBackend,
-    ToolEmbedding,
+    McpConnectionPool, MemRoutingIndex, MethodEmbedding, MockEmbeddingBackend, ToolEmbedding,
 };
 use agentic_warden::memory::ConversationHistoryStore;
 use anyhow::{anyhow, Result as AnyResult};
@@ -147,18 +146,7 @@ async fn orchestrated_tool_registered_to_registry() {
                 Some(plan.description.as_str())
             );
             assert!(tool.js_code.contains("workflow"));
-            let deps: Vec<(String, String)> = tool
-                .mcp_dependencies
-                .iter()
-                .map(|dep| (dep.server.clone(), dep.name.clone()))
-                .collect();
-            assert_eq!(
-                deps,
-                vec![
-                    ("git".to_string(), "status".to_string()),
-                    ("reports".to_string(), "write_report".to_string()),
-                ]
-            );
+            assert!(tool.js_code.contains("mcp.call"));
         }
         other => panic!("expected JS tool, got {:?}", other),
     }
@@ -390,7 +378,7 @@ fn sample_plan() -> WorkflowPlan {
 }
 
 fn sample_js_code() -> String {
-    "async function workflow(input) {\n    const status = await mcpStatus({ repo: input.repo_path });\n    const summary = await mcpWriteReport({ repo: input.repo_path });\n    return { status, summary };\n}\n"
+    "async function workflow(input) {\n    const status = await mcp.call(\"git\", \"status\", { repo: input.repo_path });\n    const summary = await mcp.call(\"reports\", \"write_report\", { repo: input.repo_path });\n    return { status, summary };\n}\n"
         .into()
 }
 

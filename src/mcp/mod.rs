@@ -2,18 +2,20 @@ pub mod capability_detector;
 mod js_executor;
 pub use js_executor::{JsExecutionReport, JsToolExecutor};
 
+use crate::platform;
+use crate::registry_factory::RegistryFactory;
+use crate::task_record::TaskStatus;
 use anyhow::Error;
+use chrono::{DateTime, Utc};
 
 use crate::mcp_routing::js_orchestrator::{BoaRuntimePool, McpFunctionInjector};
 use crate::mcp_routing::registry::{DynamicToolRegistry, RegisteredTool, RegistryConfig};
 use crate::mcp_routing::{
-    models::{
-        ExecuteToolRequest, ExecuteToolResponse, IntelligentRouteRequest, IntelligentRouteResponse,
-        MethodSchemaResponse,
-    },
+    models::{IntelligentRouteRequest, IntelligentRouteResponse},
     IntelligentRouter,
 };
 use crate::memory::{ConversationHistoryStore, ConversationSearchResult};
+use crate::roles::RoleManager;
 use capability_detector::ClientCapabilities;
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use rmcp::{
@@ -26,16 +28,13 @@ use rmcp::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::ffi::OsString;
+use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct MethodSchemaParams {
-    pub mcp_server: String,
-    pub tool_name: String,
-}
+use tokio::time::{Duration, Instant};
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SearchHistoryParams {
@@ -102,6 +101,305 @@ pub struct TaskCommandResult {
     /// Optional provider.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
+pub struct StartTaskParams {
+    /// AI CLI type (claude, codex, or gemini).
+    pub ai_type: String,
+    /// Task description/prompt for the AI.
+    pub task: String,
+    /// Optional provider name to use for this task.
+    ///
+    /// All available providers and their scenarios are defined in ~/.agentic-warden/providers.json.
+    /// Each provider can have a 'scenario' field describing when to use it.
+    ///
+    /// If not specified, the default_provider from configuration will be used.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    /// Optional role name to inject from ~/.aiw/role directory.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
+pub struct TaskLaunchInfo {
+    /// Process ID of the launched task.
+    pub pid: u32,
+    /// Path to the task log file.
+    pub log_file: String,
+    /// Task status in registry.
+    pub status: TaskStatus,
+    /// Task start time.
+    pub started_at: DateTime<Utc>,
+    /// AI CLI type used.
+    pub ai_type: String,
+    /// Original task prompt (without role prefix).
+    pub task: String,
+    /// Provider used (if any).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
+pub struct TaskInfo {
+    /// Process ID.
+    pub pid: u32,
+    /// Log file path.
+    pub log_file: String,
+    /// Registry task status.
+    pub status: TaskStatus,
+    /// Task start time.
+    pub started_at: DateTime<Utc>,
+    /// Optional completion time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<DateTime<Utc>>,
+    /// Cleanup reason if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cleanup_reason: Option<String>,
+    /// Manager PID that launched the task (if tracked).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub manager_pid: Option<u32>,
+    /// Exit code if available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    /// Log identifier stored in registry.
+    pub log_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
+pub struct StopTaskParams {
+    /// PID of the task to stop.
+    pub pid: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
+pub struct StopTaskResult {
+    /// Whether stop succeeded.
+    pub success: bool,
+    /// Human-readable status message.
+    pub message: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
+pub struct GetTaskLogsParams {
+    /// Target PID whose logs should be retrieved.
+    pub pid: u32,
+    /// Optional number of lines to tail from the end of the log.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tail_lines: Option<usize>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
+pub struct TaskLogsResult {
+    /// PID associated with the log file.
+    pub pid: u32,
+    /// Log file path.
+    pub log_file: String,
+    /// Content of the log (entire file or tail).
+    pub content: String,
+}
+
+async fn wait_for_registry_entry(
+    registry: &crate::registry_factory::McpRegistry,
+    existing: &HashSet<u32>,
+) -> Result<Option<crate::storage::RegistryEntry>, String> {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < deadline {
+        let entries = registry.entries().map_err(|e| e.to_string())?;
+        if let Some(new_entry) = entries
+            .into_iter()
+            .find(|entry| !existing.contains(&entry.pid))
+        {
+            return Ok(Some(new_entry));
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    Ok(None)
+}
+
+pub async fn start_task(params: StartTaskParams) -> Result<TaskLaunchInfo, String> {
+    use crate::cli_type::parse_cli_type;
+    use crate::supervisor;
+
+    let registry = RegistryFactory::instance().get_mcp_registry();
+
+    let mut prompt = params.task.clone();
+
+    if let Some(role_name) = &params.role {
+        let manager = RoleManager::new().map_err(|e| e.to_string())?;
+        let role = manager.get_role(role_name).map_err(|e| e.to_string())?;
+        prompt = format!("{}\n\n---\n\n{}", role.content, params.task);
+    }
+
+    let cli_type = parse_cli_type(&params.ai_type).ok_or_else(|| {
+        format!(
+            "Invalid AI type: {}. Must be claude, codex, or gemini",
+            params.ai_type
+        )
+    })?;
+
+    let existing: HashSet<u32> = registry
+        .entries()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|entry| entry.pid)
+        .collect();
+
+    let args = cli_type.build_full_access_args(&prompt);
+    let os_args: Vec<OsString> = args.into_iter().map(OsString::from).collect();
+
+    let spawn_registry = registry.clone();
+    let spawn_cli_type = cli_type.clone();
+    let spawn_args = os_args.clone();
+    let spawn_provider = params.provider.clone();
+
+    tokio::spawn(async move {
+        if let Err(err) = supervisor::execute_cli(
+            &spawn_registry,
+            &spawn_cli_type,
+            &spawn_args,
+            spawn_provider,
+        )
+        .await
+        {
+            eprintln!(
+                "start_task: failed to launch {} task: {}",
+                spawn_cli_type.display_name(),
+                err
+            );
+        }
+    });
+
+    let new_entry = wait_for_registry_entry(&registry, &existing).await?;
+    let entry = new_entry.ok_or_else(|| "Failed to register task in MCP registry".to_string())?;
+
+    Ok(TaskLaunchInfo {
+        pid: entry.pid,
+        log_file: entry.record.log_path.clone(),
+        status: entry.record.status.clone(),
+        started_at: entry.record.started_at,
+        ai_type: params.ai_type,
+        task: params.task,
+        provider: params.provider,
+    })
+}
+
+fn registry_entry_to_task_info(entry: crate::storage::RegistryEntry) -> TaskInfo {
+    TaskInfo {
+        pid: entry.pid,
+        log_file: entry.record.log_path.clone(),
+        status: entry.record.status.clone(),
+        started_at: entry.record.started_at,
+        completed_at: entry.record.completed_at,
+        cleanup_reason: entry.record.cleanup_reason.clone(),
+        manager_pid: entry.record.manager_pid,
+        exit_code: entry.record.exit_code,
+        log_id: entry.record.log_id.clone(),
+    }
+}
+
+pub async fn list_tasks() -> Result<Vec<TaskInfo>, String> {
+    let registry = RegistryFactory::instance().get_mcp_registry();
+    let entries = registry.entries().map_err(|e| e.to_string())?;
+
+    let active_entries: Vec<_> = entries
+        .into_iter()
+        .filter(|entry| platform::process_alive(entry.pid))
+        .collect();
+
+    Ok(active_entries
+        .into_iter()
+        .map(registry_entry_to_task_info)
+        .collect())
+}
+
+pub async fn stop_task(params: StopTaskParams) -> Result<StopTaskResult, String> {
+    let registry = RegistryFactory::instance().get_mcp_registry();
+    let entries = registry.entries().map_err(|e| e.to_string())?;
+
+    let target = entries
+        .into_iter()
+        .find(|entry| entry.pid == params.pid)
+        .ok_or_else(|| format!("PID {} not found in MCP registry", params.pid))?;
+
+    #[cfg(unix)]
+    {
+        use nix::sys::signal::{kill, Signal};
+        use nix::unistd::Pid;
+
+        kill(Pid::from_raw(params.pid as i32), Signal::SIGTERM).map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(not(unix))]
+    {
+        platform::terminate_process(params.pid);
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if !platform::process_alive(params.pid) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    if platform::process_alive(params.pid) {
+        #[cfg(unix)]
+        {
+            use nix::sys::signal::{kill, Signal};
+            use nix::unistd::Pid;
+
+            kill(Pid::from_raw(params.pid as i32), Signal::SIGKILL).map_err(|e| e.to_string())?;
+        }
+
+        #[cfg(not(unix))]
+        {
+            platform::terminate_process(params.pid);
+        }
+    }
+
+    registry
+        .mark_completed(
+            target.pid,
+            Some("stopped_by_user".to_string()),
+            None,
+            Utc::now(),
+        )
+        .map_err(|e| e.to_string())?;
+
+    Ok(StopTaskResult {
+        success: true,
+        message: format!("Task {} stopped", params.pid),
+    })
+}
+
+pub async fn get_task_logs(params: GetTaskLogsParams) -> Result<TaskLogsResult, String> {
+    let registry = RegistryFactory::instance().get_mcp_registry();
+    let entries = registry.entries().map_err(|e| e.to_string())?;
+
+    let entry = entries
+        .into_iter()
+        .find(|entry| entry.pid == params.pid)
+        .ok_or_else(|| format!("PID {} not found in MCP registry", params.pid))?;
+
+    let log_path = PathBuf::from(entry.record.log_path.clone());
+    let content = if let Some(lines) = params.tail_lines {
+        let data = fs::read_to_string(&log_path)
+            .map_err(|e| format!("Failed to read log file {}: {}", log_path.display(), e))?;
+        let all_lines: Vec<&str> = data.lines().collect();
+        let start = all_lines.len().saturating_sub(lines);
+        all_lines[start..].join("\n")
+    } else {
+        fs::read_to_string(&log_path)
+            .map_err(|e| format!("Failed to read log file {}: {}", log_path.display(), e))?
+    };
+
+    Ok(TaskLogsResult {
+        pid: entry.pid,
+        log_file: entry.record.log_path,
+        content,
+    })
 }
 
 #[derive(Clone)]
@@ -296,21 +594,6 @@ impl AgenticWardenMcpServer {
     }
 
     #[tool(
-        name = "get_method_schema",
-        description = "Return the JSON schema for a given MCP server tool."
-    )]
-    pub async fn get_method_schema_tool(
-        &self,
-        params: Parameters<MethodSchemaParams>,
-    ) -> Result<Json<MethodSchemaResponse>, String> {
-        self.router
-            .get_method_schema(&params.0.mcp_server, &params.0.tool_name)
-            .await
-            .map(Json)
-            .map_err(|err| err.to_string())
-    }
-
-    #[tool(
         name = "search_history",
         description = "Search conversation history using semantic similarity. Returns relevant past conversations with extracted TODO items. Each result includes conversation context and associated TODO list (markdown checkboxes, TODO: markers, Action Items)."
     )]
@@ -341,21 +624,6 @@ impl AgenticWardenMcpServer {
             .map_err(|e| format!("Failed to search conversation history: {e}"))?;
 
         Ok(Json(results))
-    }
-
-    #[tool(
-        name = "execute_tool",
-        description = "Execute a specific MCP tool with confirmed parameters. Used in two-phase negotiation mode."
-    )]
-    pub async fn execute_tool_mcp(
-        &self,
-        params: Parameters<ExecuteToolRequest>,
-    ) -> Result<Json<ExecuteToolResponse>, String> {
-        self.router
-            .execute_tool(params.0)
-            .await
-            .map(Json)
-            .map_err(|err| err.to_string())
     }
 
     #[tool(
@@ -465,6 +733,50 @@ impl AgenticWardenMcpServer {
             ai_type: params.0.ai_type,
             provider: params.0.provider,
         }))
+    }
+
+    #[tool(
+        name = "start_task",
+        description = "Launch an AI CLI task in background. Optionally inject a role prompt from ~/.aiw/role/ directory."
+    )]
+    pub async fn start_task_tool(
+        &self,
+        params: Parameters<StartTaskParams>,
+    ) -> Result<Json<TaskLaunchInfo>, String> {
+        start_task(params.0).await.map(Json)
+    }
+
+    #[tool(
+        name = "list_tasks",
+        description = "List all tracked MCP tasks. Filters out zombie processes."
+    )]
+    pub async fn list_tasks_tool(
+        &self,
+        _params: Parameters<()>,
+    ) -> Result<Json<Vec<TaskInfo>>, String> {
+        list_tasks().await.map(Json)
+    }
+
+    #[tool(
+        name = "stop_task",
+        description = "Stop a running MCP task by PID. Sends SIGTERM, waits 5s, then SIGKILL if needed."
+    )]
+    pub async fn stop_task_tool(
+        &self,
+        params: Parameters<StopTaskParams>,
+    ) -> Result<Json<StopTaskResult>, String> {
+        stop_task(params.0).await.map(Json)
+    }
+
+    #[tool(
+        name = "get_task_logs",
+        description = "Retrieve log content of a tracked task. Supports tail mode to get last N lines."
+    )]
+    pub async fn get_task_logs_tool(
+        &self,
+        params: Parameters<GetTaskLogsParams>,
+    ) -> Result<Json<TaskLogsResult>, String> {
+        get_task_logs(params.0).await.map(Json)
     }
 
     pub async fn run(self) -> Result<(), Box<dyn std::error::Error>> {

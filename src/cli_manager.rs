@@ -70,10 +70,10 @@ impl CliToolDetector {
     fn initialize_tools(&mut self) {
         self.tools = vec![
             CliTool {
-                name: "Claude CLI".to_string(),
+                name: "Claude Code".to_string(),
                 command: "claude".to_string(),
-                npm_package: "@anthropic-ai/claude-cli".to_string(), // Note: This package doesn't exist on npm. Claude Code is installed via other methods.
-                description: "Anthropic Claude CLI tool (Note: Not available on npm)".to_string(),
+                npm_package: "@anthropic-ai/claude-code".to_string(),
+                description: "Anthropic Claude Code CLI tool".to_string(),
                 installed: false,
                 version: None,
                 install_type: None,
@@ -191,17 +191,172 @@ impl CliToolDetector {
             .unwrap_or(false)
     }
 
+    /// Auto-install Node.js if not available (cross-platform)
+    pub async fn auto_install_nodejs() -> Result<()> {
+        // First check if Node.js is already installed
+        if Command::new("node")
+            .arg("--version")
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+        {
+            println!("✅ Node.js is already installed");
+            return Ok(());
+        }
+
+        println!("📦 Node.js not detected. Attempting to install via nvm...");
+
+        let os = Self::get_os_type();
+        let install_result = match os {
+            "Windows" => Self::install_nodejs_windows().await,
+            "macOS" | "Linux" => Self::install_nodejs_via_nvm().await,
+            _ => {
+                anyhow::bail!("Unsupported operating system: {}", os);
+            }
+        };
+
+        install_result?;
+
+        // Verify installation
+        println!("🔍 Verifying Node.js installation...");
+        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+
+        if Command::new("node")
+            .arg("--version")
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+        {
+            println!("✅ Node.js installed successfully!");
+            Ok(())
+        } else {
+            println!("⚠️  Node.js installation completed but not immediately available.");
+            println!("   Please restart your terminal and try again.");
+            anyhow::bail!("Node.js verification failed - terminal restart required");
+        }
+    }
+
+    /// Install Node.js via nvm (Linux/macOS unified method)
+    async fn install_nodejs_via_nvm() -> Result<()> {
+        let os = Self::get_os_type();
+        println!("🔧 Installing Node.js via nvm on {}...", os);
+
+        // Step 1: Check if nvm is already installed
+        let nvm_check = Command::new("bash")
+            .arg("-c")
+            .arg("command -v nvm")
+            .output();
+
+        let nvm_installed = nvm_check
+            .map(|output| output.status.success())
+            .unwrap_or(false);
+
+        if !nvm_installed {
+            println!("  📥 nvm not found. Installing nvm...");
+
+            // Download and install nvm
+            let nvm_install_script =
+                "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/master/install.sh | bash";
+
+            let install_result = Command::new("bash")
+                .arg("-c")
+                .arg(nvm_install_script)
+                .status();
+
+            match install_result {
+                Ok(status) if status.success() => {
+                    println!("  ✅ nvm installed successfully");
+                }
+                _ => {
+                    anyhow::bail!(
+                        "Failed to install nvm. Please install manually: \
+                        curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/master/install.sh | bash"
+                    );
+                }
+            }
+
+            // Source nvm in current shell session
+            println!("  🔄 Loading nvm...");
+        } else {
+            println!("  ✅ nvm is already installed");
+        }
+
+        // Step 2: Install Node.js LTS via nvm
+        println!("  📦 Installing Node.js LTS via nvm...");
+
+        // Construct nvm command with proper environment sourcing
+        let nvm_install_node = r#"
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            nvm install --lts
+            nvm use --lts
+            nvm alias default lts/*
+        "#;
+
+        let node_install = Command::new("bash")
+            .arg("-c")
+            .arg(nvm_install_node)
+            .status();
+
+        match node_install {
+            Ok(status) if status.success() => {
+                println!("  ✅ Node.js LTS installed via nvm");
+                Ok(())
+            }
+            _ => {
+                anyhow::bail!(
+                    "Failed to install Node.js via nvm. Please run manually: \
+                    nvm install --lts && nvm use --lts"
+                );
+            }
+        }
+    }
+
+    /// Install Node.js on Windows using winget (preferred) or chocolatey
+    async fn install_nodejs_windows() -> Result<()> {
+        println!("🪟 Installing Node.js on Windows...");
+
+        // Try winget first (available on Windows 10+ by default)
+        println!("  Trying winget...");
+        let winget_result = Command::new("winget")
+            .args(&[
+                "install",
+                "OpenJS.NodeJS",
+                "--accept-package-agreements",
+                "--accept-source-agreements",
+            ])
+            .status();
+
+        if let Ok(status) = winget_result {
+            if status.success() {
+                return Ok(());
+            }
+            println!("  Winget installation failed, trying chocolatey...");
+        }
+
+        // Fallback to chocolatey
+        println!("  Trying chocolatey...");
+        let choco_result = Command::new("choco")
+            .args(&["install", "nodejs", "-y"])
+            .status();
+
+        match choco_result {
+            Ok(status) if status.success() => Ok(()),
+            _ => {
+                anyhow::bail!(
+                    "Failed to install Node.js on Windows. Please install manually from https://nodejs.org/ \
+                     or install winget/chocolatey first."
+                );
+            }
+        }
+    }
+
     /// Get installation hint for a tool based on OS
     pub fn get_install_hint(&self, command: &str) -> String {
-        let os = Self::get_os_type();
-
         match command.to_lowercase().as_str() {
+            "claude" => "npm install -g @anthropic-ai/claude-code".to_string(),
             "codex" => "npm install -g @openai/codex".to_string(),
             "gemini" => "npm install -g @google/gemini-cli".to_string(),
-            "claude" => match os {
-                "Windows" => "irm https://claude.ai/install.ps1 | iex".to_string(),
-                _ => "curl -fsSL https://claude.ai/install.sh | bash".to_string(),
-            },
             _ => format!("Install {} via appropriate package manager", command),
         }
     }
@@ -296,6 +451,14 @@ pub fn get_install_commands() -> Vec<(String, String)> {
 /// If tool_name is None, update all installed tools
 /// If tool_name is Some, update/install that specific tool
 pub async fn execute_update(tool_name: Option<&str>) -> Result<Vec<(String, bool, String)>> {
+    // Step 0: Ensure Node.js is installed (required for all AI CLI tools)
+    println!("🔍 Checking Node.js installation...");
+    if let Err(e) = CliToolDetector::auto_install_nodejs().await {
+        eprintln!("⚠️  Node.js auto-install failed: {}", e);
+        eprintln!("Please install Node.js manually from https://nodejs.org/");
+        anyhow::bail!("Node.js is required but not available");
+    }
+
     let mut detector = CliToolDetector::new();
     detector.detect_all_tools()?;
 
@@ -328,13 +491,7 @@ pub async fn execute_update(tool_name: Option<&str>) -> Result<Vec<(String, bool
     for tool in tools_to_process {
         println!("\n🔧 Processing {}...", tool.name);
 
-        // Special handling for Claude - use 'claude update' command
-        if tool.command == "claude" {
-            handle_claude_update(tool, &mut results).await;
-            continue;
-        }
-
-        // For other tools (codex, gemini), use npm
+        // All tools use npm for installation and updates
         let npm_package = &tool.npm_package;
         let current_version = tool.version.clone();
 
@@ -420,49 +577,6 @@ pub async fn execute_update(tool_name: Option<&str>) -> Result<Vec<(String, bool
     Ok(results)
 }
 
-/// Handle Claude update - uses 'claude update' command instead of npm
-async fn handle_claude_update(tool: &CliTool, results: &mut Vec<(String, bool, String)>) {
-    if !tool.installed {
-        println!("  ❌ Claude CLI is not installed");
-        println!("  Install from: https://console.anthropic.com/downloads");
-        results.push((
-            tool.name.clone(),
-            false,
-            "Not installed - download from https://console.anthropic.com/downloads".to_string(),
-        ));
-        return;
-    }
-
-    println!("  Running 'claude update'...");
-
-    match std::process::Command::new("claude").arg("update").status() {
-        Ok(status) => {
-            if status.success() {
-                println!("  ✅ Successfully updated Claude CLI!");
-                results.push((tool.name.clone(), true, "Successfully updated".to_string()));
-            } else {
-                eprintln!(
-                    "  ❌ Claude update failed with exit code: {:?}",
-                    status.code()
-                );
-                results.push((
-                    tool.name.clone(),
-                    false,
-                    format!("Update failed with exit code: {:?}", status.code()),
-                ));
-            }
-        }
-        Err(e) => {
-            eprintln!("  ❌ Failed to execute 'claude update': {}", e);
-            results.push((
-                tool.name.clone(),
-                false,
-                format!("Failed to execute 'claude update': {}", e),
-            ));
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -518,20 +632,12 @@ mod tests {
     }
 
     #[test]
-    fn test_get_install_hint_claude_by_os() {
+    fn test_get_install_hint_claude() {
         let detector = CliToolDetector::new();
         let claude_hint = detector.get_install_hint("claude");
-        let os = CliToolDetector::get_os_type();
 
-        match os {
-            "Windows" => {
-                // Windows should use PowerShell
-                assert!(claude_hint.contains("irm https://claude.ai/install.ps1 | iex"));
-            }
-            _ => {
-                // All other systems (macOS, Linux) should use curl
-                assert!(claude_hint.contains("curl -fsSL https://claude.ai/install.sh | bash"));
-            }
-        }
+        // Claude now uses npm like other tools
+        assert!(claude_hint.contains("npm install"));
+        assert!(claude_hint.contains("@anthropic-ai/claude-code"));
     }
 }

@@ -1,5 +1,6 @@
 use assert_cmd::prelude::*;
 use predicates::prelude::*;
+use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
 
@@ -88,4 +89,25 @@ fn contextual_help_for_push_command() {
         .success()
         .stdout(predicate::str::contains("PUSH COMMAND"))
         .stdout(predicate::str::contains("agentic-warden push"));
+}
+
+#[test]
+fn roles_list_outputs_available_roles() {
+    let home = TempHome::new();
+    let role_dir = home.dir.path().join(".aiw").join("role");
+    fs::create_dir_all(&role_dir).expect("role dir created");
+
+    let role_path = role_dir.join("dev.md");
+    fs::write(&role_path, "Developer\n------------\nBuild things.")
+        .expect("role file written");
+
+    let mut cmd = home.command();
+    cmd.args(["roles", "list"]);
+
+    let role_path_str = role_path.display().to_string();
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("Available roles (1):"))
+        .stdout(predicate::str::contains("- dev: Developer"))
+        .stdout(predicate::str::contains(role_path_str.as_str()));
 }

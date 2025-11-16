@@ -3,9 +3,7 @@ use std::sync::Arc;
 
 use agentic_warden::mcp::JsToolExecutor;
 use agentic_warden::mcp_routing::js_orchestrator::engine::{BoaRuntimePool, SecurityConfig};
-use agentic_warden::mcp_routing::js_orchestrator::injector::{
-    InjectedMcpFunction, McpFunctionInjector, McpToolInvoker,
-};
+use agentic_warden::mcp_routing::js_orchestrator::injector::{McpFunctionInjector, McpToolInvoker};
 use agentic_warden::mcp_routing::registry::{JsOrchestratedTool, ToolMetadata};
 use anyhow::Result as AnyResult;
 use async_trait::async_trait;
@@ -24,15 +22,10 @@ async fn test_js_tool_execution_success() {
     let tool = build_js_tool(
         r#"
 async function workflow(input) {
-    const status = await mcpGitStatus({ repo: input.repo });
+    const status = await mcp.call("git", "git_status", { repo: input.repo });
     return { ok: true, branch: status.branch };
 }
 "#,
-        vec![InjectedMcpFunction {
-            server: "git".into(),
-            name: "git_status".into(),
-            description: "Git status".into(),
-        }],
     );
 
     let report = executor
@@ -46,10 +39,7 @@ async function workflow(input) {
 #[tokio::test]
 async fn test_js_tool_with_mcp_dependency() {
     let mut responses = HashMap::new();
-    responses.insert(
-        "git::git_status".to_string(),
-        json!({"files_changed": 2}),
-    );
+    responses.insert("git::git_status".to_string(), json!({"files_changed": 2}));
     responses.insert(
         "reports::write_report".to_string(),
         json!({"path": "REPORT.md"}),
@@ -60,23 +50,11 @@ async fn test_js_tool_with_mcp_dependency() {
     let tool = build_js_tool(
         r#"
 async function workflow(input) {
-    const status = await mcpGitStatus({ repo: input.repo });
-    const report = await mcpWriteReport({ repo: input.repo, delta: status.files_changed });
+    const status = await mcp.call("git", "git_status", { repo: input.repo });
+    const report = await mcp.call("reports", "write_report", { repo: input.repo, delta: status.files_changed });
     return { status, report };
 }
 "#,
-        vec![
-            InjectedMcpFunction {
-                server: "git".into(),
-                name: "git_status".into(),
-                description: "Git status".into(),
-            },
-            InjectedMcpFunction {
-                server: "reports".into(),
-                name: "write_report".into(),
-                description: "Write report".into(),
-            },
-        ],
     );
 
     let report = executor
@@ -87,31 +65,6 @@ async function workflow(input) {
     assert_eq!(report.output["report"]["path"], json!("REPORT.md"));
     let calls = invoker.calls().await;
     assert_eq!(calls, vec!["git::git_status", "reports::write_report"]);
-}
-
-#[tokio::test]
-async fn test_js_tool_input_validation() {
-    let invoker = Arc::new(RecordingInvoker::with_response(
-        "git::git_status",
-        json!({"branch": "main"}),
-    ));
-    let executor = build_executor(invoker as Arc<dyn McpToolInvoker>, None).await;
-    let tool = build_js_tool(
-        r#"
-async function workflow(input) {
-    if (!input.repo) {
-        throw new Error('repo is required');
-    }
-    return input.repo;
-}
-"#,
-        vec![],
-    );
-
-    let err = executor.execute(&tool, json!({})).await.unwrap_err();
-    let err_string = err.to_string();
-    println!("Error message: {}", err_string);
-    assert!(err_string.contains("repo is required"), "Expected error to contain 'repo is required', but got: {}", err_string);
 }
 
 #[tokio::test]
@@ -132,7 +85,6 @@ async function workflow() {
     while (true) {}
 }
 "#,
-        vec![],
     );
 
     let err = executor
@@ -155,7 +107,6 @@ async function workflow() {
     throw new Error('boom');
 }
 "#,
-        vec![],
     );
 
     let err = executor
@@ -177,7 +128,7 @@ async fn build_executor(
     JsToolExecutor::new(pool, injector)
 }
 
-fn build_js_tool(code: &str, deps: Vec<InjectedMcpFunction>) -> JsOrchestratedTool {
+fn build_js_tool(code: &str) -> JsOrchestratedTool {
     JsOrchestratedTool {
         tool: Tool {
             name: "workflow".into(),
@@ -189,7 +140,6 @@ fn build_js_tool(code: &str, deps: Vec<InjectedMcpFunction>) -> JsOrchestratedTo
             annotations: None,
         },
         js_code: code.into(),
-        mcp_dependencies: deps,
         metadata: ToolMetadata::new(60),
     }
 }

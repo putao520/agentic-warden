@@ -22,8 +22,15 @@ graph TB
     subgraph "AI WARDEN - Three Core Modules"
 
         subgraph "1. External AI CLI Management"
+            subgraph "1.1 供应商管理"
+                ProviderMgr[Provider Manager]
+                EnvInjector[Env Injector]
+            end
+            subgraph "1.2 AI CLI本地维护"
+                CliDetector[CLI Detector]
+                CliManager[CLI Manager]
+            end
             ProcTracker[Process Tree Tracker]
-            ProviderMgr[Provider Manager]
             TaskRegistry[Task Registry]
         end
 
@@ -99,9 +106,42 @@ AI WARDEN的三大核心模块在功能上相互独立，各自服务于不同�
 - 跨进程任务跟踪和状态监控
 - 多AI CLI并发执行协调
 
+**子模块1.1: 供应商管理 (Provider Management)**
+**核心功能**:
+- **配置文件管理**: 读取和验证`~/.agentic-warden/provider.json`配置文件
+- **多供应商支持**: OpenRouter、Anthropic、Google、DeepSeek等第三方API供应商
+- **环境变量注入**: 动态注入`OPENAI_API_KEY`、`OPENAI_BASE_URL`等环境变量到AI CLI进程
+- **兼容性验证**: 检查供应商与AI CLI类型的兼容性（如OpenRouter支持codex、claude、gemini）
+- **默认供应商机制**: 支持设置全局默认供应商，可通过`-p`参数覆盖
+- **健康检查**: 定期检查供应商连接状态（可选，间隔300秒）
+- **敏感信息保护**: API Key等敏感值在日志和TUI中自动脱敏显示
+
+**关键组件**:
+- `ProviderManager`: 供应商管理核心逻辑
+- `ProviderConfig`: 配置文件结构定义
+- `EnvInjector`: 环境变量注入器
+- `EnvMapping`: AI CLI到环境变量的映射规则
+
+**子模块1.2: AI CLI本地维护 (AI CLI Maintenance)**
+**核心功能**:
+- **自动检测**: 检测本地已安装的AI CLI工具（通过PATH查找和npm全局包检测）
+- **版本管理**: 识别AI CLI版本（原生二进制 vs NPM包）
+- **安装状态监控**: 实时检查AI CLI可执行文件的可用性
+- **安装建议**: 对未安装的AI CLI提供安装命令提示（如`npm install -g @google/gemini-cli`）
+- **更新检测**: 检查AI CLI是否有新版本可用（可选功能）
+- **可执行路径定位**: 记录并缓存AI CLI的完整可执行路径
+- **TUI状态展示**: 在TUI界面展示所有AI CLI的安装状态、版本、路径
+
+**关键组件**:
+- `CliToolDetector`: AI CLI检测和识别
+- `CliType`: AI CLI类型枚举（Claude、Codex、Gemini）
+- `CliManager`: AI CLI生命周期管理
+- `StatusScreen`: TUI状态展示界面
+
 **数据流**:
 ```
-用户命令 → CLI解析 → 提供商配置 → AI CLI启动 → 进程监控 → 任务完成
+用户命令 → CLI解析 → [供应商管理: 加载配置+注入环境变量]
+        → [AI CLI维护: 检测可执行文件] → AI CLI启动 → 进程监控 → 任务完成
 ```
 
 ##### Module 2: CC Session Management
@@ -439,17 +479,39 @@ Use environment variable injection at process startup time to dynamically config
 
 #### Implementation Details
 ```rust
-// Provider configuration structure
+// Provider configuration structure (v0.2.0 enhanced)
 pub struct Provider {
-    pub name: String,
-    pub compatible_with: Vec<AiType>,
-    pub env: HashMap<String, String>,  // API keys, base URLs, etc.
+    pub token: Option<String>,           // Optional API token
+    pub base_url: Option<String>,        // Optional base URL
+    pub scenario: Option<String>,        // [v0.2.0] Usage scenario description
+    pub env: HashMap<String, String>,    // Additional environment variables
+}
+
+impl Provider {
+    // [v0.2.0] Dynamic ENV injection with auto-mapping
+    pub fn get_all_env_vars(&self) -> HashMap<String, String> {
+        let mut env = self.env.clone();
+
+        // Auto-map token to standard env vars
+        if let Some(token) = &self.token {
+            env.entry("ANTHROPIC_API_KEY".to_string())
+               .or_insert(token.clone());
+        }
+
+        // Auto-map base_url to standard env vars
+        if let Some(base_url) = &self.base_url {
+            env.entry("ANTHROPIC_BASE_URL".to_string())
+               .or_insert(base_url.clone());
+        }
+
+        env
+    }
 }
 
 // Injection process
 impl EnvInjector {
-    pub fn inject_to_command(cmd: &mut Command, env_vars: &HashMap<String, String>) {
-        for (key, value) in env_vars {
+    pub fn inject_to_command(cmd: &mut Command, provider: &Provider) {
+        for (key, value) in provider.get_all_env_vars() {
             cmd.env(key, value);  // Direct environment variable setting
         }
     }
@@ -1069,8 +1131,8 @@ sequenceDiagram
 
 ### ARCH-013: 动态JS编排工具系统架构
 **Date**: 2025-11-15
-**Status**: 🟡 Planned
-**Version**: v0.3.0
+**Status**: 🟢 Adopted
+**Version**: v0.2.0
 **Related Requirements**: REQ-013, ARCH-012
 
 #### Background
@@ -1202,6 +1264,100 @@ tokio::spawn(async move {
     }
 });
 ```
+
+**关键架构设计 - base_tools vs dynamic_tools双层结构**:
+
+**设计理念**:
+- **base_tools (永久工具)**: 来自.mcp.json配置文件定义的MCP服务器工具,启动时通过warm_up()一次性扫描并永久驻留内存,无TTL限制
+- **dynamic_tools (临时工具)**: 运行时LLM动态生成的JS编排工具,带TTL=600秒,最多100个,LRU驱逐策略
+
+**数据结构优化**:
+```rust
+pub struct DynamicToolRegistry {
+    // 永久工具 (来自.mcp.json)
+    base_tools: HashMap<String, BaseToolDefinition>,
+    base_snapshot: Arc<Vec<Tool>>,  // ✅ Arc共享,避免重复clone
+
+    // 临时工具 (LLM运行时生成)
+    dynamic_tools: Arc<RwLock<HashMap<String, RegisteredTool>>>,  // ✅ TTL管理
+
+    // list_tools缓存
+    tool_cache: Arc<RwLock<Option<Arc<Vec<Tool>>>>>,  // ✅ Arc嵌套,零拷贝
+}
+```
+
+**启动时构建流程 (仅一次)**:
+```rust
+// src/mcp_routing/mod.rs:100-105
+pub async fn initialize() -> Result<Self> {
+    // 1. 一次性warm_up所有MCP服务器
+    let discovered = connection_pool.warm_up().await?;  // ✅ 扫描.mcp.json
+
+    // 2. 构建向量索引 (MemVDB内存数据库)
+    let embeddings = build_embeddings(&embedder, &discovered, config)?;
+    index.rebuild(&embeddings.tools, &embeddings.methods)?;  // ✅ <500ms启动
+
+    // 3. 填充永久工具注册表
+    populate_registry(&tool_registry, discovered).await;  // ✅ base_tools固化
+
+    // 4. 创建动态工具注册表(初始为空)
+    let dynamic_registry = Arc::new(DynamicToolRegistry::new(Vec::new()));
+}
+```
+
+**list_tools性能优化 (Arc共享)**:
+```rust
+// src/mcp_routing/registry.rs:331-352
+pub async fn get_all_tool_definitions(&self) -> Arc<Vec<Tool>> {
+    // 缓存命中: 直接返回Arc指针,零拷贝
+    if let Some(cached) = self.tool_cache.read().await.clone() {
+        return cached;  // ✅ Arc clone只复制指针,<1μs
+    }
+
+    // 缓存失效: 快速重建
+    let mut snapshot = Vec::new();
+    snapshot.extend(self.base_snapshot.iter().cloned());  // ✅ Arc浅拷贝,<1ms
+
+    let map = self.dynamic_tools.read().await;
+    for entry in map.values() {
+        snapshot.push(entry.tool().clone());  // ✅ 只clone动态工具(≤100个)
+    }
+
+    let arc_snapshot = Arc::new(snapshot);
+    *self.tool_cache.write().await = Some(arc_snapshot.clone());
+    arc_snapshot  // ✅ 返回Arc,后续list_tools直接复用
+}
+```
+
+**架构优势总结**:
+
+| 维度 | base_tools | dynamic_tools | 性能影响 |
+|------|-----------|---------------|---------|
+| **来源** | .mcp.json配置文件 | LLM运行时生成 | - |
+| **生命周期** | 启动时构建,永久存在 | TTL=600s,自动过期 | 避免重启重新扫描 |
+| **数量限制** | 无限制(取决于MCP服务器数量) | 最多100个,LRU驱逐 | 内存可控 |
+| **存储方式** | Arc<Vec<Tool>>共享 | RwLock<HashMap>隔离 | list_tools零拷贝 |
+| **向量索引** | 启动时一次性构建 | 不索引(无需搜索) | 启动<500ms |
+| **缓存失效开销** | Arc浅拷贝 | clone动态工具 | <1ms重建 |
+
+**性能基准**:
+- **启动时间**: warm_up + 向量化 + 索引构建 ≈ **500ms** (500个base_tools)
+- **list_tools响应**: 缓存命中 < **1μs**, 缓存失效重建 < **1ms**
+- **内存占用**: base_tools (~30MB) + dynamic_tools (~5MB) + 向量索引 (~30MB) ≈ **65MB**
+
+**未来优化方向**:
+- [ ] **批量Embedding生成**: 启动时对base_tools批量向量化,从500ms降至200ms (40x加速)
+  ```rust
+  // 当前: 逐个生成 (500工具 × 20ms = 10s)
+  for tool in tools {
+      let vector = embedder.embed(&doc)?;
+  }
+
+  // 优化: 批量生成 (FastEmbed原生支持)
+  let docs: Vec<String> = tools.iter().map(|tool| format_doc(tool)).collect();
+  let vectors = embedder.embed_batch(&docs)?;  // 200ms for 500
+  ```
+- [ ] **MemRoutingIndex单元测试**: 当前测试覆盖率0%,需补充边界测试(维度不匹配、空索引、相似度排序)
 
 ##### 2. intelligent_route LLM优先路由 (带Fallback)
 
@@ -1515,13 +1671,9 @@ impl McpServer {
      name: "review_pr_and_report",
      input_schema: {...},
      js_code: "...",
-     mcp_dependencies: [
-        {server: "git", name: "git_diff"},
-        {server: "filesystem", name: "read_file"},
-        {server: "filesystem", name: "write_file"}
-     ],
      ttl_seconds: 600
    })   // 同时刷新list_tools缓存
+   // Note: mcp_dependencies已废弃，统一通过mcp.call()接口调用
    ↓
 7. 返回: {message: "Use the 'review_pr_and_report' tool to solve your problem"}
    ↓
@@ -1585,6 +1737,279 @@ regex = "1.10"              # 安全检查
 - MCP注入: < 200ms
 - JS执行: < 30s(取决于MCP调用)
 - 工具注册: < 10ms
+
+---
+
+### ARCH-014: AI CLI角色系统和任务生命周期架构
+**Date**: 2025-11-16
+**Status**: 🟡 Partial (Phase 1 ✅ Adopted, Phase 2-3 ⏸️ Planned)
+**Version**: v0.2.0 (Phase 1), v0.3.0 (Phase 2-3)
+**Related Requirements**: REQ-014
+
+#### Background
+
+Claude Code通过MCP管理AI CLI任务时,缺少对角色配置和任务生命周期的统一管理能力。用户需要重复输入角色提示词,且无法通过MCP工具启动/停止/查询后台AI CLI任务。
+
+#### Decision
+
+**Phase 1 (✅ v0.2.0 已实现)**: 实现基于文件的角色管理系统,提供`list_roles` MCP工具。
+
+**Phase 2-3 (⏸️ v0.3.0 计划)**: 实现任务生命周期MCP工具(start_task, stop_task, list_tasks, get_task_logs),并集成角色系统到任务启动流程。
+
+#### Architecture Components
+
+##### Phase 1: Role Management (✅ Implemented)
+
+**1. Role Storage Layer**:
+```
+~/.aiw/role/
+├── backend-developer.md
+├── frontend-expert.md
+└── qa-tester.md
+
+File Format:
+<description>
+------------
+<content>
+```
+
+**2. Role Module (`src/roles/mod.rs`)**:
+```rust
+pub struct Role {
+    pub name: String,
+    pub description: String,
+    pub content: String,
+    pub file_path: PathBuf,
+}
+
+pub struct RoleInfo { // Lightweight for MCP
+    pub name: String,
+    pub description: String,
+    pub file_path: String,
+}
+
+pub struct RoleManager {
+    base_dir: PathBuf, // Default: ~/.aiw/role/
+}
+
+impl RoleManager {
+    pub fn list_all_roles() -> RoleResult<Vec<Role>>;
+    pub fn get_role(name: &str) -> RoleResult<Role>;
+}
+```
+
+**3. Security Design**:
+- **Path Traversal Prevention**: `fs::canonicalize()` + `starts_with()` validation
+- **File Size Limit**: 1MB maximum per role file
+- **Encoding Validation**: UTF-8 only, reject invalid encodings
+- **Name Validation**: Block path separators (`/`, `\`, `..`)
+- **Delimiter Validation**: Require exactly 12 dashes `------------`
+
+**4. MCP Integration**:
+```rust
+#[tool(
+    name = "list_roles",
+    description = "List all available AI CLI role configurations"
+)]
+async fn list_roles_tool() -> Result<Json<Vec<RoleInfo>>, String> {
+    let manager = RoleManager::new()?;
+    let roles = manager.list_all_roles()?;
+    Ok(Json(roles.into_iter().map(|r| r.as_info()).collect()))
+}
+```
+
+**5. Error Handling**:
+```rust
+pub enum RoleError {
+    NotFound(String),
+    InvalidName { message: String },
+    PathTraversal { path: String },
+    FileTooLarge { path: String, size: u64 },
+    InvalidEncoding { path: String },
+    InvalidFormat { path: String, details: String },
+    HomeDirectoryUnavailable,
+    Io { path: String, source: io::Error },
+}
+```
+
+##### Phase 2: Task Lifecycle MCP Tools (⏸️ Planned)
+
+**1. Task Launching**:
+```rust
+// MCP Tool: start_task
+#[tool(name = "start_task")]
+async fn start_task_tool(params: StartTaskParams) -> Result<TaskLaunchResult> {
+    // 1. Load role content if role parameter provided
+    let prompt = if let Some(role_name) = params.role {
+        let role = RoleManager::new()?.get_role(&role_name)?;
+        format!("{}\n\n---\n\n{}", role.content, params.task)
+    } else {
+        params.task
+    };
+
+    // 2. Launch AI CLI via supervisor
+    let child = supervisor::execute_cli(params.ai_type, &prompt, params.provider).await?;
+
+    // 3. Register to MCP Registry (InProcessRegistry)
+    let registry = create_mcp_registry();
+    registry.register(child.id(), &task_record)?;
+
+    Ok(TaskLaunchResult { pid, log_file, status })
+}
+
+struct StartTaskParams {
+    ai_type: String,        // "claude" | "codex" | "gemini"
+    task: String,           // User task description
+    provider: Option<String>, // Optional provider override
+    role: Option<String>,   // Optional role name
+}
+```
+
+**2. Task Control**:
+```rust
+// MCP Tool: stop_task
+#[tool(name = "stop_task")]
+async fn stop_task_tool(params: StopTaskParams) -> Result<StopTaskResult> {
+    let registry = create_mcp_registry();
+
+    // Send SIGTERM, wait 5s, then SIGKILL
+    kill_process_gracefully(params.pid, Duration::from_secs(5))?;
+
+    // Remove from registry
+    registry.mark_completed(params.pid, Some("Stopped by user"), None, Utc::now())?;
+
+    Ok(StopTaskResult { success: true, message: format!("Task {} stopped", params.pid) })
+}
+```
+
+**3. Task Query**:
+```rust
+// MCP Tool: list_tasks
+#[tool(name = "list_tasks")]
+async fn list_tasks_tool() -> Result<Json<Vec<TaskInfo>>> {
+    let registry = create_mcp_registry();
+    let entries = registry.entries()?;
+
+    // Filter out zombie processes
+    let active_tasks: Vec<TaskInfo> = entries.into_iter()
+        .filter(|e| is_process_alive(e.pid))
+        .map(|e| TaskInfo {
+            pid: e.pid,
+            ai_type: e.record.ai_type.clone(),
+            task: e.record.task.clone(),
+            status: e.record.status,
+            start_time: e.record.start_time,
+            log_file: e.record.log_file.clone(),
+        })
+        .collect();
+
+    Ok(Json(active_tasks))
+}
+```
+
+**4. Log Access**:
+```rust
+// MCP Tool: get_task_logs
+#[tool(name = "get_task_logs")]
+async fn get_task_logs_tool(params: GetTaskLogsParams) -> Result<GetTaskLogsResult> {
+    let registry = create_mcp_registry();
+    let entry = registry.get(params.pid).ok_or("Task not found")?;
+
+    // Security: verify log_file belongs to this process
+    validate_log_file_ownership(&entry.record.log_file, params.pid)?;
+
+    // Read log file (with optional tail)
+    let content = if let Some(n) = params.tail_lines {
+        read_last_n_lines(&entry.record.log_file, n)?
+    } else {
+        fs::read_to_string(&entry.record.log_file)?
+    };
+
+    Ok(GetTaskLogsResult {
+        log_content: content,
+        log_file: entry.record.log_file,
+    })
+}
+```
+
+#### Data Flow
+
+**Phase 1 - Role Listing**:
+```
+Claude Code → list_roles MCP call
+    → RoleManager::list_all_roles()
+    → Scan ~/.aiw/role/*.md
+    → Parse each file (validate, split on delimiter)
+    → Return Vec<RoleInfo>
+```
+
+**Phase 2 - Task with Role**:
+```
+Claude Code → start_task(ai_type="codex", task="Fix bug", role="backend-developer")
+    → RoleManager::get_role("backend-developer")
+    → Load role content: "You are an expert backend developer..."
+    → Compose prompt: "{role_content}\n\n---\n\n{task}"
+    → supervisor::execute_cli("codex", composed_prompt, provider)
+    → Register PID to MCP Registry
+    → Return {pid, log_file, status}
+```
+
+#### Performance Considerations
+
+**Phase 1 (Role System)**:
+- Role list caching: 可选,初次扫描后缓存,TTL 60s
+- File size limit: 1MB防止大文件解析性能问题
+- 目录扫描优化: WalkDir非递归,仅扫描顶层.md文件
+
+**Phase 2 (Task Lifecycle)**:
+- Task list query: O(1)从Registry读取,< 10ms
+- Log file access: 流式读取,支持tail模式避免读取整个文件
+- Process kill: 异步SIGTERM → SIGKILL,不阻塞MCP响应
+
+#### Security Measures
+
+**Role System**:
+- ✅ Path traversal: Canonicalize + prefix check
+- ✅ File size: 1MB max
+- ✅ Encoding: UTF-8 only
+- ✅ Delimiter: Required `------------`
+
+**Task Lifecycle**:
+- ⏸️ PID validation: Verify PID belongs to current user
+- ⏸️ Log file ownership: Validate log path before reading
+- ⏸️ Resource limits: Limit concurrent task launches
+- ⏸️ Signal permissions: Check user can signal PID
+
+#### Testing Strategy
+
+**Phase 1 (✅ Implemented)**:
+- Unit tests: `tests/roles_tests.rs` (5 tests)
+  - Role file parsing with delimiter
+  - list_all_roles returns all roles
+  - File not found error handling
+  - Path traversal rejection
+  - File size limit enforcement
+
+**Phase 2 (⏸️ Planned)**:
+- Integration tests: `tests/task_lifecycle_tests.rs`
+  - start_task launches process and returns PID
+  - stop_task terminates process gracefully
+  - list_tasks returns active tasks
+  - get_task_logs reads log files
+  - Role integration: start_task with role parameter
+
+#### Implementation Files
+
+**Phase 1 (✅ v0.2.0)**:
+- `src/roles/mod.rs` (269 lines): Core role management
+- `src/mcp/mod.rs:347-356`: MCP tool `list_roles`
+- `src/lib.rs:25`: Module export
+- `tests/roles_tests.rs` (96 lines): Unit tests
+
+**Phase 2-3 (⏸️ v0.3.0 planned)**:
+- `src/mcp/mod.rs`: Add start_task, stop_task, list_tasks, get_task_logs tools
+- `src/roles/integration.rs`: Role injection into task prompts (planned)
+- `tests/task_lifecycle_tests.rs`: Integration tests (planned)
 
 ---
 

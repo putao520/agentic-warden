@@ -33,7 +33,11 @@ impl JsToolExecutor {
         }
     }
 
-    pub async fn execute(&self, tool: &JsOrchestratedTool, input: Value) -> Result<JsExecutionReport> {
+    pub async fn execute(
+        &self,
+        tool: &JsOrchestratedTool,
+        input: Value,
+    ) -> Result<JsExecutionReport> {
         let runtime = self
             .runtime_pool
             .acquire()
@@ -41,9 +45,8 @@ impl JsToolExecutor {
             .context("Failed to lock Boa runtime from pool")?;
         let handle = Handle::current();
         let injector = Arc::clone(&self.injector);
-        let dependencies = tool.mcp_dependencies.clone();
         runtime
-            .with_context(move |ctx| injector.inject_all(ctx, &dependencies, handle.clone()))
+            .with_context(move |ctx| injector.inject(ctx, handle.clone()))
             .await
             .context("Failed to inject MCP functions into Boa runtime")?;
 
@@ -63,7 +66,9 @@ impl JsToolExecutor {
 fn build_invocation_script(code: &str, input: &Value) -> Result<String> {
     let payload = serde_json::to_string(input)?;
     if !code.contains("async function workflow") {
-        return Err(anyhow!("Generated JS code must define `async function workflow`"));
+        return Err(anyhow!(
+            "Generated JS code must define `async function workflow`"
+        ));
     }
 
     Ok(format!(
@@ -76,7 +81,7 @@ fn build_invocation_script(code: &str, input: &Value) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mcp_routing::js_orchestrator::injector::{InjectedMcpFunction, McpToolInvoker};
+    use crate::mcp_routing::js_orchestrator::injector::McpToolInvoker;
     use crate::mcp_routing::registry::ToolMetadata;
     use anyhow::Result as AnyResult;
     use async_trait::async_trait;
@@ -100,7 +105,12 @@ mod tests {
 
     #[async_trait]
     impl McpToolInvoker for MockInvoker {
-        async fn call_tool(&self, _server: &str, _tool_name: &str, _args: Value) -> AnyResult<Value> {
+        async fn call_tool(
+            &self,
+            _server: &str,
+            _tool_name: &str,
+            _args: Value,
+        ) -> AnyResult<Value> {
             let mut guard = self.calls.lock().await;
             *guard += 1;
             Ok(self.value.clone())
@@ -130,16 +140,11 @@ mod tests {
             tool: build_tool("workflow"),
             js_code: r#"
 async function workflow(input) {
-    const status = await mcpSample({ value: input.value });
+    const status = await mcp.call("mock", "sample", { value: input.value });
     return status.status;
 }
 "#
             .into(),
-            mcp_dependencies: vec![InjectedMcpFunction {
-                server: "mock".into(),
-                name: "sample".into(),
-                description: "mock".into(),
-            }],
             metadata: ToolMetadata::new(60),
         };
 

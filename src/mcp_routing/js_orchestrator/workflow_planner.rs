@@ -4,13 +4,15 @@
 
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
-use once_cell::sync::Lazy;
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{collections::{HashMap, HashSet}, sync::Arc};
+use std::sync::Arc;
 
-use super::{injector::{InjectedMcpFunction, McpFunctionInjector}, validator::JsCodeValidator};
+use super::{
+    schema_corrector::{IterativeSchemaFixer, SchemaCorrector},
+    schema_validator::SchemaValidator,
+    validator::JsCodeValidator,
+};
 use crate::mcp_routing::decision::{CandidateToolInfo, DecisionEngine};
 
 /// Abstraction over engines capable of planning workflows and generating code.
@@ -32,25 +34,29 @@ pub struct OrchestratedTool {
     pub description: String,
     pub js_code: String,
     pub input_schema: serde_json::Value,
-    pub mcp_dependencies: Vec<InjectedMcpFunction>,
 }
 
 /// Workflow orchestrator
 pub struct WorkflowOrchestrator {
     planner: Arc<dyn WorkflowPlannerEngine>,
+    decision_engine: Option<Arc<DecisionEngine>>,
 }
 
 impl WorkflowOrchestrator {
     /// Create a workflow orchestrator backed by the default decision engine
     pub fn new(decision_engine: Arc<DecisionEngine>) -> Self {
         Self {
-            planner: decision_engine,
+            planner: decision_engine.clone(),
+            decision_engine: Some(decision_engine),
         }
     }
 
     /// Create a workflow orchestrator from a custom planner implementation (used in tests)
     pub fn with_planner(planner: Arc<dyn WorkflowPlannerEngine>) -> Self {
-        Self { planner }
+        Self {
+            planner,
+            decision_engine: None,
+        }
     }
 
     /// Orchestrate a workflow from user request
@@ -106,22 +112,73 @@ impl WorkflowOrchestrator {
             ));
         }
 
-        let input_schema = build_input_schema(&plan.input_params);
-        let referenced_functions = extract_mcp_dependencies(&js_code);
-        let mcp_dependencies = build_mcp_dependency_list(
-            &plan,
-            available_tools,
-            &referenced_functions,
-        )
-        .context("Failed to map MCP dependencies to real tools")?;
+        let built_schema = build_input_schema(&plan.input_params);
+        let input_schema = match self
+            .decision_engine
+            .as_ref()
+            .map(|engine| IterativeSchemaFixer::new(Arc::clone(engine)))
+        {
+            Some(schema_fixer) => match schema_fixer
+                .fix_schema_with_retry(
+                    &plan.suggested_name,
+                    &plan.description,
+                    &js_code,
+                    built_schema.clone(),
+                )
+                .await
+            {
+                Ok(schema) => schema,
+                Err(e) => {
+                    eprintln!("⚠️  Iterative schema fixing failed: {}", e);
+                    eprintln!("ℹ️  Falling back to static SchemaCorrector");
+                    self.fallback_schema_correction(&js_code, built_schema)?
+                }
+            },
+            None => self.fallback_schema_correction(&js_code, built_schema)?,
+        };
 
         Ok(OrchestratedTool {
             name: plan.suggested_name.clone(),
             description: plan.description.clone(),
             js_code,
             input_schema,
-            mcp_dependencies,
         })
+    }
+}
+
+impl WorkflowOrchestrator {
+    fn fallback_schema_correction(&self, js_code: &str, schema: Value) -> Result<Value> {
+        let validation = SchemaValidator::validate(&schema);
+        if validation.is_valid {
+            if !validation.warnings.is_empty() {
+                eprintln!(
+                    "⚠️  Input schema warnings: {}",
+                    validation.warnings.join("; ")
+                );
+            }
+            return Ok(schema);
+        }
+
+        eprintln!(
+            "⚠️  Input schema failed validation, attempting autocorrect: {}",
+            validation.errors.join("; ")
+        );
+        let corrected = SchemaCorrector::correct(js_code, schema.clone())
+            .context("Failed to self-correct workflow input schema from generated code")?;
+        if !corrected.applied_fixes.is_empty() {
+            eprintln!(
+                "ℹ️  Applied schema fixes: {}",
+                corrected.applied_fixes.join("; ")
+            );
+        }
+        if !corrected.warnings.is_empty() {
+            eprintln!(
+                "⚠️  Schema warnings after correction: {}",
+                corrected.warnings.join("; ")
+            );
+        }
+
+        Ok(corrected.schema)
     }
 }
 
@@ -152,90 +209,6 @@ fn build_input_schema(params: &[InputParam]) -> Value {
     }
 
     Value::Object(root)
-}
-
-fn extract_mcp_dependencies(code: &str) -> Vec<String> {
-    static MCP_FN: Lazy<Regex> = Lazy::new(|| Regex::new(r"\bmcp[A-Z][A-Za-z0-9_]*").unwrap());
-    let mut seen = HashSet::new();
-    let mut deps = Vec::new();
-
-    for capture in MCP_FN.find_iter(code) {
-        let name = capture.as_str().to_string();
-        if seen.insert(name.clone()) {
-            deps.push(name);
-        }
-    }
-
-    deps
-}
-
-fn build_mcp_dependency_list(
-    plan: &WorkflowPlan,
-    available_tools: &[CandidateToolInfo],
-    referenced: &[String],
-) -> Result<Vec<InjectedMcpFunction>> {
-    if referenced.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let mut referenced_set: HashSet<String> = referenced.iter().cloned().collect();
-    let mut description_map = HashMap::new();
-    for tool in available_tools {
-        description_map.insert(
-            (tool.server.clone(), tool.tool.clone()),
-            tool.description.clone(),
-        );
-    }
-
-    let mut deps = Vec::new();
-    for step in &plan.steps {
-        let Some((server, tool_name)) = parse_step_tool(&step.tool) else {
-            continue;
-        };
-        let function_name = McpFunctionInjector::function_name_for(&tool_name);
-        if !referenced_set.remove(&function_name) {
-            continue;
-        }
-
-        let description = description_map
-            .get(&(server.clone(), tool_name.clone()))
-            .cloned()
-            .filter(|desc| !desc.is_empty())
-            .or_else(|| {
-                if step.description.is_empty() {
-                    None
-                } else {
-                    Some(step.description.clone())
-                }
-            })
-            .unwrap_or_else(|| format!("Workflow step {}", step.step));
-
-        deps.push(InjectedMcpFunction {
-            server,
-            name: tool_name,
-            description,
-        });
-    }
-
-    if !referenced_set.is_empty() {
-        let unknown = referenced_set.into_iter().collect::<Vec<_>>().join(", ");
-        return Err(anyhow!(
-            "JavaScript references MCP functions missing from workflow plan: {}",
-            unknown
-        ));
-    }
-
-    Ok(deps)
-}
-
-fn parse_step_tool(raw: &str) -> Option<(String, String)> {
-    let mut parts = raw.splitn(2, "::");
-    let server = parts.next()?.trim();
-    let tool = parts.next()?.trim();
-    if server.is_empty() || tool.is_empty() {
-        return None;
-    }
-    Some((server.to_string(), tool.to_string()))
 }
 
 /// Workflow plan from LLM

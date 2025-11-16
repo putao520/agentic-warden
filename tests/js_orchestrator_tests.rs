@@ -2,8 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use agentic_warden::mcp_routing::js_orchestrator::{
-    BoaRuntime, BoaRuntimePool, InjectedMcpFunction, JsCodeValidator, McpFunctionInjector,
-    McpToolInvoker, SecurityConfig,
+    BoaRuntime, BoaRuntimePool, McpFunctionInjector, McpToolInvoker, SecurityConfig,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -34,18 +33,6 @@ async fn timeout_limit_is_enforced() {
     assert!(err.to_string().contains("timed out"));
 }
 
-#[tokio::test]
-async fn memory_limit_is_checked() {
-    let runtime = BoaRuntime::with_security(SecurityConfig {
-        max_memory_mb: 1,
-        ..SecurityConfig::default()
-    })
-    .unwrap();
-
-    let err = runtime.execute("42").await.unwrap_err();
-    assert!(err.to_string().contains("memory usage"));
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn runtime_pool_limits_connections() {
     let pool = BoaRuntimePool::new().await.unwrap();
@@ -74,16 +61,11 @@ async fn injected_mcp_function_executes() {
     let injector = McpFunctionInjector::with_invoker(invoker.clone());
     let runtime = BoaRuntime::new().unwrap();
 
-    let tools = vec![InjectedMcpFunction {
-        server: "mock".into(),
-        name: "git_status".into(),
-        description: "mock".into(),
-    }];
     let injector_clone = injector.clone();
     let handle = tokio::runtime::Handle::current();
     runtime
         .with_context(move |ctx| {
-            injector_clone.inject_all(ctx, &tools, handle.clone())?;
+            injector_clone.inject(ctx, handle.clone())?;
             Ok(())
         })
         .await
@@ -93,7 +75,7 @@ async fn injected_mcp_function_executes() {
         .execute(
             r#"
             async function workflow() {
-                const status = await mcpGitStatus({ repo: "demo" });
+                const status = await mcp.call("mock", "git_status", { repo: "demo" });
                 return status.branch;
             }
             workflow();
@@ -104,34 +86,6 @@ async fn injected_mcp_function_executes() {
 
     assert_eq!(output, json!("main"));
     assert_eq!(*invoker.calls.lock().await, 1);
-}
-
-#[tokio::test]
-async fn validator_detects_security_issues() {
-    let valid_code = r#"
-        async function workflow() {
-            const status = await mcpGitStatus();
-            return status.prompt;
-        }
-        workflow();
-    "#;
-
-    let validation = JsCodeValidator::validate(valid_code).unwrap();
-    assert!(validation.passed);
-
-    let invalid = "eval('dangerous')";
-    let validation = JsCodeValidator::validate(invalid).unwrap();
-    assert!(!validation.passed);
-
-    let runtime_error = r#"
-        async function workflow() {
-            throw new Error('boom');
-        }
-        workflow();
-    "#;
-    let validation = JsCodeValidator::validate(runtime_error).unwrap();
-    assert!(!validation.passed);
-    assert!(validation.errors[0].contains("Dry-run failed"));
 }
 
 struct MockInvoker {

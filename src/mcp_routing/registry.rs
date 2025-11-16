@@ -10,8 +10,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
-use crate::mcp_routing::js_orchestrator::injector::InjectedMcpFunction;
-
 /// Registry configuration (defaults follow SPEC/02-ARCHITECTURE.md §1157-1201)
 #[derive(Debug, Clone)]
 pub struct RegistryConfig {
@@ -26,7 +24,7 @@ pub struct RegistryConfig {
 impl Default for RegistryConfig {
     fn default() -> Self {
         Self {
-            default_ttl_seconds: 600,
+            default_ttl_seconds: 120, // 2 minutes TTL for dynamic tools
             max_dynamic_tools: 100,
             cleanup_interval_seconds: 60,
         }
@@ -71,7 +69,6 @@ impl ToolMetadata {
 pub struct JsOrchestratedTool {
     pub tool: Tool,
     pub js_code: String,
-    pub mcp_dependencies: Vec<InjectedMcpFunction>,
     pub metadata: ToolMetadata,
 }
 
@@ -132,16 +129,10 @@ impl RegisteredTool {
 }
 
 impl RegisteredTool {
-    fn new_js(
-        tool: Tool,
-        js_code: String,
-        mcp_dependencies: Vec<InjectedMcpFunction>,
-        ttl: u64,
-    ) -> Self {
+    fn new_js(tool: Tool, js_code: String, ttl: u64) -> Self {
         RegisteredTool::JsOrchestrated(JsOrchestratedTool {
             tool,
             js_code,
-            mcp_dependencies,
             metadata: ToolMetadata::new(ttl),
         })
     }
@@ -240,7 +231,6 @@ impl DynamicToolRegistry {
         description: String,
         input_schema: serde_json::Value,
         js_code: String,
-        mcp_dependencies: Vec<InjectedMcpFunction>,
     ) -> Result<bool> {
         if name.trim().is_empty() {
             return Err(anyhow!("Tool name cannot be empty"));
@@ -266,12 +256,7 @@ impl DynamicToolRegistry {
         let is_new = !tools.contains_key(&name);
         tools.insert(
             name,
-            RegisteredTool::new_js(
-                tool,
-                js_code,
-                mcp_dependencies,
-                self.config.default_ttl_seconds,
-            ),
+            RegisteredTool::new_js(tool, js_code, self.config.default_ttl_seconds),
         );
         drop(tools);
         self.invalidate_cache().await;
@@ -336,9 +321,8 @@ impl DynamicToolRegistry {
             return cached;
         }
 
-        let mut snapshot = Vec::with_capacity(
-            self.base_tools.len() + self.config.max_dynamic_tools,
-        );
+        let mut snapshot =
+            Vec::with_capacity(self.base_tools.len() + self.config.max_dynamic_tools);
         snapshot.extend(self.base_snapshot.iter().cloned());
 
         let map = self.dynamic_tools.read().await;
@@ -447,11 +431,6 @@ mod tests {
                 "Test workflow".to_string(),
                 serde_json::json!({"type": "object"}),
                 "async function workflow() {}".to_string(),
-                vec![InjectedMcpFunction {
-                    server: "filesystem".into(),
-                    name: "read_file".into(),
-                    description: "Read file".into(),
-                }],
             )
             .await
             .unwrap();
@@ -491,7 +470,6 @@ mod tests {
                 "Temp".to_string(),
                 serde_json::json!({"type": "object"}),
                 "async function workflow() {}".to_string(),
-                Vec::new(),
             )
             .await
             .unwrap();
@@ -535,7 +513,6 @@ mod tests {
                 "Exec".to_string(),
                 serde_json::json!({}),
                 "async function workflow() {}".to_string(),
-                Vec::new(),
             )
             .await
             .unwrap();

@@ -18,6 +18,7 @@ pub mod provider;
 pub mod pwait_mode;
 pub mod registry;
 pub mod registry_factory;
+pub mod roles;
 pub mod signal;
 pub mod storage;
 pub mod supervisor;

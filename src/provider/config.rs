@@ -35,6 +35,11 @@ pub struct Provider {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
 
+    /// Scenario description - when to use this provider
+    /// 场景描述 - 何时使用此供应商
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scenario: Option<String>,
+
     /// All environment variables (includes token and base_url mappings)
     #[serde(default)]
     pub env: HashMap<String, String>,
@@ -91,6 +96,7 @@ impl ProvidersConfig {
             Provider {
                 token: None,
                 base_url: None,
+                scenario: None,
                 env: HashMap::new(),
             },
         );
@@ -200,6 +206,7 @@ impl Provider {
         Self {
             token: None,
             base_url: None,
+            scenario: None,
             env,
         }
     }
@@ -207,6 +214,9 @@ impl Provider {
     /// Get a summary string for display
     pub fn summary(&self) -> String {
         let mut parts = Vec::new();
+        if let Some(scenario) = &self.scenario {
+            parts.push(format!("scenario: {}", scenario));
+        }
         if self.token.is_some() {
             parts.push("token: ✓".to_string());
         }
@@ -233,6 +243,7 @@ mod tests {
         let provider = Provider {
             token: Some("sk-test-token".to_string()),
             base_url: Some("https://api.example.com".to_string()),
+            scenario: None,
             env: {
                 let mut map = HashMap::new();
                 map.insert("CUSTOM_VAR".to_string(), "value".to_string());
@@ -258,6 +269,27 @@ mod tests {
     }
 
     #[test]
+    fn test_provider_with_scenario() {
+        let provider = Provider {
+            token: Some("sk-test".to_string()),
+            base_url: Some("https://api.example.com".to_string()),
+            scenario: Some("Best for production workloads".to_string()),
+            env: HashMap::new(),
+        };
+
+        let summary = provider.summary();
+        assert!(summary.contains("scenario:"));
+        assert!(summary.contains("Best for production workloads"));
+    }
+
+    #[test]
+    fn test_provider_backward_compatibility() {
+        let json = r#"{"token":"sk-test","base_url":"https://api.test.com","env":{}}"#;
+        let provider: Provider = serde_json::from_str(json).expect("should deserialize");
+        assert!(provider.scenario.is_none());
+    }
+
+    #[test]
     fn test_config_validation() {
         let mut config = ProvidersConfig {
             schema: None,
@@ -275,6 +307,7 @@ mod tests {
             Provider {
                 token: Some("sk-test".to_string()),
                 base_url: Some("https://api.test.com".to_string()),
+                scenario: None,
                 env: HashMap::new(),
             },
         );

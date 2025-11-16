@@ -12,6 +12,13 @@ pub enum HooksAction {
     Handle,
 }
 
+/// AI CLI 角色管理动作
+#[derive(Subcommand, Debug, Clone)]
+pub enum RolesAction {
+    /// 列出所有可用的角色配置
+    List,
+}
+
 /// Agentic-Warden - AI CLI 工具的统一管理和进程监控平台
 #[derive(Parser, Debug, Clone)]
 #[command(
@@ -107,6 +114,10 @@ pub enum Commands {
         #[arg(long, default_value = "info")]
         log_level: String,
     },
+
+    /// AI CLI 角色管理
+    #[command(subcommand)]
+    Roles(RolesAction),
 
     /// Claude Code Hooks 处理
     #[command(subcommand)]

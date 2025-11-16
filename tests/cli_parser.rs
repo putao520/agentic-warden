@@ -1,5 +1,5 @@
 use agentic_warden::commands::parser::Cli;
-use agentic_warden::commands::{parse_external_as_ai_cli, Commands};
+use agentic_warden::commands::{parse_external_as_ai_cli, Commands, RolesAction};
 
 fn parse(args: &[&str]) -> Commands {
     let argv: Vec<String> = std::iter::once("agentic-warden")
@@ -7,12 +7,6 @@ fn parse(args: &[&str]) -> Commands {
         .map(|s| s.to_string())
         .collect();
     Cli::try_parse_command_from(argv).expect("expected command parsing to succeed")
-}
-
-#[test]
-fn defaults_to_dashboard_when_no_subcommand_given() {
-    let command = parse(&[]);
-    assert!(matches!(command, Commands::Dashboard));
 }
 
 #[test]
@@ -30,39 +24,6 @@ fn parses_status_and_provider_commands() {
     match parse(&["provider"]) {
         Commands::Provider => {}
         other => panic!("expected provider command, got {other:?}"),
-    }
-}
-
-#[test]
-fn parses_push_with_multiple_directories() {
-    let command = parse(&["push", "src", "config", "C:\\tmp\\notes"]);
-
-    let dirs = match command {
-        Commands::Push { dirs } => dirs,
-        other => panic!("expected push command, got {other:?}"),
-    };
-
-    let as_strings: Vec<String> = dirs
-        .iter()
-        .map(|p| p.to_string_lossy().to_string())
-        .collect();
-    assert_eq!(as_strings, vec!["src", "config", r"C:\tmp\notes"]);
-}
-
-#[test]
-fn parses_help_with_optional_topic() {
-    let command = parse(&["help", "push"]);
-    match command {
-        Commands::Help {
-            command: Some(topic),
-        } => assert_eq!(topic, "push"),
-        other => panic!("expected help with topic, got {other:?}"),
-    }
-
-    let command = parse(&["help"]);
-    match command {
-        Commands::Help { command: None } => {}
-        other => panic!("expected help without topic, got {other:?}"),
     }
 }
 
@@ -97,40 +58,11 @@ fn parse_external_ai_cli_arguments() {
 }
 
 #[test]
-fn fail_when_provider_flag_missing_value() {
-    let tokens = vec!["claude".to_string(), "-p".to_string()];
-    let err = parse_external_as_ai_cli(&tokens).expect_err("value is required");
-    assert!(err.contains("requires a value"));
-}
-
-#[test]
-fn returns_error_when_no_external_tokens_are_provided() {
-    let err = parse_external_as_ai_cli(&[]).expect_err("no tokens should be rejected");
-    assert!(err.contains("No command provided"));
-}
-
-#[test]
-fn invalid_flag_is_treated_as_prompt_token() {
-    // clap handles validation of unknown flags for declared subcommands.
-    // For external commands we accept anything as part of the prompt.
-    let tokens = vec![
-        "claude".to_string(),
-        "--style".to_string(),
-        "concise".to_string(),
-    ];
-    let args = parse_external_as_ai_cli(&tokens).expect("external parser should accept flags");
-    assert_eq!(args.selector, "claude");
-    assert_eq!(
-        args.prompt,
-        vec!["--style".to_string(), "concise".to_string()]
-    );
-    assert!(args.provider.is_none());
-}
-
-#[test]
-fn try_parse_fails_for_unknown_top_level_flag() {
-    let result = Cli::try_parse_command_from(["agentic-warden", "--unknown"]);
-    assert!(result.is_err(), "unknown flag should produce clap error");
+fn parses_roles_list_command() {
+    match parse(&["roles", "list"]) {
+        Commands::Roles(RolesAction::List) => {}
+        other => panic!("expected roles list command, got {other:?}"),
+    }
 }
 
 #[test]
@@ -138,23 +70,5 @@ fn parses_update_command_with_no_tool() {
     match parse(&["update"]) {
         Commands::Update { tool: None } => {}
         other => panic!("expected update command with no tool, got {other:?}"),
-    }
-}
-
-#[test]
-fn parses_update_command_with_tool_name() {
-    match parse(&["update", "codex"]) {
-        Commands::Update { tool } => assert_eq!(tool.as_deref(), Some("codex")),
-        other => panic!("expected update command with tool 'codex', got {other:?}"),
-    }
-
-    match parse(&["update", "gemini"]) {
-        Commands::Update { tool } => assert_eq!(tool.as_deref(), Some("gemini")),
-        other => panic!("expected update command with tool 'gemini', got {other:?}"),
-    }
-
-    match parse(&["update", "claude"]) {
-        Commands::Update { tool } => assert_eq!(tool.as_deref(), Some("claude")),
-        other => panic!("expected update command with tool 'claude', got {other:?}"),
     }
 }

@@ -6,8 +6,6 @@ use anyhow::{anyhow, Result};
 use boa_engine::{Context, Source};
 use once_cell::sync::Lazy;
 use regex::Regex;
-use serde_json::json;
-use std::collections::HashSet;
 use tokio::runtime::{Builder, Handle};
 
 use super::engine::BoaRuntime;
@@ -183,49 +181,23 @@ impl JsCodeValidator {
             .to_string()
     }
 
-    fn inject_mock_functions(context: &mut Context, code: &str) -> Result<()> {
-        let names = Self::discover_mock_functions(code);
-        for name in names {
-            let payload = Self::mock_payload_for(&name);
-            let script = format!("globalThis.{name} = async function() {{ return {payload}; }};");
-            context
-                .eval(Source::from_bytes(script.as_bytes()))
-                .map_err(|e| anyhow!("Failed to inject mock for {}: {}", name, e))?;
-        }
+    fn inject_mock_functions(context: &mut Context, _code: &str) -> Result<()> {
+        let script = r#"
+            globalThis.mcp = {
+                async call(server, tool, args) {
+                    return {
+                        mock: true,
+                        server: server || "unknown",
+                        tool: tool || "unknown",
+                        args: args || {}
+                    };
+                }
+            };
+        "#;
+        context
+            .eval(Source::from_bytes(script.as_bytes()))
+            .map_err(|e| anyhow!("Failed to inject mock MCP object: {}", e))?;
         Ok(())
-    }
-
-    fn discover_mock_functions(code: &str) -> HashSet<String> {
-        static MCP_FN: Lazy<Regex> = Lazy::new(|| Regex::new(r"mcp[A-Z][A-Za-z0-9_]*").unwrap());
-        MCP_FN
-            .find_iter(code)
-            .map(|m| m.as_str().to_string())
-            .collect()
-    }
-
-    fn mock_payload_for(name: &str) -> String {
-        let value = match name {
-            "mcpGitStatus" => json!({
-                "branch": "main",
-                "ahead": 1,
-                "behind": 0,
-                "clean": true
-            }),
-            "mcpReadFile" => json!({
-                "path": "README.md",
-                "content": "# mock"
-            }),
-            "mcpWriteFile" => json!({
-                "path": "README.md",
-                "ok": true
-            }),
-            _ => json!({
-                "mock": true,
-                "tool": name
-            }),
-        };
-
-        serde_json::to_string(&value).unwrap_or_else(|_| "{}".into())
     }
 }
 
@@ -237,7 +209,7 @@ mod tests {
     fn test_valid_code() {
         let code = r#"
             async function workflow(input) {
-                const result = await mcpGitStatus();
+                const result = await mcp.call("fs", "git_status", input);
                 return result;
             }
         "#;

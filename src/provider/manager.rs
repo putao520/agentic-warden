@@ -522,6 +522,7 @@ mod tests {
         let provider = Provider {
             token: None,
             base_url: None,
+            scenario: None,
             env: HashMap::new(),
         };
 

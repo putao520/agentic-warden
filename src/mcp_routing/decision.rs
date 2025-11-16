@@ -1,7 +1,5 @@
 use crate::{
-    mcp_routing::js_orchestrator::workflow_planner::{
-        WorkflowPlan, WorkflowPlannerEngine, WorkflowStep,
-    },
+    mcp_routing::js_orchestrator::workflow_planner::{WorkflowPlan, WorkflowPlannerEngine},
     memory::ConversationRecord,
 };
 use anyhow::{anyhow, Context, Result};
@@ -207,6 +205,33 @@ impl DecisionEngine {
         }
 
         Ok(code)
+    }
+
+    /// Generic LLM chat helper used by schema correction and other ad-hoc prompts.
+    pub(crate) async fn chat_completion(
+        &self,
+        system_prompt: &str,
+        user_prompt: &str,
+    ) -> Result<String> {
+        let request = ChatMessageRequest::new(
+            self.model.clone(),
+            vec![
+                ChatMessage::system(system_prompt.to_string()),
+                ChatMessage::user(user_prompt.to_string()),
+            ],
+        );
+
+        let response = timeout(self.timeout, self.client.chat(request))
+            .await
+            .map_err(|_| anyhow!("LLM chat completion timed out"))??;
+
+        let content = strip_code_fences(&response.message.content);
+        let trimmed = content.trim();
+        if trimmed.is_empty() {
+            return Err(anyhow!("LLM returned empty response for chat completion"));
+        }
+
+        Ok(trimmed.to_string())
     }
 }
 
@@ -581,13 +606,16 @@ Description: {}
 Steps:
 {}
 
-## MCP Functions Available:
-{}
+## MCP Call Contract:
+- Use the injected global `mcp` object.
+- Invoke tools via: await mcp.call("<server>", "<tool_name>", {{ /* args */ }});
+- Always pass an object payload (use {{}} when no arguments are needed).
+- Wrap calls in try/catch and surface clear, actionable error messages.
 
 ## Code Generation Requirements:
 1. Create an async function named 'workflow' that takes an 'input' parameter
 2. Access input parameters via input.paramName (e.g., input.repo_url)
-3. Call MCP tools using their injected names (e.g., await mcpGitStatus({{repo: input.repo_url}}))
+3. Call MCP tools using mcp.call(server, tool, args)
 4. Include try-catch error handling
 5. Return a structured result object
 6. Add comments explaining each step
@@ -595,60 +623,8 @@ Steps:
 ## Output:
 Provide ONLY the JavaScript code, no markdown, no explanation.
     "#,
-        plan.suggested_name,
-        plan.description,
-        steps_json,
-        format_mcp_functions(&plan.steps)
+        plan.suggested_name, plan.description, steps_json,
     )
-}
-
-fn format_mcp_functions(steps: &[WorkflowStep]) -> String {
-    let mut seen = HashSet::new();
-    let mut entries = Vec::new();
-    for step in steps {
-        if let Some(function_name) = build_mcp_function_name(&step.tool) {
-            if seen.insert(function_name.clone()) {
-                entries.push(format!("{function_name} (from {})", step.tool));
-            }
-        }
-    }
-    if entries.is_empty() {
-        "No MCP functions referenced in plan steps".into()
-    } else {
-        entries.join("\n")
-    }
-}
-
-fn build_mcp_function_name(tool: &str) -> Option<String> {
-    let (_, tool_name) = tool.split_once("::")?;
-    let camel = to_camel_case(tool_name);
-    let mut chars = camel.chars();
-    let mut function_name = String::from("mcp");
-    if let Some(first) = chars.next() {
-        function_name.push(first.to_ascii_uppercase());
-        function_name.extend(chars);
-        Some(function_name)
-    } else {
-        None
-    }
-}
-
-fn to_camel_case(name: &str) -> String {
-    let mut result = String::new();
-    let mut capitalize_next = false;
-    for ch in name.chars() {
-        if ch == '_' || ch == '-' || ch == ' ' {
-            capitalize_next = true;
-            continue;
-        }
-        if capitalize_next {
-            result.push(ch.to_ascii_uppercase());
-            capitalize_next = false;
-        } else {
-            result.push(ch);
-        }
-    }
-    result
 }
 
 #[async_trait]

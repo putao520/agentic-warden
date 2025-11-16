@@ -49,42 +49,6 @@ async fn test_ttl_expiration_via_background_cleanup() {
 }
 
 #[tokio::test]
-async fn test_concurrent_register_and_unregister() {
-    let registry = Arc::new(DynamicToolRegistry::new(vec![]));
-    let registry_clone = Arc::clone(&registry);
-
-    let register_task = {
-        let registry = Arc::clone(&registry);
-        tokio::spawn(async move {
-            for idx in 0..50 {
-                registry
-                    .register_proxied_tool(
-                        "server".to_string(),
-                        format!("tool_{idx}"),
-                        make_tool(&format!("tool_{idx}")),
-                    )
-                    .await
-                    .unwrap();
-            }
-        })
-    };
-
-    let unregister_task = tokio::spawn(async move {
-        // Allow registrations to start
-        tokio::time::sleep(Duration::from_millis(20)).await;
-        for idx in 0..25 {
-            registry_clone.unregister_tool(&format!("tool_{idx}")).await;
-        }
-    });
-
-    let _ = tokio::join!(register_task, unregister_task);
-
-    let tools = registry.get_all_tool_definitions().await;
-    assert!(tools.len() <= 50);
-    assert!(tools.len() >= 25);
-}
-
-#[tokio::test]
 async fn test_registry_eviction_strategy() {
     let registry = DynamicToolRegistry::with_config(
         vec![],

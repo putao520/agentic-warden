@@ -3,12 +3,17 @@ mod help;
 
 use agentic_warden::cli_type::{parse_cli_selector_strict, parse_cli_type};
 use agentic_warden::commands::ai_cli::AiCliCommand;
-use agentic_warden::commands::{parse_external_as_ai_cli, parser::HooksAction, Cli, Commands};
+use agentic_warden::commands::{
+    parse_external_as_ai_cli,
+    parser::{HooksAction, RolesAction},
+    Cli, Commands,
+};
 use agentic_warden::error::ErrorCategory;
 use agentic_warden::execute_update;
 use agentic_warden::mcp::AgenticWardenMcpServer;
 // Network detector module removed - functionality deprecated
 use agentic_warden::pwait_mode;
+use agentic_warden::roles::RoleManager;
 use agentic_warden::sync;
 use agentic_warden::sync::sync_config::save_network_status;
 use agentic_warden::tui;
@@ -206,6 +211,7 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
             transport,
             log_level,
         } => handle_mcp_command(transport, log_level).await,
+        Commands::Roles(action) => handle_roles_command(action).await,
         Commands::Hooks(action) => handle_hooks_command(action).await,
         Commands::External(tokens) => handle_external_command(tokens).await,
     }
@@ -397,6 +403,41 @@ async fn handle_mcp_command(transport: String, log_level: String) -> Result<Exit
         )),
     }
     // HooksGuard automatically uninstalls hooks when dropped
+}
+
+/// Handle role management commands
+async fn handle_roles_command(action: RolesAction) -> Result<ExitCode, String> {
+    match action {
+        RolesAction::List => {
+            let manager = RoleManager::new().map_err(|e| format!("Failed to load roles: {}", e))?;
+            let roles = manager
+                .list_all_roles()
+                .map_err(|e| format!("Failed to list roles: {}", e))?;
+
+            if roles.is_empty() {
+                if let Some(dir) = dirs::home_dir().map(|home| home.join(".aiw").join("role")) {
+                    println!(
+                        "No roles found. Add markdown role files under {}",
+                        dir.display()
+                    );
+                } else {
+                    println!("No roles found. Add markdown role files under ~/.aiw/role");
+                }
+            } else {
+                println!("Available roles ({}):", roles.len());
+                for role in roles {
+                    println!(
+                        "- {}: {} ({})",
+                        role.name,
+                        role.description,
+                        role.file_path.display()
+                    );
+                }
+            }
+
+            Ok(ExitCode::from(0))
+        }
+    }
 }
 
 /// Handle Claude Code hooks commands

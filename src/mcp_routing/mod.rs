@@ -321,7 +321,6 @@ impl IntelligentRouter {
                 orchestrated_tool.description.clone(),
                 orchestrated_tool.input_schema.clone(),
                 orchestrated_tool.js_code.clone(),
-                orchestrated_tool.mcp_dependencies.clone(),
             )
             .await?;
 
