@@ -53,7 +53,7 @@ Add Agentic-Warden as an MCP server to Claude Code:
 
 ```bash
 # Start the MCP server (stdio mode)
-agentic-warden mcp
+aiw mcp
 ```
 
 In your Claude Code MCP configuration (`~/.config/claude-code/mcp.json`):
@@ -62,7 +62,7 @@ In your Claude Code MCP configuration (`~/.config/claude-code/mcp.json`):
 {
   "mcpServers": {
     "agentic-warden": {
-      "command": "agentic-warden",
+      "command": "aiw",
       "args": ["mcp"]
     }
   }
@@ -80,13 +80,13 @@ Once configured, you'll have access to these tools in Claude Code:
 
 ```bash
 # Route a user request to best tool
-agentic-warden route "list files in /tmp directory"
+aiw route "list files in /tmp directory"
 
 # Search conversation history
-agentic-warden search "how did I configure git yesterday?"
+aiw search "how did I configure git yesterday?"
 
 # Get tool schema
-agentic-warden schema filesystem read_file
+aiw schema filesystem read_file
 ```
 
 ## ⚙️ Configuration
@@ -223,7 +223,7 @@ When an explicit LLM endpoint is configured, Agentic-Warden can synthesize short
 Example CLI session:
 
 ```bash
-$ agentic-warden route "Create a weekly git report for /srv/app"
+$ aiw route "Create a weekly git report for /srv/app"
 {
   "message": "Created orchestrated workflow 'git_weekly_report'. Use this tool to solve your request.",
   "selected_tool": {

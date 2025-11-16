@@ -193,7 +193,7 @@ This matrix provides complete traceability from:
 | **Implementation** | - | Main CLI Router | 🟢 Done | `src/main.rs` |
 
 **Key Insights**:
-- Seamless `agentic-warden <ai_type> -p <provider> <prompt>` syntax
+- Seamless `aiw <ai_type> -p <provider> <prompt>` syntax
 - Environment injection happens before process exec()
 - Provider compatibility validation before startup
 - Supports both single and multi-AI CLI execution
@@ -219,9 +219,9 @@ This matrix provides complete traceability from:
 - Smart detection automatically distinguishes between interactive and task modes
 
 **Usage Examples**:
-- `agentic-warden claude` → Interactive mode with default provider ✅
-- `agentic-warden claude -p openrouter` → Interactive mode with OpenRouter ✅
-- `agentic-warden claude,gemini -p litellm` → Multiple AI CLI interactive mode ✅
+- `aiw claude` → Interactive mode with default provider ✅
+- `aiw claude -p openrouter` → Interactive mode with OpenRouter ✅
+- `aiw claude,gemini -p litellm` → Multiple AI CLI interactive mode ✅
 
 ### REQ-010: AI CLI 更新/安装管理
 
@@ -312,19 +312,19 @@ This matrix provides complete traceability from:
 
 ### Complete User Workflow
 ```
-1. User runs: agentic-warden claude -p openrouter "Write code"
+1. User runs: aiw claude -p openrouter "Write code"
    REQ-008 → API-001 → supervisor.rs → env_injector.rs
 
 2. Process tracking begins automatically
    REQ-001 → ARCH-001 → process_tree.rs → shared_map.rs
 
-3. User checks status: agentic-warden status
+3. User checks status: aiw status
    REQ-006 → API-002 → cli_detection.rs
 
-4. User syncs config: agentic-warden push
+4. User syncs config: aiw push
    REQ-003 → API-003 → config_packer.rs → google_drive_service.rs
 
-5. User waits for completion: agentic-warden wait
+5. User waits for completion: aiw wait
    REQ-005 → API-004 → wait_mode.rs → registry.rs
 ```
 

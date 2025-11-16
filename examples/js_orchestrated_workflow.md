@@ -4,7 +4,7 @@ This example walks through the full lifecycle of a dynamically generated JavaScr
 
 ## 1. User Request
 ```bash
-agentic-warden route "Summarize today's git changes and save REPORT.md"
+aiw route "Summarize today's git changes and save REPORT.md"
 ```
 
 ## 2. Route Response (abridged)
