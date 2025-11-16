@@ -1,10 +1,26 @@
 # Change Log - v0.x
 
 ## Version Information
-- Current version: v0.1.0
+- Current version: v5.1.1
 - Latest planned: v0.3.0
 - Start date: 2025-11-08
-- Last updated: 2025-11-15
+- Last updated: 2025-11-16
+
+---
+
+## v5.1.1 - 二进制命名修复 (🟢 Released, 2025-11-16)
+
+### 🐛 Bug Fixes
+
+**Binary Configuration Fix**:
+- 添加显式 `[[bin]]` 配置节到 Cargo.toml
+- 确保编译产物统一为 `aiw` 二进制文件(之前会同时生成 `agentic-warden`)
+- 清理 README 和 SPEC 文档中所有命令行示例,统一使用 `aiw` 命令
+- 保留配置目录路径 `~/.config/agentic-warden/` 不变
+
+**Commits**:
+- `4ccb776`: fix: 明确指定二进制文件名为aiw
+- `c985560`: docs: 统一二进制命令名称为aiw
 
 ---
 
