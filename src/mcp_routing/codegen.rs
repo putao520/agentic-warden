@@ -3,46 +3,15 @@
 //! Unified interface for workflow planning and JS code generation.
 //! Supports multiple backends: Ollama (local LLM) and AI CLI (claude/codex/gemini).
 
+use crate::cli_type::CliType;
 use crate::mcp_routing::decision::{CandidateToolInfo, DecisionEngine};
 use crate::mcp_routing::js_orchestrator::workflow_planner::{WorkflowPlan, WorkflowPlannerEngine};
+use crate::supervisor;
+use crate::registry_factory::create_cli_registry;
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
-use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
-use tokio::time::timeout;
-
-/// AI CLI type (supported CLI tools)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CliType {
-    Claude,
-    Codex,
-    Gemini,
-}
-
-impl CliType {
-    pub fn from_str(s: &str) -> Result<Self> {
-        match s.to_lowercase().as_str() {
-            "claude" => Ok(Self::Claude),
-            "codex" => Ok(Self::Codex),
-            "gemini" => Ok(Self::Gemini),
-            _ => Err(anyhow!(
-                "Unsupported CLI_TYPE '{}'. Supported: claude, codex, gemini",
-                s
-            )),
-        }
-    }
-
-    pub fn as_command(&self) -> &'static str {
-        match self {
-            Self::Claude => "claude",
-            Self::Codex => "codex",
-            Self::Gemini => "gemini",
-        }
-    }
-}
 
 /// Code generator backend type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,14 +74,25 @@ impl CodeGeneratorFactory {
     fn create_ai_cli_generator() -> Result<Arc<dyn WorkflowPlannerEngine>> {
         // Default to claude if CLI_TYPE not set
         let cli_type_str = std::env::var("CLI_TYPE").unwrap_or_else(|_| "claude".to_string());
-        let cli_type = CliType::from_str(&cli_type_str)?;
+
+        let cli_type = match cli_type_str.to_lowercase().as_str() {
+            "claude" => CliType::Claude,
+            "codex" => CliType::Codex,
+            "gemini" => CliType::Gemini,
+            _ => {
+                return Err(anyhow!(
+                    "Unsupported CLI_TYPE '{}'. Supported: claude, codex, gemini",
+                    cli_type_str
+                ))
+            }
+        };
 
         // Provider can be any string (llmlite, openrouter, anthropic, etc.)
         let provider = std::env::var("CLI_PROVIDER").ok();
 
         eprintln!(
             "🤖 AI CLI code generator initialized: {} (provider: {:?})",
-            cli_type.as_command(),
+            cli_type.display_name(),
             provider
         );
 
@@ -140,54 +120,30 @@ impl AiCliCodeGenerator {
     }
 
     /// Call AI CLI with prompt and get response
+    /// Uses the unified AI CLI execution infrastructure
     async fn call_ai_cli(&self, prompt: &str) -> Result<String> {
-        let cli_command = self.cli_type.as_command();
+        let registry = create_cli_registry()
+            .context("Failed to create CLI registry")?;
 
-        let mut cmd = Command::new(cli_command);
-        cmd.stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        // Build args with full access permissions
+        let cli_args = self.cli_type.build_full_access_args(prompt);
 
-        // Add provider if specified
-        if let Some(ref provider) = self.provider {
-            cmd.env("AIW_PROVIDER", provider);
-        }
+        // Convert to OsString for supervisor
+        let os_args: Vec<std::ffi::OsString> = cli_args
+            .into_iter()
+            .map(|s| s.into())
+            .collect();
 
-        // Non-interactive mode args
-        cmd.arg("--non-interactive");
-
-        let mut child = cmd
-            .spawn()
-            .context(format!("Failed to spawn {} CLI", cli_command))?;
-
-        // Write prompt to stdin
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin
-                .write_all(prompt.as_bytes())
-                .await
-                .context("Failed to write prompt to AI CLI stdin")?;
-            stdin.flush().await.ok();
-            drop(stdin);
-        }
-
-        // Wait for completion with timeout
-        let output = timeout(self.timeout, child.wait_with_output())
-            .await
-            .map_err(|_| anyhow!("AI CLI timed out after {} seconds", self.timeout.as_secs()))??;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow!(
-                "{} CLI failed with exit code {:?}: {}",
-                cli_command,
-                output.status.code(),
-                stderr
-            ));
-        }
-
-        let response = String::from_utf8(output.stdout).context("AI CLI returned invalid UTF-8")?;
-
-        Ok(response.trim().to_string())
+        // Execute CLI and capture output
+        supervisor::execute_cli_with_output(
+            &registry,
+            &self.cli_type,
+            &os_args,
+            self.provider.clone(),
+            self.timeout,
+        )
+        .await
+        .context(format!("Failed to execute {} CLI", self.cli_type.display_name()))
     }
 }
 
