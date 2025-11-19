@@ -189,26 +189,15 @@ impl ConfigSyncManager {
     where
         F: FnMut(PushProgressEvent),
     {
+        // Use helper method to initialize
+        let (directory_name, mut sync_result) = self.init_sync_operation(directory_path)?;
         let path = Path::new(directory_path);
 
-        // Get directory name
-        let directory_name = path.file_name().and_then(|n| n.to_str()).ok_or_else(|| {
-            SyncError::directory_hashing(format!("Invalid directory name: {}", directory_path))
-        })?;
-
         observer(PushProgressEvent::StartingDirectory {
-            directory: directory_name.to_string(),
+            directory: directory_name.clone(),
             index: 0,
             total: 1,
         });
-
-        let mut sync_result = SyncOperationResult {
-            directory_name: directory_name.to_string(),
-            changed: false,
-            uploaded: false,
-            file_size: None,
-            message: String::new(),
-        };
 
         // Check if directory exists
         if !path.exists() {
@@ -227,7 +216,7 @@ impl ConfigSyncManager {
         // Check if it has changed since last sync
         let should_sync = self
             .config_manager
-            .should_sync(directory_name, &current_hash.hash)?;
+            .should_sync(&directory_name, &current_hash.hash)?;
 
         if !should_sync {
             let reason = "No changes detected".to_string();
@@ -241,19 +230,8 @@ impl ConfigSyncManager {
 
         sync_result.changed = true;
 
-        // Ensure Google Drive service is available
-        let service = self
-            .drive_service
-            .as_mut()
-            .ok_or(SyncError::authentication_required())?;
-
-        // Ensure folder exists in Google Drive
-        let root_folder_id = service
-            .create_or_find_folder("agentic-warden", None)
-            .await?;
-        let folder_id = service
-            .create_or_find_folder(directory_name, Some(&root_folder_id))
-            .await?;
+        // Use helper method to ensure folders exist
+        let (_base_folder_id, folder_id) = self.ensure_sync_folders(&directory_name, true).await?;
         sync_result.message.push_str(&format!(
             "Ensured folder exists in Google Drive (ID: {})",
             folder_id
@@ -285,6 +263,9 @@ impl ConfigSyncManager {
             .message
             .push_str(&format!(" Packed directory ({} bytes)", archive_size));
 
+        // Get service reference for upload operations (after packing to avoid borrow conflicts)
+        let service = self.ensure_drive_service_mut()?;
+
         // Check if file already exists in Google Drive
         let backup_file_name = format!("{}.tar.gz", directory_name);
 
@@ -311,7 +292,7 @@ impl ConfigSyncManager {
 
         // Update stored hash
         self.config_manager
-            .update_directory_hash(directory_name, current_hash)?;
+            .update_directory_hash(&directory_name, current_hash)?;
 
         observer(PushProgressEvent::Completed {
             directory: directory_name.to_string(),
@@ -380,57 +361,23 @@ impl ConfigSyncManager {
     where
         F: FnMut(PullProgressEvent),
     {
+        // Use helper method to initialize
+        let (directory_name, mut sync_result) = self.init_sync_operation(directory_path)?;
         let path = Path::new(directory_path);
 
-        // Get directory name
-        let directory_name = path.file_name().and_then(|n| n.to_str()).ok_or_else(|| {
-            SyncError::directory_hashing(format!("Invalid directory name: {}", directory_path))
-        })?;
-
         observer(PullProgressEvent::StartingDirectory {
-            directory: directory_name.to_string(),
+            directory: directory_name.clone(),
             index: 0,
             total: 1,
         });
 
-        let mut sync_result = SyncOperationResult {
-            directory_name: directory_name.to_string(),
-            changed: false,
-            uploaded: false, // Not applicable for pull
-            file_size: None,
-            message: String::new(),
-        };
-
-        // Ensure Google Drive service is available
-        let service = self
-            .drive_service
-            .as_mut()
-            .ok_or(SyncError::authentication_required())?;
-
-        // Locate base folder without creating new backup tree during pull
-        let base_folder_id = match service.find_folder("agentic-warden", None).await? {
-            Some(id) => id,
-            None => {
+        // Use helper method to find folders (don't create if missing)
+        let (_base_folder_id, target_folder_id) = match self.ensure_sync_folders(&directory_name, false).await {
+            Ok(folders) => folders,
+            Err(_) => {
                 let reason = format!("No backup found for directory: {}", directory_name);
                 observer(PullProgressEvent::Skipped {
-                    directory: directory_name.to_string(),
-                    reason: reason.clone(),
-                });
-                sync_result.message = reason;
-                return Ok(sync_result);
-            }
-        };
-
-        // Find the specific directory folder
-        let target_folder_id = match service
-            .find_folder(directory_name, Some(&base_folder_id))
-            .await?
-        {
-            Some(id) => id,
-            None => {
-                let reason = format!("No backup found for directory: {}", directory_name);
-                observer(PullProgressEvent::Skipped {
-                    directory: directory_name.to_string(),
+                    directory: directory_name.clone(),
                     reason: reason.clone(),
                 });
                 sync_result.message = reason;
@@ -439,6 +386,7 @@ impl ConfigSyncManager {
         };
 
         // List files in the target folder
+        let service = self.ensure_drive_service_mut()?;
         let folder_files = service.list_folder_files(&target_folder_id).await?;
 
         if folder_files.is_empty() {
@@ -538,7 +486,7 @@ impl ConfigSyncManager {
         // Update stored hash
         let new_hash = self.directory_hasher.calculate_hash(path)?;
         self.config_manager
-            .update_directory_hash(directory_name, new_hash)?;
+            .update_directory_hash(&directory_name, new_hash)?;
 
         observer(PullProgressEvent::Completed {
             directory: directory_name.to_string(),
@@ -908,6 +856,61 @@ impl ConfigSyncManager {
             warn!(target: "agentic_warden::sync", "No AI CLI directories found after extracting configuration '{}'", config_name);
             Ok(false)
         }
+    }
+
+    // ============================================================================
+    // Private helper methods to eliminate code duplication
+    // ============================================================================
+
+    /// Initialize sync operation result with directory validation
+    fn init_sync_operation(&self, directory_path: &str) -> ErrorResult<(String, SyncOperationResult)> {
+        let path = Path::new(directory_path);
+
+        // Get directory name
+        let directory_name = path.file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| {
+                SyncError::directory_hashing(format!("Invalid directory name: {}", directory_path))
+            })?
+            .to_string();
+
+        let sync_result = SyncOperationResult {
+            directory_name: directory_name.clone(),
+            changed: false,
+            uploaded: false,
+            file_size: None,
+            message: String::new(),
+        };
+
+        Ok((directory_name, sync_result))
+    }
+
+    /// Ensure Google Drive service is available
+    fn ensure_drive_service_mut(&mut self) -> ErrorResult<&mut GoogleDriveService> {
+        self.drive_service
+            .as_mut()
+            .ok_or(SyncError::authentication_required())
+    }
+
+    /// Ensure or find folder in Google Drive (with caching for base folder)
+    async fn ensure_sync_folders(&mut self, directory_name: &str, create_if_missing: bool) -> ErrorResult<(String, String)> {
+        let service = self.ensure_drive_service_mut()?;
+
+        let base_folder_id = if create_if_missing {
+            service.create_or_find_folder("agentic-warden", None).await?
+        } else {
+            service.find_folder("agentic-warden", None).await?
+                .ok_or_else(|| SyncError::google_drive("Base folder not found".to_string()))?
+        };
+
+        let target_folder_id = if create_if_missing {
+            service.create_or_find_folder(directory_name, Some(&base_folder_id)).await?
+        } else {
+            service.find_folder(directory_name, Some(&base_folder_id)).await?
+                .ok_or_else(|| SyncError::google_drive(format!("Folder '{}' not found", directory_name)))?
+        };
+
+        Ok((base_folder_id, target_folder_id))
     }
 }
 
