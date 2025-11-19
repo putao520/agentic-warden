@@ -1,10 +1,123 @@
 # Change Log - v0.x
 
 ## Version Information
-- Current version: v5.1.1
+- Current version: v5.2.0
 - Latest planned: v0.3.0
 - Start date: 2025-11-08
-- Last updated: 2025-11-16
+- Last updated: 2025-11-19
+
+---
+
+## v5.2.0 - 配置路径统一与Claude Code兼容性增强 (🟢 Released, 2025-11-19)
+
+### 🔧 Configuration & Compatibility
+
+**Configuration Path Unification**:
+- 统一所有持久化配置路径使用 `~/.aiw/` 目录
+- 移除对 `~/.agentic-warden/` 和 `~/.config/agentic-warden/` 的支持
+- 运行时数据保持在系统临时目录 `/tmp/.aiw/` (Linux/macOS) 或 `%TEMP%\.aiw\` (Windows)
+- 配置文件路径标准化：
+  - `~/.aiw/.mcp.json` - MCP服务器配置(全局唯一)
+  - `~/.aiw/provider.json` - Provider配置
+  - `~/.aiw/auth.json` - 认证信息
+  - `~/.aiw/config.json` - 主配置文件
+  - `/tmp/.aiw/aiw.log` - 日志文件(运行时)
+
+**Claude Code 100% Compatibility**:
+- MCP配置完全兼容Claude Code格式
+- 仅支持全局配置文件 `~/.aiw/.mcp.json`(移除项目级.mcp.json支持)
+- 新增可选字段支持：
+  - `description`: MCP服务器描述
+  - `category`: 服务器分类(system, development, search等)
+  - `enabled`: 启用/禁用开关(默认true)
+  - `healthCheck`: 健康检查配置(enabled, interval, timeout)
+- 自动过滤已禁用的服务器(`enabled: false`)
+
+**AI CLI Process Detection Enhancement**:
+- 添加 `claude-code` 二进制名称检测支持
+- 保持专注于AI CLI检测(claude, claude-code, codex, gemini)
+- 移除过度工程化的功能(环境变量AIW_CLI_TYPE、python/bash/zsh检测等)
+- 仅为AI CLI工具检测node/npm/npx进程
+
+**Configuration Management**:
+- 移除未使用的环境变量 `AGENTIC_WARDEN_MCP_CONFIG`
+- LLM配置完全通过环境变量管理(OPENAI_TOKEN, OPENAI_ENDPOINT, OPENAI_MODEL)
+- 环境变量优先级高于provider.json配置
+
+### 📁 File Changes
+
+**Modified Files**:
+- `src/core/process_tree.rs` - AI CLI检测逻辑简化和claude-code支持
+- `src/utils/config_paths.rs` - 配置路径从.agentic-warden迁移到.aiw
+- `src/mcp_routing/config.rs` - MCP配置Claude Code兼容性增强
+- `src/mcp_routing/pool.rs` - 添加enabled字段过滤
+- `src/sync/sync_config.rs` - 路径更新
+- `src/sync/sync_config_manager.rs` - 路径更新
+- `src/mcp/mod.rs` - 路径更新
+- `.mcp.json.example` - 更新为Claude Code兼容格式
+
+**Commits**:
+- `b889314`: refactor: 优化MCP配置管理,100%兼容Claude Code
+- `9e4dcdb`: fix: 修复AI CLI进程识别和配置路径问题
+- `cc0fa40`: Revert "enhance: 改进AI CLI进程检测逻辑"
+
+### 🎯 Design Principles
+
+**简化原则**:
+- 只维护AI CLI，不管理通用解释器
+- 全局配置优先，移除多层级配置支持
+- 与Claude Code等工具保持100%配置兼容
+
+**零门槛配置**:
+- 统一配置目录结构
+- 标准化文件路径
+- 自动创建必要目录
+
+### 🔜 Planned Features (v5.3.0)
+
+**MCP Management CLI Commands** (设计阶段):
+基于MCPM和Claude Code的最佳实践，计划实现：
+
+**核心命令**:
+- `aiw mcp list` - 列出所有MCP服务器及状态
+- `aiw mcp add <name> <command> [args...]` - 添加MCP服务器
+- `aiw mcp remove <name>` - 移除MCP服务器
+- `aiw mcp get <name>` - 获取服务器详细配置
+- `aiw mcp edit <name>` - 编辑服务器配置
+
+**状态控制**:
+- `aiw mcp enable <name>` - 启用服务器
+- `aiw mcp disable <name>` - 禁用服务器
+- `aiw mcp restart <name>` - 重启服务器连接
+
+**健康检查**:
+- `aiw mcp test <name>` - 测试服务器连接
+- `aiw mcp health [name]` - 检查健康状态
+- `aiw mcp tools <name>` - 列出服务器提供的工具
+
+**高级功能**:
+- `aiw mcp validate` - 验证.mcp.json配置
+- `aiw mcp export` - 导出配置
+- `aiw mcp import <file>` - 导入配置
+
+**Package Registry Strategy** (研究阶段):
+- 评估Smithery.ai集成可能性
+- 考虑GitHub MCP Registry作为数据源
+- 可选功能：`aiw mcp search <query>` 和 `aiw mcp install <package>`
+
+### 📖 Breaking Changes
+
+**配置路径迁移** (需要用户手动操作):
+```bash
+# 如果存在旧配置，需要手动迁移
+mv ~/.agentic-warden ~/.aiw
+# 或
+mv ~/.config/agentic-warden ~/.aiw
+```
+
+**MCP配置文件位置变更**:
+- 旧: `~/.config/agentic-warden/.mcp.json` 或项目目录 `.mcp.json`
+- 新: `~/.aiw/.mcp.json` (仅全局配置)
 
 ---
 

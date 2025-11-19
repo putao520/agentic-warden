@@ -45,7 +45,7 @@ Agentic-Warden MUST provide intelligent process tree tracking to identify which 
 Agentic-Warden MUST provide unified management of third-party API providers (OpenRouter, LiteLLM, etc.) through centralized configuration with transparent environment variable injection.
 
 **Acceptance Criteria**:
-- [x] Store provider configurations in `~/.agentic-warden/provider.json` with JSON schema validation
+- [x] Store provider configurations in `~/.aiw/provider.json` with JSON schema validation
 - [x] Support multiple providers with environment variable injection (API keys, base URLs, org IDs)
 - [x] Inject environment variables into AI CLI processes via `-p` parameter (transparent to user)
 - [x] Set default provider in configuration with fallback to first available provider
@@ -395,7 +395,7 @@ search_history MCP tool
 - Embedding service: FastEmbed (AllMiniLML6V2, 384 dimensions, local generation)
 - Session ID source: Hook stdin input (not parsed from JSONL)
 - Semantic search: cosine similarity with configurable threshold
-- Storage location: ~/.config/agentic-warden/conversation_history.db
+- Storage location: ~/.aiw/conversation_history.db
 - Duplicate detection: Check existing session_id before insertion
 - TODO extraction: Pattern matching on assistant messages (markdown checkboxes, TODO keywords)
 - TODO metadata: Stored as JSON in conversation record metadata field
@@ -410,7 +410,7 @@ search_history MCP tool
 **Error Handling**:
 - Hook must return exit code 0 on success
 - Hook must return exit code 2 on critical errors (blocks Claude Code)
-- Log errors to ~/.config/agentic-warden/hooks.log
+- Log errors to ~/.aiw/hooks.log
 - Gracefully handle missing transcript files
 - Skip already-processed sessions
 
