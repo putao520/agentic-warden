@@ -136,6 +136,7 @@ boa_gc = "0.21"             # Boa garbage collector
 deadpool = { version = "0.12", features = ["rt_tokio_1"] }           # Connection pool for Boa runtime instances (latest stable)
 colored = "3.0.0"
 prettytable-rs = "0.10.0"
+notify = { version = "8.2.0", features = ["serde"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -21,7 +21,7 @@ pub struct DiscoveredTool {
 }
 
 pub struct McpConnectionPool {
-    config: Arc<McpConfig>,
+    config: Arc<RwLock<Arc<McpConfig>>>,
     handles: RwLock<HashMap<String, Arc<McpServerHandle>>>,
 }
 
@@ -39,14 +39,86 @@ pub struct McpServerHandle {
 impl McpConnectionPool {
     pub fn new(config: Arc<McpConfig>) -> Self {
         Self {
-            config,
+            config: Arc::new(RwLock::new(config)),
             handles: RwLock::new(HashMap::new()),
         }
     }
 
+    /// Update the configuration and manage server lifecycle (used for hot reload)
+    pub async fn update_config(&self, new_config: Arc<McpConfig>) {
+        let old_config = self.config.read().await.clone();
+
+        // Update config first
+        {
+            let mut config_guard = self.config.write().await;
+            *config_guard = new_config.clone();
+        }
+
+        // Find servers that need to be shut down
+        let mut to_remove = Vec::new();
+        {
+            let handles = self.handles.read().await;
+            for (name, _handle) in handles.iter() {
+                let should_remove = match new_config.mcp_servers.get(name) {
+                    None => {
+                        // Server removed from config
+                        eprintln!("🗑️  Shutting down removed MCP server: {}", name);
+                        true
+                    }
+                    Some(server_config) => {
+                        // Server disabled
+                        if !server_config.enabled.unwrap_or(true) {
+                            eprintln!("⏸️  Shutting down disabled MCP server: {}", name);
+                            true
+                        } else {
+                            // Check if config changed (command, args, or env)
+                            let old_server = old_config.mcp_servers.get(name);
+                            let config_changed = match old_server {
+                                None => true, // New server
+                                Some(old) => {
+                                    old.command != server_config.command
+                                        || old.args != server_config.args
+                                        || old.env != server_config.env
+                                }
+                            };
+
+                            if config_changed {
+                                eprintln!("🔄 Restarting MCP server with changed config: {}", name);
+                            }
+                            config_changed
+                        }
+                    }
+                };
+
+                if should_remove {
+                    to_remove.push(name.clone());
+                }
+            }
+        }
+
+        // Remove servers (dropping the handle kills the child process via kill_on_drop)
+        {
+            let mut handles = self.handles.write().await;
+            for name in to_remove {
+                if let Some(handle) = handles.remove(&name) {
+                    drop(handle);
+                }
+            }
+        }
+
+        eprintln!("✅ MCP configuration reloaded");
+    }
+
+    /// Get current configuration
+    pub async fn get_config(&self) -> Arc<McpConfig> {
+        self.config.read().await.clone()
+    }
+
     pub async fn warm_up(&self) -> Result<Vec<DiscoveredTool>> {
         let mut all = Vec::new();
-        for (name, server) in self.config.mcp_servers.iter()
+        let config = self.config.read().await.clone();
+
+        for (name, server) in config.mcp_servers.iter()
         {
             // Skip disabled servers (Claude Code compatibility)
             if !server.enabled.unwrap_or(true) {
@@ -80,15 +152,15 @@ impl McpConnectionPool {
     }
 
     pub async fn call_tool(&self, server: &str, tool_name: &str, args: Value) -> Result<Value> {
-        let config = self
-            .config
+        let config = self.config.read().await.clone();
+        let server_config = config
             .mcp_servers
             .get(server)
             .ok_or_else(|| anyhow!("Unknown MCP server '{}'", server))?
             .clone();
 
         let handle = self
-            .ensure_handle(server.to_string(), config)
+            .ensure_handle(server.to_string(), server_config)
             .await
             .context("Failed to initialize MCP server connection")?;
 

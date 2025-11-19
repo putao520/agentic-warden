@@ -1,4 +1,5 @@
 pub mod config;
+pub mod config_watcher;
 mod decision;
 mod embedding;
 mod index;

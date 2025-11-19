@@ -454,8 +454,21 @@ impl AgenticWardenMcpServer {
                 .await
                 .map_err(|e| format!("Failed to initialize Boa runtime pool: {e}"))?,
         );
-        let injector = Arc::new(McpFunctionInjector::new(connection_pool));
+        let injector = Arc::new(McpFunctionInjector::new(connection_pool.clone()));
         let js_executor = Arc::new(JsToolExecutor::new(Arc::clone(&boa_pool), injector));
+
+        // Start config file watcher for hot reload
+        let config_path = dirs::home_dir()
+            .ok_or_else(|| "Cannot find home directory".to_string())?
+            .join(".aiw")
+            .join(".mcp.json");
+
+        if config_path.exists() {
+            use crate::mcp_routing::config_watcher;
+            if let Err(e) = config_watcher::start_config_watcher(connection_pool, config_path).await {
+                eprintln!("⚠️  Failed to start config watcher: {}", e);
+            }
+        }
 
         Ok(Self {
             router: Arc::new(router),
