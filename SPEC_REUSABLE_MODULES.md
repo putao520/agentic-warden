@@ -608,11 +608,40 @@ trait McpToolInvoker { ... }         // 真实MCP/Mock都实现
 
 ---
 
+## 待重构模块
+
+### 🔴 Sync模块 (`src/sync/`)
+
+**当前状态**: 生产使用中，存在重复代码
+
+**问题**:
+- `ConfigSyncManager` (1146行) - 内部存在push/pull逻辑重复
+- 直接依赖`GoogleDriveService` - 缺乏provider抽象
+- Named configuration管理与基础sync操作耦合
+
+**设计参考**:
+- `src/sync/sync_service_example.rs` - SyncService trait抽象示例
+- `src/sync/services/` - 统一服务接口设计
+
+**重构路线图**:
+1. 保留ConfigSyncManager作为生产代码（功能完整）
+2. 参考sync_service_example.rs的trait设计
+3. 逐步解耦named config和基础sync操作
+4. 引入provider抽象层
+5. 迁移完成后删除ConfigSyncManager
+
+**优先级**: P1（中优先级）
+**工作量**: 2-3天
+**风险**: 中（sync是关键功能，需要完整测试）
+
+---
+
 ## 版本历史
 
 - **v1.0** (2025-11-19): 初始版本，记录核心可复用模块
   - supervisor重构完成（消除重复代码）
   - AI CLI代码生成器集成
+  - 识别sync模块重复问题，添加待重构标记
 
 ---
 
@@ -620,3 +649,4 @@ trait McpToolInvoker { ... }         // 真实MCP/Mock都实现
 - 添加新的可复用模块时，更新此文档
 - 发现重复代码时，重构并更新此文档
 - 每月审查一次，确保文档与代码同步
+- 待重构模块完成后，从"待重构"移到相应章节

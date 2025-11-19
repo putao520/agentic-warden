@@ -1,7 +1,40 @@
-//! Refactored Sync Manager - Demonstrates unified SyncService usage
+//! Sync Service Example - Design Reference Implementation
 //!
-//! This module demonstrates how to use the new SyncService trait to eliminate
-//! the 336+ repeated sync/upload/download calls across the sync module.
+//! ⚠️  **THIS IS NOT PRODUCTION CODE** ⚠️
+//!
+//! This module serves as a design reference and proof-of-concept for how the
+//! sync module could be refactored using the unified SyncService trait pattern.
+//!
+//! ## Purpose
+//!
+//! Demonstrates architectural patterns for eliminating the 336+ repeated
+//! sync/upload/download calls across the sync module.
+//!
+//! ## Current Status
+//!
+//! - **NOT IN USE**: Production code uses `ConfigSyncManager`
+//! - **INCOMPLETE**: Missing named configuration management features
+//! - **REFERENCE ONLY**: Showcases trait-based abstraction design
+//!
+//! ## Architecture Conflicts
+//!
+//! This example uses `SyncService` trait abstraction, which conflicts with
+//! `ConfigSyncManager`'s direct dependency on `GoogleDriveService`.
+//! Merging them would require significant architectural changes:
+//!
+//! 1. Porting named config features to trait-based design
+//! 2. Migrating DirectoryHasher/ConfigPacker to work with SyncService
+//! 3. Updating all call sites (sync_command.rs, TUI screens)
+//! 4. Comprehensive integration testing
+//!
+//! ## Future Work
+//!
+//! When refactoring sync module, use this as reference for:
+//! - Provider-agnostic abstraction patterns
+//! - Unified error handling and retry logic
+//! - Consistent progress reporting interfaces
+//!
+//! See `SPEC_REUSABLE_MODULES.md` for refactoring roadmap.
 
 use anyhow::Result;
 use std::path::Path;
