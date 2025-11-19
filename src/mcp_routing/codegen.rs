@@ -1,7 +1,7 @@
 //! Code Generation Abstraction
 //!
 //! Unified interface for workflow planning and JS code generation.
-//! Supports multiple backends: Ollama (local LLM) and AI CLI (Claude/Codex/Gemini).
+//! Supports multiple backends: Ollama (local LLM) and AI CLI (claude/codex/gemini).
 
 use crate::mcp_routing::decision::{CandidateToolInfo, DecisionEngine};
 use crate::mcp_routing::js_orchestrator::workflow_planner::{WorkflowPlan, WorkflowPlannerEngine};
@@ -13,6 +13,36 @@ use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::time::timeout;
+
+/// AI CLI type (supported CLI tools)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CliType {
+    Claude,
+    Codex,
+    Gemini,
+}
+
+impl CliType {
+    pub fn from_str(s: &str) -> Result<Self> {
+        match s.to_lowercase().as_str() {
+            "claude" => Ok(Self::Claude),
+            "codex" => Ok(Self::Codex),
+            "gemini" => Ok(Self::Gemini),
+            _ => Err(anyhow!(
+                "Unsupported CLI_TYPE '{}'. Supported: claude, codex, gemini",
+                s
+            )),
+        }
+    }
+
+    pub fn as_command(&self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+            Self::Gemini => "gemini",
+        }
+    }
+}
 
 /// Code generator backend type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,13 +104,16 @@ impl CodeGeneratorFactory {
     /// Create AI CLI-based code generator (default: claude)
     fn create_ai_cli_generator() -> Result<Arc<dyn WorkflowPlannerEngine>> {
         // Default to claude if CLI_TYPE not set
-        let cli_type = std::env::var("CLI_TYPE").unwrap_or_else(|_| "claude".to_string());
+        let cli_type_str = std::env::var("CLI_TYPE").unwrap_or_else(|_| "claude".to_string());
+        let cli_type = CliType::from_str(&cli_type_str)?;
 
+        // Provider can be any string (llmlite, openrouter, anthropic, etc.)
         let provider = std::env::var("CLI_PROVIDER").ok();
 
         eprintln!(
             "🤖 AI CLI code generator initialized: {} (provider: {:?})",
-            cli_type, provider
+            cli_type.as_command(),
+            provider
         );
 
         Ok(Arc::new(AiCliCodeGenerator::new(cli_type, provider)))
@@ -88,17 +121,19 @@ impl CodeGeneratorFactory {
 }
 
 /// AI CLI-based code generator
+/// Supports claude, codex, gemini CLI tools with any provider
 pub struct AiCliCodeGenerator {
-    cli_command: String,
+    cli_type: CliType,
     provider: Option<String>,
     timeout: Duration,
 }
 
 impl AiCliCodeGenerator {
     /// Create new AI CLI code generator with 12-hour timeout
-    pub fn new(cli_command: String, provider: Option<String>) -> Self {
+    /// Provider can be any string: llmlite, openrouter, anthropic, etc.
+    pub fn new(cli_type: CliType, provider: Option<String>) -> Self {
         Self {
-            cli_command,
+            cli_type,
             provider,
             timeout: Duration::from_secs(12 * 60 * 60), // 12 hours
         }
@@ -106,7 +141,7 @@ impl AiCliCodeGenerator {
 
     /// Call AI CLI with prompt and get response
     async fn call_ai_cli(&self, prompt: &str) -> Result<String> {
-        let cli_command = &self.cli_command;
+        let cli_command = self.cli_type.as_command();
 
         let mut cmd = Command::new(cli_command);
         cmd.stdin(Stdio::piped())
