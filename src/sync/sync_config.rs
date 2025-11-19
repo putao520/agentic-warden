@@ -76,13 +76,13 @@ impl Default for SyncState {
     }
 }
 
-/// Resolve the default sync file path within the agentic-warden directory.
+/// Resolve the default sync file path within the aiw directory.
 pub fn default_sync_file_path() -> SyncResult<PathBuf> {
     let home_dir = dirs::home_dir().ok_or_else(|| {
         SyncError::sync_config("Could not determine the home directory".to_string())
     })?;
 
-    let warden_dir = home_dir.join(".agentic-warden");
+    let warden_dir = home_dir.join(".aiw");
     fs::create_dir_all(&warden_dir).map_err(|err| {
         SyncError::sync_config(format!("Failed to create config directory: {err}"))
     })?;

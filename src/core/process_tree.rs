@@ -238,15 +238,17 @@ fn get_ai_cli_type(pid: u32, process_name: &str) -> Option<String> {
     };
 
     // Native AI CLI processes - exact matches first
+    // Added claude-code for Claude Code support
     match clean_name {
-        "claude" | "claude-cli" | "anthropic-claude" => return Some("claude".to_string()),
+        "claude" | "claude-cli" | "anthropic-claude" | "claude-code" => return Some("claude".to_string()),
         "codex" | "codex-cli" | "openai-codex" => return Some("codex".to_string()),
         "gemini" | "gemini-cli" | "google-gemini" => return Some("gemini".to_string()),
         _ => {}
     }
 
     // Partial matches for variations (exclude claude-desktop to avoid confusion)
-    if clean_name.contains("claude") && !clean_name.contains("claude-desktop") {
+    // Also support claude-code in partial matches
+    if (clean_name.contains("claude") || clean_name.contains("claude-code")) && !clean_name.contains("claude-desktop") {
         return Some("claude".to_string());
     }
     if clean_name.contains("codex") {
@@ -256,8 +258,8 @@ fn get_ai_cli_type(pid: u32, process_name: &str) -> Option<String> {
         return Some("gemini".to_string());
     }
 
-    // NPM-based AI CLI processes - enhanced detection with command line analysis
-    if clean_name == "node" || clean_name == "node.exe" {
+    // NPM-based AI CLI processes - only for node-based AI CLIs
+    if clean_name == "node" {
         if let Some(ai_type) = detect_npm_ai_cli_type(pid) {
             return Some(ai_type);
         }
@@ -361,8 +363,11 @@ fn detect_npm_ai_cli_type_windows(pid: u32) -> Option<String> {
 fn analyze_cmdline_for_ai_cli(cmdline: &str) -> Option<String> {
     let cmdline_lower = cmdline.to_lowercase();
 
-    // Direct AI CLI execution
+    // Direct AI CLI execution via npm/npx
     if cmdline_lower.contains("claude-cli") || cmdline_lower.contains("@anthropic-ai/claude-cli") {
+        return Some("claude".to_string());
+    }
+    if cmdline_lower.contains("claude-code") {
         return Some("claude".to_string());
     }
     if cmdline_lower.contains("codex-cli") {
@@ -374,33 +379,33 @@ fn analyze_cmdline_for_ai_cli(cmdline: &str) -> Option<String> {
 
     // npm exec patterns
     if cmdline_lower.contains("npm exec") {
-        if cmdline_lower.contains("claude-cli") || cmdline_lower.contains("@anthropic-ai/claude") {
+        if cmdline_lower.contains("@anthropic-ai/claude") {
             return Some("claude".to_string());
         }
-        if cmdline_lower.contains("codex-cli") {
+        if cmdline_lower.contains("codex") {
             return Some("codex".to_string());
         }
-        if cmdline_lower.contains("gemini-cli") {
+        if cmdline_lower.contains("gemini") {
             return Some("gemini".to_string());
         }
     }
 
     // npx patterns
     if cmdline_lower.contains("npx") {
-        if cmdline_lower.contains("claude-cli") || cmdline_lower.contains("@anthropic-ai/claude") {
+        if cmdline_lower.contains("@anthropic-ai/claude") {
             return Some("claude".to_string());
         }
-        if cmdline_lower.contains("codex-cli") {
+        if cmdline_lower.contains("codex") {
             return Some("codex".to_string());
         }
-        if cmdline_lower.contains("gemini-cli") {
+        if cmdline_lower.contains("gemini") {
             return Some("gemini".to_string());
         }
     }
 
     // Node.js with module paths
     if cmdline_lower.contains("node_modules") {
-        if cmdline_lower.contains("claude-cli") {
+        if cmdline_lower.contains("claude-cli") || cmdline_lower.contains("claude-code") {
             return Some("claude".to_string());
         }
         if cmdline_lower.contains("codex-cli") {

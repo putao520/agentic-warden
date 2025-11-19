@@ -111,7 +111,7 @@ pub struct StartTaskParams {
     pub task: String,
     /// Optional provider name to use for this task.
     ///
-    /// All available providers and their scenarios are defined in ~/.agentic-warden/providers.json.
+    /// All available providers and their scenarios are defined in ~/.aiw/providers.json.
     /// Each provider can have a 'scenario' field describing when to use it.
     ///
     /// If not specified, the default_provider from configuration will be used.
@@ -472,7 +472,7 @@ impl AgenticWardenMcpServer {
     fn get_history_db_path() -> Result<PathBuf, String> {
         let config_dir = dirs::config_dir()
             .ok_or_else(|| "Failed to get config directory".to_string())?
-            .join("agentic-warden");
+            .join("aiw");
 
         std::fs::create_dir_all(&config_dir)
             .map_err(|e| format!("Failed to create config directory: {e}"))?;

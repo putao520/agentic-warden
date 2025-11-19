@@ -183,15 +183,9 @@ impl McpConfig {
 }
 
 fn resolve_config_path() -> Result<PathBuf> {
-    // Support environment variable override for config file path
-    if let Ok(custom) = std::env::var("AGENTIC_WARDEN_MCP_CONFIG") {
-        let path = PathBuf::from(custom);
-        return Ok(path); // Return path even if doesn't exist, let caller handle it
-    }
-
     let mut candidates = Vec::new();
     if let Some(home) = home_dir() {
-        candidates.push(home.join(".agentic-warden").join(DEFAULT_CONFIG_FILE));
+        candidates.push(home.join(".aiw").join(DEFAULT_CONFIG_FILE));
     }
     if let Ok(cwd) = std::env::current_dir() {
         candidates.push(cwd.join(DEFAULT_CONFIG_FILE));
@@ -205,7 +199,7 @@ fn resolve_config_path() -> Result<PathBuf> {
 
     // Return default path even if doesn't exist
     if let Some(home) = home_dir() {
-        Ok(home.join(".agentic-warden").join(DEFAULT_CONFIG_FILE))
+        Ok(home.join(".aiw").join(DEFAULT_CONFIG_FILE))
     } else {
         Ok(PathBuf::from(DEFAULT_CONFIG_FILE))
     }

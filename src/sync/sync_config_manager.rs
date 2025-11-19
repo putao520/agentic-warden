@@ -15,11 +15,11 @@ impl SyncConfigManager {
         let home_dir = dirs::home_dir()
             .ok_or_else(|| SyncError::sync_config("Could not find home directory".to_string()))?;
 
-        let warden_dir = home_dir.join(".agentic-warden");
+        let warden_dir = home_dir.join(".aiw");
 
         // Create directory if it doesn't exist
         fs::create_dir_all(&warden_dir).map_err(|e| {
-            SyncError::sync_config(format!("Failed to create warden directory: {}", e))
+            SyncError::sync_config(format!("Failed to create aiw directory: {}", e))
         })?;
 
         let sync_path = warden_dir.join("sync.json");
