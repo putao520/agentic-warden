@@ -1,3 +1,4 @@
+pub mod ai_cli_codegen;
 pub mod config;
 pub mod config_watcher;
 mod decision;
@@ -56,33 +57,87 @@ impl IntelligentRouter {
         let history =
             ConversationHistoryStore::new(&memory_config.sahome_db_path, embedder.dimension())?;
 
-        let decision_endpoint = std::env::var("OPENAI_ENDPOINT")
-            .unwrap_or_else(|_| memory_config.llm_endpoint.clone());
-        let decision_model = std::env::var("OPENAI_MODEL")
-            .unwrap_or_else(|_| memory_config.llm_model.clone());
-        let decision_timeout = 30; // Default timeout
-        let decision_engine = Arc::new(DecisionEngine::new(
-            &decision_endpoint,
-            &decision_model,
-            decision_timeout,
-        )?);
-
         let dynamic_registry = Arc::new(registry::DynamicToolRegistry::new(Vec::new()));
         let _cleanup_task = dynamic_registry.start_cleanup_task();
 
-        // Enable orchestrator if LLM endpoint is explicitly configured via environment variable
-        let llm_explicitly_configured = std::env::var("OPENAI_TOKEN").is_ok()
-            || std::env::var("OPENAI_ENDPOINT").is_ok()
-            || std::env::var("AGENTIC_WARDEN_LLM_ENDPOINT").is_ok();
+        // Initialize code generation backend (Ollama or AI CLI)
+        let codegen_mode = std::env::var("AIW_CODEGEN_MODE")
+            .unwrap_or_else(|_| "ollama".to_string())
+            .to_lowercase();
 
-        let js_orchestrator = if llm_explicitly_configured {
-            eprintln!("🤖 LLM orchestration enabled: {}", decision_endpoint);
-            Some(Arc::new(js_orchestrator::WorkflowOrchestrator::new(
-                decision_engine.clone(),
-            )))
-        } else {
-            eprintln!("🔍 LLM orchestration disabled, vector-only mode");
-            None
+        let (decision_engine, js_orchestrator) = match codegen_mode.as_str() {
+            "ai-cli" | "ai_cli" | "aicli" => {
+                // AI CLI mode: use Claude/Codex/Gemini for code generation
+                match ai_cli_codegen::AiCliCodeGenerator::from_env() {
+                    Ok(ai_cli_gen) => {
+                        eprintln!(
+                            "🤖 AI CLI orchestration enabled (type: {})",
+                            std::env::var("AIW_AI_CLI_TYPE").unwrap_or_else(|_| "unknown".to_string())
+                        );
+                        // Create a dummy decision engine for compatibility
+                        let dummy_endpoint = "http://localhost:11434";
+                        let dummy_model = "qwen2.5:7b";
+                        let decision_engine = Arc::new(DecisionEngine::new(
+                            dummy_endpoint,
+                            dummy_model,
+                            30,
+                        )?);
+                        let orchestrator = Some(Arc::new(js_orchestrator::WorkflowOrchestrator::with_planner(
+                            Arc::new(ai_cli_gen),
+                        )));
+                        (decision_engine, orchestrator)
+                    }
+                    Err(e) => {
+                        eprintln!("⚠️  Failed to initialize AI CLI code generator: {}", e);
+                        eprintln!("🔍 Falling back to vector-only mode");
+                        // Fallback to dummy engine
+                        let dummy_endpoint = "http://localhost:11434";
+                        let dummy_model = "qwen2.5:7b";
+                        let decision_engine = Arc::new(DecisionEngine::new(
+                            dummy_endpoint,
+                            dummy_model,
+                            30,
+                        )?);
+                        (decision_engine, None)
+                    }
+                }
+            }
+            _ => {
+                // Ollama mode (default)
+                let decision_endpoint = std::env::var("OPENAI_ENDPOINT")
+                    .unwrap_or_else(|_| memory_config.llm_endpoint.clone());
+                let decision_model = std::env::var("OPENAI_MODEL")
+                    .unwrap_or_else(|_| memory_config.llm_model.clone());
+                let decision_timeout = 30;
+
+                match DecisionEngine::new(&decision_endpoint, &decision_model, decision_timeout) {
+                    Ok(decision_engine) => {
+                        let decision_engine = Arc::new(decision_engine);
+
+                        // Check if LLM is explicitly configured
+                        let llm_explicitly_configured = std::env::var("OPENAI_TOKEN").is_ok()
+                            || std::env::var("OPENAI_ENDPOINT").is_ok()
+                            || std::env::var("AGENTIC_WARDEN_LLM_ENDPOINT").is_ok();
+
+                        let orchestrator = if llm_explicitly_configured {
+                            eprintln!("🤖 Ollama orchestration enabled: {}", decision_endpoint);
+                            Some(Arc::new(js_orchestrator::WorkflowOrchestrator::new(
+                                decision_engine.clone(),
+                            )))
+                        } else {
+                            eprintln!("🔍 LLM orchestration disabled, vector-only mode");
+                            None
+                        };
+                        (decision_engine, orchestrator)
+                    }
+                    Err(e) => {
+                        eprintln!("⚠️  Failed to initialize Ollama decision engine: {}", e);
+                        eprintln!("🔍 Falling back to vector-only mode");
+                        // Return error as this is the default mode
+                        return Err(e);
+                    }
+                }
+            }
         };
 
         let mut index = MemRoutingIndex::new(embedder.dimension())?;

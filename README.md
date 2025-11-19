@@ -237,6 +237,32 @@ Configure for **LLM ReAct mode** (primary decision engine). If not configured, f
 - `model` - Model name
 - `timeout` - Request timeout in seconds
 
+#### Code Generation Mode
+Choose how to generate JavaScript workflow orchestration code:
+
+**Ollama Mode (Default)**:
+```bash
+# Use local Ollama for code generation
+export AIW_CODEGEN_MODE=ollama
+export OPENAI_ENDPOINT=http://localhost:11434
+export OPENAI_MODEL=qwen2.5:7b
+```
+
+**AI CLI Mode**:
+```bash
+# Use Claude/Codex/Gemini CLI for code generation
+export AIW_CODEGEN_MODE=ai-cli
+export AIW_AI_CLI_TYPE=claude     # or codex, gemini
+export AIW_AI_CLI_PROVIDER=openai # optional, uses provider.json
+export AIW_AI_CLI_TIMEOUT=60      # optional, default 60s
+```
+
+Benefits of AI CLI mode:
+- Use more powerful models (Claude Sonnet, GPT-4, etc.)
+- Better code quality and error handling
+- Leverages provider configuration system
+- No local Ollama installation required
+
 ## 🏗️ Architecture
 
 ### Dual-Layer Design
