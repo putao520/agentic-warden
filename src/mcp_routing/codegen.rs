@@ -1,18 +1,105 @@
-//! AI CLI Code Generator
+//! Code Generation Abstraction
 //!
-//! Uses AI CLI (claude/codex/gemini) for workflow planning and JS code generation
-//! via non-interactive stdin/stdout communication.
+//! Unified interface for workflow planning and JS code generation.
+//! Supports multiple backends: Ollama (local LLM) and AI CLI (Claude/Codex/Gemini).
 
-use crate::mcp_routing::decision::CandidateToolInfo;
+use crate::mcp_routing::decision::{CandidateToolInfo, DecisionEngine};
 use crate::mcp_routing::js_orchestrator::workflow_planner::{WorkflowPlan, WorkflowPlannerEngine};
 use crate::provider::config::AiType;
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::time::timeout;
+
+/// Code generator backend type
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodegenBackend {
+    Ollama,
+    AiCli,
+}
+
+impl CodegenBackend {
+    /// Auto-detect backend from environment
+    /// - If OPENAI_TOKEN exists → Ollama mode
+    /// - Otherwise → AI CLI mode (default: claude)
+    pub fn from_env() -> Self {
+        if std::env::var("OPENAI_TOKEN").is_ok() {
+            Self::Ollama
+        } else {
+            Self::AiCli
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Ollama => "ollama",
+            Self::AiCli => "ai-cli",
+        }
+    }
+}
+
+/// Factory for creating code generators based on configuration
+pub struct CodeGeneratorFactory;
+
+impl CodeGeneratorFactory {
+    /// Create code generator from environment variables
+    pub fn from_env(
+        default_endpoint: String,
+        default_model: String,
+    ) -> Result<Arc<dyn WorkflowPlannerEngine>> {
+        let backend = CodegenBackend::from_env();
+
+        match backend {
+            CodegenBackend::Ollama => {
+                Self::create_ollama_generator(default_endpoint, default_model)
+            }
+            CodegenBackend::AiCli => Self::create_ai_cli_generator(),
+        }
+    }
+
+    /// Create Ollama-based code generator
+    fn create_ollama_generator(
+        endpoint: String,
+        model: String,
+    ) -> Result<Arc<dyn WorkflowPlannerEngine>> {
+        let timeout = 30;
+        let decision_engine = DecisionEngine::new(&endpoint, &model, timeout)?;
+        eprintln!("🤖 Ollama code generator initialized: {}", endpoint);
+        Ok(Arc::new(decision_engine))
+    }
+
+    /// Create AI CLI-based code generator (default: claude)
+    fn create_ai_cli_generator() -> Result<Arc<dyn WorkflowPlannerEngine>> {
+        // Default to claude if AI_CLI_TYPE not set
+        let ai_cli_type_str = std::env::var("AI_CLI_TYPE").unwrap_or_else(|_| "claude".to_string());
+
+        let ai_cli_type = ai_cli_type_str
+            .parse::<AiType>()
+            .map_err(|e| anyhow!("Invalid AI_CLI_TYPE '{}': {}", ai_cli_type_str, e))?;
+
+        let provider = std::env::var("AI_CLI_PROVIDER").ok();
+
+        let timeout_secs = std::env::var("AI_CLI_TIMEOUT")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(60);
+
+        eprintln!(
+            "🤖 AI CLI code generator initialized: {} (provider: {:?})",
+            ai_cli_type, provider
+        );
+
+        Ok(Arc::new(AiCliCodeGenerator::new(
+            ai_cli_type,
+            provider,
+            timeout_secs,
+        )))
+    }
+}
 
 /// AI CLI-based code generator
 pub struct AiCliCodeGenerator {
@@ -22,31 +109,12 @@ pub struct AiCliCodeGenerator {
 }
 
 impl AiCliCodeGenerator {
-    /// Create a new AI CLI code generator
     pub fn new(ai_cli_type: AiType, provider: Option<String>, timeout_secs: u64) -> Self {
         Self {
             ai_cli_type,
             provider,
             timeout: Duration::from_secs(timeout_secs.max(30)),
         }
-    }
-
-    /// Create from environment variables
-    pub fn from_env() -> Result<Self> {
-        let ai_cli_type_str = std::env::var("AIW_AI_CLI_TYPE")
-            .context("AIW_AI_CLI_TYPE not set")?;
-
-        let ai_cli_type = ai_cli_type_str.parse::<AiType>()
-            .map_err(|e| anyhow!("Invalid AIW_AI_CLI_TYPE: {}", e))?;
-
-        let provider = std::env::var("AIW_AI_CLI_PROVIDER").ok();
-
-        let timeout_secs = std::env::var("AIW_AI_CLI_TIMEOUT")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(60);
-
-        Ok(Self::new(ai_cli_type, provider, timeout_secs))
     }
 
     /// Call AI CLI with prompt and get response
@@ -56,8 +124,6 @@ impl AiCliCodeGenerator {
             AiType::Codex => "codex",
             AiType::Gemini => "gemini",
         };
-
-        eprintln!("🤖 Calling {} for code generation...", cli_command);
 
         let mut cmd = Command::new(cli_command);
         cmd.stdin(Stdio::piped())
@@ -69,15 +135,18 @@ impl AiCliCodeGenerator {
             cmd.env("AIW_PROVIDER", provider);
         }
 
-        // Non-interactive mode args (assuming standard CLI interface)
+        // Non-interactive mode args
         cmd.arg("--non-interactive");
 
-        let mut child = cmd.spawn()
+        let mut child = cmd
+            .spawn()
             .context(format!("Failed to spawn {} CLI", cli_command))?;
 
         // Write prompt to stdin
         if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(prompt.as_bytes()).await
+            stdin
+                .write_all(prompt.as_bytes())
+                .await
                 .context("Failed to write prompt to AI CLI stdin")?;
             stdin.flush().await.ok();
             drop(stdin);
@@ -98,8 +167,7 @@ impl AiCliCodeGenerator {
             ));
         }
 
-        let response = String::from_utf8(output.stdout)
-            .context("AI CLI returned invalid UTF-8")?;
+        let response = String::from_utf8(output.stdout).context("AI CLI returned invalid UTF-8")?;
 
         Ok(response.trim().to_string())
     }
@@ -119,10 +187,10 @@ impl WorkflowPlannerEngine for AiCliCodeGenerator {
             return Err(anyhow!("No MCP tools available for workflow planning"));
         }
 
-        let prompt = build_planning_prompt_for_ai_cli(user_request, available_tools);
+        let prompt = build_planning_prompt(user_request, available_tools);
         let response = self.call_ai_cli(&prompt).await?;
 
-        // Extract JSON from response (handle markdown code blocks)
+        // Extract JSON from response
         let json_str = extract_json_from_response(&response)
             .ok_or_else(|| anyhow!("AI CLI response does not contain valid JSON"))?;
 
@@ -146,10 +214,10 @@ impl WorkflowPlannerEngine for AiCliCodeGenerator {
             return Err(anyhow!("Workflow plan must contain at least one step"));
         }
 
-        let prompt = build_codegen_prompt_for_ai_cli(plan);
+        let prompt = build_codegen_prompt(plan);
         let response = self.call_ai_cli(&prompt).await?;
 
-        // Extract code from response (strip markdown code blocks)
+        // Extract code from response
         let code = strip_code_fences(&response);
 
         if code.trim().is_empty() {
@@ -167,8 +235,8 @@ impl WorkflowPlannerEngine for AiCliCodeGenerator {
     }
 }
 
-/// Build planning prompt for AI CLI
-fn build_planning_prompt_for_ai_cli(user_request: &str, tools: &[CandidateToolInfo]) -> String {
+/// Build planning prompt
+fn build_planning_prompt(user_request: &str, tools: &[CandidateToolInfo]) -> String {
     let tools_list = tools
         .iter()
         .map(|tool| {
@@ -228,8 +296,8 @@ Respond with ONLY the JSON, no additional text."#,
     )
 }
 
-/// Build code generation prompt for AI CLI
-fn build_codegen_prompt_for_ai_cli(plan: &WorkflowPlan) -> String {
+/// Build code generation prompt
+fn build_codegen_prompt(plan: &WorkflowPlan) -> String {
     let steps_json = serde_json::to_string_pretty(&plan.steps).unwrap_or_else(|_| "[]".into());
 
     format!(
@@ -277,7 +345,7 @@ Respond with ONLY the JavaScript code, no markdown fences, no explanation."#,
     )
 }
 
-/// Extract JSON from AI CLI response (handle markdown code blocks)
+/// Extract JSON from response (handle markdown code blocks)
 fn extract_json_from_response(response: &str) -> Option<String> {
     // Try to find JSON in code blocks first
     if let Some(start) = response.find("```json") {
