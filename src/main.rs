@@ -11,11 +11,9 @@ use agentic_warden::commands::{
 use agentic_warden::error::ErrorCategory;
 use agentic_warden::execute_update;
 use agentic_warden::mcp::AgenticWardenMcpServer;
-// Network detector module removed - functionality deprecated
 use agentic_warden::pwait_mode;
 use agentic_warden::roles::RoleManager;
 use agentic_warden::sync;
-use agentic_warden::sync::sync_config::save_network_status;
 use agentic_warden::tui;
 use agentic_warden::wait_mode;
 use help::{print_command_help, print_general_help, print_quick_examples};
@@ -137,7 +135,6 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
             launch_tui(Some(tui::ScreenType::Push(directories))).await
         }
         Commands::Pull => launch_tui(Some(tui::ScreenType::Pull)).await,
-        Commands::Reset => handle_sync_command("reset", None).await,
         Commands::List => handle_sync_command("list", None).await,
         Commands::Wait { timeout, verbose } => {
             // CLI参数已完整实现，支持timeout和verbose参数
@@ -216,12 +213,6 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
 
 async fn launch_tui(initial_screen: Option<tui::ScreenType>) -> Result<ExitCode, String> {
     color_eyre::install().map_err(|e| format!("Failed to install error handler: {}", e))?;
-
-    tokio::spawn(async {
-        if let Err(e) = perform_background_network_detection().await {
-            eprintln!("Warning: Background network detection failed: {}", e);
-        }
-    });
 
     let tui_result = match initial_screen {
         Some(screen) => tui::app::run_tui_app_with_screen(Some(screen)),
@@ -578,17 +569,4 @@ async fn run_mcp_server_stdio(
     server: AgenticWardenMcpServer,
 ) -> Result<(), Box<dyn std::error::Error>> {
     server.run().await
-}
-
-/// Perform background network detection to update cached network status (non-blocking)
-/// NOTE: Network detection has been deprecated - now using Unknown status
-async fn perform_background_network_detection() -> anyhow::Result<()> {
-    use agentic_warden::sync::sync_config::NetworkStatus;
-
-    // Network detector removed - save Unknown status
-    if let Err(e) = save_network_status(NetworkStatus::Unknown) {
-        eprintln!("Warning: Failed to save network status: {}", e);
-    }
-
-    Ok(())
 }

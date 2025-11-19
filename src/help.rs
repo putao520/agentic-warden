@@ -23,7 +23,6 @@ COMMANDS:
     push [DIR...]           Push configurations to cloud
     pull [DIR...]           Pull configurations from cloud
     status                  Show sync status
-    reset                   Reset sync state
     list                    List configurable directories
 
 OPTIONS:
@@ -67,7 +66,6 @@ pub fn print_command_help(command: &str) -> io::Result<()> {
         "push" => print_push_help(),
         "pull" => print_pull_help(),
         "status" => print_status_help(),
-        "reset" => print_reset_help(),
         "list" => print_list_help(),
         "provider" => print_provider_help(),
         _ => {
@@ -310,34 +308,6 @@ EXAMPLE OUTPUT:
     ✓ ~/.claude: Up to date
     ✓ ~/.codex: Changes detected
     ✗ ~/.gemini: Never synced
-"#;
-    print!("{}", help_text);
-    io::stdout().flush()
-}
-
-/// Print help for reset command
-fn print_reset_help() -> io::Result<()> {
-    let help_text = r#"
-RESET COMMAND
-
-USAGE:
-    agentic-warden reset
-
-DESCRIPTION:
-    Reset synchronization state and clear local cache.
-
-WARNING:
-    This will clear all local sync history. Your cloud files
-    will remain intact, but the next sync will be a full sync.
-
-EFFECTS:
-    - Clears local sync state
-    - Removes MD5 hash cache
-    - Forces full re-sync on next push/pull
-    - Preserves authentication tokens
-
-CONFIRMATION:
-    You will be prompted to confirm before reset proceeds.
 "#;
     print!("{}", help_text);
     io::stdout().flush()

@@ -99,16 +99,6 @@ pub enum PullProgressEvent {
     Completed { directory: String },
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub struct SyncSummary {
-    pub total_directories: usize,
-    pub changed_directories: usize,
-    pub uploaded_files: usize,
-    pub total_bytes_uploaded: u64,
-    pub results: Vec<SyncOperationResult>,
-}
-
 impl ConfigSyncManager {
     pub fn new() -> ErrorResult<Self> {
         let config_manager = SyncConfigManager::new()?;
@@ -123,54 +113,6 @@ impl ConfigSyncManager {
             drive_service,
             temp_archive_path: None,
         })
-    }
-
-    #[allow(dead_code)]
-    pub async fn push_all(&mut self) -> ErrorResult<SyncSummary> {
-        let directories = self.config_manager.get_sync_directories()?;
-
-        if directories.is_empty() {
-            return Ok(SyncSummary {
-                total_directories: 0,
-                changed_directories: 0,
-                uploaded_files: 0,
-                total_bytes_uploaded: 0,
-                results: vec![],
-            });
-        }
-
-        // Ensure Google Drive service is available
-        if self.drive_service.is_none() {
-            return Err(SyncError::authentication_required());
-        }
-
-        let mut summary = SyncSummary {
-            total_directories: directories.len(),
-            changed_directories: 0,
-            uploaded_files: 0,
-            total_bytes_uploaded: 0,
-            results: Vec::new(),
-        };
-
-        // Process each directory
-        for directory_path in directories {
-            let result = self.push_directory(&directory_path).await?;
-
-            if result.changed {
-                summary.changed_directories += 1;
-            }
-            if result.uploaded {
-                summary.uploaded_files += 1;
-                summary.total_bytes_uploaded += result.file_size.unwrap_or(0);
-            }
-
-            summary.results.push(result);
-        }
-
-        // Update last sync time
-        self.config_manager.update_last_sync()?;
-
-        Ok(summary)
     }
 
     pub async fn push_directory(
@@ -299,50 +241,6 @@ impl ConfigSyncManager {
         });
 
         Ok(sync_result)
-    }
-
-    #[allow(dead_code)]
-    pub async fn pull_all(&mut self) -> ErrorResult<SyncSummary> {
-        let directories = self.config_manager.get_sync_directories()?;
-
-        if directories.is_empty() {
-            return Ok(SyncSummary {
-                total_directories: 0,
-                changed_directories: 0,
-                uploaded_files: 0,
-                total_bytes_uploaded: 0,
-                results: vec![],
-            });
-        }
-
-        // Ensure Google Drive service is available
-        if self.drive_service.is_none() {
-            return Err(SyncError::authentication_required());
-        }
-
-        let mut summary = SyncSummary {
-            total_directories: directories.len(),
-            changed_directories: 0,
-            uploaded_files: 0,
-            total_bytes_uploaded: 0,
-            results: Vec::new(),
-        };
-
-        // Process each directory
-        for directory_path in directories {
-            let result = self.pull_directory(&directory_path).await?;
-
-            if result.changed {
-                summary.changed_directories += 1;
-            }
-
-            summary.results.push(result);
-        }
-
-        // Update last sync time
-        self.config_manager.update_last_sync()?;
-
-        Ok(summary)
     }
 
     pub async fn pull_directory(

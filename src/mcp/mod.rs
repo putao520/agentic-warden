@@ -682,11 +682,23 @@ impl AgenticWardenMcpServer {
                 .await
                 .map_err(|e| format!("Failed to launch {} task: {}", task_spec.ai_type, e))?;
 
-                // Note: For now we can't easily get PID and log_file from execute_cli
-                // This is a limitation of the current supervisor design
-                // Return placeholder result
+                // ⚠️ PLACEHOLDER: PID tracking limitation
+                //
+                // **Issue**: supervisor::execute_cli() doesn't return the actual child process PID.
+                // The function spawns an AI CLI process but only returns a Result<ExitCode>.
+                //
+                // **Why**: The supervisor design prioritizes async/await ergonomics and uses
+                // tokio::process::Command, which doesn't expose the PID before spawning.
+                //
+                // **Current workaround**:
+                // - Return pid: 0 as a placeholder
+                // - Actual PIDs are tracked internally by the unified registry via shared memory
+                // - Clients can query task status via the registry, not via this PID
+                //
+                // **Future fix**: Refactor supervisor::execute_cli() to return a struct containing
+                // both the PID and a JoinHandle to the process future.
                 Ok::<TaskLaunchResult, String>(TaskLaunchResult {
-                    pid: 0, // Placeholder - actual PID tracked in registry
+                    pid: 0, // Placeholder - real PID tracked in shared memory registry
                     ai_type: task_spec.ai_type.clone(),
                     task: task_spec.task.clone(),
                     provider: task_spec.provider.clone(),

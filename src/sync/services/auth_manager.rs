@@ -162,25 +162,29 @@ impl crate::sync::services::sync_service::AuthManager for DefaultAuthManager {
     }
 
     async fn authenticate(&mut self) -> Result<AuthStatus> {
-        // This would implement the actual authentication flow
-        // For now, simulate successful authentication
-
         // Check if already authenticated with valid token
         if self.validate_token() {
             self.auth_status = AuthStatus::Authenticated;
             return Ok(self.auth_status.clone());
         }
 
-        // Perform authentication (placeholder)
+        // ⚠️ PLACEHOLDER IMPLEMENTATION
+        //
+        // This is a mock authentication flow for testing/development purposes.
+        // In production, this should be replaced with actual provider-specific authentication.
+        //
+        // Real implementation would:
+        // 1. Check if stored credentials exist in secure storage
+        // 2. If not, initiate provider-specific auth flow (OAuth2, API key, etc.)
+        // 3. Exchange credentials for access/refresh tokens
+        // 4. Validate token with provider
+        // 5. Store tokens securely with encryption
+        //
+        // Currently used by: GoogleDriveSyncService (which uses its own auth),
+        //                     MockSyncService (for testing)
         tracing::info!("Starting authentication flow");
 
-        // In a real implementation, this would:
-        // 1. Check if stored credentials exist
-        // 2. If not, initiate OAuth flow or prompt for credentials
-        // 3. Exchange credentials for tokens
-        // 4. Store tokens securely
-
-        // Mock successful authentication
+        // Mock successful authentication for testing
         let token = AuthToken::new("mock_access_token".to_string())
             .with_refresh_token("mock_refresh_token".to_string())
             .with_expiration(chrono::Utc::now() + chrono::Duration::hours(1));

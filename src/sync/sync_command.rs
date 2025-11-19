@@ -13,11 +13,6 @@ pub async fn handle_sync_command(command: &str, config_name: Option<String>) -> 
         "pull" => sync_cmd.execute_pull(config_name).await,
         "list" => sync_cmd.execute_list().await,
         "status" => sync_cmd.execute_status().await,
-        "reset" => {
-            // Reset sync state
-            eprintln!("Reset command not yet implemented");
-            Ok(0)
-        }
         _ => Err(SyncError::sync_config(format!(
             "Unknown sync command: {}",
             command

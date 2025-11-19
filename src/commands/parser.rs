@@ -131,9 +131,6 @@ pub enum Commands {
     /// 从 Google Drive 拉取文件
     Pull,
 
-    /// 重置同步状态
-    Reset,
-
     /// 列出远程文件
     List,
 
