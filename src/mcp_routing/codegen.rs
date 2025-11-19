@@ -81,23 +81,14 @@ impl CodeGeneratorFactory {
             .parse::<AiType>()
             .map_err(|e| anyhow!("Invalid AI_CLI_TYPE '{}': {}", ai_cli_type_str, e))?;
 
-        let provider = std::env::var("AI_CLI_PROVIDER").ok();
-
-        let timeout_secs = std::env::var("AI_CLI_TIMEOUT")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(60);
+        let provider = std::env::var("CLI_PROVIDER").ok();
 
         eprintln!(
             "🤖 AI CLI code generator initialized: {} (provider: {:?})",
             ai_cli_type, provider
         );
 
-        Ok(Arc::new(AiCliCodeGenerator::new(
-            ai_cli_type,
-            provider,
-            timeout_secs,
-        )))
+        Ok(Arc::new(AiCliCodeGenerator::new(ai_cli_type, provider)))
     }
 }
 
@@ -109,11 +100,12 @@ pub struct AiCliCodeGenerator {
 }
 
 impl AiCliCodeGenerator {
-    pub fn new(ai_cli_type: AiType, provider: Option<String>, timeout_secs: u64) -> Self {
+    /// Create new AI CLI code generator with 12-hour timeout
+    pub fn new(ai_cli_type: AiType, provider: Option<String>) -> Self {
         Self {
             ai_cli_type,
             provider,
-            timeout: Duration::from_secs(timeout_secs.max(30)),
+            timeout: Duration::from_secs(12 * 60 * 60), // 12 hours
         }
     }
 
