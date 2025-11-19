@@ -548,7 +548,7 @@ pub enum AgenticWardenError {
 ## Authentication & Authorization
 
 ### [v0] Local Authentication
-- **File System**: Standard Unix permissions for configuration files
+- **File System**: Standard Unix permissions for system configuration
 - **Process**: Parent-child process relationship validation
 - **Shared Memory**: Namespace isolation by root PID
 
@@ -1132,6 +1132,61 @@ pub trait HealthCheck {
     async fn check_dependencies_health(&self) -> DependencyHealthStatus;
 
     async fn detailed_health_report(&self) -> DetailedHealthReport;
+}
+```
+
+---
+
+### API-013: OpenAI Environment Variable Configuration
+
+**Description**: OpenAI API configuration through environment variables with precedence over any LLM settings
+
+**Related**: REQ-013, ARCH-013
+
+#### Environment Variables
+| Variable | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `OPENAI_ENDPOINT` | URL | ✗ | `https://api.openai.com/v1` | OpenAI API endpoint URL |
+| `OPENAI_TOKEN` | string | ✓ | - | OpenAI API authentication token (sk-...) |
+| `OPENAI_MODEL` | string | ✗ | `gpt-4` | Default OpenAI model to use |
+
+#### Configuration Priority
+1. **Environment Variables** (highest priority)
+2. **Configuration File** (overridden when env vars present)
+3. **Default Values** (fallback)
+
+#### Usage Examples
+```bash
+# Basic OpenAI configuration
+export OPENAI_TOKEN="sk-proj-..."
+export OPENAI_MODEL="gpt-4-turbo"
+
+# Custom endpoint (for compatible API)
+export OPENAI_ENDPOINT="https://api.openai.com/v1"
+export OPENAI_TOKEN="sk-..."
+export OPENAI_MODEL="gpt-4"
+
+# Container deployment
+docker run -e OPENAI_TOKEN="sk-..." -e OPENAI_MODEL="gpt-3.5-turbo" agentic-warden
+```
+
+#### Security Considerations
+- Token validation ensures non-empty string values starting with "sk-"
+- Endpoint validation requires valid URL format
+- Configuration file LLM settings are ignored when environment variables are detected
+- Security warnings logged when tokens found in configuration files
+- Environment variables take complete precedence over file-based settings
+
+#### Validation Rules
+```rust
+// Token validation
+fn validate_openai_token(token: &str) -> bool {
+    !token.is_empty() && token.starts_with("sk-")
+}
+
+// Endpoint validation
+fn validate_openai_endpoint(endpoint: &str) -> bool {
+    endpoint.parse::<url::Url>().is_ok()
 }
 ```
 

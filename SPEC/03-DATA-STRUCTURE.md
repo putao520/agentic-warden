@@ -654,47 +654,28 @@ Prevention:
 ##### .mcp.json Configuration Schema
 ```json
 {
-  "$schema": "https://agentic-warden.dev/schema/mcp-config-v1.json",
-  "version": "1.0",
   "mcpServers": {
     "git-server": {
       "command": "mcp-server-git",
       "args": ["--repository", "/workspace"],
-      "description": "Git version control operations",
-      "category": "development",
-      "enabled": true,
-      "health_check": {
-        "enabled": true,
-        "interval": 60,
-        "timeout": 10
+      "env": {
+        "GIT_REPO_PATH": "/workspace"
       }
     },
     "filesystem-server": {
       "command": "mcp-server-filesystem",
-      "args": ["/workspace"],
-      "description": "File system operations",
-      "category": "development",
-      "enabled": true,
-      "health_check": {
-        "enabled": true,
-        "interval": 30,
-        "timeout": 5
-      }
+      "args": ["/workspace"]
     }
-  },
-  "routing": {
-    "max_tools_per_request": 10,
-    "clustering_threshold": 0.7,
-    "rerank_top_k": 5,
-    "similarity_threshold": 0.5
-  },
-  "llm": {
-    "endpoint": "http://localhost:11434",
-    "model": "qwen2.5:7b",
-    "timeout": 30
   }
 }
 ```
+
+##### Routing Configuration
+The intelligent routing system uses hardcoded configuration constants for routing parameters:
+- `DEFAULT_MAX_TOOLS_PER_REQUEST`: 10 - Maximum tools to consider per request
+- `DEFAULT_CLUSTERING_THRESHOLD`: 0.7 - Vector similarity threshold for tool clustering
+- `DEFAULT_RERANK_TOP_K`: 5 - Number of top candidates to rerank
+- `DEFAULT_SIMILARITY_THRESHOLD`: 0.5 - Minimum similarity threshold for tool selection
 
 #### In-Memory Vector Data Structures
 

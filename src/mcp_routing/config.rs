@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use dirs::home_dir;
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 use std::{
     collections::HashMap,
     fs,
@@ -18,10 +19,6 @@ pub struct McpConfig {
     pub version: String,
     #[serde(rename = "mcpServers", alias = "mcp_servers")]
     pub mcp_servers: HashMap<String, McpServerConfig>,
-    #[serde(default)]
-    pub routing: RoutingConfig,
-    #[serde(default)]
-    pub llm: LlmSection,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,45 +27,17 @@ pub struct McpServerConfig {
     pub command: String,
     #[serde(default)]
     pub args: Vec<String>,
-    pub description: Option<String>,
-    pub category: Option<String>,
-    #[serde(default = "enabled_true")]
-    pub enabled: bool,
     #[serde(default)]
-    pub health_check: HealthCheckConfig,
+    pub env: std::collections::HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HealthCheckConfig {
-    #[serde(default = "enabled_true")]
-    pub enabled: bool,
-    #[serde(default = "default_health_interval")]
-    pub interval: u64,
-    #[serde(default = "default_health_timeout")]
-    pub timeout: u64,
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct RoutingConfig {
-    #[serde(default = "default_max_tools")]
-    pub max_tools_per_request: usize,
-    #[serde(default = "default_clustering_threshold")]
-    pub clustering_threshold: f32,
-    #[serde(default = "default_rerank_top_k")]
-    pub rerank_top_k: usize,
-    #[serde(default = "default_similarity_threshold")]
-    pub similarity_threshold: f32,
-}
+// Routing configuration constants - hardcoded per design decision
+pub const DEFAULT_MAX_TOOLS_PER_REQUEST: usize = 10;
+pub const DEFAULT_CLUSTERING_THRESHOLD: f32 = 0.7;
+pub const DEFAULT_RERANK_TOP_K: usize = 5;
+pub const DEFAULT_SIMILARITY_THRESHOLD: f32 = 0.5;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct LlmSection {
-    pub endpoint: Option<String>,
-    pub model: Option<String>,
-    pub timeout: Option<u64>,
-}
 
 pub struct McpConfigManager {
     path: PathBuf,
@@ -79,18 +48,92 @@ pub struct McpConfigManager {
 impl McpConfigManager {
     pub fn load() -> Result<Self> {
         let path = resolve_config_path()?;
-        let metadata = fs::metadata(&path)?;
-        let last_loaded = metadata.modified().ok();
-        let content = fs::read_to_string(&path)
-            .with_context(|| format!("Failed to read MCP config from {}", path.display()))?;
-        let config: McpConfig = serde_json::from_str(&content)
-            .with_context(|| format!("Invalid JSON in {}", path.display()))?;
-        config.validate()?;
+
+        // Try to load from file, but handle missing file gracefully
+        let (config, last_loaded) = if path.exists() {
+            let metadata = fs::metadata(&path)?;
+            let last_loaded = metadata.modified().ok();
+            let content = fs::read_to_string(&path)
+                .with_context(|| format!("Failed to read MCP config from {}", path.display()))?;
+            let mut config: McpConfig = serde_json::from_str(&content)
+                .with_context(|| format!("Invalid JSON in {}", path.display()))?;
+
+            // Apply environment variable overrides based on .mcp.json structure
+            Self::apply_env_overrides(&mut config)?;
+            config.validate()?;
+
+            (config, last_loaded)
+        } else {
+            // Create default config
+            let mut config = McpConfig {
+                version: DEFAULT_VERSION.to_string(),
+                mcp_servers: std::collections::HashMap::new(),
+            };
+
+            // Apply environment variable overrides
+            Self::apply_env_overrides(&mut config)?;
+            config.validate()?;
+
+            (config, None)
+        };
+
         Ok(Self {
             path,
             config,
             last_loaded,
         })
+    }
+
+    /// Apply OpenAI environment variable configuration
+    /// LLM configuration is managed exclusively through environment variables per REQ-013
+    fn apply_env_overrides(_config: &mut McpConfig) -> Result<()> {
+        // Validate OpenAI environment variables if present
+        if let Ok(token) = std::env::var("OPENAI_TOKEN") {
+            Self::validate_openai_token(&token)?;
+            debug!("OpenAI token configured via environment variable");
+        }
+
+        if let Ok(endpoint) = std::env::var("OPENAI_ENDPOINT") {
+            Self::validate_openai_endpoint(&endpoint)?;
+            debug!("OpenAI endpoint configured via environment variable: {}", endpoint);
+        }
+
+        if let Ok(model) = std::env::var("OPENAI_MODEL") {
+            debug!("OpenAI model configured via environment variable: {}", model);
+        }
+
+        
+        Ok(())
+    }
+
+    /// Validate OpenAI token format
+    fn validate_openai_token(token: &str) -> Result<()> {
+        if token.is_empty() {
+            return Err(anyhow!("OPENAI_TOKEN cannot be empty"));
+        }
+
+        if !token.starts_with("sk-") {
+            return Err(anyhow!(
+                "OPENAI_TOKEN must start with 'sk-' prefix. Invalid token format detected."
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Validate OpenAI endpoint URL format
+    fn validate_openai_endpoint(endpoint: &str) -> Result<()> {
+        let url = endpoint.parse::<url::Url>()
+            .with_context(|| format!("Invalid OpenAI endpoint URL: {}", endpoint))?;
+
+        if url.scheme() != "https" && url.scheme() != "http" {
+            return Err(anyhow!(
+                "OpenAI endpoint must use http or https protocol. Invalid URL: {}",
+                endpoint
+            ));
+        }
+
+        Ok(())
     }
 
     pub fn config(&self) -> &McpConfig {
@@ -101,13 +144,7 @@ impl McpConfigManager {
         self.config
             .mcp_servers
             .iter()
-            .filter_map(|(name, cfg)| {
-                if cfg.enabled {
-                    Some((name.clone(), cfg.clone()))
-                } else {
-                    None
-                }
-            })
+            .map(|(name, cfg)| (name.clone(), cfg.clone()))
             .collect()
     }
 
@@ -140,42 +177,16 @@ impl McpConfig {
             if server.command.trim().is_empty() {
                 return Err(anyhow!("Server '{}' is missing a command", name));
             }
-            if server
-                .description
-                .as_deref()
-                .map(str::is_empty)
-                .unwrap_or(true)
-            {
-                return Err(anyhow!("Server '{}' requires a description", name));
-            }
-            if server
-                .category
-                .as_deref()
-                .map(str::is_empty)
-                .unwrap_or(true)
-            {
-                return Err(anyhow!(
-                    "Server '{}' requires a category (development/system/utility/ai/other)",
-                    name
-                ));
-            }
-            if server.health_check.interval == 0 || server.health_check.timeout == 0 {
-                return Err(anyhow!(
-                    "Server '{}' health_check interval/timeout must be > 0",
-                    name
-                ));
-            }
         }
         Ok(())
     }
 }
 
 fn resolve_config_path() -> Result<PathBuf> {
+    // Support environment variable override for config file path
     if let Ok(custom) = std::env::var("AGENTIC_WARDEN_MCP_CONFIG") {
         let path = PathBuf::from(custom);
-        if path.exists() {
-            return Ok(path);
-        }
+        return Ok(path); // Return path even if doesn't exist, let caller handle it
     }
 
     let mut candidates = Vec::new();
@@ -192,61 +203,18 @@ fn resolve_config_path() -> Result<PathBuf> {
         }
     }
 
-    Err(anyhow!(
-        "Unable to locate .mcp.json. Expected at ~/.agentic-warden/.mcp.json or ./{}",
-        DEFAULT_CONFIG_FILE
-    ))
+    // Return default path even if doesn't exist
+    if let Some(home) = home_dir() {
+        Ok(home.join(".agentic-warden").join(DEFAULT_CONFIG_FILE))
+    } else {
+        Ok(PathBuf::from(DEFAULT_CONFIG_FILE))
+    }
 }
 
 fn default_version() -> String {
     DEFAULT_VERSION.to_string()
 }
 
-fn enabled_true() -> bool {
-    true
-}
 
-fn default_health_interval() -> u64 {
-    60
-}
 
-fn default_health_timeout() -> u64 {
-    10
-}
 
-fn default_max_tools() -> usize {
-    10
-}
-
-fn default_clustering_threshold() -> f32 {
-    0.7
-}
-
-fn default_rerank_top_k() -> usize {
-    5
-}
-
-fn default_similarity_threshold() -> f32 {
-    0.5
-}
-
-impl Default for RoutingConfig {
-    fn default() -> Self {
-        Self {
-            max_tools_per_request: default_max_tools(),
-            clustering_threshold: default_clustering_threshold(),
-            rerank_top_k: default_rerank_top_k(),
-            similarity_threshold: default_similarity_threshold(),
-        }
-    }
-}
-
-impl Default for HealthCheckConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            interval: default_health_interval(),
-            timeout: default_health_timeout(),
-        }
-    }
-}

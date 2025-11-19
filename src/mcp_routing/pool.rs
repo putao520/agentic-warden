@@ -46,11 +46,7 @@ impl McpConnectionPool {
 
     pub async fn warm_up(&self) -> Result<Vec<DiscoveredTool>> {
         let mut all = Vec::new();
-        for (name, server) in self
-            .config
-            .mcp_servers
-            .iter()
-            .filter(|(_, cfg)| cfg.enabled)
+        for (name, server) in self.config.mcp_servers.iter()
         {
             let handle = self.ensure_handle(name.clone(), server.clone()).await?;
             let mut tools = handle.list_tools().await?;

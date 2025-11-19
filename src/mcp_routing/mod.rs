@@ -33,7 +33,6 @@ use tokio::sync::RwLock;
 const METHOD_VECTOR_PREFIX: &str = "method";
 
 pub struct IntelligentRouter {
-    routing: config::RoutingConfig,
     embedder: FastEmbedder,
     index: Mutex<MemRoutingIndex>,
     history: ConversationHistoryStore,
@@ -48,7 +47,6 @@ impl IntelligentRouter {
     pub async fn initialize() -> Result<Self> {
         let config_manager = McpConfigManager::load()?;
         let config_arc = Arc::new(config_manager.config().clone());
-        let routing = config_arc.routing.clone();
 
         let memory_config = MemoryConfig::load_from_provider_config()?;
         memory_config.validate()?;
@@ -57,19 +55,11 @@ impl IntelligentRouter {
         let history =
             ConversationHistoryStore::new(&memory_config.sahome_db_path, embedder.dimension())?;
 
-        let decision_endpoint = config_arc
-            .llm
-            .endpoint
-            .as_deref()
-            .unwrap_or(&memory_config.llm_endpoint)
-            .to_string();
-        let decision_model = config_arc
-            .llm
-            .model
-            .as_deref()
-            .unwrap_or(&memory_config.llm_model)
-            .to_string();
-        let decision_timeout = config_arc.llm.timeout.unwrap_or(30);
+        let decision_endpoint = std::env::var("OPENAI_ENDPOINT")
+            .unwrap_or_else(|_| memory_config.llm_endpoint.clone());
+        let decision_model = std::env::var("OPENAI_MODEL")
+            .unwrap_or_else(|_| memory_config.llm_model.clone());
+        let decision_timeout = 30; // Default timeout
         let decision_engine = Arc::new(DecisionEngine::new(
             &decision_endpoint,
             &decision_model,
@@ -79,10 +69,9 @@ impl IntelligentRouter {
         let dynamic_registry = Arc::new(registry::DynamicToolRegistry::new(Vec::new()));
         let _cleanup_task = dynamic_registry.start_cleanup_task();
 
-        // Enable orchestrator if LLM endpoint is explicitly configured
-        // Priority: config file > environment variable
-        // Only enable if user explicitly sets either one (not using defaults)
-        let llm_explicitly_configured = config_arc.llm.endpoint.is_some()
+        // Enable orchestrator if LLM endpoint is explicitly configured via environment variable
+        let llm_explicitly_configured = std::env::var("OPENAI_TOKEN").is_ok()
+            || std::env::var("OPENAI_ENDPOINT").is_ok()
             || std::env::var("AGENTIC_WARDEN_LLM_ENDPOINT").is_ok();
 
         let js_orchestrator = if llm_explicitly_configured {
@@ -105,7 +94,6 @@ impl IntelligentRouter {
         populate_registry(&tool_registry, discovered).await;
 
         Ok(Self {
-            routing,
             embedder,
             index: Mutex::new(index),
             history,
@@ -119,7 +107,6 @@ impl IntelligentRouter {
 
     /// Build a router from explicit dependencies (used for deterministic testing).
     pub fn new_with_components(
-        routing: config::RoutingConfig,
         embedder: FastEmbedder,
         index: MemRoutingIndex,
         history: ConversationHistoryStore,
@@ -130,7 +117,6 @@ impl IntelligentRouter {
         js_orchestrator: Option<Arc<js_orchestrator::WorkflowOrchestrator>>,
     ) -> Self {
         Self {
-            routing,
             embedder,
             index: Mutex::new(index),
             history,
@@ -194,7 +180,7 @@ impl IntelligentRouter {
     ) -> Result<IntelligentRouteResponse> {
         let max_tools = request
             .max_candidates
-            .unwrap_or(self.routing.max_tools_per_request);
+            .unwrap_or(config::DEFAULT_MAX_TOOLS_PER_REQUEST);
 
         let (tool_scores, method_scores) = {
             let index = self.index.lock();
@@ -296,7 +282,7 @@ impl IntelligentRouter {
             let index = self.index.lock();
             let max_tools = request
                 .max_candidates
-                .unwrap_or(self.routing.max_tools_per_request);
+                .unwrap_or(config::DEFAULT_MAX_TOOLS_PER_REQUEST);
             let tools = index.search_tools(embed, max_tools)?;
             let methods = index.search_methods(embed, max_tools * 2)?;
             (tools, methods)
@@ -422,17 +408,13 @@ struct PreparedEmbeddings {
 fn build_embeddings(
     embedder: &FastEmbedder,
     tools: &[DiscoveredTool],
-    config: &config::McpConfig,
+    _config: &config::McpConfig,
 ) -> Result<PreparedEmbeddings> {
     let mut tool_embeddings = Vec::new();
     let mut method_embeddings = Vec::new();
 
     for tool in tools {
-        let category = config
-            .mcp_servers
-            .get(&tool.server)
-            .and_then(|cfg| cfg.category.clone())
-            .unwrap_or_else(|| "uncategorized".into());
+        let category = "uncategorized".to_string();
 
         let description = tool
             .definition

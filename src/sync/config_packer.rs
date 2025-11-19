@@ -127,7 +127,7 @@ impl ConfigPacker {
         let mut file_count = 0;
         let mut total_size = 0u64;
 
-        // List of files to include
+        // Core files to include
         let files_to_pack = [
             ("CLAUDE.md", "Main memory file"),
             ("settings.json", "Main configuration file"),
@@ -172,6 +172,45 @@ impl ConfigPacker {
                     "Added skills directory with {} SKILL files ({} bytes)",
                     count, size
                 );
+            }
+        }
+
+        // Pack additional directories specified in SPEC REQ-003 (hooks, scripts, commands)
+        let additional_dirs = [
+            ("hooks", "Claude Code hook handlers and configuration"),
+            ("scripts", "Execution scripts and workflow files"),
+            ("commands", "Custom slash command definitions"),
+        ];
+
+        for (dir_name, description) in &additional_dirs {
+            let dir_path = claude_dir.join(dir_name);
+            if dir_path.exists() && dir_path.is_dir() {
+                if let Some((count, size)) =
+                    self.add_directory_to_tar(tar, &dir_path, &format!(".claude/{}", dir_name))?
+                {
+                    file_count += count;
+                    total_size += size;
+                    debug!(
+                        "Added {} directory with {} files ({} bytes)",
+                        dir_name, count, size
+                    );
+                    info!("Packed {}: {} files, {} bytes", description, count, size);
+                }
+            }
+        }
+
+        // Pack .mcp.json file if it exists (MCP server configuration for Claude)
+        let mcp_config_path = claude_dir.join(".mcp.json");
+        if mcp_config_path.exists() && mcp_config_path.is_file() {
+            if let Ok(size) = self.add_file_to_tar(
+                tar,
+                &mcp_config_path,
+                ".claude/.mcp.json",
+            ) {
+                file_count += 1;
+                total_size += size;
+                info!("Packed MCP configuration: .mcp.json ({} bytes)", size);
+                debug!("Added .mcp.json: {} bytes", size);
             }
         }
 

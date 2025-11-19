@@ -101,10 +101,16 @@ Agentic-Warden MUST integrate with Google Drive for selective AI CLI configurati
 - Archive size MUST be optimized (< 5MB typical)
 
 **Configuration File Selection Strategy**:
-- **Claude**: `CLAUDE.md`, `settings.json`, `agents/`, `skills/SKILL.md`
+- **Claude**: `CLAUDE.md`, `settings.json`, `agents/`, `skills/SKILL.md`, `hooks/`, `scripts/`, `commands/`, `.mcp.json`
 - **Codex**: `auth.json`, `config.toml`, `agents.md`, `history.jsonl`
 - **Gemini**: `google_accounts.json`, `oauth_creds.json`, `settings.json`, `gemini.md`
 - **Exclude**: `.cache/`, `temp/`, `logs/`, `node_modules/`, binaries
+
+**Claude Configuration Details**:
+- `hooks/`: Claude Code hook handlers and configuration files (SessionEnd/PreCompact/Stop)
+- `scripts/`: Execution scripts including ai-cli-runner.sh and custom workflow scripts
+- `commands/`: Custom slash command definitions and configurations
+- `.mcp.json`: MCP server configuration for Claude Code integration
 
 ---
 
@@ -607,33 +613,24 @@ Agentic-Warden MUST provide an intelligent MCP (Model Context Protocol) routing 
 #### Configuration Format (.mcp.json):
 ```json
 {
-  "version": "1.0",
-  "mcp_servers": {
+  "mcpServers": {
     "git-server": {
-      "command": "uvx",
-      "args": ["mcp-server-git"],
-      "description": "Git version control operations",
-      "category": "development",
-      "enabled": true,
-      "health_check": {
-        "enabled": true,
-        "interval": 60,
-        "timeout": 10
+      "command": "mcp-server-git",
+      "args": ["--repository", "/workspace"],
+      "env": {
+        "GIT_REPO_PATH": "/workspace"
       }
     }
-  },
-  "routing": {
-    "max_tools_per_request": 10,
-    "clustering_threshold": 0.7,
-    "rerank_top_k": 5
-  },
-  "llm": {
-    "endpoint": "http://localhost:11434",
-    "model": "qwen2.5:7b",
-    "timeout": 30
   }
 }
 ```
+
+#### Routing Configuration
+The intelligent routing system uses hardcoded configuration constants for routing parameters:
+- `DEFAULT_MAX_TOOLS_PER_REQUEST`: 10 - Maximum tools to consider per request
+- `DEFAULT_CLUSTERING_THRESHOLD`: 0.7 - Vector similarity threshold for tool clustering
+- `DEFAULT_RERANK_TOP_K`: 5 - Number of top candidates to rerank
+- `DEFAULT_SIMILARITY_THRESHOLD`: 0.5 - Minimum similarity threshold for tool selection
 
 #### 双模式向量数据库架构:
 - **SahomeDB** (File-based Persistent): Claude Code conversation history storage
@@ -1143,10 +1140,59 @@ Agentic-Warden MUST meet performance criteria for process tracking and task mana
 | REQ-010 | 内存集成与语义搜索 | P1 | 🟢 Done | v0.1.0 | ARCH-010, DATA-003, API-005 | Memory and search integration |
 | REQ-011 | AI CLI 更新/安装管理 | P1 | 🟢 Done | v0.1.0 | ARCH-008, MODULE-002, API-004 | Update command implementation |
 | REQ-012 | 智能MCP路由系统 | P0 | 🟢 Done | v0.2.0 | ARCH-012, DATA-012, API-012 | Intelligent routing system design |
+| REQ-013 | OpenAI环境变量配置 | P0 | 🟢 Done | v5.1.1 | ARCH-013, API-013 | OpenAI environment variable configuration |
 
 ---
 
-## Change Log
+### REQ-013: OpenAI 环境变量配置
+**Status**: 🟢 Done
+**Priority**: P0 (Critical)
+**Version**: v5.1.1
+**Related**: ARCH-013, API-013
+
+**Description**:
+Agentic-Warden MUST support OpenAI API configuration exclusively through environment variables, replacing configuration file-based LLM settings to improve security and containerized deployment compatibility.
+
+**Acceptance Criteria**:
+- [x] Support `OPENAI_ENDPOINT` environment variable for OpenAI API endpoint
+- [x] Support `OPENAI_TOKEN` environment variable for OpenAI API authentication token
+- [x] Support `OPENAI_MODEL` environment variable for default model selection
+- [x] Environment variables MUST take precedence over any configuration file LLM settings
+- [x] LLM configuration in `.mcp.json` MUST be ignored when environment variables are present
+- [x] Support containerized deployment with environment variable injection
+- [x] Graceful fallback to default values when environment variables are not set
+- [x] Security validation for token values and endpoint URLs
+
+**Technical Constraints**:
+- Environment variables MUST override configuration file LLM settings completely
+- Default endpoint MUST be `https://api.openai.com/v1` when not specified
+- Default model MUST be `gpt-4` when not specified
+- Token validation MUST ensure non-empty string values
+- Endpoint validation MUST ensure valid URL format
+- Configuration loading MUST validate environment variables before file config
+- Security warnings MUST be logged when tokens are detected in configuration files
+
+**Environment Variables**:
+```bash
+# Required: OpenAI API token
+OPENAI_TOKEN="sk-..."
+
+# Optional: Custom OpenAI endpoint (defaults to https://api.openai.com/v1)
+OPENAI_ENDPOINT="https://api.openai.com/v1"
+
+# Optional: Default model (defaults to gpt-4)
+OPENAI_MODEL="gpt-4"
+```
+
+### 2025-11-19
+- Added REQ-013: OpenAI环境变量配置
+- Status: Critical requirement for v5.1.1 security and containerization improvements
+- Complete OpenAI environment variable configuration with:
+  - OPENAI_ENDPOINT for API endpoint configuration
+  - OPENAI_TOKEN for secure authentication (replaces config file tokens)
+  - OPENAI_MODEL for default model selection
+  - Environment variable precedence over configuration file settings
+  - Security validation and container deployment support
 
 ### 2025-11-13
 - Added REQ-012: 智能MCP路由系统
