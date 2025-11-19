@@ -244,7 +244,7 @@ Agentic-Warden automatically chooses the best code generator:
 ```bash
 # Zero configuration! Uses claude by default
 # Optional customization:
-export AI_CLI_TYPE=claude      # or codex, gemini (default: claude)
+export CLI_TYPE=claude         # Any AI CLI: claude, codex, gemini, aider, cursor, etc.
 export CLI_PROVIDER=anthropic  # optional, uses provider.json
 ```
 
@@ -261,12 +261,15 @@ export OPENAI_MODEL=qwen2.5:7b
 - Otherwise → AI CLI (default: claude)
 
 **Environment Variables**:
-- `AI_CLI_TYPE`: AI CLI type (claude/codex/gemini, default: claude)
+- `CLI_TYPE`: AI CLI command name (default: claude)
+  - Supports any AI CLI tool: claude, codex, gemini, aider, cursor, etc.
+  - No restrictions - use any command you want
 - `CLI_PROVIDER`: Provider name from provider.json (optional)
 - Timeout: Fixed at 12 hours for long-running code generation
 
 **Benefits**:
 - Zero config for AI CLI mode
+- Works with any AI CLI tool (not limited to specific providers)
 - Better code quality with Claude/GPT-4
 - No Ollama installation needed
 - Long timeout (12h) for complex workflows

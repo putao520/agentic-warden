@@ -5,7 +5,6 @@
 
 use crate::mcp_routing::decision::{CandidateToolInfo, DecisionEngine};
 use crate::mcp_routing::js_orchestrator::workflow_planner::{WorkflowPlan, WorkflowPlannerEngine};
-use crate::provider::config::AiType;
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use std::process::Stdio;
@@ -74,36 +73,32 @@ impl CodeGeneratorFactory {
 
     /// Create AI CLI-based code generator (default: claude)
     fn create_ai_cli_generator() -> Result<Arc<dyn WorkflowPlannerEngine>> {
-        // Default to claude if AI_CLI_TYPE not set
-        let ai_cli_type_str = std::env::var("AI_CLI_TYPE").unwrap_or_else(|_| "claude".to_string());
-
-        let ai_cli_type = ai_cli_type_str
-            .parse::<AiType>()
-            .map_err(|e| anyhow!("Invalid AI_CLI_TYPE '{}': {}", ai_cli_type_str, e))?;
+        // Default to claude if CLI_TYPE not set
+        let cli_type = std::env::var("CLI_TYPE").unwrap_or_else(|_| "claude".to_string());
 
         let provider = std::env::var("CLI_PROVIDER").ok();
 
         eprintln!(
             "🤖 AI CLI code generator initialized: {} (provider: {:?})",
-            ai_cli_type, provider
+            cli_type, provider
         );
 
-        Ok(Arc::new(AiCliCodeGenerator::new(ai_cli_type, provider)))
+        Ok(Arc::new(AiCliCodeGenerator::new(cli_type, provider)))
     }
 }
 
 /// AI CLI-based code generator
 pub struct AiCliCodeGenerator {
-    ai_cli_type: AiType,
+    cli_command: String,
     provider: Option<String>,
     timeout: Duration,
 }
 
 impl AiCliCodeGenerator {
     /// Create new AI CLI code generator with 12-hour timeout
-    pub fn new(ai_cli_type: AiType, provider: Option<String>) -> Self {
+    pub fn new(cli_command: String, provider: Option<String>) -> Self {
         Self {
-            ai_cli_type,
+            cli_command,
             provider,
             timeout: Duration::from_secs(12 * 60 * 60), // 12 hours
         }
@@ -111,11 +106,7 @@ impl AiCliCodeGenerator {
 
     /// Call AI CLI with prompt and get response
     async fn call_ai_cli(&self, prompt: &str) -> Result<String> {
-        let cli_command = match self.ai_cli_type {
-            AiType::Claude => "claude",
-            AiType::Codex => "codex",
-            AiType::Gemini => "gemini",
-        };
+        let cli_command = &self.cli_command;
 
         let mut cmd = Command::new(cli_command);
         cmd.stdin(Stdio::piped())
