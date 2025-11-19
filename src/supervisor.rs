@@ -110,12 +110,63 @@ async fn get_cli_command(cli_type: &CliType) -> Result<String, ProcessError> {
     Ok(default_cmd.to_string())
 }
 
+/// Output handling strategy for CLI execution
+enum OutputStrategy {
+    /// Mirror output to stdout/stderr
+    Mirror,
+    /// Capture stdout to buffer
+    Capture(Arc<Mutex<Vec<u8>>>),
+}
+
 pub async fn execute_cli<S: TaskStorage>(
     registry: &Registry<S>,
     cli_type: &CliType,
     args: &[OsString],
     provider: Option<String>,
 ) -> Result<i32, ProcessError> {
+    execute_cli_internal(registry, cli_type, args, provider, None, OutputStrategy::Mirror)
+        .await
+        .map(|(exit_code, _)| exit_code)
+}
+
+/// Execute CLI and capture stdout output (for code generation)
+pub async fn execute_cli_with_output<S: TaskStorage>(
+    registry: &Registry<S>,
+    cli_type: &CliType,
+    args: &[OsString],
+    provider: Option<String>,
+    timeout: std::time::Duration,
+) -> Result<String, ProcessError> {
+    let buffer = Arc::new(Mutex::new(Vec::new()));
+    let (_, output_opt) = execute_cli_internal(
+        registry,
+        cli_type,
+        args,
+        provider,
+        Some(timeout),
+        OutputStrategy::Capture(buffer.clone()),
+    )
+    .await?;
+
+    match output_opt {
+        Some(output) => Ok(output),
+        None => Err(ProcessError::Other(
+            "Output capture failed unexpectedly".to_string(),
+        )),
+    }
+}
+
+/// Internal CLI execution with configurable output handling
+async fn execute_cli_internal<S: TaskStorage>(
+    registry: &Registry<S>,
+    cli_type: &CliType,
+    args: &[OsString],
+    provider: Option<String>,
+    timeout: Option<std::time::Duration>,
+    output_strategy: OutputStrategy,
+) -> Result<(i32, Option<String>), ProcessError> {
+    let is_capture_mode = matches!(output_strategy, OutputStrategy::Capture(_));
+
     platform::init_platform();
 
     let terminate_wrapper = |pid: u32| {
@@ -156,209 +207,6 @@ pub async fn execute_cli<S: TaskStorage>(
             provider_config.summary()
         );
     }
-
-    let cli_command = get_cli_command(cli_type).await?;
-
-    let mut command = Command::new(&cli_command);
-    command.args(args);
-    // Close stdin to prevent CLI from waiting for more input
-    // This allows one-shot execution with positional arguments
-    command.stdin(Stdio::null());
-    command.stdout(Stdio::piped());
-    command.stderr(Stdio::piped());
-
-    // Platform-specific command preparation (Unix: set process group and death signal)
-    #[cfg(unix)]
-    {
-        unsafe {
-            command.pre_exec(|| {
-                // Set process group ID
-                let result = libc::setpgid(0, 0);
-                if result != 0 {
-                    return Err(io::Error::last_os_error());
-                }
-                // Set parent death signal on Linux
-                #[cfg(target_os = "linux")]
-                {
-                    let result = libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
-                    if result != 0 {
-                        return Err(io::Error::last_os_error());
-                    }
-                }
-                Ok(())
-            });
-        }
-    }
-
-    // Inject environment variables
-    for (key, value) in &provider_config.env {
-        command.env(key, value);
-    }
-
-    let mut child = command.spawn()?;
-    let child_pid = child
-        .id()
-        .ok_or_else(|| io::Error::other("Failed to get child PID"))?;
-
-    let log_path = match generate_log_path(child_pid) {
-        Ok(path) => path,
-        Err(err) => {
-            platform::terminate_process(child_pid);
-            let _ = child.wait();
-            return Err(err.into());
-        }
-    };
-
-    let log_file = match OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(&log_path)
-        .await
-    {
-        Ok(file) => file,
-        Err(err) => {
-            platform::terminate_process(child_pid);
-            let _ = child.wait().await;
-            return Err(err.into());
-        }
-    };
-
-    debug(format!(
-        "Started Codex process pid={} log={}",
-        child_pid,
-        log_path.display()
-    ));
-
-    // Note: ChildResources not needed with tokio::process::Child
-    // It's only used on Windows for job object management
-    #[cfg(windows)]
-    {
-        let _resources = ChildResources::with_job(None);
-    }
-
-    let signal_guard = signal::install(child_pid)?;
-
-    let log_writer = Arc::new(Mutex::new(BufWriter::new(log_file)));
-    let mut copy_handles = Vec::new();
-
-    if let Some(stdout) = child.stdout.take() {
-        copy_handles.push(tokio::spawn(spawn_copy(
-            stdout,
-            log_writer.clone(),
-            StreamMirror::Stdout,
-        )));
-    }
-    if let Some(stderr) = child.stderr.take() {
-        copy_handles.push(tokio::spawn(spawn_copy(
-            stderr,
-            log_writer.clone(),
-            StreamMirror::Stderr,
-        )));
-    }
-
-    let registration_guard = if true {
-        let mut record = TaskRecord::new(
-            Utc::now(),
-            child_pid.to_string(),
-            log_path.to_string_lossy().into_owned(),
-            Some(platform::current_pid()),
-        );
-
-        // Get process tree information (core functionality)
-        match ProcessTreeInfo::current() {
-            Ok(tree_info) => match record.clone().with_process_tree_info(tree_info) {
-                Ok(updated) => {
-                    record = updated;
-                }
-                Err(err) => {
-                    warn(format!("Failed to attach process tree info: {}", err));
-                }
-            },
-            Err(err) => {
-                warn(format!("Failed to get process tree info: {}", err));
-                // Continue with basic record creation
-            }
-        }
-
-        if let Err(err) = registry.register(child_pid, &record) {
-            platform::terminate_process(child_pid);
-            let _ = child.wait().await;
-            return Err(err.into());
-        }
-        Some(RegistrationGuard::new(registry, child_pid))
-    } else {
-        None
-    };
-
-    let status = child.wait().await?;
-    drop(signal_guard);
-
-    for handle in copy_handles {
-        match handle.await {
-            Ok(result) => result?,
-            Err(_) => {
-                return Err(io::Error::other("Log writer task failed").into());
-            }
-        }
-    }
-
-    {
-        let mut writer = log_writer.lock().await;
-        writer.flush().await?;
-        writer.get_ref().sync_all().await?;
-    }
-
-    // Display log file path to user
-    eprintln!("完整日志已保存到: {}", log_path.display());
-
-    if let Some(guard) = registration_guard {
-        let completed_at = Utc::now();
-        let exit_code = status.code();
-        let result = match (status.success(), exit_code) {
-            (true, _) => Some("success".to_owned()),
-            (false, Some(code)) => Some(format!("failed_with_exit_code_{code}")),
-            (false, None) => Some("failed_without_exit_code".to_owned()),
-        };
-        let _ = guard.mark_completed(result, exit_code, completed_at);
-    }
-
-    Ok(extract_exit_code(status))
-}
-
-/// Execute CLI and capture stdout output (for code generation)
-/// Similar to execute_cli but captures and returns stdout instead of mirroring it
-pub async fn execute_cli_with_output<S: TaskStorage>(
-    registry: &Registry<S>,
-    cli_type: &CliType,
-    args: &[OsString],
-    provider: Option<String>,
-    timeout: std::time::Duration,
-) -> Result<String, ProcessError> {
-    platform::init_platform();
-
-    let terminate_wrapper = |pid: u32| {
-        platform::terminate_process(pid);
-        Ok(())
-    };
-    registry.sweep_stale_entries(Utc::now(), platform::process_alive, &terminate_wrapper)?;
-
-    // Load provider configuration
-    let provider_manager = ProviderManager::new()
-        .map_err(|e| ProcessError::Other(format!("Failed to load provider: {}", e)))?;
-
-    // Determine which provider to use
-    let (provider_name, provider_config) = if let Some(name) = provider {
-        let config = provider_manager
-            .get_provider(&name)
-            .map_err(|e| ProcessError::Other(e.to_string()))?;
-        (name, config)
-    } else {
-        let (name, config) = provider_manager
-            .get_default_provider()
-            .ok_or_else(|| ProcessError::Other("No default provider configured".to_string()))?;
-        (name, config)
-    };
 
     let cli_command = get_cli_command(cli_type).await?;
 
@@ -424,24 +272,41 @@ pub async fn execute_cli_with_output<S: TaskStorage>(
     };
 
     debug(format!(
-        "Started {} process for code generation pid={} log={}",
+        "Started {} process pid={} log={}{}",
         cli_type.display_name(),
         child_pid,
-        log_path.display()
+        log_path.display(),
+        if is_capture_mode { " (capture mode)" } else { "" }
     ));
 
-    let log_writer = Arc::new(Mutex::new(BufWriter::new(log_file)));
+    #[cfg(windows)]
+    {
+        let _resources = ChildResources::with_job(None);
+    }
 
-    // Capture stdout to buffer
-    let stdout_buffer = Arc::new(Mutex::new(Vec::new()));
+    let signal_guard = signal::install(child_pid)?;
+
+    let log_writer = Arc::new(Mutex::new(BufWriter::new(log_file)));
     let mut copy_handles = Vec::new();
 
+    // Handle stdout based on strategy
     if let Some(stdout) = child.stdout.take() {
-        let buffer_clone = stdout_buffer.clone();
-        let writer_clone = log_writer.clone();
-        copy_handles.push(tokio::spawn(async move {
-            spawn_copy_with_capture(stdout, writer_clone, buffer_clone).await
-        }));
+        match &output_strategy {
+            OutputStrategy::Mirror => {
+                copy_handles.push(tokio::spawn(spawn_copy(
+                    stdout,
+                    log_writer.clone(),
+                    StreamMirror::Stdout,
+                )));
+            }
+            OutputStrategy::Capture(buffer) => {
+                let buffer_clone = buffer.clone();
+                let writer_clone = log_writer.clone();
+                copy_handles.push(tokio::spawn(async move {
+                    spawn_copy_with_capture(stdout, writer_clone, buffer_clone).await
+                }));
+            }
+        }
     }
 
     if let Some(stderr) = child.stderr.take() {
@@ -460,9 +325,18 @@ pub async fn execute_cli_with_output<S: TaskStorage>(
             Some(platform::current_pid()),
         );
 
-        if let Ok(tree_info) = ProcessTreeInfo::current() {
-            if let Ok(updated) = record.clone().with_process_tree_info(tree_info) {
-                record = updated;
+        // Get process tree information
+        match ProcessTreeInfo::current() {
+            Ok(tree_info) => match record.clone().with_process_tree_info(tree_info) {
+                Ok(updated) => {
+                    record = updated;
+                }
+                Err(err) => {
+                    warn(format!("Failed to attach process tree info: {}", err));
+                }
+            },
+            Err(err) => {
+                warn(format!("Failed to get process tree info: {}", err));
             }
         }
 
@@ -474,18 +348,24 @@ pub async fn execute_cli_with_output<S: TaskStorage>(
         Some(RegistrationGuard::new(registry, child_pid))
     };
 
-    // Wait with timeout
-    let status = tokio::select! {
-        result = child.wait() => result?,
-        _ = tokio::time::sleep(timeout) => {
-            platform::terminate_process(child_pid);
-            let _ = child.wait().await;
-            return Err(ProcessError::Other(format!(
-                "Code generation timed out after {:?}",
-                timeout
-            )));
+    // Wait with optional timeout
+    let status = if let Some(timeout_duration) = timeout {
+        tokio::select! {
+            result = child.wait() => result?,
+            _ = tokio::time::sleep(timeout_duration) => {
+                platform::terminate_process(child_pid);
+                let _ = child.wait().await;
+                return Err(ProcessError::Other(format!(
+                    "CLI execution timed out after {:?}",
+                    timeout_duration
+                )));
+            }
         }
+    } else {
+        child.wait().await?
     };
+
+    drop(signal_guard);
 
     for handle in copy_handles {
         match handle.await {
@@ -502,31 +382,52 @@ pub async fn execute_cli_with_output<S: TaskStorage>(
         writer.get_ref().sync_all().await?;
     }
 
+    // Display log file path to user (not in capture mode)
+    if !is_capture_mode {
+        eprintln!("完整日志已保存到: {}", log_path.display());
+    }
+
     if let Some(guard) = registration_guard {
         let completed_at = Utc::now();
         let exit_code = status.code();
         let result = match (status.success(), exit_code) {
-            (true, _) => Some("codegen_success".to_owned()),
-            (false, Some(code)) => Some(format!("codegen_failed_with_exit_code_{code}")),
-            (false, None) => Some("codegen_failed_without_exit_code".to_owned()),
+            (true, _) => Some(if is_capture_mode {
+                "codegen_success".to_owned()
+            } else {
+                "success".to_owned()
+            }),
+            (false, Some(code)) => Some(format!(
+                "{}_failed_with_exit_code_{code}",
+                if is_capture_mode { "codegen" } else { "cli" }
+            )),
+            (false, None) => Some(format!(
+                "{}_failed_without_exit_code",
+                if is_capture_mode { "codegen" } else { "cli" }
+            )),
         };
         let _ = guard.mark_completed(result, exit_code, completed_at);
     }
 
-    // Extract captured output
-    let output = stdout_buffer.lock().await.clone();
-    let output_str = String::from_utf8_lossy(&output).to_string();
+    // Extract captured output if in capture mode
+    let captured_output = if let OutputStrategy::Capture(buffer) = output_strategy {
+        let output = buffer.lock().await.clone();
+        let output_str = String::from_utf8_lossy(&output).to_string();
 
-    if !status.success() {
-        return Err(ProcessError::Other(format!(
-            "{} CLI failed with exit code {}: {}",
-            cli_type.display_name(),
-            extract_exit_code(status),
-            output_str
-        )));
-    }
+        if !status.success() {
+            return Err(ProcessError::Other(format!(
+                "{} CLI failed with exit code {}: {}",
+                cli_type.display_name(),
+                extract_exit_code(status),
+                output_str
+            )));
+        }
 
-    Ok(output_str)
+        Some(output_str)
+    } else {
+        None
+    };
+
+    Ok((extract_exit_code(status), captured_output))
 }
 
 /// Generate a secure log file path in runtime directory
