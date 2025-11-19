@@ -126,6 +126,20 @@ aiw mcp remove filesystem -y
 - `aiw mcp disable <name>` - Disable a server (preserves configuration)
 - `aiw mcp edit` - Edit configuration file in your editor
 
+### Hot Reload
+
+Configuration changes are **automatically detected and applied** at runtime:
+
+- File watcher monitors `~/.aiw/.mcp.json` for changes
+- When config file is modified:
+  - Removed servers are shut down immediately
+  - Disabled servers are shut down immediately
+  - Changed servers (command/args/env) are restarted on next tool call
+  - Unchanged servers continue running without interruption
+  - New servers are lazily initialized on first tool call
+- No need to restart `aiw mcp serve` or any processes
+- Changes from CLI commands (`add`, `remove`, `enable`, `disable`) take effect instantly
+
 ### Add Command Options
 
 ```bash

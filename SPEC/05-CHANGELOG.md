@@ -52,6 +52,28 @@ aiw mcp disable brave-search
 aiw mcp edit
 ```
 
+**Configuration Hot Reload**:
+实现MCP配置文件的自动监听和热重载，无需重启进程即可应用配置更改。
+
+**核心功能**:
+- ✅ 使用 `notify` 库监听 `~/.aiw/.mcp.json` 文件变化
+- ✅ 智能生命周期管理:
+  - 🗑️ 自动关闭被删除的MCP服务器
+  - ⏸️ 自动关闭被禁用的MCP服务器
+  - 🔄 自动重启配置改变的服务器(command/args/env)
+  - ✨ 保持未变化的服务器继续运行
+  - 🆕 懒加载新增的服务器(首次调用时启动)
+- ✅ 利用RMCP的 `kill_on_drop` 自动清理子进程
+- ✅ 100ms延迟确保文件写入完成
+- ✅ 支持编辑器原子写入(vim等)
+- ✅ CLI命令(add/remove/enable/disable)更改即时生效
+
+**技术实现**:
+- 文件监听在独立线程运行，通过mpsc channel与tokio runtime通信
+- 配置包装在 `Arc<RwLock<Arc<McpConfig>>>` 实现线程安全的热更新
+- 对比新旧配置智能决定哪些服务需要重启
+- 无需重启 `aiw mcp serve` 或任何进程
+
 ### 📁 Implementation
 
 **新增模块**:
@@ -63,6 +85,11 @@ aiw mcp edit
 - `src/commands/mcp/get.rs` - 查看配置命令
 - `src/commands/mcp/enable_disable.rs` - 启用/禁用命令
 - `src/commands/mcp/edit.rs` - 编辑器集成命令
+- `src/mcp_routing/config_watcher.rs` - 配置文件热重载监听器
+
+**修改模块**:
+- `src/mcp_routing/pool.rs` - 添加配置热更新和服务生命周期管理
+- `src/mcp/mod.rs` - 集成配置监听器启动
 
 **新增依赖**:
 ```toml
@@ -70,6 +97,7 @@ colored = "2.1"          # 彩色终端输出
 prettytable-rs = "0.10"  # 表格格式化
 dialoguer = "0.11"       # 交互式提示
 which = "6.0"            # 命令查找
+notify = "8.2"           # 文件系统事件监听
 ```
 
 ### 🎯 Design Principles
@@ -93,6 +121,7 @@ which = "6.0"            # 命令查找
 
 **Commits**:
 - `2b7f399`: feat: 实现MCP服务器管理CLI命令
+- `b0bb8d6`: feat: 实现MCP配置文件热重载和服务生命周期管理
 
 ---
 
