@@ -1,10 +1,98 @@
 # Change Log - v0.x
 
 ## Version Information
-- Current version: v5.2.0
+- Current version: v5.3.0
 - Latest planned: v0.3.0
 - Start date: 2025-11-08
 - Last updated: 2025-11-19
+
+---
+
+## v5.3.0 - MCP服务器管理CLI命令 (🟢 Released, 2025-11-19)
+
+### 🆕 New Features
+
+**MCP Management CLI Commands**:
+实现完整的MCP服务器管理CLI命令集，简化MCP配置管理工作流程。
+
+**7个核心命令**:
+```bash
+aiw mcp list                              # 列出所有MCP服务器
+aiw mcp add <name> <command> [args...]    # 添加MCP服务器
+aiw mcp remove <name> [-y]                # 移除MCP服务器
+aiw mcp get <name>                        # 查看服务器详细配置
+aiw mcp enable <name>                     # 启用服务器
+aiw mcp disable <name>                    # 禁用服务器
+aiw mcp edit                              # 用编辑器打开.mcp.json
+```
+
+**功能特性**:
+- ✅ 友好的彩色终端输出
+- ✅ 表格格式展示服务器列表
+- ✅ YAML格式输出配置详情
+- ✅ 环境变量自动脱敏（API keys等）
+- ✅ 交互式确认提示（remove命令）
+- ✅ JSON格式验证和自动恢复（edit命令）
+- ✅ $EDITOR环境变量支持
+- ✅ 100% Claude Code配置兼容
+
+**使用示例**:
+```bash
+# 添加filesystem服务器
+aiw mcp add filesystem npx --description "Filesystem operations" --category system \
+  -- -y @modelcontextprotocol/server-filesystem /home/user
+
+# 列出所有服务器
+aiw mcp list
+
+# 临时禁用某个服务器
+aiw mcp disable brave-search
+
+# 直接编辑配置文件
+aiw mcp edit
+```
+
+### 📁 Implementation
+
+**新增模块**:
+- `src/commands/mcp/mod.rs` - MCP命令入口和路由
+- `src/commands/mcp/config_editor.rs` - 配置文件编辑器工具类
+- `src/commands/mcp/list.rs` - 列表展示命令
+- `src/commands/mcp/add.rs` - 添加服务器命令
+- `src/commands/mcp/remove.rs` - 移除服务器命令
+- `src/commands/mcp/get.rs` - 查看配置命令
+- `src/commands/mcp/enable_disable.rs` - 启用/禁用命令
+- `src/commands/mcp/edit.rs` - 编辑器集成命令
+
+**新增依赖**:
+```toml
+colored = "2.1"          # 彩色终端输出
+prettytable-rs = "0.10"  # 表格格式化
+dialoguer = "0.11"       # 交互式提示
+which = "6.0"            # 命令查找
+```
+
+### 🎯 Design Principles
+
+- **简单实用** - 只做配置管理，不做包注册表
+- **单一级别** - 只操作 `~/.aiw/.mcp.json`
+- **Claude Code兼容** - 配置格式100%兼容
+- **用户友好** - 丰富的彩色输出和清晰的错误提示
+
+### 📖 Documentation
+
+- `docs/MCP_CLI_SIMPLE_DESIGN.md` - 简化版MCP CLI设计文档
+- README.md更新 - 添加MCP管理命令说明
+
+### ✅ Testing
+
+- [x] McpConfigEditor单元测试通过
+- [x] 所有命令手动测试通过
+- [x] JSON验证和错误恢复测试通过
+- [x] 环境变量脱敏功能测试通过
+
+**Commits**:
+- `2b7f399`: feat: 实现MCP服务器管理CLI命令
 
 ---
 

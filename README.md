@@ -89,11 +89,65 @@ aiw search "how did I configure git yesterday?"
 aiw schema filesystem read_file
 ```
 
+## 🔧 MCP Server Management
+
+Agentic-Warden provides simple CLI commands to manage your MCP servers in `~/.aiw/.mcp.json`.
+
+### Quick Start
+
+```bash
+# Add a filesystem server
+aiw mcp add filesystem npx --description "Filesystem operations" --category system \
+  -- -y @modelcontextprotocol/server-filesystem /home/user
+
+# List all servers
+aiw mcp list
+
+# Get server details
+aiw mcp get filesystem
+
+# Disable a server temporarily
+aiw mcp disable brave-search
+
+# Edit configuration directly
+aiw mcp edit
+
+# Remove a server
+aiw mcp remove filesystem -y
+```
+
+### Available Commands
+
+- `aiw mcp list` - List all MCP servers with status
+- `aiw mcp add <name> <command> [args...]` - Add a new MCP server
+- `aiw mcp remove <name> [-y]` - Remove a server (with confirmation)
+- `aiw mcp get <name>` - Show server configuration details
+- `aiw mcp enable <name>` - Enable a disabled server
+- `aiw mcp disable <name>` - Disable a server (preserves configuration)
+- `aiw mcp edit` - Edit configuration file in your editor
+
+### Add Command Options
+
+```bash
+aiw mcp add <name> <command> [args...] [OPTIONS]
+
+Options:
+  --description <text>    Server description
+  --category <category>   Server category (system, development, search, etc.)
+  --env KEY=VALUE         Environment variables (can be used multiple times)
+  --disabled              Add but don't enable (default: enabled)
+```
+
+**Note**: Use `--` to separate positional arguments from command args:
+```bash
+aiw mcp add filesystem npx -- -y @modelcontextprotocol/server-filesystem /path
+```
+
 ## ⚙️ Configuration
 
 ### MCP Server Configuration
 
-Create `.mcp.json` in your project root or `~/.config/agentic-warden/.mcp.json`:
+Configuration file location: `~/.aiw/.mcp.json`
 
 ```json
 {
