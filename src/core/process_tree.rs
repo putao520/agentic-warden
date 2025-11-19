@@ -228,12 +228,6 @@ pub fn find_ai_cli_root_parent(pid: u32) -> AgenticResult<u32> {
 /// Get the specific AI CLI type from a process name and command line
 /// Returns: Some("claude"), Some("codex"), Some("gemini"), or None
 fn get_ai_cli_type(pid: u32, process_name: &str) -> Option<String> {
-    // 1. Check for environment variable override (AIW_CLI_TYPE)
-    // This allows users to manually tag a process if auto-detection fails
-    if let Some(env_type) = get_process_env_var(pid, "AIW_CLI_TYPE") {
-        return Some(env_type.to_lowercase());
-    }
-
     let name_lower = process_name.to_lowercase();
 
     // Remove .exe extension on Windows for comparison
@@ -243,16 +237,16 @@ fn get_ai_cli_type(pid: u32, process_name: &str) -> Option<String> {
         &name_lower
     };
 
-    // 2. Native AI CLI processes - exact matches first
+    // Native AI CLI processes - exact matches first
     match clean_name {
-        "claude" | "claude-cli" | "anthropic-claude" | "claude-code" => return Some("claude".to_string()),
+        "claude" | "claude-cli" | "anthropic-claude" => return Some("claude".to_string()),
         "codex" | "codex-cli" | "openai-codex" => return Some("codex".to_string()),
         "gemini" | "gemini-cli" | "google-gemini" => return Some("gemini".to_string()),
         _ => {}
     }
 
-    // 3. Partial matches for binary names (exclude claude-desktop)
-    if (clean_name.contains("claude") || clean_name.contains("claude-code")) && !clean_name.contains("claude-desktop") {
+    // Partial matches for variations (exclude claude-desktop to avoid confusion)
+    if clean_name.contains("claude") && !clean_name.contains("claude-desktop") {
         return Some("claude".to_string());
     }
     if clean_name.contains("codex") {
@@ -262,15 +256,9 @@ fn get_ai_cli_type(pid: u32, process_name: &str) -> Option<String> {
         return Some("gemini".to_string());
     }
 
-    // 4. Enhanced Runner/Interpreter Detection
-    // Supports: node, bun, deno, python, pnpm, yarn, bash, zsh, fish, powershell
-    let runners = [
-        "node", "bun", "deno", "python", "python3", "pnpm", "yarn", "npm", "npx", "bash", "zsh",
-        "fish", "sh", "powershell", "pwsh", "cmd",
-    ];
-
-    if runners.iter().any(|r| clean_name == *r || clean_name.starts_with(r)) {
-        if let Some(ai_type) = detect_runner_ai_cli_type(pid) {
+    // NPM-based AI CLI processes - enhanced detection with command line analysis
+    if clean_name == "node" || clean_name == "node.exe" {
+        if let Some(ai_type) = detect_npm_ai_cli_type(pid) {
             return Some(ai_type);
         }
     }
@@ -278,64 +266,24 @@ fn get_ai_cli_type(pid: u32, process_name: &str) -> Option<String> {
     None
 }
 
-/// Helper to get environment variable of a process (Platform specific)
-fn get_process_env_var(pid: u32, key: &str) -> Option<String> {
+/// Enhanced detection for NPM AI CLI processes using command line inspection
+pub fn detect_npm_ai_cli_type(pid: u32) -> Option<String> {
     #[cfg(unix)]
     {
-        // On Linux, we can read /proc/{pid}/environ
-        // This is a simplified implementation. In a real scenario, we might need better parsing.
-        use std::fs::File;
-        use std::io::Read;
-        
-        let path = format!("/proc/{}/environ", pid);
-        if let Ok(mut file) = File::open(path) {
-            let mut contents = Vec::new();
-            if file.read_to_end(&mut contents).is_ok() {
-                // Environ is null-separated
-                let data = String::from_utf8_lossy(&contents);
-                for line in data.split('\0') {
-                    if let Some((k, v)) = line.split_once('=') {
-                        if k == key {
-                            return Some(v.to_string());
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    // Windows implementation would go here (requires more complex API calls)
-    // For now, we skip env check on Windows or use current process env if pid matches
-    if pid == std::process::id() {
-        return std::env::var(key).ok();
-    }
-
-    None
-}
-
-/// Enhanced detection for Runner/Interpreter processes using command line inspection
-pub fn detect_runner_ai_cli_type(pid: u32) -> Option<String> {
-    #[cfg(unix)]
-    {
-        detect_runner_ai_cli_type_unix(pid)
+        detect_npm_ai_cli_type_unix(pid)
     }
 
     #[cfg(windows)]
     {
-        detect_runner_ai_cli_type_windows(pid)
+        detect_npm_ai_cli_type_windows(pid)
     }
 }
 
 #[cfg(unix)]
-fn detect_runner_ai_cli_type_unix(pid: u32) -> Option<String> {
+fn detect_npm_ai_cli_type_unix(pid: u32) -> Option<String> {
     get_command_line(pid)
         .and_then(|cmd| analyze_cmdline_for_ai_cli(&cmd))
-}
-
-#[cfg(windows)]
-fn detect_runner_ai_cli_type_windows(pid: u32) -> Option<String> {
-    get_command_line(pid)
-        .and_then(|cmd| analyze_cmdline_for_ai_cli(&cmd))
+        .or_else(|| Some("node".to_string()))
 }
 
 fn build_ai_cli_process_info(pid: u32) -> Option<AiCliProcessInfo> {
@@ -401,69 +349,70 @@ fn get_executable_path(pid: u32) -> Option<PathBuf> {
         .and_then(|info| info.executable_path)
 }
 
+#[cfg(windows)]
+fn detect_npm_ai_cli_type_windows(pid: u32) -> Option<String> {
+    get_command_line(pid)
+        .and_then(|cmd| analyze_cmdline_for_ai_cli(&cmd))
+        .or_else(|| Some("node".to_string()))
+}
+
 /// Analyze command line string to identify specific AI CLI type
-/// Now supports looser matching for various runners
 #[allow(dead_code)]
 fn analyze_cmdline_for_ai_cli(cmdline: &str) -> Option<String> {
     let cmdline_lower = cmdline.to_lowercase();
 
-    // 1. Strong indicators (package names)
-    if cmdline_lower.contains("claude-cli") || cmdline_lower.contains("@anthropic-ai/claude") || cmdline_lower.contains("claude-code") {
+    // Direct AI CLI execution
+    if cmdline_lower.contains("claude-cli") || cmdline_lower.contains("@anthropic-ai/claude-cli") {
         return Some("claude".to_string());
     }
     if cmdline_lower.contains("codex-cli") {
         return Some("codex".to_string());
     }
-    if cmdline_lower.contains("gemini-cli") || cmdline_lower.contains("@google/generative-ai") {
+    if cmdline_lower.contains("gemini-cli") || cmdline_lower.contains("@google/generative-ai-cli") {
         return Some("gemini".to_string());
     }
 
-    // 2. Script/File names
-    // e.g. "python run_claude.py", "bash start_codex.sh"
-    // We look for the tool name surrounded by word boundaries or path separators
-    
-    // Helper closure to check for tool name in path/arguments
-    let has_tool_keyword = |tool: &str| -> bool {
-        // Simple check: is it in the string?
-        // We want to avoid false positives like "include_common.rs" matching "claude"
-        // But for CLI args, "claude" usually appears as a distinct argument or part of a path
-        
-        // Check for "claude" as a standalone word or path component
-        // e.g. "/bin/claude", " claude ", "claude.js"
-        let patterns = [
-            format!(" {} ", tool),
-            format!("/{}", tool),
-            format!("\\{}", tool),
-            format!("{}.", tool),
-            format!("{} ", tool), // Start of arg
-        ];
-        
-        patterns.iter().any(|p| cmdline_lower.contains(p)) || cmdline_lower == tool
-    };
-
-    if has_tool_keyword("claude") && !cmdline_lower.contains("claude-desktop") {
-        return Some("claude".to_string());
-    }
-    if has_tool_keyword("codex") {
-        return Some("codex".to_string());
-    }
-    if has_tool_keyword("gemini") {
-        return Some("gemini".to_string());
+    // npm exec patterns
+    if cmdline_lower.contains("npm exec") {
+        if cmdline_lower.contains("claude-cli") || cmdline_lower.contains("@anthropic-ai/claude") {
+            return Some("claude".to_string());
+        }
+        if cmdline_lower.contains("codex-cli") {
+            return Some("codex".to_string());
+        }
+        if cmdline_lower.contains("gemini-cli") {
+            return Some("gemini".to_string());
+        }
     }
 
-    // 3. Environment variable injection in command line
-    // e.g. "AIW_CLI_TYPE=claude npm start"
-    if cmdline_lower.contains("aiw_cli_type=claude") {
-        return Some("claude".to_string());
-    }
-    if cmdline_lower.contains("aiw_cli_type=codex") {
-        return Some("codex".to_string());
-    }
-    if cmdline_lower.contains("aiw_cli_type=gemini") {
-        return Some("gemini".to_string());
+    // npx patterns
+    if cmdline_lower.contains("npx") {
+        if cmdline_lower.contains("claude-cli") || cmdline_lower.contains("@anthropic-ai/claude") {
+            return Some("claude".to_string());
+        }
+        if cmdline_lower.contains("codex-cli") {
+            return Some("codex".to_string());
+        }
+        if cmdline_lower.contains("gemini-cli") {
+            return Some("gemini".to_string());
+        }
     }
 
-    None
+    // Node.js with module paths
+    if cmdline_lower.contains("node_modules") {
+        if cmdline_lower.contains("claude-cli") {
+            return Some("claude".to_string());
+        }
+        if cmdline_lower.contains("codex-cli") {
+            return Some("codex".to_string());
+        }
+        if cmdline_lower.contains("gemini-cli") {
+            return Some("gemini".to_string());
+        }
+    }
+
+    // Generic Node.js detection if no specific AI CLI found
+    Some("node".to_string())
 }
 
 /// Get the process tree from a given PID up to the root parent
@@ -750,17 +699,9 @@ mod tests {
 
     #[test]
     fn test_analyze_cmdline_detects_specific_cli() {
-        // Standard NPM/Node patterns
         let claude_cmd = "node ./node_modules/@anthropic-ai/claude-cli/bin/run.js ask";
         assert_eq!(
             analyze_cmdline_for_ai_cli(claude_cmd),
-            Some("claude".to_string())
-        );
-
-        // Native Claude Code binary
-        let claude_native_cmd = "/usr/local/bin/claude-code";
-        assert_eq!(
-            analyze_cmdline_for_ai_cli(claude_native_cmd),
             Some("claude".to_string())
         );
 
@@ -770,47 +711,20 @@ mod tests {
             Some("codex".to_string())
         );
 
-        // New Runner patterns (bun, pnpm, yarn)
-        let bun_cmd = "bun run claude-cli";
+        let gemini_cmd = "npm exec @google/generative-ai-cli -- text";
         assert_eq!(
-            analyze_cmdline_for_ai_cli(bun_cmd),
-            Some("claude".to_string())
-        );
-
-        let pnpm_cmd = "pnpm exec codex-cli";
-        assert_eq!(
-            analyze_cmdline_for_ai_cli(pnpm_cmd),
-            Some("codex".to_string())
-        );
-
-        // Script/Wrapper patterns
-        let python_cmd = "python3 run_gemini.py";
-        assert_eq!(
-            analyze_cmdline_for_ai_cli(python_cmd),
+            analyze_cmdline_for_ai_cli(gemini_cmd),
             Some("gemini".to_string())
-        );
-
-        let bash_cmd = "/bin/bash ./start_claude.sh";
-        assert_eq!(
-            analyze_cmdline_for_ai_cli(bash_cmd),
-            Some("claude".to_string())
-        );
-
-        // Environment variable injection in cmdline
-        let env_cmd = "AIW_CLI_TYPE=codex npm start";
-        assert_eq!(
-            analyze_cmdline_for_ai_cli(env_cmd),
-            Some("codex".to_string())
         );
     }
 
     #[test]
-    fn test_analyze_cmdline_returns_none_for_generic() {
+    fn test_analyze_cmdline_defaults_to_node() {
         let generic_cmd = "node ./scripts/custom-runner.js";
-        assert_eq!(analyze_cmdline_for_ai_cli(generic_cmd), None);
-        
-        let random_cmd = "python3 calculate_pi.py";
-        assert_eq!(analyze_cmdline_for_ai_cli(random_cmd), None);
+        assert_eq!(
+            analyze_cmdline_for_ai_cli(generic_cmd),
+            Some("node".to_string())
+        );
     }
 
     #[cfg(unix)]
