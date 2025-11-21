@@ -1,12 +1,4 @@
 use crate::sync::directory_hasher::DirectoryHash;
-
-/// Network connectivity status
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum NetworkStatus {
-    Online,
-    Offline,
-    Unknown,
-}
 use crate::sync::error::{SyncError, SyncResult};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -60,8 +52,6 @@ pub struct SyncState {
     pub directories: HashMap<String, DirectoryHash>,
     pub last_sync: DateTime<Utc>,
     pub version: u32,
-    pub network_status: Option<NetworkStatus>,
-    pub network_last_checked: DateTime<Utc>,
 }
 
 impl Default for SyncState {
@@ -70,19 +60,17 @@ impl Default for SyncState {
             directories: HashMap::new(),
             last_sync: Utc::now(),
             version: 1,
-            network_status: None,
-            network_last_checked: Utc::now(),
         }
     }
 }
 
-/// Resolve the default sync file path within the agentic-warden directory.
+/// Resolve the default sync file path within the aiw directory.
 pub fn default_sync_file_path() -> SyncResult<PathBuf> {
     let home_dir = dirs::home_dir().ok_or_else(|| {
         SyncError::sync_config("Could not determine the home directory".to_string())
     })?;
 
-    let warden_dir = home_dir.join(".agentic-warden");
+    let warden_dir = home_dir.join(".aiw");
     fs::create_dir_all(&warden_dir).map_err(|err| {
         SyncError::sync_config(format!("Failed to create config directory: {err}"))
     })?;
@@ -134,14 +122,6 @@ pub fn save_sync_data_to(path: impl AsRef<Path>, data: &SyncData) -> SyncResult<
 
     fs::write(path, content)
         .map_err(|err| SyncError::sync_config(format!("Failed to write sync data: {err}")))
-}
-
-/// Save network status to the sync configuration.
-pub fn save_network_status(status: NetworkStatus) -> SyncResult<()> {
-    let mut data = load_sync_data()?;
-    data.state.network_status = Some(status);
-    data.state.network_last_checked = Utc::now();
-    save_sync_data(&data)
 }
 
 /// Expand tilde based paths into absolute directories.

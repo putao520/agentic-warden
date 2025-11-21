@@ -29,6 +29,24 @@ pub struct McpServerConfig {
     pub args: Vec<String>,
     #[serde(default)]
     pub env: std::collections::HashMap<String, String>,
+
+    // Optional fields for Claude Code compatibility
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub health_check: Option<HealthCheckConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HealthCheckConfig {
+    pub enabled: bool,
+    pub interval: u64,
+    pub timeout: u64,
 }
 
 
@@ -144,6 +162,10 @@ impl McpConfigManager {
         self.config
             .mcp_servers
             .iter()
+            .filter(|(_, cfg)| {
+                // Filter by enabled field if present (Claude Code compatibility)
+                cfg.enabled.unwrap_or(true)
+            })
             .map(|(name, cfg)| (name.clone(), cfg.clone()))
             .collect()
     }
@@ -183,32 +205,10 @@ impl McpConfig {
 }
 
 fn resolve_config_path() -> Result<PathBuf> {
-    // Support environment variable override for config file path
-    if let Ok(custom) = std::env::var("AGENTIC_WARDEN_MCP_CONFIG") {
-        let path = PathBuf::from(custom);
-        return Ok(path); // Return path even if doesn't exist, let caller handle it
-    }
-
-    let mut candidates = Vec::new();
-    if let Some(home) = home_dir() {
-        candidates.push(home.join(".agentic-warden").join(DEFAULT_CONFIG_FILE));
-    }
-    if let Ok(cwd) = std::env::current_dir() {
-        candidates.push(cwd.join(DEFAULT_CONFIG_FILE));
-    }
-
-    for candidate in candidates {
-        if candidate.exists() {
-            return Ok(candidate);
-        }
-    }
-
-    // Return default path even if doesn't exist
-    if let Some(home) = home_dir() {
-        Ok(home.join(".agentic-warden").join(DEFAULT_CONFIG_FILE))
-    } else {
-        Ok(PathBuf::from(DEFAULT_CONFIG_FILE))
-    }
+    // Only support global config at ~/.aiw/.mcp.json
+    // 100% compatible with Claude Code and other AI tools
+    let home = home_dir().ok_or_else(|| anyhow!("Cannot find home directory"))?;
+    Ok(home.join(".aiw").join(DEFAULT_CONFIG_FILE))
 }
 
 fn default_version() -> String {

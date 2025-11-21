@@ -650,7 +650,7 @@ Exit 2 scenarios (blocking):
 - FastEmbed initialization error
 ```
 
-**Log File**: `~/.config/agentic-warden/hooks.log`
+**Log File**: `~/.aiw/hooks.log`
 
 **Usage Examples**:
 ```bash
@@ -659,7 +659,7 @@ echo '{"session_id":"test-123","transcript_path":"~/.claude/sessions/test.jsonl"
   agentic-warden hooks handle
 
 # Check hook logs
-tail -f ~/.config/agentic-warden/hooks.log
+tail -f ~/.aiw/hooks.log
 ```
 
 ---

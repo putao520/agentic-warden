@@ -1,10 +1,240 @@
 # Change Log - v0.x
 
 ## Version Information
-- Current version: v5.1.1
+- Current version: v5.3.0
 - Latest planned: v0.3.0
 - Start date: 2025-11-08
-- Last updated: 2025-11-16
+- Last updated: 2025-11-19
+
+---
+
+## v5.3.0 - MCP服务器管理CLI命令 (🟢 Released, 2025-11-19)
+
+### 🆕 New Features
+
+**MCP Management CLI Commands**:
+实现完整的MCP服务器管理CLI命令集，简化MCP配置管理工作流程。
+
+**7个核心命令**:
+```bash
+aiw mcp list                              # 列出所有MCP服务器
+aiw mcp add <name> <command> [args...]    # 添加MCP服务器
+aiw mcp remove <name> [-y]                # 移除MCP服务器
+aiw mcp get <name>                        # 查看服务器详细配置
+aiw mcp enable <name>                     # 启用服务器
+aiw mcp disable <name>                    # 禁用服务器
+aiw mcp edit                              # 用编辑器打开.mcp.json
+```
+
+**功能特性**:
+- ✅ 友好的彩色终端输出
+- ✅ 表格格式展示服务器列表
+- ✅ YAML格式输出配置详情
+- ✅ 环境变量自动脱敏（API keys等）
+- ✅ 交互式确认提示（remove命令）
+- ✅ JSON格式验证和自动恢复（edit命令）
+- ✅ $EDITOR环境变量支持
+- ✅ 100% Claude Code配置兼容
+
+**使用示例**:
+```bash
+# 添加filesystem服务器
+aiw mcp add filesystem npx --description "Filesystem operations" --category system \
+  -- -y @modelcontextprotocol/server-filesystem /home/user
+
+# 列出所有服务器
+aiw mcp list
+
+# 临时禁用某个服务器
+aiw mcp disable brave-search
+
+# 直接编辑配置文件
+aiw mcp edit
+```
+
+**Configuration Hot Reload**:
+实现MCP配置文件的自动监听和热重载，无需重启进程即可应用配置更改。
+
+**核心功能**:
+- ✅ 使用 `notify` 库监听 `~/.aiw/.mcp.json` 文件变化
+- ✅ 智能生命周期管理:
+  - 🗑️ 自动关闭被删除的MCP服务器
+  - ⏸️ 自动关闭被禁用的MCP服务器
+  - 🔄 自动重启配置改变的服务器(command/args/env)
+  - ✨ 保持未变化的服务器继续运行
+  - 🆕 懒加载新增的服务器(首次调用时启动)
+- ✅ 利用RMCP的 `kill_on_drop` 自动清理子进程
+- ✅ 100ms延迟确保文件写入完成
+- ✅ 支持编辑器原子写入(vim等)
+- ✅ CLI命令(add/remove/enable/disable)更改即时生效
+
+**技术实现**:
+- 文件监听在独立线程运行，通过mpsc channel与tokio runtime通信
+- 配置包装在 `Arc<RwLock<Arc<McpConfig>>>` 实现线程安全的热更新
+- 对比新旧配置智能决定哪些服务需要重启
+- 无需重启 `aiw mcp serve` 或任何进程
+
+### 📁 Implementation
+
+**新增模块**:
+- `src/commands/mcp/mod.rs` - MCP命令入口和路由
+- `src/commands/mcp/config_editor.rs` - 配置文件编辑器工具类
+- `src/commands/mcp/list.rs` - 列表展示命令
+- `src/commands/mcp/add.rs` - 添加服务器命令
+- `src/commands/mcp/remove.rs` - 移除服务器命令
+- `src/commands/mcp/get.rs` - 查看配置命令
+- `src/commands/mcp/enable_disable.rs` - 启用/禁用命令
+- `src/commands/mcp/edit.rs` - 编辑器集成命令
+- `src/mcp_routing/config_watcher.rs` - 配置文件热重载监听器
+
+**修改模块**:
+- `src/mcp_routing/pool.rs` - 添加配置热更新和服务生命周期管理
+- `src/mcp/mod.rs` - 集成配置监听器启动
+
+**新增依赖**:
+```toml
+colored = "2.1"          # 彩色终端输出
+prettytable-rs = "0.10"  # 表格格式化
+dialoguer = "0.11"       # 交互式提示
+which = "6.0"            # 命令查找
+notify = "8.2"           # 文件系统事件监听
+```
+
+### 🎯 Design Principles
+
+- **简单实用** - 只做配置管理，不做包注册表
+- **单一级别** - 只操作 `~/.aiw/.mcp.json`
+- **Claude Code兼容** - 配置格式100%兼容
+- **用户友好** - 丰富的彩色输出和清晰的错误提示
+
+### 📖 Documentation
+
+- `docs/MCP_CLI_SIMPLE_DESIGN.md` - 简化版MCP CLI设计文档
+- README.md更新 - 添加MCP管理命令说明
+
+### ✅ Testing
+
+- [x] McpConfigEditor单元测试通过
+- [x] 所有命令手动测试通过
+- [x] JSON验证和错误恢复测试通过
+- [x] 环境变量脱敏功能测试通过
+
+**Commits**:
+- `2b7f399`: feat: 实现MCP服务器管理CLI命令
+- `b0bb8d6`: feat: 实现MCP配置文件热重载和服务生命周期管理
+
+---
+
+## v5.2.0 - 配置路径统一与Claude Code兼容性增强 (🟢 Released, 2025-11-19)
+
+### 🔧 Configuration & Compatibility
+
+**Configuration Path Unification**:
+- 统一所有持久化配置路径使用 `~/.aiw/` 目录
+- 移除对 `~/.agentic-warden/` 和 `~/.config/agentic-warden/` 的支持
+- 运行时数据保持在系统临时目录 `/tmp/.aiw/` (Linux/macOS) 或 `%TEMP%\.aiw\` (Windows)
+- 配置文件路径标准化：
+  - `~/.aiw/.mcp.json` - MCP服务器配置(全局唯一)
+  - `~/.aiw/provider.json` - Provider配置
+  - `~/.aiw/auth.json` - 认证信息
+  - `~/.aiw/config.json` - 主配置文件
+  - `/tmp/.aiw/aiw.log` - 日志文件(运行时)
+
+**Claude Code 100% Compatibility**:
+- MCP配置完全兼容Claude Code格式
+- 仅支持全局配置文件 `~/.aiw/.mcp.json`(移除项目级.mcp.json支持)
+- 新增可选字段支持：
+  - `description`: MCP服务器描述
+  - `category`: 服务器分类(system, development, search等)
+  - `enabled`: 启用/禁用开关(默认true)
+  - `healthCheck`: 健康检查配置(enabled, interval, timeout)
+- 自动过滤已禁用的服务器(`enabled: false`)
+
+**AI CLI Process Detection Enhancement**:
+- 添加 `claude-code` 二进制名称检测支持
+- 保持专注于AI CLI检测(claude, claude-code, codex, gemini)
+- 移除过度工程化的功能(环境变量AIW_CLI_TYPE、python/bash/zsh检测等)
+- 仅为AI CLI工具检测node/npm/npx进程
+
+**Configuration Management**:
+- 移除未使用的环境变量 `AGENTIC_WARDEN_MCP_CONFIG`
+- LLM配置完全通过环境变量管理(OPENAI_TOKEN, OPENAI_ENDPOINT, OPENAI_MODEL)
+- 环境变量优先级高于provider.json配置
+
+### 📁 File Changes
+
+**Modified Files**:
+- `src/core/process_tree.rs` - AI CLI检测逻辑简化和claude-code支持
+- `src/utils/config_paths.rs` - 配置路径从.agentic-warden迁移到.aiw
+- `src/mcp_routing/config.rs` - MCP配置Claude Code兼容性增强
+- `src/mcp_routing/pool.rs` - 添加enabled字段过滤
+- `src/sync/sync_config.rs` - 路径更新
+- `src/sync/sync_config_manager.rs` - 路径更新
+- `src/mcp/mod.rs` - 路径更新
+- `.mcp.json.example` - 更新为Claude Code兼容格式
+
+**Commits**:
+- `b889314`: refactor: 优化MCP配置管理,100%兼容Claude Code
+- `9e4dcdb`: fix: 修复AI CLI进程识别和配置路径问题
+- `cc0fa40`: Revert "enhance: 改进AI CLI进程检测逻辑"
+
+### 🎯 Design Principles
+
+**简化原则**:
+- 只维护AI CLI，不管理通用解释器
+- 全局配置优先，移除多层级配置支持
+- 与Claude Code等工具保持100%配置兼容
+
+**零门槛配置**:
+- 统一配置目录结构
+- 标准化文件路径
+- 自动创建必要目录
+
+### 🔜 Planned Features (v5.3.0)
+
+**MCP Management CLI Commands** (设计阶段):
+基于MCPM和Claude Code的最佳实践，计划实现：
+
+**核心命令**:
+- `aiw mcp list` - 列出所有MCP服务器及状态
+- `aiw mcp add <name> <command> [args...]` - 添加MCP服务器
+- `aiw mcp remove <name>` - 移除MCP服务器
+- `aiw mcp get <name>` - 获取服务器详细配置
+- `aiw mcp edit <name>` - 编辑服务器配置
+
+**状态控制**:
+- `aiw mcp enable <name>` - 启用服务器
+- `aiw mcp disable <name>` - 禁用服务器
+- `aiw mcp restart <name>` - 重启服务器连接
+
+**健康检查**:
+- `aiw mcp test <name>` - 测试服务器连接
+- `aiw mcp health [name]` - 检查健康状态
+- `aiw mcp tools <name>` - 列出服务器提供的工具
+
+**高级功能**:
+- `aiw mcp validate` - 验证.mcp.json配置
+- `aiw mcp export` - 导出配置
+- `aiw mcp import <file>` - 导入配置
+
+**Package Registry Strategy** (研究阶段):
+- 评估Smithery.ai集成可能性
+- 考虑GitHub MCP Registry作为数据源
+- 可选功能：`aiw mcp search <query>` 和 `aiw mcp install <package>`
+
+### 📖 Breaking Changes
+
+**配置路径迁移** (需要用户手动操作):
+```bash
+# 如果存在旧配置，需要手动迁移
+mv ~/.agentic-warden ~/.aiw
+# 或
+mv ~/.config/agentic-warden ~/.aiw
+```
+
+**MCP配置文件位置变更**:
+- 旧: `~/.config/agentic-warden/.mcp.json` 或项目目录 `.mcp.json`
+- 新: `~/.aiw/.mcp.json` (仅全局配置)
 
 ---
 

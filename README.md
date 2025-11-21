@@ -89,11 +89,79 @@ aiw search "how did I configure git yesterday?"
 aiw schema filesystem read_file
 ```
 
+## 🔧 MCP Server Management
+
+Agentic-Warden provides simple CLI commands to manage your MCP servers in `~/.aiw/.mcp.json`.
+
+### Quick Start
+
+```bash
+# Add a filesystem server
+aiw mcp add filesystem npx --description "Filesystem operations" --category system \
+  -- -y @modelcontextprotocol/server-filesystem /home/user
+
+# List all servers
+aiw mcp list
+
+# Get server details
+aiw mcp get filesystem
+
+# Disable a server temporarily
+aiw mcp disable brave-search
+
+# Edit configuration directly
+aiw mcp edit
+
+# Remove a server
+aiw mcp remove filesystem -y
+```
+
+### Available Commands
+
+- `aiw mcp list` - List all MCP servers with status
+- `aiw mcp add <name> <command> [args...]` - Add a new MCP server
+- `aiw mcp remove <name> [-y]` - Remove a server (with confirmation)
+- `aiw mcp get <name>` - Show server configuration details
+- `aiw mcp enable <name>` - Enable a disabled server
+- `aiw mcp disable <name>` - Disable a server (preserves configuration)
+- `aiw mcp edit` - Edit configuration file in your editor
+
+### Hot Reload
+
+Configuration changes are **automatically detected and applied** at runtime:
+
+- File watcher monitors `~/.aiw/.mcp.json` for changes
+- When config file is modified:
+  - Removed servers are shut down immediately
+  - Disabled servers are shut down immediately
+  - Changed servers (command/args/env) are restarted on next tool call
+  - Unchanged servers continue running without interruption
+  - New servers are lazily initialized on first tool call
+- No need to restart `aiw mcp serve` or any processes
+- Changes from CLI commands (`add`, `remove`, `enable`, `disable`) take effect instantly
+
+### Add Command Options
+
+```bash
+aiw mcp add <name> <command> [args...] [OPTIONS]
+
+Options:
+  --description <text>    Server description
+  --category <category>   Server category (system, development, search, etc.)
+  --env KEY=VALUE         Environment variables (can be used multiple times)
+  --disabled              Add but don't enable (default: enabled)
+```
+
+**Note**: Use `--` to separate positional arguments from command args:
+```bash
+aiw mcp add filesystem npx -- -y @modelcontextprotocol/server-filesystem /path
+```
+
 ## ⚙️ Configuration
 
 ### MCP Server Configuration
 
-Create `.mcp.json` in your project root or `~/.config/agentic-warden/.mcp.json`:
+Configuration file location: `~/.aiw/.mcp.json`
 
 ```json
 {
@@ -168,6 +236,45 @@ Configure for **LLM ReAct mode** (primary decision engine). If not configured, f
 - `endpoint` - LLM API endpoint (OpenAI-compatible)
 - `model` - Model name
 - `timeout` - Request timeout in seconds
+
+#### Code Generation Mode
+Agentic-Warden automatically chooses the best code generator:
+
+**AI CLI Mode** (Default - uses Claude):
+```bash
+# Zero configuration! Uses claude by default
+# Optional customization:
+export CLI_TYPE=claude           # Supported: claude, codex, gemini
+export CLI_PROVIDER=llmlite      # Any provider: llmlite, openrouter, anthropic, etc.
+```
+
+**Ollama Mode** (when OPENAI_TOKEN is set):
+```bash
+# Set OPENAI_TOKEN to enable Ollama
+export OPENAI_TOKEN=your-token
+export OPENAI_ENDPOINT=http://localhost:11434
+export OPENAI_MODEL=qwen2.5:7b
+```
+
+**Auto-detection**:
+- `OPENAI_TOKEN` exists → Ollama (local LLM)
+- Otherwise → AI CLI (default: claude)
+
+**Environment Variables**:
+- `CLI_TYPE`: AI CLI tool name (default: claude)
+  - **Supported CLI tools**: `claude`, `codex`, `gemini`
+  - Uses the actual CLI command (e.g., `claude`, `codex`)
+- `CLI_PROVIDER`: Provider name from provider.json (optional)
+  - **No restrictions** - supports any provider
+  - Examples: `llmlite`, `openrouter`, `anthropic`, `deepseek`, etc.
+- Timeout: Fixed at 12 hours for long-running code generation
+
+**Benefits**:
+- Zero config for AI CLI mode
+- Flexible provider support (not limited to specific vendors)
+- Better code quality with Claude/GPT-4
+- No Ollama installation needed
+- Long timeout (12h) for complex workflows
 
 ## 🏗️ Architecture
 

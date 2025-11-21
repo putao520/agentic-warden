@@ -5,17 +5,15 @@ use agentic_warden::cli_type::{parse_cli_selector_strict, parse_cli_type};
 use agentic_warden::commands::ai_cli::AiCliCommand;
 use agentic_warden::commands::{
     parse_external_as_ai_cli,
-    parser::{HooksAction, RolesAction},
+    parser::{HooksAction, McpAction, RolesAction},
     Cli, Commands,
 };
 use agentic_warden::error::ErrorCategory;
 use agentic_warden::execute_update;
 use agentic_warden::mcp::AgenticWardenMcpServer;
-// Network detector module removed - functionality deprecated
 use agentic_warden::pwait_mode;
 use agentic_warden::roles::RoleManager;
 use agentic_warden::sync;
-use agentic_warden::sync::sync_config::save_network_status;
 use agentic_warden::tui;
 use agentic_warden::wait_mode;
 use help::{print_command_help, print_general_help, print_quick_examples};
@@ -137,7 +135,6 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
             launch_tui(Some(tui::ScreenType::Push(directories))).await
         }
         Commands::Pull => launch_tui(Some(tui::ScreenType::Pull)).await,
-        Commands::Reset => handle_sync_command("reset", None).await,
         Commands::List => handle_sync_command("list", None).await,
         Commands::Wait { timeout, verbose } => {
             // CLI参数已完整实现，支持timeout和verbose参数
@@ -207,10 +204,7 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
                 }
             }
         }
-        Commands::Mcp {
-            transport,
-            log_level,
-        } => handle_mcp_command(transport, log_level).await,
+        Commands::Mcp(action) => handle_mcp_action(action).await,
         Commands::Roles(action) => handle_roles_command(action).await,
         Commands::Hooks(action) => handle_hooks_command(action).await,
         Commands::External(tokens) => handle_external_command(tokens).await,
@@ -219,12 +213,6 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
 
 async fn launch_tui(initial_screen: Option<tui::ScreenType>) -> Result<ExitCode, String> {
     color_eyre::install().map_err(|e| format!("Failed to install error handler: {}", e))?;
-
-    tokio::spawn(async {
-        if let Err(e) = perform_background_network_detection().await {
-            eprintln!("Warning: Background network detection failed: {}", e);
-        }
-    });
 
     let tui_result = match initial_screen {
         Some(screen) => tui::app::run_tui_app_with_screen(Some(screen)),
@@ -343,7 +331,114 @@ fn handle_help_command(topic: Option<String>) -> Result<ExitCode, String> {
 }
 
 /// 处理MCP命令
-async fn handle_mcp_command(transport: String, log_level: String) -> Result<ExitCode, String> {
+async fn handle_mcp_action(action: McpAction) -> Result<ExitCode, String> {
+    match action {
+        McpAction::List => {
+            use agentic_warden::commands::mcp::{handle_mcp_command, McpCommand};
+            match handle_mcp_command(McpCommand::List) {
+                Ok(_) => Ok(ExitCode::from(0)),
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    Ok(ExitCode::from(1))
+                }
+            }
+        }
+        McpAction::Add {
+            name,
+            command,
+            args,
+            description,
+            category,
+            env_vars,
+            disabled,
+        } => {
+            use agentic_warden::commands::mcp::{handle_mcp_command, McpCommand};
+
+            // 解析环境变量
+            let mut env = Vec::new();
+            for env_var in env_vars {
+                let parts: Vec<&str> = env_var.splitn(2, '=').collect();
+                if parts.len() == 2 {
+                    env.push((parts[0].to_string(), parts[1].to_string()));
+                } else {
+                    eprintln!("Warning: Invalid env var format '{}', expected KEY=VALUE", env_var);
+                }
+            }
+
+            match handle_mcp_command(McpCommand::Add {
+                name,
+                command,
+                args,
+                description,
+                category,
+                env,
+                disabled,
+            }) {
+                Ok(_) => Ok(ExitCode::from(0)),
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    Ok(ExitCode::from(1))
+                }
+            }
+        }
+        McpAction::Remove { name, yes } => {
+            use agentic_warden::commands::mcp::{handle_mcp_command, McpCommand};
+            match handle_mcp_command(McpCommand::Remove { name, yes }) {
+                Ok(_) => Ok(ExitCode::from(0)),
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    Ok(ExitCode::from(1))
+                }
+            }
+        }
+        McpAction::Get { name } => {
+            use agentic_warden::commands::mcp::{handle_mcp_command, McpCommand};
+            match handle_mcp_command(McpCommand::Get { name }) {
+                Ok(_) => Ok(ExitCode::from(0)),
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    Ok(ExitCode::from(1))
+                }
+            }
+        }
+        McpAction::Enable { name } => {
+            use agentic_warden::commands::mcp::{handle_mcp_command, McpCommand};
+            match handle_mcp_command(McpCommand::Enable { name }) {
+                Ok(_) => Ok(ExitCode::from(0)),
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    Ok(ExitCode::from(1))
+                }
+            }
+        }
+        McpAction::Disable { name } => {
+            use agentic_warden::commands::mcp::{handle_mcp_command, McpCommand};
+            match handle_mcp_command(McpCommand::Disable { name }) {
+                Ok(_) => Ok(ExitCode::from(0)),
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    Ok(ExitCode::from(1))
+                }
+            }
+        }
+        McpAction::Edit => {
+            use agentic_warden::commands::mcp::{handle_mcp_command, McpCommand};
+            match handle_mcp_command(McpCommand::Edit) {
+                Ok(_) => Ok(ExitCode::from(0)),
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    Ok(ExitCode::from(1))
+                }
+            }
+        }
+        McpAction::Serve {
+            transport,
+            log_level,
+        } => handle_mcp_serve(transport, log_level).await,
+    }
+}
+
+async fn handle_mcp_serve(transport: String, log_level: String) -> Result<ExitCode, String> {
     // 初始化日志
     let log_level_filter = match log_level.to_lowercase().as_str() {
         "debug" => tracing::Level::DEBUG,
@@ -474,17 +569,4 @@ async fn run_mcp_server_stdio(
     server: AgenticWardenMcpServer,
 ) -> Result<(), Box<dyn std::error::Error>> {
     server.run().await
-}
-
-/// Perform background network detection to update cached network status (non-blocking)
-/// NOTE: Network detection has been deprecated - now using Unknown status
-async fn perform_background_network_detection() -> anyhow::Result<()> {
-    use agentic_warden::sync::sync_config::NetworkStatus;
-
-    // Network detector removed - save Unknown status
-    if let Err(e) = save_network_status(NetworkStatus::Unknown) {
-        eprintln!("Warning: Failed to save network status: {}", e);
-    }
-
-    Ok(())
 }

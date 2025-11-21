@@ -62,7 +62,7 @@ graph TB
 #### DATA-001: Provider Configuration
 **Version**: v0.1.0+
 **Related Requirements**: REQ-002
-**Storage Location**: `~/.agentic-warden/provider.json`
+**Storage Location**: `~/.aiw/provider.json`
 
 **Schema Definition**:
 ```json
@@ -135,7 +135,7 @@ pub struct Provider {
 #### DATA-002: Synchronization Configuration
 **Version**: v0.1.0+
 **Related Requirements**: REQ-003
-**Storage Location**: `~/.agentic-warden/sync.json`
+**Storage Location**: `~/.aiw/sync.json`
 
 **Schema Definition**:
 ```json
@@ -173,7 +173,7 @@ pub struct Provider {
 #### DATA-003: OAuth Token Information
 **Version**: v0.1.0+
 **Related Requirements**: REQ-003
-**Storage Location**: `~/.agentic-warden/auth.json`
+**Storage Location**: `~/.aiw/auth.json`
 
 **Schema Definition**:
 ```json
@@ -372,7 +372,7 @@ pub const MCP_TOOLS: &[&str] = &[
 
 #### Configuration Directory Structure
 ```
-~/.agentic-warden/
+~/.aiw/
 ├── provider.json              # Provider configurations (DATA-001)
 ├── sync.json                  # Synchronization state (DATA-002)
 ├── auth.json                  # OAuth tokens (DATA-003)
@@ -385,7 +385,7 @@ pub const MCP_TOOLS: &[&str] = &[
 
 #### Runtime Data Organization
 ```
-<TEMP>/.agentic-warden/         # System temp directory
+<TEMP>/.aiw/         # System temp directory
 ├── agentic-warden.log          # Application logs
 ├── temp/                       # Temporary files
 │   ├── oauth_callback.html     # OAuth callback page
@@ -615,7 +615,7 @@ Detection:
   - Backup file comparison
 
 Recovery:
-  - Restore from backup (~/.agentic-warden/backup/)
+  - Restore from backup (~/.aiw/backup/)
   - Reset to default configuration
   - User notification and manual intervention
 

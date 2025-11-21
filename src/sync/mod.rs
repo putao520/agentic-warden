@@ -1,4 +1,3 @@
-pub mod compressor;
 pub mod config_packer;
 pub mod config_sync_manager;
 pub mod directory_hasher;

@@ -19,6 +19,75 @@ pub enum RolesAction {
     List,
 }
 
+/// MCP服务器管理动作
+#[derive(Subcommand, Debug, Clone)]
+pub enum McpAction {
+    /// 列出所有MCP服务器
+    List,
+
+    /// 添加MCP服务器
+    Add {
+        /// 服务器名称
+        name: String,
+        /// 可执行命令
+        command: String,
+        /// 命令参数
+        args: Vec<String>,
+        /// 服务器描述
+        #[arg(long)]
+        description: Option<String>,
+        /// 服务器分类
+        #[arg(long)]
+        category: Option<String>,
+        /// 环境变量 (KEY=VALUE格式，可多次使用)
+        #[arg(long = "env")]
+        env_vars: Vec<String>,
+        /// 添加但不启用
+        #[arg(long)]
+        disabled: bool,
+    },
+
+    /// 移除MCP服务器
+    Remove {
+        /// 服务器名称
+        name: String,
+        /// 跳过确认提示
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
+
+    /// 获取服务器详细配置
+    Get {
+        /// 服务器名称
+        name: String,
+    },
+
+    /// 启用服务器
+    Enable {
+        /// 服务器名称
+        name: String,
+    },
+
+    /// 禁用服务器
+    Disable {
+        /// 服务器名称
+        name: String,
+    },
+
+    /// 在编辑器中编辑配置文件
+    Edit,
+
+    /// 启动MCP服务器（内部使用）
+    Serve {
+        /// 传输协议
+        #[arg(long, default_value = "stdio")]
+        transport: String,
+        /// 日志级别
+        #[arg(long, default_value = "info")]
+        log_level: String,
+    },
+}
+
 /// Agentic-Warden - AI CLI 工具的统一管理和进程监控平台
 #[derive(Parser, Debug, Clone)]
 #[command(
@@ -62,9 +131,6 @@ pub enum Commands {
     /// 从 Google Drive 拉取文件
     Pull,
 
-    /// 重置同步状态
-    Reset,
-
     /// 列出远程文件
     List,
 
@@ -104,16 +170,9 @@ pub enum Commands {
         tool: Option<String>,
     },
 
-    /// 启动 MCP (Model Context Protocol) 服务器
-    Mcp {
-        /// 传输协议
-        #[arg(long, default_value = "stdio")]
-        transport: String,
-
-        /// 日志级别
-        #[arg(long, default_value = "info")]
-        log_level: String,
-    },
+    /// MCP服务器管理
+    #[command(subcommand)]
+    Mcp(McpAction),
 
     /// AI CLI 角色管理
     #[command(subcommand)]

@@ -27,10 +27,24 @@ impl ClientCapabilities {
     }
 
     /// Test if client supports dynamic tool registration.
-    /// Note: This is a placeholder - actual notification sending is disabled due to rmcp API constraints.
+    ///
+    /// # Current Implementation (Placeholder)
+    ///
+    /// This function currently always returns `true` without performing actual capability testing.
+    ///
+    /// **Why**: The rmcp library does not provide an API to send test notifications to clients.
+    /// Attempting to send notifications during initialization could interfere with the
+    /// connection handshake.
+    ///
+    /// **Workaround**: We assume all clients support dynamic tools and rely on a query-based
+    /// approach:
+    /// - After generating new tools via `intelligent_route`, clients should re-query the
+    ///   tool list using the standard MCP `tools/list` method
+    /// - This is compatible with all MCP clients as per the protocol specification
+    ///
+    /// **Future**: If rmcp adds a proper notification API or capability negotiation protocol,
+    /// this function should be updated to perform actual testing.
     pub async fn test_dynamic_tools_support(_peer: &Peer<RoleServer>) -> bool {
-        // Dynamic tool notification support is assumed to be true for now
-        // The client should re-query tools after receiving intelligent_route responses
         eprintln!("   ✅ Dynamic tools: ENABLED (query-based mode)");
         true
     }

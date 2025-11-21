@@ -111,7 +111,7 @@ pub struct StartTaskParams {
     pub task: String,
     /// Optional provider name to use for this task.
     ///
-    /// All available providers and their scenarios are defined in ~/.agentic-warden/providers.json.
+    /// All available providers and their scenarios are defined in ~/.aiw/providers.json.
     /// Each provider can have a 'scenario' field describing when to use it.
     ///
     /// If not specified, the default_provider from configuration will be used.
@@ -454,8 +454,21 @@ impl AgenticWardenMcpServer {
                 .await
                 .map_err(|e| format!("Failed to initialize Boa runtime pool: {e}"))?,
         );
-        let injector = Arc::new(McpFunctionInjector::new(connection_pool));
+        let injector = Arc::new(McpFunctionInjector::new(connection_pool.clone()));
         let js_executor = Arc::new(JsToolExecutor::new(Arc::clone(&boa_pool), injector));
+
+        // Start config file watcher for hot reload
+        let config_path = dirs::home_dir()
+            .ok_or_else(|| "Cannot find home directory".to_string())?
+            .join(".aiw")
+            .join(".mcp.json");
+
+        if config_path.exists() {
+            use crate::mcp_routing::config_watcher;
+            if let Err(e) = config_watcher::start_config_watcher(connection_pool, config_path).await {
+                eprintln!("⚠️  Failed to start config watcher: {}", e);
+            }
+        }
 
         Ok(Self {
             router: Arc::new(router),
@@ -472,7 +485,7 @@ impl AgenticWardenMcpServer {
     fn get_history_db_path() -> Result<PathBuf, String> {
         let config_dir = dirs::config_dir()
             .ok_or_else(|| "Failed to get config directory".to_string())?
-            .join("agentic-warden");
+            .join("aiw");
 
         std::fs::create_dir_all(&config_dir)
             .map_err(|e| format!("Failed to create config directory: {e}"))?;
@@ -669,11 +682,23 @@ impl AgenticWardenMcpServer {
                 .await
                 .map_err(|e| format!("Failed to launch {} task: {}", task_spec.ai_type, e))?;
 
-                // Note: For now we can't easily get PID and log_file from execute_cli
-                // This is a limitation of the current supervisor design
-                // Return placeholder result
+                // ⚠️ PLACEHOLDER: PID tracking limitation
+                //
+                // **Issue**: supervisor::execute_cli() doesn't return the actual child process PID.
+                // The function spawns an AI CLI process but only returns a Result<ExitCode>.
+                //
+                // **Why**: The supervisor design prioritizes async/await ergonomics and uses
+                // tokio::process::Command, which doesn't expose the PID before spawning.
+                //
+                // **Current workaround**:
+                // - Return pid: 0 as a placeholder
+                // - Actual PIDs are tracked internally by the unified registry via shared memory
+                // - Clients can query task status via the registry, not via this PID
+                //
+                // **Future fix**: Refactor supervisor::execute_cli() to return a struct containing
+                // both the PID and a JoinHandle to the process future.
                 Ok::<TaskLaunchResult, String>(TaskLaunchResult {
-                    pid: 0, // Placeholder - actual PID tracked in registry
+                    pid: 0, // Placeholder - real PID tracked in shared memory registry
                     ai_type: task_spec.ai_type.clone(),
                     task: task_spec.task.clone(),
                     provider: task_spec.provider.clone(),

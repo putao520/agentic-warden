@@ -1,4 +1,6 @@
+pub mod codegen;
 pub mod config;
+pub mod config_watcher;
 mod decision;
 mod embedding;
 mod index;
@@ -55,33 +57,49 @@ impl IntelligentRouter {
         let history =
             ConversationHistoryStore::new(&memory_config.sahome_db_path, embedder.dimension())?;
 
+        let dynamic_registry = Arc::new(registry::DynamicToolRegistry::new(Vec::new()));
+        let _cleanup_task = dynamic_registry.start_cleanup_task();
+
+        // Initialize code generator using factory pattern
+        // Auto-detect: OPENAI_TOKEN exists → Ollama, otherwise → AI CLI (default: claude)
         let decision_endpoint = std::env::var("OPENAI_ENDPOINT")
             .unwrap_or_else(|_| memory_config.llm_endpoint.clone());
         let decision_model = std::env::var("OPENAI_MODEL")
             .unwrap_or_else(|_| memory_config.llm_model.clone());
-        let decision_timeout = 30; // Default timeout
-        let decision_engine = Arc::new(DecisionEngine::new(
-            &decision_endpoint,
-            &decision_model,
-            decision_timeout,
-        )?);
 
-        let dynamic_registry = Arc::new(registry::DynamicToolRegistry::new(Vec::new()));
-        let _cleanup_task = dynamic_registry.start_cleanup_task();
+        let code_generator = codegen::CodeGeneratorFactory::from_env(
+            decision_endpoint.clone(),
+            decision_model,
+        );
 
-        // Enable orchestrator if LLM endpoint is explicitly configured via environment variable
-        let llm_explicitly_configured = std::env::var("OPENAI_TOKEN").is_ok()
-            || std::env::var("OPENAI_ENDPOINT").is_ok()
-            || std::env::var("AGENTIC_WARDEN_LLM_ENDPOINT").is_ok();
+        let (decision_engine, js_orchestrator) = match code_generator {
+            Ok(generator) => {
+                // Create decision engine for routing (separate from code generation)
+                let decision_engine = Arc::new(DecisionEngine::new(
+                    &decision_endpoint,
+                    &"qwen2.5:7b",  // Use lightweight model for routing decisions
+                    30,
+                )?);
 
-        let js_orchestrator = if llm_explicitly_configured {
-            eprintln!("🤖 LLM orchestration enabled: {}", decision_endpoint);
-            Some(Arc::new(js_orchestrator::WorkflowOrchestrator::new(
-                decision_engine.clone(),
-            )))
-        } else {
-            eprintln!("🔍 LLM orchestration disabled, vector-only mode");
-            None
+                let orchestrator = Some(Arc::new(
+                    js_orchestrator::WorkflowOrchestrator::with_planner(generator),
+                ));
+
+                (decision_engine, orchestrator)
+            }
+            Err(e) => {
+                eprintln!("⚠️  Code generator initialization failed: {}", e);
+                eprintln!("🔍 Falling back to vector-only mode");
+
+                // Create fallback decision engine
+                let decision_engine = Arc::new(DecisionEngine::new(
+                    &decision_endpoint,
+                    &"qwen2.5:7b",
+                    30,
+                )?);
+
+                (decision_engine, None)
+            }
         };
 
         let mut index = MemRoutingIndex::new(embedder.dimension())?;
