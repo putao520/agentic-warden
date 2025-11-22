@@ -31,7 +31,7 @@ const LOOP_LIMIT_MULTIPLIER: u64 = 40_000;
 /// Security configuration for Boa runtime
 #[derive(Debug, Clone)]
 pub struct SecurityConfig {
-    /// Maximum execution time in milliseconds (default: 30000ms)
+    /// Maximum execution time in milliseconds (default: 30 minutes)
     pub max_execution_time_ms: u64,
     /// Maximum memory usage in MB (default: 256MB)
     pub max_memory_mb: usize,
@@ -42,7 +42,7 @@ pub struct SecurityConfig {
 impl Default for SecurityConfig {
     fn default() -> Self {
         Self {
-            max_execution_time_ms: 30_000,
+            max_execution_time_ms: 30 * 60 * 1000,  // 30 minutes in milliseconds
             max_memory_mb: 256,
             max_call_stack_depth: 128,
         }

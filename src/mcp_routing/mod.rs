@@ -296,6 +296,8 @@ impl IntelligentRouter {
         request: &IntelligentRouteRequest,
         embed: &[f32],
     ) -> Result<IntelligentRouteResponse> {
+        eprintln!("   🔍 [DEBUG] try_orchestrate started");
+
         let (tool_scores, method_scores) = {
             let index = self.index.lock();
             let max_tools = request
@@ -306,14 +308,27 @@ impl IntelligentRouter {
             (tools, methods)
         };
 
+        eprintln!("   🔍 [DEBUG] Found {} candidate tools", tool_scores.len());
+
         if tool_scores.is_empty() {
             return Err(anyhow!("No candidate tools for orchestration"));
         }
 
         let candidate_infos = build_candidates(&tool_scores, &method_scores);
-        let orchestrated_tool = orchestrator
+        eprintln!("   🔍 [DEBUG] Calling orchestrator.orchestrate()...");
+
+        let orchestrated_tool = match orchestrator
             .orchestrate(&request.user_request, &candidate_infos)
-            .await?;
+            .await {
+                Ok(tool) => {
+                    eprintln!("   ✅ [DEBUG] Orchestration succeeded: {}", tool.name);
+                    tool
+                }
+                Err(e) => {
+                    eprintln!("   ❌ [DEBUG] Orchestration failed: {}", e);
+                    return Err(e);
+                }
+            };
 
         let Some(registry) = self.dynamic_registry.as_ref() else {
             return Err(anyhow!("Dynamic registry not initialized"));

@@ -45,6 +45,7 @@ impl ClientCapabilities {
     /// **Future**: If rmcp adds a proper notification API or capability negotiation protocol,
     /// this function should be updated to perform actual testing.
     pub async fn test_dynamic_tools_support(_peer: &Peer<RoleServer>) -> bool {
+        eprintln!("   🔍 [DEBUG] test_dynamic_tools_support called!");
         eprintln!("   ✅ Dynamic tools: ENABLED (query-based mode)");
         true
     }

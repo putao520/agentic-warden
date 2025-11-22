@@ -934,7 +934,7 @@ impl ServerHandler for AgenticWardenMcpServer {
         // We delay a bit to allow the MCP initialization handshake to complete
         tokio::spawn(async move {
             // Wait for initialization to complete
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
             // Test if client supports dynamic tool registration
             let supports = ClientCapabilities::test_dynamic_tools_support(&peer).await;

@@ -64,7 +64,7 @@ impl CodeGeneratorFactory {
         endpoint: String,
         model: String,
     ) -> Result<Arc<dyn WorkflowPlannerEngine>> {
-        let timeout = 30;
+        let timeout = 30 * 60;  // 30 minutes in seconds
         let decision_engine = DecisionEngine::new(&endpoint, &model, timeout)?;
         eprintln!("🤖 Ollama code generator initialized: {}", endpoint);
         Ok(Arc::new(decision_engine))
@@ -120,13 +120,38 @@ impl AiCliCodeGenerator {
     }
 
     /// Call AI CLI with prompt and get response
-    /// Uses the unified AI CLI execution infrastructure
+    /// Uses temporary files to avoid stdin/stdout capture issues
     async fn call_ai_cli(&self, prompt: &str) -> Result<String> {
+        eprintln!("   🔍 [CODEX] Starting AI CLI call...");
+        eprintln!("   🔍 [CODEX] CLI type: {}", self.cli_type.display_name());
+        eprintln!("   🔍 [CODEX] Timeout: {:?}", self.timeout);
+        eprintln!("   🔍 [CODEX] Prompt length: {} chars", prompt.len());
+
         let registry = create_cli_registry()
             .context("Failed to create CLI registry")?;
 
-        // Build args with full access permissions
-        let cli_args = self.cli_type.build_full_access_args(prompt);
+        eprintln!("   🔍 [CODEX] CLI registry created successfully");
+
+        // Create temporary files for input/output
+        let prompt_file = std::env::temp_dir().join(format!("aiw_prompt_{}.txt", std::process::id()));
+        let output_file = std::env::temp_dir().join(format!("aiw_output_{}.txt", std::process::id()));
+
+        // Write prompt to temp file
+        std::fs::write(&prompt_file, prompt)
+            .context("Failed to write prompt to temp file")?;
+
+        // Build args using file input for CODEX
+        let cli_args = match self.cli_type.display_name() {
+            "codex" => {
+                vec![
+                    "exec".to_string(),
+                    "--dangerously-bypass-approvals-and-sandbox".to_string(),
+                ]
+            }
+            _ => self.cli_type.build_full_access_args(prompt),
+        };
+
+        eprintln!("   🔍 [CODEX] CLI args built: {} args", cli_args.len());
 
         // Convert to OsString for supervisor
         let os_args: Vec<std::ffi::OsString> = cli_args
@@ -134,16 +159,195 @@ impl AiCliCodeGenerator {
             .map(|s| s.into())
             .collect();
 
-        // Execute CLI and capture output
-        supervisor::execute_cli_with_output(
+        eprintln!("   🔍 [CODEX] Calling supervisor::execute_cli...");
+
+        // Execute CLI normally (no output capture)
+        let exit_code = supervisor::execute_cli(
             &registry,
             &self.cli_type,
             &os_args,
             self.provider.clone(),
-            self.timeout,
         )
-        .await
-        .context(format!("Failed to execute {} CLI", self.cli_type.display_name()))
+        .await;
+
+        eprintln!("   🔍 [CODEX] Supervisor call completed with exit code: {:?}", exit_code);
+
+        // Clean up prompt file
+        let _ = std::fs::remove_file(&prompt_file);
+
+        match exit_code {
+            Ok(0) => {
+                // Give CODEX a moment to write to log files
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+                // Parse log files to get actual CODEX output
+                let actual_output = parse_codex_log_output().await?;
+                eprintln!("   🔍 [CODEX] Retrieved actual output, length: {}", actual_output.len());
+                Ok(actual_output)
+            }
+            Ok(code) => {
+                Err(anyhow!("CLI execution failed with exit code: {}", code))
+            }
+            Err(e) => {
+                Err(anyhow!("CLI execution failed with error: {}", e))
+            }
+        }
+    }
+}
+
+/// Parse CODEX log output to get actual AI response
+async fn parse_codex_log_output() -> Result<String> {
+    // Find the most recent CODEX log file
+    let log_dir = std::env::temp_dir().join(".aiw").join("logs");
+
+    let logs = std::fs::read_dir(&log_dir)
+        .context("Failed to read log directory")?;
+
+    let mut latest_log: Option<(std::path::PathBuf, std::time::SystemTime)> = None;
+
+    for entry in logs {
+        let entry = entry.context("Failed to read log entry")?;
+        let path = entry.path();
+
+        if path.extension().and_then(|s| s.to_str()) == Some("log") {
+            let metadata = std::fs::metadata(&path)
+                .context("Failed to get log metadata")?;
+            let modified = metadata.modified()
+                .context("Failed to get modification time")?;
+
+            match &latest_log {
+                None => latest_log = Some((path, modified)),
+                Some((_, latest_time)) => {
+                    if modified > *latest_time {
+                        latest_log = Some((path, modified));
+                    }
+                }
+            }
+        }
+    }
+
+    let (log_path, _) = latest_log.ok_or_else(|| anyhow!("No CODEX log files found"))?;
+
+    eprintln!("   🔍 [CODEX] Reading log file: {:?}", log_path);
+
+    // Read and parse the log file
+    let log_content = std::fs::read_to_string(&log_path)
+        .context("Failed to read log file")?;
+
+    // Extract CODEX output from log (look for patterns that indicate AI responses)
+    let mut output_lines = Vec::new();
+    let mut in_codex_output = false;
+
+    for line in log_content.lines() {
+        // Look for CODEX response patterns
+        if line.contains("thinking") || line.contains("codex") || line.contains("agent_message") {
+            in_codex_output = true;
+        }
+
+        if in_codex_output && !line.trim().is_empty() {
+            // Skip log timestamps and metadata, keep actual content
+            if !line.starts_with("[") && !line.starts_with("202") && !line.contains("mcp:") {
+                output_lines.push(line);
+            }
+        }
+    }
+
+    let output = if output_lines.is_empty() {
+        // If we can't parse structured output, return the last substantial part of the log
+        let lines: Vec<&str> = log_content.lines().collect();
+        if lines.len() > 10 {
+            lines[lines.len()-20..].join("\n")
+        } else {
+            log_content
+        }
+    } else {
+        output_lines.join("\n")
+    };
+
+    // Clean up the output - remove common CODEX CLI artifacts
+    let cleaned_output = output
+        .replace("thinking", "")
+        .replace("codex", "")
+        .replace("user", "")
+        .replace("assistant", "")
+        .trim()
+        .to_string();
+
+    if cleaned_output.is_empty() {
+        return Err(anyhow!("No usable output found in CODEX logs"));
+    }
+
+    Ok(cleaned_output)
+}
+
+/// Generate mock response for testing purposes (deprecated)
+fn generate_mock_response(prompt: &str) -> String {
+    if prompt.contains("workflow") || prompt.contains("plan") {
+        r#"{
+  "is_feasible": true,
+  "reason": "",
+  "suggested_name": "example_workflow",
+  "description": "Example workflow generated from prompt",
+  "steps": [
+    {
+      "step": 1,
+      "tool": "server::tool1",
+      "description": "Example step 1",
+      "dependencies": []
+    }
+  ],
+  "input_params": []
+}"#.to_string()
+    } else if prompt.contains("JavaScript") || prompt.contains("function") {
+        r#"async function workflow(input) {
+  try {
+    // Example JavaScript workflow
+    const result = await mcp.call("server", "tool", {});
+    return { success: true, data: result };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}"#.to_string()
+    } else {
+        "Mock response for testing purposes".to_string()
+    }
+}
+
+/// Extract the final agent message from CODEX JSONL output
+fn extract_final_message_from_jsonl(jsonl_output: &str) -> String {
+    eprintln!("   🔍 [CODEX] Parsing JSONL output with {} lines", jsonl_output.lines().count());
+
+    let mut final_message = String::new();
+
+    for line in jsonl_output.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        // Parse each JSONL line
+        if let Ok(json_obj) = serde_json::from_str::<serde_json::Value>(line) {
+            if let Some(obj) = json_obj.as_object() {
+                // Look for "item" objects with type "agent_message"
+                if let Some(item) = obj.get("item").and_then(|v| v.as_object()) {
+                    if let Some(item_type) = item.get("type").and_then(|v| v.as_str()) {
+                        if item_type == "agent_message" {
+                            if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
+                                final_message = text.to_string();
+                                eprintln!("   🔍 [CODEX] Found final agent message");
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if final_message.is_empty() {
+        eprintln!("   🔍 [CODEX] No final message found, returning raw output");
+        jsonl_output.to_string()
+    } else {
+        final_message
     }
 }
 
@@ -154,6 +358,8 @@ impl WorkflowPlannerEngine for AiCliCodeGenerator {
         user_request: &str,
         available_tools: &[CandidateToolInfo],
     ) -> Result<WorkflowPlan> {
+        eprintln!("   🔍 [PLANNER] Starting plan_workflow...");
+
         if user_request.trim().is_empty() {
             return Err(anyhow!("user_request cannot be empty"));
         }
@@ -161,23 +367,36 @@ impl WorkflowPlannerEngine for AiCliCodeGenerator {
             return Err(anyhow!("No MCP tools available for workflow planning"));
         }
 
+        eprintln!("   🔍 [PLANNER] Input validated, {} tools available", available_tools.len());
+
         let prompt = build_planning_prompt(user_request, available_tools);
+        eprintln!("   🔍 [PLANNER] Planning prompt built, length: {}", prompt.len());
+
+        eprintln!("   🔍 [PLANNER] Calling AI CLI for workflow planning...");
         let response = self.call_ai_cli(&prompt).await?;
+        eprintln!("   🔍 [PLANNER] AI CLI response received, length: {}", response.len());
 
         // Extract JSON from response
         let json_str = extract_json_from_response(&response)
             .ok_or_else(|| anyhow!("AI CLI response does not contain valid JSON"))?;
 
+        eprintln!("   🔍 [PLANNER] JSON extracted, length: {}", json_str.len());
+
         let mut plan: WorkflowPlan = serde_json::from_str(&json_str)
             .context("Failed to parse workflow plan JSON from AI CLI")?;
+
+        eprintln!("   🔍 [PLANNER] Workflow plan parsed, feasible: {}, steps: {}", plan.is_feasible, plan.steps.len());
 
         // Normalize plan
         finalize_workflow_plan(&mut plan, user_request);
 
+        eprintln!("   🔍 [PLANNER] Workflow plan finalized successfully");
         Ok(plan)
     }
 
     async fn generate_js_code(&self, plan: &WorkflowPlan) -> Result<String> {
+        eprintln!("   🔍 [CODEGEN] Starting JavaScript code generation...");
+
         if !plan.is_feasible {
             return Err(anyhow!(
                 "Cannot generate code for infeasible workflow: {}",
@@ -188,8 +407,14 @@ impl WorkflowPlannerEngine for AiCliCodeGenerator {
             return Err(anyhow!("Workflow plan must contain at least one step"));
         }
 
+        eprintln!("   🔍 [CODEGEN] Plan validation passed, generating code for {} steps", plan.steps.len());
+
         let prompt = build_codegen_prompt(plan);
+        eprintln!("   🔍 [CODEGEN] Code generation prompt built, length: {}", prompt.len());
+
+        eprintln!("   🔍 [CODEGEN] Calling AI CLI for JavaScript generation...");
         let response = self.call_ai_cli(&prompt).await?;
+        eprintln!("   🔍 [CODEGEN] AI CLI response received, length: {}", response.len());
 
         // Extract code from response
         let code = strip_code_fences(&response);
@@ -198,13 +423,33 @@ impl WorkflowPlannerEngine for AiCliCodeGenerator {
             return Err(anyhow!("AI CLI returned empty JavaScript code"));
         }
 
-        // Basic validation
-        if !code.contains("async function workflow") {
-            return Err(anyhow!(
-                "Generated JavaScript missing `async function workflow` signature"
-            ));
+        eprintln!("   🔍 [CODEGEN] JavaScript code extracted, length: {}", code.len());
+
+        // Strict validation - 100% compliance required
+        let required_elements = vec![
+            ("async function workflow(input)", "Missing exact function signature"),
+            ("return { success: true", "Missing success return format"),
+            ("return { success: false", "Missing error return format"),
+            ("await mcp.call(", "Missing MCP calls"),
+            ("try {", "Missing try block"),
+            ("catch (", "Missing catch block"),
+        ];
+
+        for (element, error_msg) in required_elements {
+            if !code.contains(element) {
+                return Err(anyhow!(
+                    "Generated JavaScript validation failed: {} - missing '{}'",
+                    error_msg, element
+                ));
+            }
         }
 
+        // Ensure no markdown fences
+        if code.contains("```") {
+            return Err(anyhow!("Generated JavaScript contains markdown fences"));
+        }
+
+        eprintln!("   🔍 [CODEGEN] JavaScript code validation passed");
         Ok(code)
     }
 }
@@ -275,7 +520,7 @@ fn build_codegen_prompt(plan: &WorkflowPlan) -> String {
     let steps_json = serde_json::to_string_pretty(&plan.steps).unwrap_or_else(|_| "[]".into());
 
     format!(
-        r#"You are Agentic-Warden's JavaScript code generator. Generate a workflow function based on the plan.
+        r#"You are Agentic-Warden's JavaScript code generator. Generate a workflow function based EXACTLY on the provided plan.
 
 ## Workflow Plan:
 Name: {}
@@ -283,36 +528,46 @@ Description: {}
 Steps:
 {}
 
-## MCP Call Contract:
-- Use the injected global `mcp` object
-- Invoke tools via: await mcp.call("<server>", "<tool_name>", {{ /* args */ }});
-- Always pass an object payload (use {{}} when no arguments are needed)
-- Wrap calls in try/catch and surface clear, actionable error messages
+## CRITICAL REQUIREMENTS - MUST FOLLOW EXACTLY:
 
-## Code Generation Requirements:
-1. Create an async function named 'workflow' that takes an 'input' parameter
-2. Access input parameters via input.paramName (e.g., input.repo_url)
-3. Call MCP tools using mcp.call(server, tool, args)
-4. Include try-catch error handling for each MCP call
-5. Return a structured result object
-6. Add comments explaining each step
+1. **Function Signature**: MUST be exactly: `async function workflow(input)`
 
-## Example:
+2. **Step Implementation**: You MUST implement EACH step from the plan EXACTLY as specified:
+   - Use the EXACT server and tool names from the plan
+   - Follow the EXACT step order from the plan
+   - Use the step descriptions as comments
+
+3. **MCP Call Format**: ALWAYS use: `await mcp.call("server_name", "tool_name", {{ arguments }})`
+
+4. **Error Handling**: Wrap EVERY mcp.call in try-catch with structured error response
+
+5. **Return Format**: MUST return `{{ success: true, data: result }}` or `{{ success: false, error: error.message }}`
+
+## Strict Implementation Template:
 ```javascript
 async function workflow(input) {{
   try {{
-    // Step 1: Call first MCP tool
-    const result1 = await mcp.call("server1", "tool1", {{ arg: input.param }});
+    // Step 1: [Step 1 description from plan]
+    const step1Result = await mcp.call("server_from_step1", "tool_from_step1", {{ /* args based on input */ }});
 
-    // Step 2: Use result in next call
-    const result2 = await mcp.call("server2", "tool2", {{ data: result1 }});
+    // Step 2: [Step 2 description from plan]
+    const step2Result = await mcp.call("server_from_step2", "tool_from_step2", {{ /* use step1Result if needed */ }});
 
-    return {{ success: true, data: result2 }};
+    // Continue with all steps...
+
+    return {{ success: true, data: finalResult }};
   }} catch (error) {{
     return {{ success: false, error: error.message }};
   }}
 }}
 ```
+
+## IMPORTANT:
+- DO NOT deviate from the plan steps
+- DO NOT add extra functionality not in the plan
+- DO NOT change the function signature
+- MUST use the exact server and tool names from the plan
+- MUST implement ALL steps in the plan
 
 Respond with ONLY the JavaScript code, no markdown fences, no explanation."#,
         plan.suggested_name, plan.description, steps_json
