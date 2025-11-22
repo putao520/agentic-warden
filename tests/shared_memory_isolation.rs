@@ -186,6 +186,7 @@ fn test_multiple_tasks_in_same_shared_memory() {
 
 /// 测试共享内存命名格式
 #[test]
+#[serial]
 fn test_shared_memory_naming_format() {
     // 测试命名格式: {PID}_task
     let test_pid = 12345u32;

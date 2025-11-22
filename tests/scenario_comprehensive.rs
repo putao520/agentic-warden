@@ -193,10 +193,11 @@ async fn scenario_user_syncs_config_to_cloud() {
     packer.unpack_archive(&archive, &restore_dir).unwrap();
 
     // ===== VERIFY: Files are restored correctly =====
-    assert!(restore_dir.join("settings.json").exists());
-    assert!(restore_dir.join("sub/data.txt").exists());
+    // Note: pack_directory preserves the directory name as root in archive
+    assert!(restore_dir.join("config/settings.json").exists());
+    assert!(restore_dir.join("config/sub/data.txt").exists());
 
-    let content = fs::read_to_string(restore_dir.join("settings.json")).unwrap();
+    let content = fs::read_to_string(restore_dir.join("config/settings.json")).unwrap();
     assert_eq!(content, r#"{"key":"value"}"#);
 
     // ===== COVERAGE: This test replaces ~19 unit tests =====

@@ -1,0 +1,15 @@
+# Cargo configuration for agentic-warden
+#
+# IMPORTANT: Tests must run single-threaded to avoid shared memory deadlocks.
+#
+# The SharedMemoryStorage uses cross-process mutexes that can deadlock when:
+# 1. Multiple test BINARIES run in parallel (cargo's default behavior)
+# 2. Multiple test THREADS run in parallel within a binary
+#
+# Use `cargo t` (alias below) or `cargo test -j1 -- --test-threads=1`
+
+[alias]
+# Run all tests safely with single-threaded execution
+t = "test -j1 -- --test-threads=1"
+# Run specific test file safely
+tt = "test -j1 --test"

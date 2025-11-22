@@ -219,6 +219,7 @@ fn test_different_pids_isolated_shared_memory() {
 
 /// 测试共享内存命名格式
 #[test]
+#[serial]
 fn test_shared_memory_naming_format() {
     let test_pid = 12345u32;
 
