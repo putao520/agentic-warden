@@ -473,12 +473,13 @@ impl McpServerTestHarness {
                     "dynamically_registered": true
                 }))
             }
+            "search_history" => {
+                Ok(serde_json::json!({ "results": Vec::<Value>::new() }))
+            }
             other => {
                 let registry = self.tools.lock().unwrap();
                 if registry.iter().any(|t| t.name == other) {
                     Ok(serde_json::json!({ "ok": true, "tool": other }))
-                } else if other == "search_history" {
-                    Ok(serde_json::json!({ "results": Vec::<Value>::new() }))
                 } else {
                     Err(anyhow::anyhow!("tool not found: {other}"))
                 }
