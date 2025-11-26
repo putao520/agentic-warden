@@ -17,9 +17,10 @@ pub struct OAuthConfig {
 
 impl Default for OAuthConfig {
     fn default() -> Self {
+        // Built-in OAuth client for Google Drive - no user credentials required
         Self {
-            client_id: String::new(),
-            client_secret: String::new(),
+            client_id: "77185425430.apps.googleusercontent.com".to_string(),
+            client_secret: "GOCSPX-1r0aNJW8XY1Mqg4k5L_KzQDGH43".to_string(),
             access_token: None,
             refresh_token: None,
             expires_in: 0,

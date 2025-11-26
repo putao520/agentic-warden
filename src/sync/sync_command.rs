@@ -99,24 +99,14 @@ impl SyncCommand {
                 message, provider, ..
             } = &e
             {
-                if provider == "google_drive" && message.contains("GOOGLE_CLIENT_ID") {
+                if provider == "google_drive" {
                     term.write_line("🚫 Google Drive authentication failed:")?;
                     term.write_line(&format!("   {}", message))?;
                     term.write_line("")?;
-                    term.write_line("To set up Google Drive sync, please set the following environment variables:")?;
-                    term.write_line("  export GOOGLE_CLIENT_ID='your_client_id'")?;
-                    term.write_line("  export GOOGLE_CLIENT_SECRET='your_client_secret'")?;
+                    term.write_line("This app uses built-in OAuth credentials.")?;
+                    term.write_line("Please ensure you have a Google account and try again.")?;
                     term.write_line("")?;
-                    term.write_line(
-                        "You can get these credentials from the Google Cloud Console:",
-                    )?;
-                    term.write_line("1. Go to https://console.cloud.google.com/")?;
-                    term.write_line("2. Create a new project or select existing one")?;
-                    term.write_line("3. Enable Google Drive API")?;
-                    term.write_line("4. Create OAuth 2.0 credentials")?;
-                    term.write_line(
-                        "5. Add urn:ietf:wg:oauth:2.0:oob to authorized redirect URIs",
-                    )?;
+                    term.write_line("The error might be temporary. Please try again later.")?;
                     return Ok(1);
                 }
             }
@@ -232,24 +222,14 @@ impl SyncCommand {
                 message, provider, ..
             } = &e
             {
-                if provider == "google_drive" && message.contains("GOOGLE_CLIENT_ID") {
+                if provider == "google_drive" {
                     term.write_line("🚫 Google Drive authentication failed:")?;
                     term.write_line(&format!("   {}", message))?;
                     term.write_line("")?;
-                    term.write_line("To set up Google Drive sync, please set the following environment variables:")?;
-                    term.write_line("  export GOOGLE_CLIENT_ID='your_client_id'")?;
-                    term.write_line("  export GOOGLE_CLIENT_SECRET='your_client_secret'")?;
+                    term.write_line("This app uses built-in OAuth credentials.")?;
+                    term.write_line("Please ensure you have a Google account and try again.")?;
                     term.write_line("")?;
-                    term.write_line(
-                        "You can get these credentials from the Google Cloud Console:",
-                    )?;
-                    term.write_line("1. Go to https://console.cloud.google.com/")?;
-                    term.write_line("2. Create a new project or select existing one")?;
-                    term.write_line("3. Enable Google Drive API")?;
-                    term.write_line("4. Create OAuth 2.0 credentials")?;
-                    term.write_line(
-                        "5. Add urn:ietf:wg:oauth:2.0:oob to authorized redirect URIs",
-                    )?;
+                    term.write_line("The error might be temporary. Please try again later.")?;
                     return Ok(1);
                 }
             }

@@ -14,7 +14,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
-use tokio::task::spawn_blocking;
 use tracing::{error, info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -984,71 +983,13 @@ impl ConfigSyncManager {
     }
 
     async fn ensure_client_credentials(auth: &mut StoredAuthState) -> ErrorResult<()> {
-        if !auth.client_id.trim().is_empty() && !auth.client_secret.trim().is_empty() {
-            return Ok(());
+        // Use built-in OAuth client - no user credentials required
+        if auth.client_id.trim().is_empty() || auth.client_secret.trim().is_empty() {
+            let default_config = super::oauth_client::OAuthConfig::default();
+            auth.client_id = default_config.client_id;
+            auth.client_secret = default_config.client_secret;
+            Self::save_auth_state(auth)?;
         }
-
-        println!("🔐 Google Drive OAuth credentials are required.");
-        println!("   Please create OAuth 2.0 credentials in Google Cloud Console.");
-        println!("   We'll store them securely in ~/.aiw/auth.json.\n");
-
-        let existing_id = auth.client_id.clone();
-        let _existing_secret = auth.client_secret.clone();
-
-        let credentials_result = spawn_blocking(move || -> ErrorResult<(String, String)> {
-            use dialoguer::{Input, Password};
-
-            let client_id = Input::<String>::new()
-                .with_prompt("Google OAuth Client ID")
-                .with_initial_text(existing_id)
-                .validate_with(|input: &String| {
-                    if input.trim().is_empty() {
-                        Err("Client ID cannot be empty")
-                    } else {
-                        Ok(())
-                    }
-                })
-                .interact_text()
-                .map_err(|err| {
-                    error!(target: "agentic_warden::sync", "Failed to read Client ID: {}", err);
-                    ConfigSyncManager::auth_failed_error()
-                })?
-                .trim()
-                .to_string();
-
-            let client_secret = Password::new()
-                .with_prompt("Google OAuth Client Secret")
-                .allow_empty_password(false)
-                .interact()
-                .map_err(|err| {
-                    error!(
-                        target: "agentic_warden::sync",
-                        "Failed to read Client Secret: {}",
-                        err
-                    );
-                    ConfigSyncManager::auth_failed_error()
-                })?
-                .trim()
-                .to_string();
-
-            Ok((client_id, client_secret))
-        })
-        .await
-        .map_err(|err| {
-            error!(
-                target: "agentic_warden::sync",
-                "Credential prompt task failed: {}",
-                err
-            );
-            ConfigSyncManager::auth_failed_error()
-        })?;
-
-        let (client_id, client_secret) = credentials_result?;
-
-        auth.client_id = client_id;
-        auth.client_secret = client_secret;
-        Self::save_auth_state(auth)?;
-
         Ok(())
     }
 

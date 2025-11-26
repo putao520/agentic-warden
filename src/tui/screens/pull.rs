@@ -1,7 +1,7 @@
 //! Pull progress screen
 
 use super::render_helpers::{DialogResult, DialogState, ProgressState};
-use super::{Screen, ScreenAction, ScreenType};
+use super::{Screen, ScreenAction};
 use crate::common::constants::providers::GOOGLE_DRIVE;
 use crate::common::utils::format_bytes_alt as format_bytes;
 use crate::error::AgenticWardenError;
@@ -580,7 +580,8 @@ impl Screen for PullScreen {
                     self.auth_checked = false;
                     self.auto_start_pending = true;
                     self.mode = PullMode::CheckingAuth;
-                    Ok(ScreenAction::SwitchTo(ScreenType::OAuth))
+                    // OAuth flow will be handled automatically by the sync manager
+                    Ok(ScreenAction::None)
                 }
                 DialogResult::Cancelled | DialogResult::Closed => Ok(ScreenAction::Back),
                 DialogResult::None => Ok(ScreenAction::None),

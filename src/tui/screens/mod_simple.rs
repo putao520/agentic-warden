@@ -42,8 +42,7 @@ impl ScreenType {
             ScreenType::Dashboard => Ok(Box::new(DashboardScreen::new()?)),
             ScreenType::Status => Ok(Box::new(DashboardScreen::new()?)), // Reuse for now
             ScreenType::Provider => Ok(Box::new(DashboardScreen::new()?)), // Reuse for now
-            ScreenType::OAuth => Ok(Box::new(DashboardScreen::new()?)), // Reuse for now
-            ScreenType::Push(_) => Ok(Box::new(DashboardScreen::new()?)), // Reuse for now
+            ScreenType::Push => Ok(Box::new(DashboardScreen::new()?)), // Reuse for now
             ScreenType::Pull => Ok(Box::new(DashboardScreen::new()?)), // Reuse for now
         }
     }
@@ -55,8 +54,7 @@ impl fmt::Display for ScreenType {
             ScreenType::Dashboard => write!(f, "Dashboard"),
             ScreenType::Status => write!(f, "System Status"),
             ScreenType::Provider => write!(f, "Provider Management"),
-            ScreenType::OAuth => write!(f, "OAuth Configuration"),
-            ScreenType::Push(dirs) => write!(f, "Push: {} directories", dirs.len()),
+            ScreenType::Push => write!(f, "Push to Google Drive"),
             ScreenType::Pull => write!(f, "Pull from Remote"),
         }
     }

@@ -7,6 +7,228 @@ use std::path::Path;
 use tar::Builder;
 use tracing::{debug, info, warn};
 
+/// File patterns to exclude from synchronization (blacklist)
+const EXCLUDE_PATTERNS: &[&str] = &[
+    // === Claude specific cache/session directories ===
+    "file-history/",          // Claude file history cache
+    "session-env/",           // Claude session environment cache
+    "todos/",                 // Claude TODO items (temporary)
+    "debug/",                 // Claude debug files
+    "shell-snapshots/",       // Claude shell snapshots
+    "statsig/",               // Claude analytics
+    ".update.lock",           // Claude update lock file
+    "history.jsonl",          // Claude conversation history
+    ".credentials.json",      // Claude credentials (sensitive)
+
+    // === Codex specific directories ===
+    "log/",                   // Codex log files
+    "sessions/",              // Codex session cache
+    "history.jsonl",          // Codex conversation history
+
+    // === Gemini specific directories ===
+    "tmp/",                   // Gemini temporary files
+    "tmp/*/chats/",           // Gemini chat sessions in temp dirs
+    "tmp/*/*session-*.json",  // Gemini session JSON files
+    "antigravity/",           // Gemini entire cache directory (all subdirs excluded)
+
+    // === Common files and directories ===
+    "node_modules/",          // Node.js dependencies
+    ".git/",                  // Git repository
+    ".gitignore",            // Git ignore file
+    ".gitmodules",           // Git submodules
+
+    // === Temporary and cache files ===
+    "*.tmp",
+    "*.temp",
+    "*.cache",
+    "*.pid",
+    "*.lock",
+    "*.swp",
+    "*.swo",
+    ".DS_Store",
+    "Thumbs.db",
+
+    // === Editor and IDE files ===
+    ".vscode/",
+    ".idea/",
+    "*.sublime-*",
+
+    // === Development dependencies ===
+    "npm-debug.log*",
+    "yarn-debug.log*",
+    "yarn-error.log*",
+    "package-lock.json",     // NPM lock file
+    "__pycache__/",
+    "*.py[cod]",
+    "pip-log.txt",
+    "pip-delete-this-directory.txt",
+    "target/",
+    "Cargo.lock",
+
+    // === Large data files (over 10MB) ===
+    "*.mp4",
+    "*.avi",
+    "*.mov",
+    "*.zip",
+    "*.tar.gz",
+    "*.tgz",
+    "*.rar",
+    "*.7z",
+
+    // === AI model files and embeddings ===
+    "*.bin",
+    "*.onnx",
+    "*.safetensors",
+    "*.gguf",
+    "*.h5",
+    "*.pb",
+    "*.pt",
+    "*.pth",
+    ".fastembed_cache/",
+    "embeddings/",
+
+    // === OS-specific files ===
+    ".Trashes/",
+    ".Spotlight-V100/",
+    ".DocumentRevisions-V100/",
+
+    // === Sensitive files ===
+    "*.pem",
+    "*.key",
+    "*.p12",
+    "*.pfx",
+    "*.crt",
+    "*.ca-bundle",
+
+    // === Generated and auto files ===
+    "*~",
+    "*.bak",
+    "*.orig",
+    "*.rej",
+];
+
+impl ConfigPacker {
+    /// Check if a file should be excluded based on blacklist patterns
+    fn should_exclude_file(file_path: &Path, relative_path: &str) -> bool {
+        let file_name = file_path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+
+        // Check each exclusion pattern
+        for pattern in EXCLUDE_PATTERNS {
+            if pattern.ends_with('/') {
+                // Directory pattern
+                if relative_path.starts_with(pattern) || relative_path.contains(&format!("/{}", pattern)) {
+                    debug!("Excluding directory: {}", relative_path);
+                    return true;
+                }
+            } else if pattern.contains('*') {
+                // Wildcard pattern - simple glob matching
+                if Self::matches_glob(file_name, pattern) || Self::matches_glob(relative_path, pattern) {
+                    debug!("Excluding file by pattern '{}': {}", pattern, relative_path);
+                    return true;
+                }
+            } else {
+                // Exact match
+                if file_name == *pattern || relative_path == *pattern {
+                    debug!("Excluding file by exact match '{}': {}", pattern, relative_path);
+                    return true;
+                }
+            }
+        }
+
+        // Also check file size (exclude files larger than 10MB)
+        if let Ok(metadata) = file_path.metadata() {
+            if metadata.len() > 10 * 1024 * 1024 {
+                debug!("Excluding large file ({}MB): {}",
+                       metadata.len() / (1024 * 1024), relative_path);
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Simple glob pattern matching (supports * and ? wildcards)
+    fn matches_glob(text: &str, pattern: &str) -> bool {
+        // Convert glob pattern to regex pattern
+        let regex_pattern = pattern
+            .replace('.', r"\.")
+            .replace('?', ".")
+            .replace('*', ".*");
+
+        // Simple starts_with/ends_with optimization for common patterns
+        if pattern.starts_with('*') && pattern.ends_with('*') {
+            let middle = &pattern[1..pattern.len()-1];
+            return text.contains(middle);
+        } else if pattern.starts_with('*') {
+            let suffix = &pattern[1..];
+            return text.ends_with(suffix);
+        } else if pattern.ends_with('*') {
+            let prefix = &pattern[..pattern.len()-1];
+            return text.starts_with(prefix);
+        }
+
+        // For more complex patterns, use simple character-by-character matching
+        Self::simple_glob_match(text, pattern)
+    }
+
+    /// Simple glob matching implementation
+    fn simple_glob_match(text: &str, pattern: &str) -> bool {
+        let text_chars: Vec<char> = text.chars().collect();
+        let pattern_chars: Vec<char> = pattern.chars().collect();
+
+        Self::glob_match_recursive(&text_chars, 0, &pattern_chars, 0)
+    }
+
+    fn glob_match_recursive(text: &[char], text_pos: usize, pattern: &[char], pattern_pos: usize) -> bool {
+        // If we've reached the end of both text and pattern, it's a match
+        if text_pos >= text.len() && pattern_pos >= pattern.len() {
+            return true;
+        }
+
+        // If pattern has * but we're at the end, it can match empty
+        if pattern_pos < pattern.len() && pattern[pattern_pos] == '*' &&
+           text_pos >= text.len() && pattern_pos + 1 == pattern.len() {
+            return true;
+        }
+
+        // If we've reached the end of text but pattern has more non-* characters
+        if text_pos >= text.len() && pattern_pos < pattern.len() {
+            // Check if remaining pattern characters are all *
+            for &c in &pattern[pattern_pos..] {
+                if c != '*' {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        // If we've reached the end of pattern but text has more
+        if pattern_pos >= pattern.len() && text_pos < text.len() {
+            return false;
+        }
+
+        match pattern[pattern_pos] {
+            '?' => {
+                // ? matches any single character
+                Self::glob_match_recursive(text, text_pos + 1, pattern, pattern_pos + 1)
+            }
+            '*' => {
+                // * matches zero or more characters
+                // Try to match the rest of pattern with current position, or advance one character in text
+                Self::glob_match_recursive(text, text_pos, pattern, pattern_pos + 1) ||
+                Self::glob_match_recursive(text, text_pos + 1, pattern, pattern_pos)
+            }
+            c => {
+                // Literal character match
+                text[text_pos] == c &&
+                Self::glob_match_recursive(text, text_pos + 1, pattern, pattern_pos + 1)
+            }
+        }
+    }
+}
+
 pub struct ConfigPacker;
 
 impl Default for ConfigPacker {
@@ -127,90 +349,14 @@ impl ConfigPacker {
         let mut file_count = 0;
         let mut total_size = 0u64;
 
-        // Core files to include
-        let files_to_pack = [
-            ("CLAUDE.md", "Main memory file"),
-            ("settings.json", "Main configuration file"),
-        ];
-
-        for (file, description) in &files_to_pack {
-            let file_path = claude_dir.join(file);
-            if file_path.exists() {
-                if let Ok(size) =
-                    self.add_file_to_tar(tar, &file_path, &format!(".claude/{}", file))
-                {
-                    file_count += 1;
-                    total_size += size;
-                    debug!("Added {}: {} ({} bytes)", description, file, size);
-                }
+        // Pack entire .claude directory using blacklist approach
+        match self.add_directory_to_tar(tar, &claude_dir, ".claude")? {
+            Some((count, size)) => {
+                file_count = count;
+                total_size = size;
             }
-        }
-
-        // Pack agents directory if it exists
-        let agents_dir = claude_dir.join("agents");
-        if agents_dir.exists() && agents_dir.is_dir() {
-            if let Some((count, size)) =
-                self.add_directory_to_tar(tar, &agents_dir, ".claude/agents")?
-            {
-                file_count += count;
-                total_size += size;
-                debug!(
-                    "Added agents directory with {} files ({} bytes)",
-                    count, size
-                );
-            }
-        }
-
-        // Pack skills directory and SKILL.md files if it exists
-        let skills_dir = claude_dir.join("skills");
-        if skills_dir.exists() && skills_dir.is_dir() {
-            // Recursively find all SKILL.md files
-            if let Ok((count, size)) = self.pack_skills_directory(tar, &skills_dir) {
-                file_count += count;
-                total_size += size;
-                debug!(
-                    "Added skills directory with {} SKILL files ({} bytes)",
-                    count, size
-                );
-            }
-        }
-
-        // Pack additional directories specified in SPEC REQ-003 (hooks, scripts, commands)
-        let additional_dirs = [
-            ("hooks", "Claude Code hook handlers and configuration"),
-            ("scripts", "Execution scripts and workflow files"),
-            ("commands", "Custom slash command definitions"),
-        ];
-
-        for (dir_name, description) in &additional_dirs {
-            let dir_path = claude_dir.join(dir_name);
-            if dir_path.exists() && dir_path.is_dir() {
-                if let Some((count, size)) =
-                    self.add_directory_to_tar(tar, &dir_path, &format!(".claude/{}", dir_name))?
-                {
-                    file_count += count;
-                    total_size += size;
-                    debug!(
-                        "Added {} directory with {} files ({} bytes)",
-                        dir_name, count, size
-                    );
-                    info!("Packed {}: {} files, {} bytes", description, count, size);
-                }
-            }
-        }
-
-        // Pack .mcp.json file if it exists (MCP server configuration for Claude)
-        let mcp_config_path = claude_dir.join(".mcp.json");
-        if mcp_config_path.exists() && mcp_config_path.is_file() {
-            if let Ok(size) = self.add_file_to_tar(
-                tar,
-                &mcp_config_path,
-                ".claude/.mcp.json",
-            ) {
-                file_count += 1;
-                total_size += size;
-                info!("Packed MCP configuration: .mcp.json ({} bytes)", size);
-                debug!("Added .mcp.json: {} bytes", size);
+            None => {
+                debug!("No files found in .claude directory");
             }
         }
 
@@ -238,24 +384,14 @@ impl ConfigPacker {
         let mut file_count = 0;
         let mut total_size = 0u64;
 
-        // List of files to include
-        let files_to_pack = [
-            ("auth.json", "Authentication configuration"),
-            ("config.toml", "Main configuration file"),
-            ("version.json", "Version information"),
-            ("agents.md", "Main memory file"),
-            ("history.jsonl", "Command history"),
-        ];
-
-        for (file, description) in &files_to_pack {
-            let file_path = codex_dir.join(file);
-            if file_path.exists() {
-                if let Ok(size) = self.add_file_to_tar(tar, &file_path, &format!(".codex/{}", file))
-                {
-                    file_count += 1;
-                    total_size += size;
-                    debug!("Added {}: {} ({} bytes)", description, file, size);
-                }
+        // Pack entire .codex directory using blacklist approach
+        match self.add_directory_to_tar(tar, &codex_dir, ".codex")? {
+            Some((count, size)) => {
+                file_count = count;
+                total_size = size;
+            }
+            None => {
+                debug!("No files found in .codex directory");
             }
         }
 
@@ -283,34 +419,14 @@ impl ConfigPacker {
         let mut file_count = 0;
         let mut total_size = 0u64;
 
-        // List of files to include
-        let files_to_pack = [
-            ("google_accounts.json", "Google account configuration"),
-            ("oauth_creds.json", "OAuth credentials"),
-            ("settings.json", "Main configuration file"),
-            ("gemini.md", "Main memory file"),
-        ];
-
-        for (file, description) in &files_to_pack {
-            let file_path = gemini_dir.join(file);
-            if file_path.exists() {
-                if let Ok(size) =
-                    self.add_file_to_tar(tar, &file_path, &format!(".gemini/{}", file))
-                {
-                    file_count += 1;
-                    total_size += size;
-                    debug!("Added {}: {} ({} bytes)", description, file, size);
-                }
+        // Pack entire .gemini directory using blacklist approach
+        match self.add_directory_to_tar(tar, &gemini_dir, ".gemini")? {
+            Some((count, size)) => {
+                file_count = count;
+                total_size = size;
             }
-        }
-
-        // Pack tmp directory if it exists
-        let tmp_dir = gemini_dir.join("tmp");
-        if tmp_dir.exists() && tmp_dir.is_dir() {
-            if let Some((count, size)) = self.add_directory_to_tar(tar, &tmp_dir, ".gemini/tmp")? {
-                file_count += count;
-                total_size += size;
-                debug!("Added tmp directory with {} files ({} bytes)", count, size);
+            None => {
+                debug!("No files found in .gemini directory");
             }
         }
 
@@ -399,7 +515,15 @@ impl ConfigPacker {
 
         for entry in walkdir::WalkDir::new(dir_path)
             .into_iter()
-            .filter_entry(|e| !e.file_name().to_string_lossy().starts_with('.'))
+            .filter_entry(|e| {
+                let file_name = e.file_name().to_string_lossy();
+                // Skip hidden files (starting with .) except for specific config files
+                if file_name.starts_with('.') &&
+                   ![".claude", ".codex", ".gemini", ".aiw", "auth.json", "config.json", "settings.json"].iter().any(|&allowed| file_name == allowed) {
+                    return false;
+                }
+                true
+            })
         {
             let entry = entry.map_err(|e| {
                 SyncError::config_packing(format!("Failed to walk directory: {}", e))
@@ -408,18 +532,27 @@ impl ConfigPacker {
             let path = entry.path();
             let relative_path = path.strip_prefix(dir_path).unwrap();
             let tar_path = Path::new(tar_base_path).join(relative_path);
+            let tar_path_str = tar_path.to_string_lossy();
 
             if path.is_file() {
-                if let Ok(size) = self.add_file_to_tar(tar, path, &tar_path.to_string_lossy()) {
-                    file_count += 1;
-                    total_size += size;
+                // Check if file should be excluded based on blacklist
+                if !Self::should_exclude_file(path, &tar_path_str) {
+                    if let Ok(size) = self.add_file_to_tar(tar, path, &tar_path_str) {
+                        file_count += 1;
+                        total_size += size;
+                        debug!("Included file: {} ({} bytes)", tar_path_str, size);
+                    } else {
+                        debug!("Failed to add file to tar: {}", tar_path_str);
+                    }
                 }
             }
         }
 
         if file_count > 0 {
+            debug!("Added directory {} with {} files ({} bytes)", tar_base_path, file_count, total_size);
             Ok(Some((file_count, total_size)))
         } else {
+            debug!("No files included from directory: {}", tar_base_path);
             Ok(None)
         }
     }

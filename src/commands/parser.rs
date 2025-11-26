@@ -3,7 +3,7 @@
 //! 使用 clap 定义命令行接口并进行参数解析
 
 use clap::{Parser, Subcommand};
-use std::{ffi::OsString, path::PathBuf};
+use std::ffi::OsString;
 
 /// AI CLI 角色管理动作
 #[derive(Subcommand, Debug, Clone)]
@@ -109,17 +109,8 @@ pub enum Commands {
     /// 启动 Provider 管理 TUI
     Provider,
 
-    /// 推送目录到 Google Drive
-    Push {
-        /// 需要推送的目录（缺省为当前目录）
-        #[arg(
-            value_name = "DIR",
-            value_parser = clap::value_parser!(PathBuf),
-            num_args = 0..,
-            trailing_var_arg = true
-        )]
-        dirs: Vec<PathBuf>,
-    },
+    /// 推送配置到 Google Drive
+    Push,
 
     /// 从 Google Drive 拉取文件
     Pull,

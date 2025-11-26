@@ -13,7 +13,6 @@ use agentic_warden::execute_update;
 use agentic_warden::mcp::AgenticWardenMcpServer;
 use agentic_warden::pwait_mode;
 use agentic_warden::roles::RoleManager;
-use agentic_warden::sync;
 use agentic_warden::tui;
 use agentic_warden::wait_mode;
 use help::{print_command_help, print_general_help, print_quick_examples};
@@ -127,12 +126,8 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
             }
         }
         Commands::Provider => launch_tui(Some(tui::ScreenType::Provider)).await,
-        Commands::Push { dirs } => {
-            let directories = dirs
-                .into_iter()
-                .map(|dir| dir.to_string_lossy().to_string())
-                .collect();
-            launch_tui(Some(tui::ScreenType::Push(directories))).await
+        Commands::Push => {
+            launch_tui(Some(tui::ScreenType::Push)).await
         }
         Commands::Pull => launch_tui(Some(tui::ScreenType::Pull)).await,
         Commands::List => handle_sync_command("list", None).await,

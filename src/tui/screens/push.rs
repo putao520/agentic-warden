@@ -1,7 +1,7 @@
 //! Push progress screen
 
 use super::render_helpers::{DialogResult, DialogState, ProgressState};
-use super::{Screen, ScreenAction, ScreenType};
+use super::{Screen, ScreenAction};
 use crate::common::constants::providers::GOOGLE_DRIVE;
 use crate::common::utils::format_bytes_alt as format_bytes;
 use crate::error::{errors, AgenticWardenError, ErrorCategory, SyncOperation, UserFacingError};
@@ -98,16 +98,12 @@ pub struct PushScreen {
 }
 
 impl PushScreen {
-    pub fn new(directories: Vec<String>) -> Result<Self> {
-        let resolved_directories = if directories.is_empty() {
-            let manager = ConfigSyncManager::new().context("failed to initialise sync manager")?;
-            manager
-                .config_manager
-                .get_sync_directories()
-                .context("failed to load sync directories")?
-        } else {
-            directories
-        };
+    pub fn new() -> Result<Self> {
+        let manager = ConfigSyncManager::new().context("failed to initialise sync manager")?;
+        let resolved_directories = manager
+            .config_manager
+            .get_sync_directories()
+            .context("failed to load sync directories")?;
 
         let progress_widget = ProgressState::new("Pushing to Google Drive".to_string());
         let app_state = AppState::global();
@@ -568,7 +564,8 @@ impl Screen for PushScreen {
                     self.auth_checked = false;
                     self.auto_start_pending = true;
                     self.mode = PushMode::CheckingAuth;
-                    Ok(ScreenAction::SwitchTo(ScreenType::OAuth))
+                    // OAuth flow will be handled automatically by the sync manager
+                    Ok(ScreenAction::None)
                 }
                 DialogResult::Cancelled | DialogResult::Closed => Ok(ScreenAction::Back),
                 DialogResult::None => Ok(ScreenAction::None),

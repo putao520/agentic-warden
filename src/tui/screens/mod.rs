@@ -10,7 +10,6 @@ mod render_helpers;
 
 // Include the available screens
 pub mod dashboard;
-pub mod oauth;
 pub mod provider;
 pub mod pull;
 pub mod push;
@@ -18,7 +17,6 @@ pub mod status;
 
 // Re-export key screens
 pub use dashboard::DashboardScreen;
-pub use oauth::OAuthScreen;
 pub use provider::ProviderScreen;
 pub use pull::PullScreen;
 pub use push::PushScreen;
@@ -43,8 +41,7 @@ pub enum ScreenType {
     Dashboard,
     Status,
     Provider,
-    OAuth,
-    Push(Vec<String>),
+    Push,
     Pull,
 }
 
@@ -55,8 +52,7 @@ impl ScreenType {
             ScreenType::Dashboard => Ok(Box::new(DashboardScreen::new()?)),
             ScreenType::Status => Ok(Box::new(StatusScreen::new()?)),
             ScreenType::Provider => Ok(Box::new(ProviderScreen::new()?)),
-            ScreenType::OAuth => Ok(Box::new(OAuthScreen::new()?)),
-            ScreenType::Push(dirs) => Ok(Box::new(PushScreen::new(dirs.clone())?)),
+            ScreenType::Push => Ok(Box::new(PushScreen::new()?)),
             ScreenType::Pull => Ok(Box::new(PullScreen::new()?)),
         }
     }
@@ -68,8 +64,7 @@ impl fmt::Display for ScreenType {
             ScreenType::Dashboard => write!(f, "Dashboard"),
             ScreenType::Status => write!(f, "System Status"),
             ScreenType::Provider => write!(f, "Provider Management"),
-            ScreenType::OAuth => write!(f, "OAuth Configuration"),
-            ScreenType::Push(dirs) => write!(f, "Push: {} directories", dirs.len()),
+            ScreenType::Push => write!(f, "Push to Google Drive"),
             ScreenType::Pull => write!(f, "Pull from Remote"),
         }
     }
