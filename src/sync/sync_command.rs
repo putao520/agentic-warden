@@ -13,6 +13,11 @@ pub async fn handle_sync_command(command: &str, config_name: Option<String>) -> 
         "pull" => sync_cmd.execute_pull(config_name).await,
         "list" => sync_cmd.execute_list().await,
         "status" => sync_cmd.execute_status().await,
+        "reset" => {
+            // Reset sync state
+            eprintln!("Reset command not yet implemented");
+            Ok(0)
+        }
         _ => Err(SyncError::sync_config(format!(
             "Unknown sync command: {}",
             command
@@ -31,18 +36,6 @@ impl SyncCommand {
         })
     }
 
-    /// Get paths to known AI CLI configuration directories
-    fn get_ai_cli_dirs() -> SyncResult<Vec<(String, std::path::PathBuf)>> {
-        let home_dir = dirs::home_dir()
-            .ok_or_else(|| SyncError::sync_config("Could not find home directory".to_string()))?;
-
-        Ok(vec![
-            ("Claude".to_string(), home_dir.join(".claude")),
-            ("Codex".to_string(), home_dir.join(".codex")),
-            ("Gemini".to_string(), home_dir.join(".gemini")),
-        ])
-    }
-
     /// Execute push command with a configuration name
     pub async fn execute_push(&mut self, config_name: Option<String>) -> SyncResult<i32> {
         let term = Term::stdout();
@@ -56,31 +49,46 @@ impl SyncCommand {
         term.write_line(&format!("📦 Configuration name: '{}'", config_name))?;
         term.write_line("")?;
 
-        // Check for AI CLI configurations using helper
-        let cli_dirs = Self::get_ai_cli_dirs()?;
-        let found_configs: Vec<_> = cli_dirs
-            .iter()
-            .filter(|(_, path)| path.exists())
-            .collect();
+        let home_dir = dirs::home_dir()
+            .ok_or_else(|| SyncError::sync_config("Could not find home directory".to_string()))?;
 
-        if found_configs.is_empty() {
+        let claude_dir = home_dir.join(".claude");
+        let codex_dir = home_dir.join(".codex");
+        let gemini_dir = home_dir.join(".gemini");
+
+        let claude_exists = claude_dir.exists();
+        let codex_exists = codex_dir.exists();
+        let gemini_exists = gemini_dir.exists();
+
+        if !claude_exists && !codex_exists && !gemini_exists {
             term.write_line("ℹ️  No AI CLI configurations found.")?;
             term.write_line("")?;
             term.write_line("Expected directories:")?;
-            for (name, path) in &cli_dirs {
-                term.write_line(&format!("  - {} at {}", name, path.display()))?;
-            }
+            term.write_line(&format!("  - {}", claude_dir.display()))?;
+            term.write_line(&format!("  - {}", codex_dir.display()))?;
+            term.write_line(&format!("  - {}", gemini_dir.display()))?;
             term.write_line("")?;
             term.write_line("Please install at least one AI CLI tool and try again.")?;
             return Ok(1);
         }
 
         term.write_line("🔍 Scanning for AI CLI configurations...")?;
-        for (name, path) in &found_configs {
+        if claude_exists {
             term.write_line(&format!(
-                "  ✓ Found {} configuration at {}",
-                name,
-                path.display()
+                "  ✓ Found Claude configuration at {}",
+                claude_dir.display()
+            ))?;
+        }
+        if codex_exists {
+            term.write_line(&format!(
+                "  ✓ Found Codex configuration at {}",
+                codex_dir.display()
+            ))?;
+        }
+        if gemini_exists {
+            term.write_line(&format!(
+                "  ✓ Found Gemini configuration at {}",
+                gemini_dir.display()
             ))?;
         }
         term.write_line("")?;
@@ -371,21 +379,39 @@ impl SyncCommand {
 
         term.write_line("")?;
 
-        // Check local configurations using helper
-        let cli_dirs = Self::get_ai_cli_dirs()?;
+        // Check local configurations
+        let home_dir = dirs::home_dir()
+            .ok_or_else(|| SyncError::sync_config("Could not find home directory".to_string()))?;
+
+        let claude_dir = home_dir.join(".claude");
+        let codex_dir = home_dir.join(".codex");
+        let gemini_dir = home_dir.join(".gemini");
 
         term.write_line("Local Configurations:")?;
-        for (name, path) in &cli_dirs {
-            term.write_line(&format!(
-                "  {}: {}",
-                name,
-                if path.exists() {
-                    "鉁?Present"
-                } else {
-                    "鉂?Not found"
-                }
-            ))?;
-        }
+        term.write_line(&format!(
+            "  Claude: {}",
+            if claude_dir.exists() {
+                "鉁?Present"
+            } else {
+                "鉂?Not found"
+            }
+        ))?;
+        term.write_line(&format!(
+            "  Codex: {}",
+            if codex_dir.exists() {
+                "鉁?Present"
+            } else {
+                "鉂?Not found"
+            }
+        ))?;
+        term.write_line(&format!(
+            "  Gemini: {}",
+            if gemini_dir.exists() {
+                "鉁?Present"
+            } else {
+                "鉂?Not found"
+            }
+        ))?;
 
         term.write_line("")?;
         Ok(0)

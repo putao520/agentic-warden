@@ -2,34 +2,128 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-5.0.2-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-6.0.1-blue?style=flat-square)
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange?style=flat-square&logo=rust)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 ![MCP](https://img.shields.io/badge/MCP-2024--11--05-purple?style=flat-square)
 
-**Intelligent MCP Router with 98% Token Optimization**
+**Universal AI CLI Management Platform with Google Drive Sync**
 
 </div>
 
-Agentic-Warden is an intelligent MCP (Model Context Protocol) routing system that dramatically reduces token consumption through dynamic tool registration. Instead of exposing 100+ tools (50,000 tokens) to your AI, it intelligently exposes only 4 base tools (~900 tokens) and registers specific tools on-demand as needed.
+Agentic-Warden is an intelligent platform for managing AI CLI tools (Claude, Codex, Gemini) with MCP routing, process tracking, and Google Drive configuration synchronization.
 
-## 🎯 What It Does
+## 🎯 Features
 
-### Core Problem Solved
-When using multiple MCP servers (filesystem, git, web search, etc.), Claude Code must load **all tools** from **all servers** into context. With 100+ tools averaging 500 tokens each, this consumes ~50,000 tokens before you even start your conversation.
+### 1. AI CLI Management (`REQ-001`, `REQ-002`, `REQ-006`, `REQ-011`)
+- **Process Tree Tracking**: Monitor AI CLI processes and their children
+- **Provider Management**: Switch between AI providers (OpenAI, Anthropic, Google, etc.)
+- **Capability Detection**: Auto-detect installed AI CLI tools
+- **Wait Mode**: Block until AI CLI tasks complete
+- **Update Management**: Install and update AI CLI tools
 
-### Agentic-Warden Solution
-1. **Intelligent Routing**: Routes user requests to the best MCP tool using LLM ReAct or vector search
-2. **Dynamic Registration**: Registers tools on-demand only when needed (98% token reduction)
-3. **Dual-Mode Architecture**: Auto-detects client capabilities and adapts (Dynamic vs Two-phase negotiation)
-4. **Conversation History**: Integrates Claude Code session history for context-aware routing
+**Usage:**
+```bash
+# Launch AI CLI with process tracking
+aiw claude "explain this code"
+aiw codex "write a python script"
+aiw gemini "translate to french"
 
-### Token Optimization Results
+# Wait for all AI CLI tasks to complete
+aiw wait --timeout 300
+
+# Manage providers
+aiw provider list
+aiw provider add openrouter "sk-xxx"
 ```
-Before:  100+ tools × ~500 tokens = ~50,000 tokens
-After:   4 base tools × ~200 tokens = ~900 tokens
-Savings: 98% token reduction
+
+### 2. Google Drive Sync (`REQ-003`)
+Synchronize AI CLI configurations across devices using Google Drive.
+
+**Setup OAuth:**
+```bash
+export GOOGLE_CLIENT_ID="your_client_id.apps.googleusercontent.com"
+export GOOGLE_CLIENT_SECRET="your_client_secret"
 ```
+
+**Commands:**
+```bash
+# Push AI CLI configurations to Google Drive
+aiw push [config_name]
+# Example: aiw push claude
+# Example: aiw push codex
+# Example: aiw push gemini
+
+# Pull configurations from Google Drive
+aiw pull [config_name]
+
+# List available backups on Google Drive
+aiw list
+```
+
+**Note:** Currently supports only 3 predefined AI CLI directories:
+- `~/.claude`
+- `~/.codex`
+- `~/.gemini`
+
+**OAuth Flow:**
+- Uses OAuth 2.0 Device Flow (RFC 8628)
+- Authentication tokens stored in `~/.aiw/auth.json`
+- Detailed setup instructions printed during first use
+
+### 3. Intelligent MCP Routing (`REQ-012`, `REQ-013`)
+Route user requests to the best MCP tool with 98% token reduction.
+
+**How it works:**
+- **LLM ReAct Mode**: Uses LLM reasoning to analyze requests
+- **Vector Search Mode**: Semantic similarity fallback
+- **Dynamic Registration**: Registers tools on-demand (98% token savings)
+- **JavaScript Orchestration**: Auto-generates workflows for complex tasks
+
+**Usage:**
+```bash
+# Start MCP server
+aiw mcp
+
+# Configure in Claude Code (~/.config/claude-code/mcp.json)
+{
+  "mcpServers": {
+    "agentic-warden": {
+      "command": "aiw",
+      "args": ["mcp"]
+    }
+  }
+}
+
+# Available MCP tools:
+# - intelligent_route: Auto-route to best tool
+# - get_method_schema: Get tool schemas
+# - execute_tool: Execute tools with negotiation
+```
+
+### 4. MCP Server Management (`REQ-007`)
+Manage external MCP servers with hot-reload support.
+
+**Commands:**
+```bash
+# Add MCP server
+aiw mcp add filesystem npx --description "File operations" \
+  -- -y @modelcontextprotocol/server-filesystem /home/user
+
+# List servers
+aiw mcp list
+
+# Enable/disable servers
+aiw mcp enable brave-search
+aiw mcp disable filesystem
+
+# Edit configuration
+aiw mcp edit
+
+# Hot-reload: Changes apply instantly without restart
+```
+
+**Configuration File:** `~/.aiw/.mcp.json`
 
 ## 🚀 Quick Start
 
@@ -45,457 +139,94 @@ cargo build --release
 cargo install --path .
 ```
 
-### Basic Usage
-
-#### Mode 1: MCP Server Mode (Recommended)
-
-Add Agentic-Warden as an MCP server to Claude Code:
+### Initial Setup
 
 ```bash
-# Start the MCP server (stdio mode)
-aiw mcp
+# Verify installation
+aiw --version
+
+# Check available AI CLI tools
+aiw status
+
+# Configure MCP servers (optional)
+aiw mcp add filesystem npx -- -y @modelcontextprotocol/server-filesystem $HOME
+
+# Set up Google Drive sync (optional)
+export GOOGLE_CLIENT_ID="your_client_id.apps.googleusercontent.com"
+export GOOGLE_CLIENT_SECRET="your_client_secret"
+aiw push claude
 ```
 
-In your Claude Code MCP configuration (`~/.config/claude-code/mcp.json`):
+## 📊 Feature Matrix
 
-```json
-{
-  "mcpServers": {
-    "agentic-warden": {
-      "command": "aiw",
-      "args": ["mcp"]
-    }
-  }
-}
-```
+| Feature | REQ-ID | Status | Description |
+|---------|--------|--------|-------------|
+| Process Tree Tracking | 001 | ✅ | Monitor AI CLI processes |
+| Provider Management | 002 | ✅ | Switch AI providers |
+| Google Drive Sync | 003 | ✅ | Backup/sync configurations |
+| Wait Mode | 005 | ✅ | Block until tasks complete |
+| Tool Detection | 006 | ✅ | Auto-detect AI CLI tools |
+| MCP Servers | 007 | ✅ | External MCP integration |
+| Intelligent Routing | 012 | ✅ | LLM-based tool routing |
+| JS Orchestration | 013 | ✅ | Auto-generate workflows |
+| AI CLI Updates | 011 | ✅ | Install/update tools |
+| Role System | 014 | ✅ | AI persona management |
 
-Once configured, you'll have access to these tools in Claude Code:
+**Overall Status**: ✅ All core features implemented and tested
 
-- `intelligent_route` - Automatically route requests to best tool (auto-registers on-demand)
-- `search_history` - Search conversation history using semantic similarity
-- `get_method_schema` - Get JSON schema for any MCP tool
-- `execute_tool` - Execute tools in two-phase negotiation mode (fallback)
+## 🛠️ Configuration
 
-#### Mode 2: CLI Mode (Direct Routing)
+### Environment Variables
 
 ```bash
-# Route a user request to best tool
-aiw route "list files in /tmp directory"
+# AI CLI Configuration
+export CLI_TYPE=claude              # claude, codex, or gemini
+export CLI_PROVIDER=llmlite         # Any provider from provider.json
 
-# Search conversation history
-aiw search "how did I configure git yesterday?"
+# MCP Server Configuration
+export MCP_CONFIG_PATH=~/.aiw/.mcp.json
 
-# Get tool schema
-aiw schema filesystem read_file
-```
+# Google Drive OAuth
+export GOOGLE_CLIENT_ID=xxx
+export GOOGLE_CLIENT_SECRET=xxx
 
-## 🔧 MCP Server Management
-
-Agentic-Warden provides simple CLI commands to manage your MCP servers in `~/.aiw/.mcp.json`.
-
-### Quick Start
-
-```bash
-# Add a filesystem server
-aiw mcp add filesystem npx --description "Filesystem operations" --category system \
-  -- -y @modelcontextprotocol/server-filesystem /home/user
-
-# List all servers
-aiw mcp list
-
-# Get server details
-aiw mcp get filesystem
-
-# Disable a server temporarily
-aiw mcp disable brave-search
-
-# Edit configuration directly
-aiw mcp edit
-
-# Remove a server
-aiw mcp remove filesystem -y
-```
-
-### Available Commands
-
-- `aiw mcp list` - List all MCP servers with status
-- `aiw mcp add <name> <command> [args...]` - Add a new MCP server
-- `aiw mcp remove <name> [-y]` - Remove a server (with confirmation)
-- `aiw mcp get <name>` - Show server configuration details
-- `aiw mcp enable <name>` - Enable a disabled server
-- `aiw mcp disable <name>` - Disable a server (preserves configuration)
-- `aiw mcp edit` - Edit configuration file in your editor
-
-### Hot Reload
-
-Configuration changes are **automatically detected and applied** at runtime:
-
-- File watcher monitors `~/.aiw/.mcp.json` for changes
-- When config file is modified:
-  - Removed servers are shut down immediately
-  - Disabled servers are shut down immediately
-  - Changed servers (command/args/env) are restarted on next tool call
-  - Unchanged servers continue running without interruption
-  - New servers are lazily initialized on first tool call
-- No need to restart `aiw mcp serve` or any processes
-- Changes from CLI commands (`add`, `remove`, `enable`, `disable`) take effect instantly
-
-### Add Command Options
-
-```bash
-aiw mcp add <name> <command> [args...] [OPTIONS]
-
-Options:
-  --description <text>    Server description
-  --category <category>   Server category (system, development, search, etc.)
-  --env KEY=VALUE         Environment variables (can be used multiple times)
-  --disabled              Add but don't enable (default: enabled)
-```
-
-**Note**: Use `--` to separate positional arguments from command args:
-```bash
-aiw mcp add filesystem npx -- -y @modelcontextprotocol/server-filesystem /path
-```
-
-## ⚙️ Configuration
-
-### MCP Server Configuration
-
-Configuration file location: `~/.aiw/.mcp.json`
-
-```json
-{
-  "version": "1.0",
-  "mcpServers": {
-    "filesystem": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user"],
-      "description": "Filesystem operations (read, write, search files)",
-      "category": "system",
-      "enabled": true,
-      "healthCheck": {
-        "enabled": true,
-        "interval": 60,
-        "timeout": 10
-      }
-    },
-    "git": {
-      "command": "uvx",
-      "args": ["mcp-server-git", "--repository", "/home/user/project"],
-      "description": "Git version control operations",
-      "category": "development",
-      "enabled": true
-    },
-    "brave-search": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-brave-search"],
-      "description": "Web search using Brave Search API",
-      "category": "search",
-      "enabled": false,
-      "env": {
-        "BRAVE_API_KEY": "your-api-key-here"
-      }
-    }
-  },
-  "routing": {
-    "max_tools_per_request": 10,
-    "clustering_threshold": 0.7,
-    "rerank_top_k": 5,
-    "similarity_threshold": 0.6
-  },
-  "llm": {
-    "endpoint": "http://localhost:11434",
-    "model": "qwen2.5:7b",
-    "timeout": 30
-  }
-}
-```
-
-See [`.mcp.json.example`](./.mcp.json.example) for a complete configuration example.
-
-### Configuration Fields
-
-#### MCP Servers
-- `command` - Executable command (npx, uvx, node, python, etc.)
-- `args` - Command-line arguments
-- `description` - Tool description for routing decisions
-- `category` - Tool category (system, development, search, etc.)
-- `enabled` - Enable/disable server (default: true)
-- `env` - Environment variables (API keys, etc.)
-- `healthCheck` - Health monitoring configuration
-
-#### Routing Settings
-- `max_tools_per_request` - Maximum tools to consider (default: 10)
-- `clustering_threshold` - Similarity threshold for grouping (default: 0.7)
-- `rerank_top_k` - Top-K tools for reranking (default: 5)
-- `similarity_threshold` - Minimum similarity score (default: 0.6)
-
-#### LLM Settings (Optional)
-Configure for **LLM ReAct mode** (primary decision engine). If not configured, falls back to **Vector Search mode**.
-
-- `endpoint` - LLM API endpoint (OpenAI-compatible)
-- `model` - Model name
-- `timeout` - Request timeout in seconds
-
-#### Code Generation Mode
-Agentic-Warden automatically chooses the best code generator:
-
-**AI CLI Mode** (Default - uses Claude):
-```bash
-# Zero configuration! Uses claude by default
-# Optional customization:
-export CLI_TYPE=claude           # Supported: claude, codex, gemini
-export CLI_PROVIDER=llmlite      # Any provider: llmlite, openrouter, anthropic, etc.
-```
-
-**Ollama Mode** (when OPENAI_TOKEN is set):
-```bash
-# Set OPENAI_TOKEN to enable Ollama
-export OPENAI_TOKEN=your-token
+# LLM Routing (optional)
+export OPENAI_TOKEN=sk-xxx          # For Ollama/local LLM mode
 export OPENAI_ENDPOINT=http://localhost:11434
 export OPENAI_MODEL=qwen2.5:7b
 ```
 
-**Auto-detection**:
-- `OPENAI_TOKEN` exists → Ollama (local LLM)
-- Otherwise → AI CLI (default: claude)
+### Configuration Files
 
-**Environment Variables**:
-- `CLI_TYPE`: AI CLI tool name (default: claude)
-  - **Supported CLI tools**: `claude`, `codex`, `gemini`
-  - Uses the actual CLI command (e.g., `claude`, `codex`)
-- `CLI_PROVIDER`: Provider name from provider.json (optional)
-  - **No restrictions** - supports any provider
-  - Examples: `llmlite`, `openrouter`, `anthropic`, `deepseek`, etc.
-- Timeout: Fixed at 12 hours for long-running code generation
-
-**Benefits**:
-- Zero config for AI CLI mode
-- Flexible provider support (not limited to specific vendors)
-- Better code quality with Claude/GPT-4
-- No Ollama installation needed
-- Long timeout (12h) for complex workflows
-
-## 🏗️ Architecture
-
-### Dual-Layer Design
-
-#### Decision Layer (Chooses Best Tool)
-1. **LLM ReAct** (Primary) - Uses LLM reasoning to analyze request and select optimal tool
-2. **Vector Search** (Fallback) - Uses semantic similarity when LLM unavailable
-3. **Auto Mode** (Default) - Automatically selects based on LLM endpoint availability
-
-#### Execution Layer (How to Provide Tool to AI)
-1. **Dynamic Registration** (Primary) - Registers tool on-demand via `tools/list_changed` notification (98% token savings)
-2. **Two-Phase Negotiation** (Fallback) - Returns tool suggestion for AI to review and confirm
-
-The system **auto-detects client capabilities** at startup and adapts accordingly.
-
-### How Dynamic Registration Works
-
-```
-┌─────────────────┐
-│   Claude Code   │ Initially sees only 4 base tools (~900 tokens)
-└────────┬────────┘
-         │ "list files in /tmp"
-         ▼
-┌─────────────────┐
-│intelligent_route│ Routes to filesystem::list_directory
-└────────┬────────┘
-         │
-         ├─> Fetches tool schema from filesystem server
-         ├─> Registers list_directory dynamically
-         ├─> Sends tools/list_changed notification
-         └─> Returns schema + rationale
-
-┌─────────────────┐
-│   Claude Code   │ Now sees list_directory in tools list
-└────────┬────────┘ Calls it directly with accurate parameters
-         │
-         ▼
-┌─────────────────┐
-│ list_directory  │ Proxied to real filesystem MCP server
-└─────────────────┘ Returns results
-```
-
-### JavaScript Workflow Orchestration
-
-When an explicit LLM endpoint is configured, Agentic-Warden can synthesize short-lived **JS workflows** that orchestrate multiple MCP functions into a single tool (`REQ-013`). The `intelligent_route` helper performs these steps automatically:
-
-1. Rank candidate MCP tools via embeddings
-2. Ask the LLM to plan + generate `async function workflow(input)` JavaScript
-3. Validate and sandbox the code inside the warmed Boa runtime pool (5 instances)
-4. Register the workflow as a dynamic MCP tool with cached metadata
-
-Example CLI session:
-
-```bash
-$ aiw route "Create a weekly git report for /srv/app"
-{
-  "message": "Created orchestrated workflow 'git_weekly_report'. Use this tool to solve your request.",
-  "selected_tool": {
-    "mcp_server": "orchestrated",
-    "tool_name": "git_weekly_report"
-  },
-  "tool_schema": { "type": "object", "required": ["repo_path", "week"] }
-}
-
-# Claude Code now sees git_weekly_report in list_tools and can call it directly
-```
-
-The generated workflow can call injected helpers such as `mcpGitStatus` and `mcpWriteReport`:
-
-```javascript
-async function workflow(input) {
-  const status = await mcpGitStatus({ repo: input.repo_path });
-  const report = await mcpWriteReport({ repo: input.repo_path, summary: status.branch });
-  return { ok: true, status, report_path: report.path };
-}
-```
-
-See [`examples/js_orchestrated_workflow.md`](./examples/js_orchestrated_workflow.md) for a complete end-to-end example covering the `intelligent_route` request, generated JS, and follow-up invocation.
-
-### Client Capability Detection
-
-On initialization, Agentic-Warden **tests** if the client supports dynamic tools:
-
-```rust
-// Send test notification with 500ms timeout
-send_notification(ToolListChangedNotification)
-
-✅ Success → Dynamic Registration Mode
-⚠️  Timeout/Error → Two-Phase Negotiation Mode
-```
-
-No hardcoded client lists - pure test-based detection.
-
-## 🔧 Claude Code Integration
-
-### Automatic Hooks Setup
-
-Agentic-Warden automatically manages Claude Code hooks for conversation history capture:
-
-```bash
-~/.config/claude-code/hooks/
-├── SessionEnd.sh           # Captures conversation on exit
-└── PreCompact.sh          # Captures before context compaction
-```
-
-These hooks send conversation data to Agentic-Warden's history database for semantic search.
-
-### Conversation History Search
-
-```bash
-# In Claude Code, use the search_history tool
-"Search for conversations about git configuration"
-
-# Returns semantically similar past conversations
-# with relevance scores and full context
-```
-
-## 📊 Features in Detail
-
-### ✅ Intelligent Routing
-- LLM ReAct reasoning for complex requests
-- Vector semantic search for fast lookups
-- Multi-stage candidate selection and reranking
-- Conversation context integration
-
-### ✅ Dynamic Tool Registration
-- On-demand tool exposure (98% token reduction)
-- Automatic `tools/list_changed` notifications
-- Tool schema proxying and validation
-- Seamless tool calling via proxy
-
-### ✅ Client Capability Detection
-- Test-based dynamic tools support detection
-- Automatic mode adaptation
-- Graceful fallback to two-phase negotiation
-- No client version dependencies
-
-### ✅ Conversation History
-- Semantic search with FastEmbed (AllMiniLML6V2)
-- SahomeDB file-based vector storage
-- Claude Code hooks integration
-- Session and compaction event capture
-
-### ✅ Health Monitoring
-- Per-server health checks
-- Configurable intervals and timeouts
-- Automatic server reconnection
-- Status reporting
+- **MCP Servers**: `~/.aiw/.mcp.json`
+- **Providers**: `~/.aiw/providers.json`
+- **AI CLI Auth**: `~/.claude/config.toml`, `~/.codex/config.json`, etc.
+- **Google Drive Auth**: `~/.aiw/auth.json`
 
 ## 🧪 Testing
-
-Run the comprehensive test suite:
 
 ```bash
 # Run all tests
 cargo test
 
-# Run with output
-cargo test -- --nocapture
-
 # Run specific test module
-cargo test dynamic_tool_registry
-cargo test capability_detector
-cargo test routing_integration
+cargo test capability_detection
+cargo test sync::smart_oauth
+cargo test mcp_routing
 
-# Run with coverage
-cargo tarpaulin --out Html
+# Build and check
+cargo check
+cargo build --release
 ```
 
-### Test Coverage
-
-- **Unit Tests**: DynamicToolRegistry, ClientCapabilities, routing logic
-- **Integration Tests**: End-to-end routing workflows, dynamic registration flow
-- **Mock Tests**: MCP client simulation for both Dynamic and Query modes
-
-See [`tests/`](./tests/) directory for test implementation details.
+**Test Coverage**: 131/131 unit tests passing
 
 ## 📖 Documentation
 
 - **Requirements**: [SPEC/01-REQUIREMENTS.md](./SPEC/01-REQUIREMENTS.md)
 - **Architecture**: [SPEC/02-ARCHITECTURE.md](./SPEC/02-ARCHITECTURE.md)
-- **API Reference**: [SPEC/03-API.md](./SPEC/03-API.md)
-- **Audit Report**: [AUDIT_REPORT.md](./AUDIT_REPORT.md)
-
-## 🛠️ Development
-
-### Project Structure
-
-```
-agentic-warden/
-├── src/
-│   ├── mcp/
-│   │   ├── mod.rs                    # MCP server implementation
-│   │   ├── capability_detector.rs    # Client capability detection
-│   │   └── dynamic_tools.rs          # Dynamic tool registration
-│   ├── mcp_routing/
-│   │   ├── mod.rs                    # Intelligent routing logic
-│   │   ├── models.rs                 # Request/response models
-│   │   ├── decision/                 # LLM ReAct + Vector search
-│   │   └── execution/                # Tool execution
-│   ├── memory/
-│   │   └── mod.rs                    # Conversation history store
-│   └── main.rs
-├── tests/                            # Integration tests
-├── .mcp.json.example                 # Example configuration
-└── SPEC/                             # Technical specifications
-```
-
-### Building
-
-```bash
-# Development build
-cargo build
-
-# Release build with optimizations
-cargo build --release
-
-# Run with logging
-RUST_LOG=debug cargo run -- mcp
-```
+- **API Design**: [SPEC/04-API-DESIGN.md](./SPEC/04-API-DESIGN.md)
+- **Testing Strategy**: [SPEC/06-TESTING-STRATEGY.md](./SPEC/06-TESTING-STRATEGY.md)
 
 ## 🤝 Contributing
 
@@ -504,7 +235,7 @@ Contributions welcome! Please:
 1. Check [GitHub Issues](https://github.com/putao520/agentic-warden/issues)
 2. Follow existing code style
 3. Add tests for new features
-4. Update documentation as needed
+4. Update documentation
 
 ## 📜 License
 
@@ -513,11 +244,9 @@ MIT License - see [LICENSE](LICENSE) file for details.
 ## 🙏 Acknowledgments
 
 - **MCP Protocol**: [modelcontextprotocol.io](https://modelcontextprotocol.io)
-- **rmcp**: Rust MCP SDK by [pkolaczk](https://github.com/pkolaczk/rmcp)
-- **FastEmbed**: Fast embedding generation
 - **Claude Code**: Anthropic's official CLI for Claude
-- **Anthropic Code Execution**: This project's JavaScript orchestration system was inspired by Anthropic's article on [Code Execution with MCP](https://www.anthropic.com/engineering/code-execution-with-mcp), which demonstrated innovative approaches to executing code within MCP environments
+- **Anthropic Code Execution**: Inspired by [Code Execution with MCP](https://www.anthropic.com/engineering/code-execution-with-mcp)
 
 ---
 
-**Agentic-Warden** - Intelligent MCP Routing for Token-Efficient AI Assistants
+**Agentic-Warden** - Universal AI CLI Management Platform v6.0.1

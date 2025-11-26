@@ -14,7 +14,6 @@ use crate::mcp_routing::{
     models::{IntelligentRouteRequest, IntelligentRouteResponse},
     IntelligentRouter,
 };
-use crate::memory::{ConversationHistoryStore, ConversationSearchResult};
 use crate::roles::RoleManager;
 use capability_detector::ClientCapabilities;
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
@@ -36,18 +35,6 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{Duration, Instant};
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct SearchHistoryParams {
-    /// The search query to find relevant conversation history.
-    pub query: String,
-    /// Maximum number of results to return (default: 10).
-    #[serde(default = "default_search_limit")]
-    pub limit: usize,
-}
-
-fn default_search_limit() -> usize {
-    10
-}
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct TaskSpec {
@@ -407,7 +394,6 @@ pub struct AgenticWardenMcpServer {
     router: Arc<IntelligentRouter>,
     tool_router: ToolRouter<Self>,
     embedder: Arc<tokio::sync::Mutex<TextEmbedding>>,
-    history_store: Arc<ConversationHistoryStore>,
     // Client capability detection
     client_capabilities: Arc<RwLock<Option<ClientCapabilities>>>,
     // Dynamic tool registry (SSOT for MCP tools)
@@ -446,9 +432,6 @@ impl AgenticWardenMcpServer {
         // Initialize conversation history store
         let db_path = Self::get_history_db_path()
             .map_err(|e| format!("Failed to get history DB path: {e}"))?;
-        let history_store = ConversationHistoryStore::new(&db_path, 384)
-            .map_err(|e| format!("Failed to initialize conversation history store: {e}"))?;
-
         let boa_pool = Arc::new(
             BoaRuntimePool::new()
                 .await
@@ -474,7 +457,6 @@ impl AgenticWardenMcpServer {
             router: Arc::new(router),
             tool_router,
             embedder: Arc::new(tokio::sync::Mutex::new(embedder)),
-            history_store: Arc::new(history_store),
             client_capabilities: Arc::new(RwLock::new(None)),
             tool_registry: registry,
             peer: Arc::new(RwLock::new(None)),
@@ -604,39 +586,6 @@ impl AgenticWardenMcpServer {
         }
 
         Ok(Json(response))
-    }
-
-    #[tool(
-        name = "search_history",
-        description = "Search conversation history using semantic similarity. Returns relevant past conversations with extracted TODO items. Each result includes conversation context and associated TODO list (markdown checkboxes, TODO: markers, Action Items)."
-    )]
-    pub async fn search_history_tool(
-        &self,
-        params: Parameters<SearchHistoryParams>,
-    ) -> Result<Json<Vec<ConversationSearchResult>>, String> {
-        // Generate embedding for the query
-        let query = &params.0.query;
-        let limit = params.0.limit;
-
-        let embeddings = self
-            .embedder
-            .lock()
-            .await
-            .embed(vec![query.clone()], None)
-            .map_err(|e| format!("Failed to generate embedding: {e}"))?;
-
-        let query_embedding = embeddings
-            .into_iter()
-            .next()
-            .ok_or_else(|| "No embedding generated".to_string())?;
-
-        // Search conversation history
-        let results = self
-            .history_store
-            .search_with_scores(query_embedding, limit)
-            .map_err(|e| format!("Failed to search conversation history: {e}"))?;
-
-        Ok(Json(results))
     }
 
     #[tool(

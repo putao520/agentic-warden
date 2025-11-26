@@ -207,6 +207,24 @@ run_unit_tests() {
 run_integration_tests() {
     log_info "运行集成测试..."
 
+    # SPEC CI容器化铁律警告
+    if [ "$DOCKER_MODE" != true ] && [ "$CICD_MODE" != true ]; then
+        log_warning "======================================================================"
+        log_warning "⚠️  SPEC CI容器化测试铁律警告"
+        log_warning ""
+        log_warning "禁止在主机直接运行集成测试！"
+        log_warning "所有非单元测试必须使用CI容器环境执行。"
+        log_warning ""
+        log_warning "正确方式："
+        log_warning "  1. 使用Docker模式: $0 --docker integration"
+        log_warning "  2. 使用CI/CD: 通过GitHub Actions或docker-compose.ci.yml"
+        log_warning "  3. 启动CI环境: docker-compose -f docker-compose.ci.yml up"
+        log_warning ""
+        log_warning "立即终止集成测试执行。"
+        log_warning "======================================================================"
+        return 1
+    fi
+
     local test_args="--test integration"
 
     if [ "$VERBOSE" = true ]; then
@@ -229,6 +247,23 @@ run_integration_tests() {
 # 运行CLI测试
 run_cli_tests() {
     log_info "运行CLI测试..."
+
+    # SPEC CI容器化铁律警告
+    if [ "$DOCKER_MODE" != true ] && [ "$CICD_MODE" != true ]; then
+        log_warning "======================================================================"
+        log_warning "⚠️  SPEC CI容器化测试铁律警告"
+        log_warning ""
+        log_warning "禁止在主机直接运行CLI集成测试！"
+        log_warning "所有非单元测试必须使用CI容器环境执行。"
+        log_warning ""
+        log_warning "正确方式："
+        log_warning "  1. 使用Docker模式: $0 --docker cli"
+        log_warning "  2. 使用CI/CD: 通过GitHub Actions"
+        log_warning ""
+        log_warning "立即终止CLI测试执行。"
+        log_warning "======================================================================"
+        return 1
+    fi
 
     local test_args="--test cli_integration"
 

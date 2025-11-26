@@ -1,0 +1,74 @@
+# CI环境Docker镜像
+# 严格遵循SPEC CI容器化测试铁律
+
+FROM rust:1.82-slim-bookworm as builder
+
+# 安装系统依赖
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    curl \
+    build-essential \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# 创建应用目录
+WORKDIR /app
+
+# 复制依赖文件
+COPY Cargo.toml Cargo.lock ./
+
+# 创建src目录并放入一个占位文件，以便Cargo可以下载依赖
+RUN mkdir src && echo "fn main() {}" > src/main.rs
+
+# 构建缓存依赖（为了加快后续构建）
+RUN cargo fetch
+
+# 复制源代码
+COPY src ./src
+
+# 删除占位main.rs并重新复制真实的main.rs
+RUN rm -f src/main.rs
+COPY src ./src
+
+# 构建应用
+RUN cargo build --release
+
+# 运行时镜像
+FROM debian:bookworm-slim
+
+# 安装运行时依赖
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# 创建非root用户
+RUN groupadd -r aiw && useradd -r -g aiw aiw
+
+# 创建应用目录
+WORKDIR /app
+
+# 从builder阶段复制二进制文件
+COPY --from=builder /app/target/release/aiw /usr/local/bin/aiw
+
+# 复制测试脚本和配置
+COPY tests ./tests
+COPY scripts ./scripts
+
+# 创建日志目录
+RUN mkdir -p /app/test-results /app/logs && chown -R aiw:aiw /app
+
+# 切换到非root用户
+USER aiw
+
+# 验证安装
+RUN aiw --version
+
+# 设置环境变量
+ENV RUST_LOG=info
+ENV AIW_ENV=ci
+
+# 默认命令
+CMD ["/usr/local/bin/aiw", "--help"]

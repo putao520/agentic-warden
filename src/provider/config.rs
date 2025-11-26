@@ -18,10 +18,6 @@ pub struct ProvidersConfig {
 
     /// Default provider name
     pub default_provider: String,
-
-    /// Memory configuration for semantic search
-    #[serde(default)]
-    pub memory: Option<crate::memory::MemoryConfig>,
 }
 
 /// Single Provider configuration - 最简化版本
@@ -105,7 +101,6 @@ impl ProvidersConfig {
             schema: Some(Self::default_schema()),
             providers,
             default_provider: "official".to_string(),
-            memory: None,
         }
     }
 
@@ -295,7 +290,6 @@ mod tests {
             schema: None,
             providers: HashMap::new(),
             default_provider: "test".to_string(),
-            memory: None,
         };
 
         // Empty providers should fail

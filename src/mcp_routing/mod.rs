@@ -24,7 +24,6 @@ use self::{
     },
     pool::DiscoveredTool,
 };
-use crate::memory::{ConversationHistoryStore, ConversationRecord, MemoryConfig};
 use anyhow::{anyhow, Result};
 use parking_lot::Mutex;
 use rmcp::model::Tool;
@@ -37,7 +36,6 @@ const METHOD_VECTOR_PREFIX: &str = "method";
 pub struct IntelligentRouter {
     embedder: FastEmbedder,
     index: Mutex<MemRoutingIndex>,
-    history: ConversationHistoryStore,
     decision_engine: Arc<DecisionEngine>,
     connection_pool: Arc<McpConnectionPool>,
     tool_registry: RwLock<HashMap<String, Tool>>,
@@ -50,22 +48,19 @@ impl IntelligentRouter {
         let config_manager = McpConfigManager::load()?;
         let config_arc = Arc::new(config_manager.config().clone());
 
-        let memory_config = MemoryConfig::load_from_provider_config()?;
-        memory_config.validate()?;
-
-        let embedder = FastEmbedder::new(&memory_config.fastembed_model)?;
-        let history =
-            ConversationHistoryStore::new(&memory_config.sahome_db_path, embedder.dimension())?;
+        // Load embedding config from environment
+        let fastembed_model = std::env::var("FASTEMBED_MODEL")
+            .unwrap_or_else(|_| "BAAI/bge-small-en-v1.5".to_string());
+        let embedder = FastEmbedder::new(&fastembed_model)?;
 
         let dynamic_registry = Arc::new(registry::DynamicToolRegistry::new(Vec::new()));
         let _cleanup_task = dynamic_registry.start_cleanup_task();
 
         // Initialize code generator using factory pattern
-        // Auto-detect: OPENAI_TOKEN exists → Ollama, otherwise → AI CLI (default: claude)
         let decision_endpoint = std::env::var("OPENAI_ENDPOINT")
-            .unwrap_or_else(|_| memory_config.llm_endpoint.clone());
+            .unwrap_or_else(|_| "http://localhost:11434".to_string());
         let decision_model = std::env::var("OPENAI_MODEL")
-            .unwrap_or_else(|_| memory_config.llm_model.clone());
+            .unwrap_or_else(|_| "qwen2.5:7b".to_string());
 
         let code_generator = codegen::CodeGeneratorFactory::from_env(
             decision_endpoint.clone(),
@@ -114,7 +109,6 @@ impl IntelligentRouter {
         Ok(Self {
             embedder,
             index: Mutex::new(index),
-            history,
             decision_engine,
             connection_pool,
             tool_registry,
@@ -127,7 +121,6 @@ impl IntelligentRouter {
     pub fn new_with_components(
         embedder: FastEmbedder,
         index: MemRoutingIndex,
-        history: ConversationHistoryStore,
         decision_engine: Arc<DecisionEngine>,
         connection_pool: Arc<McpConnectionPool>,
         tool_registry: RwLock<HashMap<String, Tool>>,
@@ -137,7 +130,6 @@ impl IntelligentRouter {
         Self {
             embedder,
             index: Mutex::new(index),
-            history,
             decision_engine,
             connection_pool,
             tool_registry,
@@ -158,7 +150,6 @@ impl IntelligentRouter {
                 selected_tool: None,
                 result: None,
                 alternatives: Vec::new(),
-                conversation_context: Vec::new(),
                 tool_schema: None,
                 dynamically_registered: false,
             });
@@ -215,16 +206,13 @@ impl IntelligentRouter {
                 selected_tool: None,
                 result: None,
                 alternatives: Vec::new(),
-                conversation_context: Vec::new(),
                 tool_schema: None,
                 dynamically_registered: false,
             });
         }
 
         let candidate_infos = build_candidates(&tool_scores, &method_scores);
-        let mut conversation_context = Vec::new();
         if request.session_id.is_some() {
-            conversation_context = self.history.top_conversations(embed.to_vec(), 5)?;
         }
 
         let decision = self
@@ -232,7 +220,6 @@ impl IntelligentRouter {
             .decide(DecisionInput {
                 user_request: request.user_request.clone(),
                 candidates: candidate_infos.clone(),
-                conversation: conversation_context.clone(),
             })
             .await?;
 
@@ -250,16 +237,6 @@ impl IntelligentRouter {
                 )
             }
         };
-
-        if let Some(session) = request.session_id.as_ref() {
-            let record = ConversationRecord::new(
-                Some(session.clone()),
-                "user",
-                request.user_request.clone(),
-                vec![format!("{}::{}", decision.server, decision.tool)],
-            );
-            self.history.append(record, embed.to_vec())?;
-        }
 
         Ok(IntelligentRouteResponse {
             success: true,
@@ -283,7 +260,6 @@ impl IntelligentRouter {
                     rationale: cand.description,
                 })
                 .collect(),
-            conversation_context,
             tool_schema: None,
             dynamically_registered: false,
         })
@@ -358,7 +334,6 @@ impl IntelligentRouter {
             }),
             result: None,
             alternatives: Vec::new(),
-            conversation_context: Vec::new(),
             tool_schema: Some(orchestrated_tool.input_schema),
             dynamically_registered: true,
         })

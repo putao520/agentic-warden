@@ -10,10 +10,7 @@ use crate::{
     config::{AUTH_DIRECTORY, AUTH_FILE_NAME},
     provider::config::Provider as ProviderConfig,
     storage::RegistryEntry,
-    sync::{
-        oauth_client::{OAuthConfig, OAuthTokenResponse},
-        smart_oauth::{AuthState, SmartOAuthAuthenticator},
-    },
+    sync::smart_oauth::{AuthState, SmartOAuthAuthenticator},
     task_record::{TaskRecord, TaskStatus},
 };
 use anyhow::{anyhow, Context, Result};
@@ -181,47 +178,19 @@ impl AppState {
     }
 
     /// Ensure a [`SmartOAuthAuthenticator`] exists for the requested provider.
+    /// STUB: OAuth TUI flow not fully implemented for simplified sync module
     pub fn ensure_authenticator(&self, provider: &str) -> Result<SmartOAuthAuthenticator> {
-        if let Some(existing) = self.authenticators.read().get(provider) {
-            return Ok(existing.clone());
-        }
-
-        let config = self.load_oauth_config(provider)?;
-        let authenticator = SmartOAuthAuthenticator::new(config.clone());
-        self.authenticators
-            .write()
-            .insert(provider.to_string(), authenticator.clone());
-        Ok(authenticator)
+        Err(anyhow!("OAuth TUI flow not implemented for {}", provider))
     }
 
     /// Persist new OAuth tokens returned by the authenticator and refresh the cache.
+    /// STUB: OAuth TUI flow not fully implemented for simplified sync module
     pub fn persist_oauth_success(
         &self,
         provider: &str,
-        response: &OAuthTokenResponse,
+        _response: &serde_json::Value,
     ) -> Result<()> {
-        let mut stored = self.load_oauth_state()?.unwrap_or_default();
-
-        stored.access_token = Some(response.access_token.clone());
-        if let Some(refresh) = &response.refresh_token {
-            stored.refresh_token = Some(refresh.clone());
-        }
-        stored.token_type = Some(response.token_type.clone());
-        stored.scope = response.scope.clone();
-        let expires_at = Utc::now() + Duration::seconds(response.expires_in as i64);
-        stored.expires_at = Some(expires_at.timestamp());
-
-        self.save_oauth_state(&stored)?;
-
-        // Replace cached authenticator so future calls see fresh credentials.
-        self.authenticators.write().remove(provider);
-        let config = self.load_oauth_config(provider)?;
-        let authenticator = SmartOAuthAuthenticator::new(config.clone());
-        self.authenticators
-            .write()
-            .insert(provider.to_string(), authenticator);
-
-        Ok(())
+        Err(anyhow!("OAuth TUI persistence not implemented for {}", provider))
     }
 
     /// Create a new OAuth flow entry so other screens can query its state.
@@ -295,18 +264,9 @@ impl AppState {
         self.oauth_flows.read().get(flow_id).cloned()
     }
 
-    fn load_oauth_config(&self, provider: &str) -> Result<OAuthConfig> {
-        match provider {
-            "google-drive" => self
-                .load_oauth_state()?
-                .map(StoredOAuthState::into_oauth_config)
-                .ok_or_else(|| {
-                    anyhow!(
-                        "Google Drive credentials are not configured. Run the OAuth flow first."
-                    )
-                }),
-            other => Err(anyhow!("unsupported OAuth provider '{other}'")),
-        }
+    fn load_oauth_config(&self, _provider: &str) -> Result<serde_json::Value> {
+        // STUB: Simplified OAuth config for TUI
+        Err(anyhow!("OAuth config loading not implemented in simplified sync module"))
     }
 
     fn load_oauth_state(&self) -> Result<Option<StoredOAuthState>> {
@@ -367,37 +327,6 @@ struct StoredOAuthState {
     expires_at: Option<i64>,
     token_type: Option<String>,
     scope: Option<String>,
-}
-
-impl StoredOAuthState {
-    fn into_oauth_config(self) -> OAuthConfig {
-        let mut config = OAuthConfig::default();
-        config.client_id = self.client_id;
-        config.client_secret = self.client_secret;
-        config.refresh_token = self.refresh_token;
-        config.access_token = self.access_token;
-        config.token_type = self.token_type.unwrap_or_else(|| "Bearer".to_string());
-        config.scopes = self
-            .scope
-            .map(|scope| scope.split_whitespace().map(|s| s.to_string()).collect())
-            .unwrap_or_else(default_scopes);
-
-        if let Some(expires_at) = self.expires_at {
-            if let Some(expires) = Utc.timestamp_opt(expires_at, 0).single() {
-                let remaining = expires - Utc::now();
-                config.expires_in = remaining.num_seconds().max(0) as u64;
-            }
-        }
-
-        config
-    }
-}
-
-fn default_scopes() -> Vec<String> {
-    vec![
-        "https://www.googleapis.com/auth/drive.file".to_string(),
-        "https://www.googleapis.com/auth/drive.metadata.readonly".to_string(),
-    ]
 }
 
 /// Synchronisation phases shown in the TUI.

@@ -5,7 +5,7 @@ use agentic_warden::cli_type::{parse_cli_selector_strict, parse_cli_type};
 use agentic_warden::commands::ai_cli::AiCliCommand;
 use agentic_warden::commands::{
     parse_external_as_ai_cli,
-    parser::{HooksAction, McpAction, RolesAction},
+    parser::{McpAction, RolesAction},
     Cli, Commands,
 };
 use agentic_warden::error::ErrorCategory;
@@ -206,7 +206,6 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
         }
         Commands::Mcp(action) => handle_mcp_action(action).await,
         Commands::Roles(action) => handle_roles_command(action).await,
-        Commands::Hooks(action) => handle_hooks_command(action).await,
         Commands::External(tokens) => handle_external_command(tokens).await,
     }
 }
@@ -257,25 +256,6 @@ fn handle_status_command() -> Result<ExitCode, String> {
     Ok(ExitCode::from(0))
 }
 
-async fn handle_sync_command(
-    command: &str,
-    args: Option<Vec<PathBuf>>,
-) -> Result<ExitCode, String> {
-    let config_name = match (command, args) {
-        ("push", Some(dirs)) => dirs
-            .into_iter()
-            .next()
-            .map(|dir| dir.to_string_lossy().to_string())
-            .or_else(|| Some("default".to_string())),
-        ("pull", _) => Some("default".to_string()),
-        _ => None,
-    };
-
-    match sync::sync_command::handle_sync_command(command, config_name).await {
-        Ok(code) => Ok(ExitCode::from((code & 0xFF) as u8)),
-        Err(e) => Err(format!("Sync command failed: {}", e)),
-    }
-}
 
 async fn handle_external_command(tokens: Vec<String>) -> Result<ExitCode, String> {
     if tokens.is_empty() {
@@ -453,22 +433,8 @@ async fn handle_mcp_serve(transport: String, log_level: String) -> Result<ExitCo
         .with_target(false)
         .init();
 
-    // Install Claude Code hooks before starting MCP server
-    if let Err(e) = agentic_warden::hooks::install_hooks() {
-        eprintln!("⚠️  Failed to install Claude Code hooks: {}", e);
-        eprintln!("    The MCP server will still work, but conversation history won't be automatically captured.");
-    }
-
-    // Setup cleanup guard to ensure hooks are uninstalled even on panic/signal
-    struct HooksGuard;
-    impl Drop for HooksGuard {
-        fn drop(&mut self) {
-            if let Err(e) = agentic_warden::hooks::uninstall_hooks() {
-                eprintln!("⚠️  Failed to uninstall Claude Code hooks: {}", e);
-            }
-        }
-    }
-    let _hooks_guard = HooksGuard;
+    // Note: Claude Code hooks were removed in v6.0.0 (CC session history deleted)
+    // No hooks installation/uninstallation needed
 
     // 创建MCP服务器（使用InProcessRegistry）
     // Provider配置通过supervisor模块管理，不需要在MCP server中直接管理
@@ -535,34 +501,26 @@ async fn handle_roles_command(action: RolesAction) -> Result<ExitCode, String> {
     }
 }
 
-/// Handle Claude Code hooks commands
-async fn handle_hooks_command(action: HooksAction) -> Result<ExitCode, String> {
-    match action {
-        HooksAction::Handle => {
-            // Handle hook event from stdin
-            match agentic_warden::hooks::handle_hook_from_stdin().await {
-                Ok(_) => Ok(ExitCode::from(0)),
-                Err(e) => {
-                    // Log error for debugging
-                    eprintln!("❌ Hook processing failed: {}", e);
 
-                    // Return exit code 2 for critical errors (blocks Claude Code)
-                    // Return exit code 1 for non-critical errors (logged but doesn't block)
-                    if e.to_string().contains("stdin")
-                        || e.to_string().contains("vector database")
-                        || e.to_string().contains("FastEmbed")
-                    {
-                        // Critical errors that should block
-                        Ok(ExitCode::from(2))
-                    } else {
-                        // Non-critical errors (e.g., already indexed, empty transcript)
-                        Ok(ExitCode::from(1))
-                    }
-                }
-            }
-        }
+/// Handle sync command (push, pull, list)
+async fn handle_sync_command(
+    command: &str,
+    _args: Option<Vec<PathBuf>>,
+) -> Result<ExitCode, String> {
+    match agentic_warden::sync::sync_command::handle_sync_command(command, None).await {
+        Ok(code) => {
+            // Convert i32 to u8 for ExitCode
+            let exit_code = if code >= 0 && code <= 255 {
+                code as u8
+            } else {
+                1 // Default error code
+            };
+            Ok(ExitCode::from(exit_code))
+        },
+        Err(e) => Err(format!("Sync command failed: {}", e)),
     }
 }
+
 
 /// 运行stdio传输的MCP服务器
 async fn run_mcp_server_stdio(

@@ -1212,3 +1212,12 @@ OPENAI_MODEL="gpt-4"
 - Added REQ-010: AI CLI 更新/安装管理 (renumbered from REQ-009)
 - Status: New requirement for v0.2.0 feature
 - Re-numbered requirements to maintain sequential ordering
+
+<!-- 
+更新记录 (2025-11-25):
+- REQ-003 (Google Drive同步): 已从删除状态恢复
+- REQ-010 (CC会话历史): 保持删除状态
+
+说明: Google Drive同步是通用基础设施，与CC会话系统无技术依赖，
+因此根据用户反馈恢复此功能。
+-->

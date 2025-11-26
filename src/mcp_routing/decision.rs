@@ -1,7 +1,4 @@
-use crate::{
-    mcp_routing::js_orchestrator::workflow_planner::{WorkflowPlan, WorkflowPlannerEngine},
-    memory::ConversationRecord,
-};
+use crate::mcp_routing::js_orchestrator::workflow_planner::{WorkflowPlan, WorkflowPlannerEngine};
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use ollama_rs::{
@@ -24,7 +21,6 @@ pub struct CandidateToolInfo {
 pub struct DecisionInput {
     pub user_request: String,
     pub candidates: Vec<CandidateToolInfo>,
-    pub conversation: Vec<ConversationRecord>,
 }
 
 #[derive(Debug, Clone)]
@@ -255,16 +251,6 @@ fn build_user_prompt(input: &DecisionInput) -> String {
             prompt.push('\n');
         }
         prompt.push('\n');
-    }
-
-    if !input.conversation.is_empty() {
-        prompt.push_str("Relevant conversation context:\n");
-        for convo in &input.conversation {
-            prompt.push_str(&format!(
-                "- [{}] {}: {}\n",
-                convo.timestamp, convo.role, convo.content
-            ));
-        }
     }
 
     prompt.push_str(

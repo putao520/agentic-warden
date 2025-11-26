@@ -1,4 +1,3 @@
-use crate::memory::ConversationRecord;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -72,9 +71,6 @@ pub struct IntelligentRouteResponse {
     pub result: Option<RouteExecutionResult>,
     #[serde(default)]
     pub alternatives: Vec<SelectedRoute>,
-    #[serde(default)]
-    #[schemars(skip)]
-    pub conversation_context: Vec<ConversationRecord>,
     /// Tool schema when dynamically registered (Dynamic mode only)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_schema: Option<Value>,

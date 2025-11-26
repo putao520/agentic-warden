@@ -77,3 +77,37 @@ integration*.log
 # Schema and temporary config
 /schema/
 *.schema.json
+
+# Cache and models
+.fastembed_cache/
+.cache/
+.model_cache/
+
+# Python virtual environment
+venv/
+.env/
+.envrc
+
+# Test files
+test-*.py
+real_*.py
+final_*.py
+*_test.py
+*.test.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
