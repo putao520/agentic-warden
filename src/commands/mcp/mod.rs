@@ -2,13 +2,13 @@
 //!
 //! 提供对 ~/.aiw/.mcp.json 的管理命令
 
-pub mod config_editor;
-mod list;
 mod add;
-mod remove;
-mod get;
-mod enable_disable;
+pub mod config_editor;
 mod edit;
+mod enable_disable;
+mod get;
+mod list;
+mod remove;
 
 pub use config_editor::{McpConfigEditor, McpServerConfig};
 
@@ -30,22 +30,13 @@ pub enum McpCommand {
         disabled: bool,
     },
     /// 移除MCP服务器
-    Remove {
-        name: String,
-        yes: bool,
-    },
+    Remove { name: String, yes: bool },
     /// 获取服务器配置
-    Get {
-        name: String,
-    },
+    Get { name: String },
     /// 启用服务器
-    Enable {
-        name: String,
-    },
+    Enable { name: String },
     /// 禁用服务器
-    Disable {
-        name: String,
-    },
+    Disable { name: String },
     /// 编辑配置文件
     Edit,
 }
@@ -54,23 +45,19 @@ pub enum McpCommand {
 pub fn handle_mcp_command(cmd: McpCommand) -> Result<()> {
     match cmd {
         McpCommand::List => list::execute(),
-        McpCommand::Add { name, command, args, description, category, env, disabled } => {
-            add::execute(&name, &command, args, description, category, env, disabled)
-        }
-        McpCommand::Remove { name, yes } => {
-            remove::execute(&name, yes)
-        }
-        McpCommand::Get { name } => {
-            get::execute(&name)
-        }
-        McpCommand::Enable { name } => {
-            enable_disable::execute_enable(&name)
-        }
-        McpCommand::Disable { name } => {
-            enable_disable::execute_disable(&name)
-        }
-        McpCommand::Edit => {
-            edit::execute()
-        }
+        McpCommand::Add {
+            name,
+            command,
+            args,
+            description,
+            category,
+            env,
+            disabled,
+        } => add::execute(&name, &command, args, description, category, env, disabled),
+        McpCommand::Remove { name, yes } => remove::execute(&name, yes),
+        McpCommand::Get { name } => get::execute(&name),
+        McpCommand::Enable { name } => enable_disable::execute_enable(&name),
+        McpCommand::Disable { name } => enable_disable::execute_disable(&name),
+        McpCommand::Edit => edit::execute(),
     }
 }

@@ -19,7 +19,10 @@ pub fn execute(name: &str) -> Result<()> {
                 println!("  • {}", server_name);
             }
             println!();
-            println!("Use '{}' to see all servers", format!("{} mcp list", "aiw").cyan());
+            println!(
+                "Use '{}' to see all servers",
+                format!("{} mcp list", "aiw").cyan()
+            );
             return Ok(());
         }
     };
@@ -59,7 +62,8 @@ pub fn execute(name: &str) -> Result<()> {
             // 脱敏显示可能的敏感信息
             let display_value = if key.to_uppercase().contains("KEY")
                 || key.to_uppercase().contains("TOKEN")
-                || key.to_uppercase().contains("SECRET") {
+                || key.to_uppercase().contains("SECRET")
+            {
                 format!("{}...", &value.chars().take(8).collect::<String>())
             } else {
                 value.clone()

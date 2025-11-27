@@ -15,6 +15,16 @@ use super::{
 };
 use crate::mcp_routing::decision::{CandidateToolInfo, DecisionEngine};
 
+/// Deserialize null as empty string
+fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    T: Default + serde::Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    let opt = Option::deserialize(deserializer)?;
+    Ok(opt.unwrap_or_default())
+}
+
 /// Abstraction over engines capable of planning workflows and generating code.
 #[async_trait]
 pub trait WorkflowPlannerEngine: Send + Sync {
@@ -27,13 +37,23 @@ pub trait WorkflowPlannerEngine: Send + Sync {
     async fn generate_js_code(&self, plan: &WorkflowPlan) -> Result<String>;
 }
 
-/// An orchestrated tool (JS function combining multiple MCP tools)
+/// Information for direct proxy registration (single tool, no JS)
+#[derive(Debug, Clone)]
+pub struct ProxyToolInfo {
+    pub server: String,
+    pub tool_name: String,
+}
+
+/// An orchestrated tool result
 #[derive(Debug, Clone)]
 pub struct OrchestratedTool {
     pub name: String,
     pub description: String,
-    pub js_code: String,
+    /// None = direct proxy (use proxy_info), Some = JS orchestrated
+    pub js_code: Option<String>,
     pub input_schema: serde_json::Value,
+    /// Present when needs_orchestration=false (direct proxy)
+    pub proxy_info: Option<ProxyToolInfo>,
 }
 
 /// Workflow orchestrator
@@ -93,6 +113,36 @@ impl WorkflowOrchestrator {
             return Err(anyhow!("Workflow is not feasible: {reason}"));
         }
 
+        // Optimization: If needs_orchestration=false and single step, use direct proxy
+        if !plan.needs_orchestration && plan.steps.len() == 1 {
+            let step = &plan.steps[0];
+            // Parse "server::tool_name" format
+            let parts: Vec<&str> = step.tool.split("::").collect();
+            if parts.len() == 2 {
+                let server = parts[0].to_string();
+                let tool_name = parts[1].to_string();
+
+                eprintln!(
+                    "   ⚡ [OPTIMIZATION] Direct proxy mode: {}::{}",
+                    server, tool_name
+                );
+
+                // Build schema from plan's input_params
+                let input_schema = build_input_schema(&plan.input_params);
+
+                return Ok(OrchestratedTool {
+                    name: plan.suggested_name.clone(),
+                    description: plan.description.clone(),
+                    js_code: None, // No JS needed
+                    input_schema,
+                    proxy_info: Some(ProxyToolInfo { server, tool_name }),
+                });
+            }
+        }
+
+        // Full JS orchestration path
+        eprintln!("   🔧 [ORCHESTRATION] Generating JS workflow...");
+
         let js_code = self
             .planner
             .generate_js_code(&plan)
@@ -140,8 +190,9 @@ impl WorkflowOrchestrator {
         Ok(OrchestratedTool {
             name: plan.suggested_name.clone(),
             description: plan.description.clone(),
-            js_code,
+            js_code: Some(js_code),
             input_schema,
+            proxy_info: None,
         })
     }
 }
@@ -216,11 +267,15 @@ fn build_input_schema(params: &[InputParam]) -> Value {
 pub struct WorkflowPlan {
     #[serde(default)]
     pub is_feasible: bool,
+    /// Whether JS orchestration is needed (multi-step, data transform, loops, etc.)
+    /// false = single tool direct proxy, true = generate JS workflow
     #[serde(default)]
+    pub needs_orchestration: bool,
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub reason: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub suggested_name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub description: String,
     #[serde(default)]
     pub steps: Vec<WorkflowStep>,
@@ -232,9 +287,9 @@ pub struct WorkflowPlan {
 pub struct WorkflowStep {
     #[serde(default)]
     pub step: usize,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub tool: String, // "server::tool_name"
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub description: String,
     #[serde(default)]
     pub dependencies: Vec<usize>,
@@ -242,11 +297,15 @@ pub struct WorkflowStep {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct InputParam {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub name: String,
-    #[serde(rename = "type", default)]
+    #[serde(
+        rename = "type",
+        default,
+        deserialize_with = "deserialize_null_default"
+    )]
     pub param_type: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub description: String,
     #[serde(default)]
     pub required: bool,

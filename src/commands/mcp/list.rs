@@ -3,7 +3,7 @@
 use super::McpConfigEditor;
 use anyhow::Result;
 use colored::Colorize;
-use prettytable::{Cell, Row, Table, format};
+use prettytable::{format, Cell, Row, Table};
 
 pub fn execute() -> Result<()> {
     let editor = McpConfigEditor::new()?;
@@ -17,11 +17,14 @@ pub fn execute() -> Result<()> {
         println!("  {} mcp add <name> <command> [args...]", "aiw".cyan());
         println!();
         println!("Example:");
-        println!("  {} mcp add filesystem npx -y @modelcontextprotocol/server-filesystem /home/user", "aiw".cyan());
+        println!(
+            "  {} mcp add filesystem npx -y @modelcontextprotocol/server-filesystem /home/user",
+            "aiw".cyan()
+        );
         return Ok(());
     }
 
-    println!("{}", format!("MCP Servers ({})","~/.aiw/.mcp.json".cyan()));
+    println!("{}", format!("MCP Servers ({})", "~/.aiw/.mcp.json".cyan()));
     println!();
 
     let mut table = Table::new();

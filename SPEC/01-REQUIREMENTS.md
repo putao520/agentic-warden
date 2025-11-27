@@ -651,7 +651,7 @@ The intelligent routing system uses hardcoded configuration constants for routin
 
 #### Environment Variables:
 - `AGENTIC_WARDEN_LLM_ENDPOINT`: Internal LLM endpoint (default: http://localhost:11434)
-- `AGENTIC_WARDEN_LLM_MODEL`: Internal LLM model (default: qwen2.5:7b)
+- `AGENTIC_WARDEN_LLM_MODEL`: Internal LLM model (default: qwen3:1.7b)
 - `AGENTIC_WARDEN_FASTEMBED_MODEL`: FastEmbed model (default: AllMiniLML6V2)
 
 #### Algorithm Requirements:
@@ -771,10 +771,20 @@ match js_orchestrator {
 **LLM编排模式** (优先尝试):
 - [x] LLM分析用户任务,规划所需步骤和MCP工具
 - [x] 检查是否有合适的工具支持,不可行时返回Err触发fallback
-- [x] 可行时生成带输入参数定义的JS函数
+- [x] **智能注册决策** (needs_orchestration字段):
+  - `needs_orchestration = false`: 单工具直接透传,注册为代理工具(ProxiedMcpTool)
+  - `needs_orchestration = true`: 需要JS编排,生成JS代码并注册为编排工具(JsOrchestratedTool)
+- [x] **触发JS编排的条件** (任一满足):
+  - 多步骤工作流(steps > 1)
+  - 需要转换/过滤/聚合输出数据
+  - 需要条件逻辑或循环
+  - 需要组合多个工具的结果
+- [x] **直接代理的条件** (全部满足):
+  - 单步骤(steps = 1)
+  - 输入参数直接透传到目标工具
+  - 无输出处理需求
 - [x] JS函数内部调用注入的MCP工具(以`mcp`前缀暴露)
 - [x] 代码验证失败时返回Err触发fallback
-- [x] 验证通过后注册为单一动态JS编排工具到Registry
 - [x] 返回消息: "Use the 'xxx' tool to solve your problem"
 
 **向量搜索模式** (Fallback保障):
@@ -795,9 +805,7 @@ match js_orchestrator {
 **安全沙箱**:
 - [x] 使用Boa引擎提供安全的JS运行时环境
 - [x] 禁用危险全局对象: `eval`, `Function`, `require`, `import`, `fetch`, `XMLHttpRequest`
-- [x] 实现执行时间限制(最大30秒)
-- [x] 实现内存使用限制(最大256MB)
-- [x] 实现调用栈深度限制(最大128层)
+- [x] 实现执行时间限制(最大10分钟)
 - [x] 提供安全的`console.log`(仅用于调试)
 
 **MCP函数注入**:

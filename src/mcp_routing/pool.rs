@@ -118,8 +118,7 @@ impl McpConnectionPool {
         let mut all = Vec::new();
         let config = self.config.read().await.clone();
 
-        for (name, server) in config.mcp_servers.iter()
-        {
+        for (name, server) in config.mcp_servers.iter() {
             // Skip disabled servers (Claude Code compatibility)
             if !server.enabled.unwrap_or(true) {
                 continue;

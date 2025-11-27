@@ -190,7 +190,10 @@ impl AppState {
         provider: &str,
         _response: &serde_json::Value,
     ) -> Result<()> {
-        Err(anyhow!("OAuth TUI persistence not implemented for {}", provider))
+        Err(anyhow!(
+            "OAuth TUI persistence not implemented for {}",
+            provider
+        ))
     }
 
     /// Create a new OAuth flow entry so other screens can query its state.
@@ -266,7 +269,9 @@ impl AppState {
 
     fn load_oauth_config(&self, _provider: &str) -> Result<serde_json::Value> {
         // STUB: Simplified OAuth config for TUI
-        Err(anyhow!("OAuth config loading not implemented in simplified sync module"))
+        Err(anyhow!(
+            "OAuth config loading not implemented in simplified sync module"
+        ))
     }
 
     fn load_oauth_state(&self) -> Result<Option<StoredOAuthState>> {

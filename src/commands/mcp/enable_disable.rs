@@ -17,7 +17,10 @@ pub fn execute_enable(name: &str) -> Result<()> {
             println!("  • {}", server_name);
         }
         println!();
-        println!("Use '{}' to see all servers", format!("{} mcp list", "aiw").cyan());
+        println!(
+            "Use '{}' to see all servers",
+            format!("{} mcp list", "aiw").cyan()
+        );
         return Ok(());
     }
 
@@ -45,7 +48,10 @@ pub fn execute_disable(name: &str) -> Result<()> {
             println!("  • {}", server_name);
         }
         println!();
-        println!("Use '{}' to see all servers", format!("{} mcp list", "aiw").cyan());
+        println!(
+            "Use '{}' to see all servers",
+            format!("{} mcp list", "aiw").cyan()
+        );
         return Ok(());
     }
 

@@ -12,7 +12,10 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::mpsc;
 
 /// Start watching MCP configuration file for changes
-pub async fn start_config_watcher(connection_pool: Arc<McpConnectionPool>, config_path: PathBuf) -> Result<()> {
+pub async fn start_config_watcher(
+    connection_pool: Arc<McpConnectionPool>,
+    config_path: PathBuf,
+) -> Result<()> {
     let (tx, mut rx) = mpsc::channel(100);
 
     // Spawn blocking file watcher in separate thread
@@ -92,8 +95,7 @@ async fn reload_config(connection_pool: &McpConnectionPool) -> Result<()> {
     // Small delay to ensure file write is complete
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    let config_manager = McpConfigManager::load()
-        .context("Failed to load MCP configuration")?;
+    let config_manager = McpConfigManager::load().context("Failed to load MCP configuration")?;
 
     let new_config = Arc::new(config_manager.config().clone());
 

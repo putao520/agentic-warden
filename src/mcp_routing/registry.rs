@@ -176,8 +176,8 @@ pub struct BaseToolDefinition {
 
 /// Dynamic tool registry implementation (thread-safe)
 pub struct DynamicToolRegistry {
-    base_tools: HashMap<String, BaseToolDefinition>,
-    base_snapshot: Arc<Vec<Tool>>,
+    base_tools: Arc<RwLock<HashMap<String, BaseToolDefinition>>>,
+    base_snapshot: Arc<RwLock<Vec<Tool>>>,
     dynamic_tools: Arc<RwLock<HashMap<String, RegisteredTool>>>,
     config: RegistryConfig,
     tool_cache: Arc<RwLock<Option<Arc<Vec<Tool>>>>>,
@@ -199,12 +199,30 @@ impl DynamicToolRegistry {
         }
 
         Self {
-            base_tools: base_map,
-            base_snapshot: Arc::new(base_snapshot),
+            base_tools: Arc::new(RwLock::new(base_map)),
+            base_snapshot: Arc::new(RwLock::new(base_snapshot)),
             dynamic_tools: Arc::new(RwLock::new(HashMap::new())),
             config,
             tool_cache: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// Extend base tools with additional tools (used to merge server tools)
+    pub async fn extend_base_tools(&self, tools: Vec<Tool>) {
+        let mut base_map = self.base_tools.write().await;
+        let mut base_snapshot = self.base_snapshot.write().await;
+
+        for tool in tools {
+            if !base_map.contains_key(tool.name.as_ref()) {
+                base_snapshot.push(tool.clone());
+                base_map.insert(tool.name.to_string(), BaseToolDefinition { tool });
+            }
+        }
+
+        // Invalidate cache since base tools changed
+        drop(base_map);
+        drop(base_snapshot);
+        self.invalidate_cache().await;
     }
 
     /// Start the background cleanup loop, returning the JoinHandle for the caller to manage
@@ -321,9 +339,12 @@ impl DynamicToolRegistry {
             return cached;
         }
 
-        let mut snapshot =
-            Vec::with_capacity(self.base_tools.len() + self.config.max_dynamic_tools);
-        snapshot.extend(self.base_snapshot.iter().cloned());
+        let base_tools = self.base_tools.read().await;
+        let base_snapshot = self.base_snapshot.read().await;
+        let mut snapshot = Vec::with_capacity(base_tools.len() + self.config.max_dynamic_tools);
+        snapshot.extend(base_snapshot.iter().cloned());
+        drop(base_tools);
+        drop(base_snapshot);
 
         let map = self.dynamic_tools.read().await;
         for entry in map.values() {
@@ -344,10 +365,15 @@ impl DynamicToolRegistry {
 
     /// Whether a tool exists (base or dynamic)
     pub async fn has_tool(&self, name: &str) -> bool {
-        if self.base_tools.contains_key(name) {
+        if self.base_tools.read().await.contains_key(name) {
             return true;
         }
         self.dynamic_tools.read().await.contains_key(name)
+    }
+
+    /// Get the number of dynamically registered tools
+    pub async fn dynamic_tool_count(&self) -> usize {
+        self.dynamic_tools.read().await.len()
     }
 
     /// Increment execution count for a tool and return the updated number

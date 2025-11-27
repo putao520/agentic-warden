@@ -20,13 +20,20 @@ pub fn execute(name: &str, yes: bool) -> Result<()> {
                 println!("  • {}", server_name);
             }
             println!();
-            println!("Use '{}' to see all servers", format!("{} mcp list", "aiw").cyan());
+            println!(
+                "Use '{}' to see all servers",
+                format!("{} mcp list", "aiw").cyan()
+            );
             return Ok(());
         }
     };
 
     // 显示要移除的服务器信息
-    println!("{} You are about to remove MCP server '{}':", "⚠️".yellow(), name.cyan());
+    println!(
+        "{} You are about to remove MCP server '{}':",
+        "⚠️".yellow(),
+        name.cyan()
+    );
     println!();
     println!("  Command: {} {}", server.command, server.args.join(" "));
     if let Some(desc) = server.description {

@@ -240,7 +240,9 @@ fn get_ai_cli_type(pid: u32, process_name: &str) -> Option<String> {
     // Native AI CLI processes - exact matches first
     // Added claude-code for Claude Code support
     match clean_name {
-        "claude" | "claude-cli" | "anthropic-claude" | "claude-code" => return Some("claude".to_string()),
+        "claude" | "claude-cli" | "anthropic-claude" | "claude-code" => {
+            return Some("claude".to_string())
+        }
         "codex" | "codex-cli" | "openai-codex" => return Some("codex".to_string()),
         "gemini" | "gemini-cli" | "google-gemini" => return Some("gemini".to_string()),
         _ => {}
@@ -248,7 +250,9 @@ fn get_ai_cli_type(pid: u32, process_name: &str) -> Option<String> {
 
     // Partial matches for variations (exclude claude-desktop to avoid confusion)
     // Also support claude-code in partial matches
-    if (clean_name.contains("claude") || clean_name.contains("claude-code")) && !clean_name.contains("claude-desktop") {
+    if (clean_name.contains("claude") || clean_name.contains("claude-code"))
+        && !clean_name.contains("claude-desktop")
+    {
         return Some("claude".to_string());
     }
     if clean_name.contains("codex") {

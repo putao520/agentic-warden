@@ -35,7 +35,6 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{Duration, Instant};
 
-
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct TaskSpec {
     /// AI CLI type (claude, codex, or gemini).
@@ -411,17 +410,13 @@ impl AgenticWardenMcpServer {
             .map_err(|e| format!("Failed to initialise intelligent router: {e}"))?;
         let connection_pool = router.connection_pool();
 
+        // Use router's shared registry and extend with server's base tools
+        let registry = router
+            .dynamic_registry()
+            .ok_or_else(|| "Router dynamic registry not initialized".to_string())?;
         let tool_router = Self::tool_router();
         let base_tools = tool_router.list_all();
-        let registry = Arc::new(DynamicToolRegistry::with_config(
-            base_tools,
-            RegistryConfig {
-                default_ttl_seconds: 600,
-                max_dynamic_tools: 100,
-                cleanup_interval_seconds: 60,
-            },
-        ));
-        let _cleanup_task = registry.start_cleanup_task();
+        registry.extend_base_tools(base_tools).await;
 
         // Initialize FastEmbed for conversation search
         let embedder = TextEmbedding::try_new(
@@ -448,7 +443,8 @@ impl AgenticWardenMcpServer {
 
         if config_path.exists() {
             use crate::mcp_routing::config_watcher;
-            if let Err(e) = config_watcher::start_config_watcher(connection_pool, config_path).await {
+            if let Err(e) = config_watcher::start_config_watcher(connection_pool, config_path).await
+            {
                 eprintln!("⚠️  Failed to start config watcher: {}", e);
             }
         }
@@ -473,6 +469,20 @@ impl AgenticWardenMcpServer {
             .map_err(|e| format!("Failed to create config directory: {e}"))?;
 
         Ok(config_dir.join("conversation_history.db"))
+    }
+
+    /// Get all tool definitions (for testing and debugging)
+    ///
+    /// Returns all available MCP tools, including:
+    /// - Base tools (intelligent_route, etc.)
+    /// - Dynamic tools (JS orchestrated, proxied MCP)
+    pub async fn get_all_tool_definitions(&self) -> Arc<Vec<Tool>> {
+        self.tool_registry.get_all_tool_definitions().await
+    }
+
+    /// Get the count of dynamically registered tools (for testing FIFO eviction)
+    pub async fn get_dynamic_tool_count(&self) -> usize {
+        self.tool_registry.dynamic_tool_count().await
     }
 
     fn build_dynamic_tool_definition(

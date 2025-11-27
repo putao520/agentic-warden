@@ -1,13 +1,13 @@
 use anyhow::{anyhow, Context, Result};
 use dirs::home_dir;
 use serde::{Deserialize, Serialize};
-use tracing::debug;
 use std::{
     collections::HashMap,
     fs,
     path::{Path, PathBuf},
     time::SystemTime,
 };
+use tracing::debug;
 
 const DEFAULT_CONFIG_FILE: &str = ".mcp.json";
 const DEFAULT_VERSION: &str = "1.0";
@@ -49,13 +49,11 @@ pub struct HealthCheckConfig {
     pub timeout: u64,
 }
 
-
 // Routing configuration constants - hardcoded per design decision
 pub const DEFAULT_MAX_TOOLS_PER_REQUEST: usize = 10;
 pub const DEFAULT_CLUSTERING_THRESHOLD: f32 = 0.7;
 pub const DEFAULT_RERANK_TOP_K: usize = 5;
 pub const DEFAULT_SIMILARITY_THRESHOLD: f32 = 0.5;
-
 
 pub struct McpConfigManager {
     path: PathBuf,
@@ -113,14 +111,19 @@ impl McpConfigManager {
 
         if let Ok(endpoint) = std::env::var("OPENAI_ENDPOINT") {
             Self::validate_openai_endpoint(&endpoint)?;
-            debug!("OpenAI endpoint configured via environment variable: {}", endpoint);
+            debug!(
+                "OpenAI endpoint configured via environment variable: {}",
+                endpoint
+            );
         }
 
         if let Ok(model) = std::env::var("OPENAI_MODEL") {
-            debug!("OpenAI model configured via environment variable: {}", model);
+            debug!(
+                "OpenAI model configured via environment variable: {}",
+                model
+            );
         }
 
-        
         Ok(())
     }
 
@@ -141,7 +144,8 @@ impl McpConfigManager {
 
     /// Validate OpenAI endpoint URL format
     fn validate_openai_endpoint(endpoint: &str) -> Result<()> {
-        let url = endpoint.parse::<url::Url>()
+        let url = endpoint
+            .parse::<url::Url>()
             .with_context(|| format!("Invalid OpenAI endpoint URL: {}", endpoint))?;
 
         if url.scheme() != "https" && url.scheme() != "http" {
@@ -214,7 +218,3 @@ fn resolve_config_path() -> Result<PathBuf> {
 fn default_version() -> String {
     DEFAULT_VERSION.to_string()
 }
-
-
-
-

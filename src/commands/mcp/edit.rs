@@ -18,8 +18,9 @@ pub fn execute() -> Result<()> {
   "mcpServers": {}
 }
 "#;
-        fs::write(&config_path, empty_config)
-            .with_context(|| format!("Failed to create config file at {}", config_path.display()))?;
+        fs::write(&config_path, empty_config).with_context(|| {
+            format!("Failed to create config file at {}", config_path.display())
+        })?;
     }
 
     // 获取编辑器
@@ -49,7 +50,11 @@ pub fn execute() -> Result<()> {
         return Ok(());
     }
 
-    println!("Opening {} in {}...", config_path.display().to_string().cyan(), editor_cmd.green());
+    println!(
+        "Opening {} in {}...",
+        config_path.display().to_string().cyan(),
+        editor_cmd.green()
+    );
 
     // 读取编辑前的内容用于验证
     let original_content = fs::read_to_string(&config_path)?;

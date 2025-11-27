@@ -26,6 +26,14 @@
 - **真实服务**: 集成测试禁止使用Mock，必须连接真实服务
 - **持续验证**: 每次提交都运行全套测试套件
 
+### 1.3 测试铁律 🔒
+
+以下规则**绝对禁止违反**：
+
+1. **禁止 `#[ignore]` 标记**: 所有测试必须在 `cargo test` 时正常运行，禁止使用 `#[ignore]` 跳过测试
+2. **禁止 Mock**: 集成/E2E 测试必须连接真实服务（MCP服务器、AI CLI、Ollama等）
+3. **禁止过时测试**: 测试代码必须与当前 API 保持同步，发现过时测试立即删除或更新
+
 ---
 
 ## 2. 测试分层架构
@@ -148,7 +156,8 @@ docker-compose -f docker-compose.ci.yml run --rm e2e-tester
 | REQ-007 | MCP服务器 | P1 | 集成 | mcp_task_launching.rs | ⚠️ 待验证 |
 | REQ-011 | AI CLI更新/安装管理 | P1 | E2E | ai_cli_update_e2e_tests.rs | ✅ 已覆盖 |
 | REQ-012 | 智能MCP路由系统 | P0 | 集成/E2E | mcp_intelligent_route_claude_code_e2e.rs | ⚠️ 待验证 |
-| REQ-013 | 动态JS编排工具系统 | P0 | 集成 | mcp_js_tool_e2e_tests.rs, js_orchestrator_tests.rs | ⚠️ 待验证 |
+| REQ-013 | 动态JS编排工具系统 (Phase 1: 能力描述) | P0 | E2E | real_req013_phase1_capability_e2e.rs | ✅ 已覆盖 |
+| REQ-013 | 动态JS编排工具系统 (Phase 2: 动态工具注册和调用) | P0 | E2E | real_req013_phase2_dynamic_tool_e2e.rs | ✅ 已覆盖 |
 | REQ-014 | AI CLI角色系统 | P1 | 单元 | roles_tests.rs | ⚠️ 待验证 |
 
 **覆盖率状态说明**:
@@ -191,15 +200,22 @@ Wait模式             | 005    | E2E      | pwait_command          | ⚠️
 ### 3.4 模块3: MCP代理路由系统测试覆盖
 
 ```
-功能组件              | REQ-ID | 测试类型 | 测试文件               | 状态
----------------------|--------|----------|------------------------|--------
-MCP服务器核心        | 007    | 集成     | mcp_task_launching     | ⚠️
-智能路由             | 012    | E2E      | mcp_intelligent_route  | ⚠️
-JS编排引擎           | 013    | 集成     | js_orchestrator_tests  | ⚠️
-动态工具注册         | 013    | 集成     | dynamic_tool_registry  | ⚠️
+功能组件              | REQ-ID | 测试类型 | 测试文件                          | 状态
+---------------------|--------|----------|-----------------------------------|--------
+MCP服务器核心        | 007    | 集成     | mcp_task_launching                | ⚠️
+智能路由             | 012    | E2E      | mcp_intelligent_route              | ⚠️
+能力描述生成         | 013-P1 | E2E      | real_req013_phase1_capability_e2e  | ✅
+动态工具注册         | 013-P1 | 单元     | capability_description_e2e_test    | ✅
+动态工具完整调用链   | 013-P2 | E2E      | real_req013_phase2_dynamic_tool_e2e| ✅
+JS编排引擎           | 013-P2 | 集成     | js_orchestrator_tests              | ⚠️
+JS工具执行           | 013-P2 | E2E      | mcp_js_tool_e2e_tests              | ⚠️
 ```
 
-**注意**: REQ-012的智能路由功能已移除会话历史依赖，相关测试需要验证是否仍然能通过。
+**注意**:
+- ✅ REQ-013 Phase 1（能力描述生成）已完成真实环境E2E测试覆盖
+- ✅ REQ-013 Phase 2（动态工具注册和调用）已完成完整E2E测试覆盖
+  - 测试覆盖：基础动态工具流程、JS编排工具、LRU缓存驱逐、工具复用、Query vs Dynamic模式对比
+- REQ-012的智能路由功能已移除会话历史依赖，相关测试需要验证是否仍然能通过。
 
 ### 3.5 已删除模块测试
 
@@ -415,11 +431,13 @@ REQ-012移除会话历史依赖后，需要验证测试完整性。
 | REQ-010 | Claude Code会话历史集成 | **已删除** | - | 保持删除 |
 | REQ-011 | AI CLI更新/安装管理 | 保留 | ✅ 已覆盖 | E2E测试覆盖 |
 | REQ-012 | 智能MCP路由系统 | 保留 | ⚠️ 待验证 | 移除会话历史依赖 |
-| REQ-013 | 动态JS编排工具系统 | 保留 | ⚠️ 待验证 | |
+| REQ-013 | 动态JS编排工具系统 (Phase 1) | 保留 | ✅ 已覆盖 | 真实环境E2E测试 |
+| REQ-013 | 动态JS编排工具系统 (Phase 2) | 保留 | ⚠️ 待验证 | JS编排需验证 |
 | REQ-014 | AI CLI角色系统 | 保留 | ⚠️ 待验证 | |
 
-**总体覆盖率**: ~65% (需要提升到80%+)
-**缺失测试**: Google Drive同步相关测试 (P0优先级)
+**总体覆盖率**: ~70% (需要提升到80%+)
+**缺失测试**: Google Drive同步相关测试 (P0优先级), REQ-013 Phase 2 JS编排测试
+**最新更新**: REQ-013 Phase 1 真实环境E2E测试已补充 (2025-11-27)
 **注意事项**: CI容器化铁律已实施，所有非单元测试必须通过docker-compose.ci.yml执行
 
 ---
@@ -428,5 +446,6 @@ REQ-012移除会话历史依赖后，需要验证测试完整性。
 
 | 日期 | 版本 | 作者 | 变更内容 |
 |------|------|------|----------|
+| 2025-11-27 | v6.0.2 | Claude | 补充 REQ-013 Phase 1 真实环境E2E测试 |
 | 2025-11-26 | v6.0.0 | Claude | 初始版本 - 根据v6.0.0代码库状态创建 |
 

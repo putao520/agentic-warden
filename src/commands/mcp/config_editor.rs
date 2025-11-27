@@ -56,8 +56,9 @@ impl McpConfigEditor {
     /// 确保配置目录存在
     fn ensure_config_dir(&self) -> Result<()> {
         if let Some(parent) = self.config_path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create config directory: {}", parent.display()))?;
+            fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create config directory: {}", parent.display())
+            })?;
         }
         Ok(())
     }
@@ -71,8 +72,12 @@ impl McpConfigEditor {
             });
         }
 
-        let content = fs::read_to_string(&self.config_path)
-            .with_context(|| format!("Failed to read MCP config from {}", self.config_path.display()))?;
+        let content = fs::read_to_string(&self.config_path).with_context(|| {
+            format!(
+                "Failed to read MCP config from {}",
+                self.config_path.display()
+            )
+        })?;
 
         let config: McpConfig = serde_json::from_str(&content)
             .with_context(|| format!("Invalid JSON in {}", self.config_path.display()))?;
@@ -84,11 +89,15 @@ impl McpConfigEditor {
     pub fn write(&self, config: &McpConfig) -> Result<()> {
         self.ensure_config_dir()?;
 
-        let content = serde_json::to_string_pretty(config)
-            .context("Failed to serialize MCP config")?;
+        let content =
+            serde_json::to_string_pretty(config).context("Failed to serialize MCP config")?;
 
-        fs::write(&self.config_path, content)
-            .with_context(|| format!("Failed to write MCP config to {}", self.config_path.display()))?;
+        fs::write(&self.config_path, content).with_context(|| {
+            format!(
+                "Failed to write MCP config to {}",
+                self.config_path.display()
+            )
+        })?;
 
         Ok(())
     }
@@ -165,10 +174,7 @@ impl McpConfigEditor {
     pub fn list_servers(&self) -> Result<Vec<(String, McpServerConfig)>> {
         let config = self.read()?;
 
-        let mut servers: Vec<(String, McpServerConfig)> = config
-            .mcp_servers
-            .into_iter()
-            .collect();
+        let mut servers: Vec<(String, McpServerConfig)> = config.mcp_servers.into_iter().collect();
 
         // 按名称排序
         servers.sort_by(|a, b| a.0.cmp(&b.0));

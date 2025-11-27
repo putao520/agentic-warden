@@ -1,3 +1,4 @@
+mod capability_generator; // REQ-013: Capability description generation
 pub mod codegen;
 pub mod config;
 pub mod config_watcher;
@@ -49,31 +50,88 @@ impl IntelligentRouter {
         let config_arc = Arc::new(config_manager.config().clone());
 
         // Load embedding config from environment
+        // Note: Use shorthand model name that fastembed-rs accepts (Xenova/bge-small-en-v1.5)
         let fastembed_model = std::env::var("FASTEMBED_MODEL")
-            .unwrap_or_else(|_| "BAAI/bge-small-en-v1.5".to_string());
+            .unwrap_or_else(|_| "bge-small-en-v1.5".to_string());
         let embedder = FastEmbedder::new(&fastembed_model)?;
-
-        let dynamic_registry = Arc::new(registry::DynamicToolRegistry::new(Vec::new()));
-        let _cleanup_task = dynamic_registry.start_cleanup_task();
 
         // Initialize code generator using factory pattern
         let decision_endpoint = std::env::var("OPENAI_ENDPOINT")
             .unwrap_or_else(|_| "http://localhost:11434".to_string());
-        let decision_model = std::env::var("OPENAI_MODEL")
-            .unwrap_or_else(|_| "qwen2.5:7b".to_string());
+        let decision_model =
+            std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "qwen3:1.7b".to_string());
+
+        // Discover downstream MCP tools first (needed for capability description)
+        let connection_pool = Arc::new(McpConnectionPool::new(config_arc.clone()));
+        let discovered = connection_pool.warm_up().await?;
+
+        // REQ-013 Phase 1: Generate capability description
+        let capability_generator = capability_generator::CapabilityGenerator::with_llm(
+            &decision_endpoint,
+            &decision_model,
+        )
+        .unwrap_or_else(|_| capability_generator::CapabilityGenerator::fallback());
+
+        let capability_description = capability_generator
+            .generate_capability_description(&discovered)
+            .await?;
+
+        eprintln!(
+            "📝 Generated capability description: {}",
+            capability_description
+        );
+
+        // Construct base tools (persistent tools shown in list_tools)
+        let base_tools = vec![Tool {
+            name: "intelligent_route".into(),
+            title: Some("Intelligent Tool Router".into()),
+            description: Some(capability_description.into()),
+            input_schema: Arc::new(serde_json::from_value(json!({
+                "type": "object",
+                "properties": {
+                    "user_request": {
+                        "type": "string",
+                        "description": "Natural language description of what you want to accomplish"
+                    },
+                    "max_candidates": {
+                        "type": "integer",
+                        "description": "Maximum number of candidate tools to consider (default: 3)",
+                        "minimum": 1,
+                        "maximum": 10
+                    }
+                },
+                "required": ["user_request"]
+            }))?),
+            output_schema: None,
+            icons: None,
+            annotations: None,
+        }];
+
+        // Create dynamic registry with max 5 dynamic tools (REQ-013: FIFO eviction)
+        let registry_config = registry::RegistryConfig {
+            max_dynamic_tools: 5,
+            default_ttl_seconds: 86400, // 1 day TTL (effectively permanent)
+            cleanup_interval_seconds: 3600, // 1 hour cleanup
+        };
+        let dynamic_registry = Arc::new(registry::DynamicToolRegistry::with_config(
+            base_tools,
+            registry_config,
+        ));
+        let _cleanup_task = dynamic_registry.start_cleanup_task();
 
         let code_generator = codegen::CodeGeneratorFactory::from_env(
             decision_endpoint.clone(),
-            decision_model,
+            decision_model.clone(),
         );
 
         let (decision_engine, js_orchestrator) = match code_generator {
             Ok(generator) => {
                 // Create decision engine for routing (separate from code generation)
+                // Timeout: 120 seconds to handle slow LLM responses
                 let decision_engine = Arc::new(DecisionEngine::new(
                     &decision_endpoint,
-                    &"qwen2.5:7b",  // Use lightweight model for routing decisions
-                    30,
+                    &decision_model, // BUG FIX: Use env var instead of hardcoded model
+                    120,
                 )?);
 
                 let orchestrator = Some(Arc::new(
@@ -87,10 +145,11 @@ impl IntelligentRouter {
                 eprintln!("🔍 Falling back to vector-only mode");
 
                 // Create fallback decision engine
+                // Timeout: 120 seconds to handle slow LLM responses
                 let decision_engine = Arc::new(DecisionEngine::new(
                     &decision_endpoint,
-                    &"qwen2.5:7b",
-                    30,
+                    &decision_model, // BUG FIX: Use env var instead of hardcoded model
+                    120,
                 )?);
 
                 (decision_engine, None)
@@ -98,8 +157,6 @@ impl IntelligentRouter {
         };
 
         let mut index = MemRoutingIndex::new(embedder.dimension())?;
-        let connection_pool = Arc::new(McpConnectionPool::new(config_arc.clone()));
-        let discovered = connection_pool.warm_up().await?;
         let tool_registry = RwLock::new(HashMap::new());
         let embeddings = build_embeddings(&embedder, &discovered, config_arc.as_ref())?;
         index.rebuild(&embeddings.tools, &embeddings.methods)?;
@@ -138,6 +195,11 @@ impl IntelligentRouter {
         }
     }
 
+    /// Get the dynamic tool registry (for sharing with MCP server)
+    pub fn dynamic_registry(&self) -> Option<Arc<registry::DynamicToolRegistry>> {
+        self.dynamic_registry.clone()
+    }
+
     pub async fn intelligent_route(
         &self,
         request: IntelligentRouteRequest,
@@ -157,6 +219,13 @@ impl IntelligentRouter {
 
         let embed = self.embedder.embed(&request.user_request)?;
 
+        // Query mode: skip LLM orchestration, use vector search only (no tool registration)
+        if matches!(request.execution_mode, models::ExecutionMode::Query) {
+            eprintln!("🔍 Query mode: using vector search (no tool registration)");
+            return self.vector_mode(&request, &embed).await;
+        }
+
+        // Dynamic mode: try LLM orchestration first, fall back to vector search
         match self.js_orchestrator.as_ref() {
             None => {
                 eprintln!("🔍 LLM not configured, using vector search mode");
@@ -212,8 +281,7 @@ impl IntelligentRouter {
         }
 
         let candidate_infos = build_candidates(&tool_scores, &method_scores);
-        if request.session_id.is_some() {
-        }
+        if request.session_id.is_some() {}
 
         let decision = self
             .decision_engine
@@ -274,60 +342,144 @@ impl IntelligentRouter {
     ) -> Result<IntelligentRouteResponse> {
         eprintln!("   🔍 [DEBUG] try_orchestrate started");
 
-        let (tool_scores, method_scores) = {
-            let index = self.index.lock();
-            let max_tools = request
-                .max_candidates
-                .unwrap_or(config::DEFAULT_MAX_TOOLS_PER_REQUEST);
-            let tools = index.search_tools(embed, max_tools)?;
-            let methods = index.search_methods(embed, max_tools * 2)?;
-            (tools, methods)
+        // BUG FIX #1: For orchestration, pass ALL tools to LLM planner, not just top vector matches
+        // The LLM needs complete tool visibility to plan optimal workflows
+        let candidate_infos: Vec<CandidateToolInfo> = {
+            let registry = self.tool_registry.read().await;
+            registry
+                .iter()
+                .map(|(key, tool_def)| {
+                    let parts: Vec<&str> = key.split("::").collect();
+                    let server = parts.get(0).map(|s| s.to_string()).unwrap_or_default();
+                    let tool_name = parts.get(1).map(|s| s.to_string()).unwrap_or_default();
+                    let description = tool_def
+                        .description
+                        .as_ref()
+                        .map(|d| d.to_string())
+                        .unwrap_or_default();
+                    let schema = serde_json::to_string(&*tool_def.input_schema).ok();
+
+                    CandidateToolInfo {
+                        server,
+                        tool: tool_name,
+                        description,
+                        schema_snippet: schema,
+                    }
+                })
+                .collect()
         };
 
-        eprintln!("   🔍 [DEBUG] Found {} candidate tools", tool_scores.len());
+        eprintln!(
+            "   🔍 [DEBUG] Passing {} tools to orchestrator (all available tools)",
+            candidate_infos.len()
+        );
 
-        if tool_scores.is_empty() {
+        if candidate_infos.is_empty() {
             return Err(anyhow!("No candidate tools for orchestration"));
         }
 
-        let candidate_infos = build_candidates(&tool_scores, &method_scores);
         eprintln!("   🔍 [DEBUG] Calling orchestrator.orchestrate()...");
 
         let orchestrated_tool = match orchestrator
             .orchestrate(&request.user_request, &candidate_infos)
-            .await {
-                Ok(tool) => {
-                    eprintln!("   ✅ [DEBUG] Orchestration succeeded: {}", tool.name);
-                    tool
-                }
-                Err(e) => {
-                    eprintln!("   ❌ [DEBUG] Orchestration failed: {}", e);
-                    return Err(e);
-                }
-            };
+            .await
+        {
+            Ok(tool) => {
+                eprintln!("   ✅ [DEBUG] Orchestration succeeded: {}", tool.name);
+                tool
+            }
+            Err(e) => {
+                eprintln!("   ❌ [DEBUG] Orchestration failed: {}", e);
+                return Err(e);
+            }
+        };
 
         let Some(registry) = self.dynamic_registry.as_ref() else {
             return Err(anyhow!("Dynamic registry not initialized"));
         };
 
-        registry
-            .register_js_tool(
-                orchestrated_tool.name.clone(),
-                orchestrated_tool.description.clone(),
-                orchestrated_tool.input_schema.clone(),
-                orchestrated_tool.js_code.clone(),
+        // Decide registration type based on optimization result
+        let (mcp_server, message) = if let Some(proxy_info) = &orchestrated_tool.proxy_info {
+            // Direct proxy mode: register as proxied tool (no JS wrapper)
+            let tool_key = format!("{}::{}", proxy_info.server, proxy_info.tool_name);
+            let tool_def = {
+                let tool_registry = self.tool_registry.read().await;
+                tool_registry.get(&tool_key).cloned()
+            };
+
+            let tool = match tool_def {
+                Some(def) => rmcp::model::Tool {
+                    name: orchestrated_tool.name.clone().into(),
+                    title: None,
+                    description: Some(orchestrated_tool.description.clone().into()),
+                    input_schema: def.input_schema.clone(),
+                    output_schema: None,
+                    icons: None,
+                    annotations: None,
+                },
+                None => {
+                    // Fallback: create tool with schema from plan
+                    let schema_map = match &orchestrated_tool.input_schema {
+                        serde_json::Value::Object(map) => map.clone(),
+                        _ => serde_json::Map::new(),
+                    };
+                    rmcp::model::Tool {
+                        name: orchestrated_tool.name.clone().into(),
+                        title: None,
+                        description: Some(orchestrated_tool.description.clone().into()),
+                        input_schema: std::sync::Arc::new(schema_map),
+                        output_schema: None,
+                        icons: None,
+                        annotations: None,
+                    }
+                }
+            };
+
+            registry
+                .register_proxied_tool(
+                    proxy_info.server.clone(),
+                    proxy_info.tool_name.clone(),
+                    tool,
+                )
+                .await?;
+
+            (
+                proxy_info.server.clone(),
+                format!(
+                    "Registered '{}' (proxy to {}::{}). Use this tool directly.",
+                    orchestrated_tool.name, proxy_info.server, proxy_info.tool_name
+                ),
             )
-            .await?;
+        } else if let Some(js_code) = &orchestrated_tool.js_code {
+            // JS orchestration mode: register as JS tool
+            registry
+                .register_js_tool(
+                    orchestrated_tool.name.clone(),
+                    orchestrated_tool.description.clone(),
+                    orchestrated_tool.input_schema.clone(),
+                    js_code.clone(),
+                )
+                .await?;
+
+            (
+                "orchestrated".to_string(),
+                format!(
+                    "Created orchestrated workflow '{}'. Use this tool to solve your request.",
+                    orchestrated_tool.name
+                ),
+            )
+        } else {
+            return Err(anyhow!(
+                "Invalid orchestrated tool: neither proxy_info nor js_code present"
+            ));
+        };
 
         Ok(IntelligentRouteResponse {
             success: true,
-            message: format!(
-                "Created orchestrated workflow '{}'. Use this tool to solve your request.",
-                orchestrated_tool.name
-            ),
+            message,
             confidence: 1.0,
             selected_tool: Some(SelectedRoute {
-                mcp_server: "orchestrated".into(),
+                mcp_server: mcp_server.into(),
                 tool_name: orchestrated_tool.name.clone(),
                 arguments: Value::Object(Default::default()),
                 rationale: orchestrated_tool.description.clone(),

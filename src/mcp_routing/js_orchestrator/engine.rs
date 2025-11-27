@@ -13,38 +13,24 @@ use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 
-#[cfg(target_family = "unix")]
-use psutil::process::Process;
-
-#[cfg(not(target_family = "unix"))]
-use sysinfo::{PidExt, ProcessExt, System, SystemExt};
-
 /// Default minimum number of pooled runtimes kept warm.
 const DEFAULT_POOL_MIN_SIZE: usize = 5;
 /// Maximum pooled runtimes.
 const DEFAULT_POOL_MAX_SIZE: usize = 10;
 /// Default pool timeout configuration.
 const DEFAULT_POOL_TIMEOUT: Duration = Duration::from_secs(30);
-/// Multiplier used to translate execution timeout into loop iteration limit.
-const LOOP_LIMIT_MULTIPLIER: u64 = 40_000;
 
 /// Security configuration for Boa runtime
 #[derive(Debug, Clone)]
 pub struct SecurityConfig {
-    /// Maximum execution time in milliseconds (default: 30 minutes)
+    /// Maximum execution time in milliseconds (default: 10 minutes)
     pub max_execution_time_ms: u64,
-    /// Maximum memory usage in MB (default: 256MB)
-    pub max_memory_mb: usize,
-    /// Maximum call stack depth (default: 128)
-    pub max_call_stack_depth: usize,
 }
 
 impl Default for SecurityConfig {
     fn default() -> Self {
         Self {
-            max_execution_time_ms: 30 * 60 * 1000,  // 30 minutes in milliseconds
-            max_memory_mb: 256,
-            max_call_stack_depth: 128,
+            max_execution_time_ms: 10 * 60 * 1000, // 10 minutes
         }
     }
 }
@@ -52,12 +38,6 @@ impl Default for SecurityConfig {
 impl SecurityConfig {
     fn timeout_duration(&self) -> Duration {
         Duration::from_millis(self.max_execution_time_ms)
-    }
-
-    fn loop_iteration_limit(&self) -> u64 {
-        self.max_execution_time_ms
-            .saturating_mul(LOOP_LIMIT_MULTIPLIER)
-            .max(1_000)
     }
 }
 
@@ -119,17 +99,13 @@ impl BoaRuntimeInner {
         Ok(())
     }
 
-    fn configure_context(context: &mut Context, config: &SecurityConfig) -> Result<()> {
+    fn configure_context(context: &mut Context, _config: &SecurityConfig) -> Result<()> {
         Self::disable_dangerous_globals(context)?;
-        let limits = context.runtime_limits_mut();
-        limits.set_stack_size_limit(config.max_call_stack_depth);
-        limits.set_recursion_limit(config.max_call_stack_depth);
-        limits.set_loop_iteration_limit(config.loop_iteration_limit());
+        // Boa engine limits removed per SPEC REQ-013 update.
         Ok(())
     }
 
     fn execute_inner(&mut self, code: &str) -> Result<serde_json::Value> {
-        self.enforce_memory_limit()?;
         let source = Source::from_bytes(code);
         let value = match self.context.eval(source) {
             Ok(value) => value,
@@ -141,7 +117,6 @@ impl BoaRuntimeInner {
             return Err(self.handle_js_error(js_err));
         }
 
-        self.enforce_memory_limit()?;
         if value.is_promise() {
             self.resolve_promise(value.clone())
         } else {
@@ -166,19 +141,6 @@ impl BoaRuntimeInner {
                     .unwrap_or_else(|_| "<unknown>".to_owned());
                 Err(anyhow!("JavaScript promise rejected: {}", message))
             }
-        }
-    }
-
-    fn enforce_memory_limit(&self) -> Result<()> {
-        let usage = current_memory_usage_mb()?;
-        if usage > self.security_config.max_memory_mb {
-            Err(anyhow!(
-                "JavaScript execution aborted: memory usage {} MB exceeds limit of {} MB",
-                usage,
-                self.security_config.max_memory_mb
-            ))
-        } else {
-            Ok(())
         }
     }
 
@@ -448,27 +410,6 @@ fn worker_loop(worker: &mut BoaRuntimeInner, receiver: Receiver<RuntimeCommand>)
             RuntimeCommand::Shutdown => break,
         }
     }
-}
-
-#[cfg(target_family = "unix")]
-fn current_memory_usage_mb() -> Result<usize> {
-    let process = Process::current().map_err(|err| anyhow!("psutil failure: {err}"))?;
-    let info = process
-        .memory_info()
-        .map_err(|err| anyhow!("psutil memory info failure: {err}"))?;
-    Ok((info.rss() / (1024 * 1024)) as usize)
-}
-
-#[cfg(not(target_family = "unix"))]
-fn current_memory_usage_mb() -> Result<usize> {
-    let mut system = System::new();
-    system.refresh_process(sysinfo::Pid::from_u32(std::process::id()));
-    let pid = sysinfo::Pid::from_u32(std::process::id());
-    let process = system
-        .process(pid)
-        .ok_or_else(|| anyhow!("Unable to query memory usage"))?;
-    // sysinfo reports memory usage in kilobytes.
-    Ok((process.memory() / 1024) as usize)
 }
 
 #[cfg(test)]

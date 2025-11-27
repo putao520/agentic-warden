@@ -124,9 +124,16 @@ pub async fn execute_cli<S: TaskStorage>(
     args: &[OsString],
     provider: Option<String>,
 ) -> Result<i32, ProcessError> {
-    execute_cli_internal(registry, cli_type, args, provider, None, OutputStrategy::Mirror)
-        .await
-        .map(|(exit_code, _)| exit_code)
+    execute_cli_internal(
+        registry,
+        cli_type,
+        args,
+        provider,
+        None,
+        OutputStrategy::Mirror,
+    )
+    .await
+    .map(|(exit_code, _)| exit_code)
 }
 
 /// Execute CLI and capture stdout output (for code generation)
@@ -276,7 +283,11 @@ async fn execute_cli_internal<S: TaskStorage>(
         cli_type.display_name(),
         child_pid,
         log_path.display(),
-        if is_capture_mode { " (capture mode)" } else { "" }
+        if is_capture_mode {
+            " (capture mode)"
+        } else {
+            ""
+        }
     ));
 
     #[cfg(windows)]

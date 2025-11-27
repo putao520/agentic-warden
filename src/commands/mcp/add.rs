@@ -18,7 +18,11 @@ pub fn execute(
 
     // 检查服务器是否已存在
     if editor.server_exists(name)? {
-        eprintln!("{} MCP server '{}' already exists", "❌".red(), name.yellow());
+        eprintln!(
+            "{} MCP server '{}' already exists",
+            "❌".red(),
+            name.yellow()
+        );
         println!();
         println!("To update: {} mcp edit", "aiw".cyan());
         println!("To remove: {} mcp remove {}", "aiw".cyan(), name);
@@ -52,7 +56,14 @@ pub fn execute(
     if let Some(cat) = category {
         println!("  Category: {}", cat);
     }
-    println!("  Status: {}", if disabled { "disabled".yellow() } else { "enabled".green() });
+    println!(
+        "  Status: {}",
+        if disabled {
+            "disabled".yellow()
+        } else {
+            "enabled".green()
+        }
+    );
     println!();
     println!("Configuration saved to {}", "~/.aiw/.mcp.json".cyan());
     println!("Restart your AI CLI to apply changes.");

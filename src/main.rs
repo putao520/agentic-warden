@@ -126,9 +126,7 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
             }
         }
         Commands::Provider => launch_tui(Some(tui::ScreenType::Provider)).await,
-        Commands::Push => {
-            launch_tui(Some(tui::ScreenType::Push)).await
-        }
+        Commands::Push => launch_tui(Some(tui::ScreenType::Push)).await,
         Commands::Pull => launch_tui(Some(tui::ScreenType::Pull)).await,
         Commands::List => handle_sync_command("list", None).await,
         Commands::Wait { timeout, verbose } => {
@@ -251,7 +249,6 @@ fn handle_status_command() -> Result<ExitCode, String> {
     Ok(ExitCode::from(0))
 }
 
-
 async fn handle_external_command(tokens: Vec<String>) -> Result<ExitCode, String> {
     if tokens.is_empty() {
         return Err("No command provided".to_string());
@@ -336,7 +333,10 @@ async fn handle_mcp_action(action: McpAction) -> Result<ExitCode, String> {
                 if parts.len() == 2 {
                     env.push((parts[0].to_string(), parts[1].to_string()));
                 } else {
-                    eprintln!("Warning: Invalid env var format '{}', expected KEY=VALUE", env_var);
+                    eprintln!(
+                        "Warning: Invalid env var format '{}', expected KEY=VALUE",
+                        env_var
+                    );
                 }
             }
 
@@ -496,7 +496,6 @@ async fn handle_roles_command(action: RolesAction) -> Result<ExitCode, String> {
     }
 }
 
-
 /// Handle sync command (push, pull, list)
 async fn handle_sync_command(
     command: &str,
@@ -511,11 +510,10 @@ async fn handle_sync_command(
                 1 // Default error code
             };
             Ok(ExitCode::from(exit_code))
-        },
+        }
         Err(e) => Err(format!("Sync command failed: {}", e)),
     }
 }
-
 
 /// 运行stdio传输的MCP服务器
 async fn run_mcp_server_stdio(

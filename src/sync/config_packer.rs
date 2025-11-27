@@ -10,33 +10,29 @@ use tracing::{debug, info, warn};
 /// File patterns to exclude from synchronization (blacklist)
 const EXCLUDE_PATTERNS: &[&str] = &[
     // === Claude specific cache/session directories ===
-    "file-history/",          // Claude file history cache
-    "session-env/",           // Claude session environment cache
-    "todos/",                 // Claude TODO items (temporary)
-    "debug/",                 // Claude debug files
-    "shell-snapshots/",       // Claude shell snapshots
-    "statsig/",               // Claude analytics
-    ".update.lock",           // Claude update lock file
-    "history.jsonl",          // Claude conversation history
-    ".credentials.json",      // Claude credentials (sensitive)
-
+    "file-history/",     // Claude file history cache
+    "session-env/",      // Claude session environment cache
+    "todos/",            // Claude TODO items (temporary)
+    "debug/",            // Claude debug files
+    "shell-snapshots/",  // Claude shell snapshots
+    "statsig/",          // Claude analytics
+    ".update.lock",      // Claude update lock file
+    "history.jsonl",     // Claude conversation history
+    ".credentials.json", // Claude credentials (sensitive)
     // === Codex specific directories ===
-    "log/",                   // Codex log files
-    "sessions/",              // Codex session cache
-    "history.jsonl",          // Codex conversation history
-
+    "log/",          // Codex log files
+    "sessions/",     // Codex session cache
+    "history.jsonl", // Codex conversation history
     // === Gemini specific directories ===
-    "tmp/",                   // Gemini temporary files
-    "tmp/*/chats/",           // Gemini chat sessions in temp dirs
-    "tmp/*/*session-*.json",  // Gemini session JSON files
-    "antigravity/",           // Gemini entire cache directory (all subdirs excluded)
-
+    "tmp/",                  // Gemini temporary files
+    "tmp/*/chats/",          // Gemini chat sessions in temp dirs
+    "tmp/*/*session-*.json", // Gemini session JSON files
+    "antigravity/",          // Gemini entire cache directory (all subdirs excluded)
     // === Common files and directories ===
-    "node_modules/",          // Node.js dependencies
-    ".git/",                  // Git repository
-    ".gitignore",            // Git ignore file
-    ".gitmodules",           // Git submodules
-
+    "node_modules/", // Node.js dependencies
+    ".git/",         // Git repository
+    ".gitignore",    // Git ignore file
+    ".gitmodules",   // Git submodules
     // === Temporary and cache files ===
     "*.tmp",
     "*.temp",
@@ -47,24 +43,21 @@ const EXCLUDE_PATTERNS: &[&str] = &[
     "*.swo",
     ".DS_Store",
     "Thumbs.db",
-
     // === Editor and IDE files ===
     ".vscode/",
     ".idea/",
     "*.sublime-*",
-
     // === Development dependencies ===
     "npm-debug.log*",
     "yarn-debug.log*",
     "yarn-error.log*",
-    "package-lock.json",     // NPM lock file
+    "package-lock.json", // NPM lock file
     "__pycache__/",
     "*.py[cod]",
     "pip-log.txt",
     "pip-delete-this-directory.txt",
     "target/",
     "Cargo.lock",
-
     // === Large data files (over 10MB) ===
     "*.mp4",
     "*.avi",
@@ -74,7 +67,6 @@ const EXCLUDE_PATTERNS: &[&str] = &[
     "*.tgz",
     "*.rar",
     "*.7z",
-
     // === AI model files and embeddings ===
     "*.bin",
     "*.onnx",
@@ -86,12 +78,10 @@ const EXCLUDE_PATTERNS: &[&str] = &[
     "*.pth",
     ".fastembed_cache/",
     "embeddings/",
-
     // === OS-specific files ===
     ".Trashes/",
     ".Spotlight-V100/",
     ".DocumentRevisions-V100/",
-
     // === Sensitive files ===
     "*.pem",
     "*.key",
@@ -99,7 +89,6 @@ const EXCLUDE_PATTERNS: &[&str] = &[
     "*.pfx",
     "*.crt",
     "*.ca-bundle",
-
     // === Generated and auto files ===
     "*~",
     "*.bak",
@@ -110,28 +99,33 @@ const EXCLUDE_PATTERNS: &[&str] = &[
 impl ConfigPacker {
     /// Check if a file should be excluded based on blacklist patterns
     fn should_exclude_file(file_path: &Path, relative_path: &str) -> bool {
-        let file_name = file_path.file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("");
+        let file_name = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
         // Check each exclusion pattern
         for pattern in EXCLUDE_PATTERNS {
             if pattern.ends_with('/') {
                 // Directory pattern
-                if relative_path.starts_with(pattern) || relative_path.contains(&format!("/{}", pattern)) {
+                if relative_path.starts_with(pattern)
+                    || relative_path.contains(&format!("/{}", pattern))
+                {
                     debug!("Excluding directory: {}", relative_path);
                     return true;
                 }
             } else if pattern.contains('*') {
                 // Wildcard pattern - simple glob matching
-                if Self::matches_glob(file_name, pattern) || Self::matches_glob(relative_path, pattern) {
+                if Self::matches_glob(file_name, pattern)
+                    || Self::matches_glob(relative_path, pattern)
+                {
                     debug!("Excluding file by pattern '{}': {}", pattern, relative_path);
                     return true;
                 }
             } else {
                 // Exact match
                 if file_name == *pattern || relative_path == *pattern {
-                    debug!("Excluding file by exact match '{}': {}", pattern, relative_path);
+                    debug!(
+                        "Excluding file by exact match '{}': {}",
+                        pattern, relative_path
+                    );
                     return true;
                 }
             }
@@ -140,8 +134,11 @@ impl ConfigPacker {
         // Also check file size (exclude files larger than 10MB)
         if let Ok(metadata) = file_path.metadata() {
             if metadata.len() > 10 * 1024 * 1024 {
-                debug!("Excluding large file ({}MB): {}",
-                       metadata.len() / (1024 * 1024), relative_path);
+                debug!(
+                    "Excluding large file ({}MB): {}",
+                    metadata.len() / (1024 * 1024),
+                    relative_path
+                );
                 return true;
             }
         }
@@ -159,13 +156,13 @@ impl ConfigPacker {
 
         // Simple starts_with/ends_with optimization for common patterns
         if pattern.starts_with('*') && pattern.ends_with('*') {
-            let middle = &pattern[1..pattern.len()-1];
+            let middle = &pattern[1..pattern.len() - 1];
             return text.contains(middle);
         } else if pattern.starts_with('*') {
             let suffix = &pattern[1..];
             return text.ends_with(suffix);
         } else if pattern.ends_with('*') {
-            let prefix = &pattern[..pattern.len()-1];
+            let prefix = &pattern[..pattern.len() - 1];
             return text.starts_with(prefix);
         }
 
@@ -181,15 +178,23 @@ impl ConfigPacker {
         Self::glob_match_recursive(&text_chars, 0, &pattern_chars, 0)
     }
 
-    fn glob_match_recursive(text: &[char], text_pos: usize, pattern: &[char], pattern_pos: usize) -> bool {
+    fn glob_match_recursive(
+        text: &[char],
+        text_pos: usize,
+        pattern: &[char],
+        pattern_pos: usize,
+    ) -> bool {
         // If we've reached the end of both text and pattern, it's a match
         if text_pos >= text.len() && pattern_pos >= pattern.len() {
             return true;
         }
 
         // If pattern has * but we're at the end, it can match empty
-        if pattern_pos < pattern.len() && pattern[pattern_pos] == '*' &&
-           text_pos >= text.len() && pattern_pos + 1 == pattern.len() {
+        if pattern_pos < pattern.len()
+            && pattern[pattern_pos] == '*'
+            && text_pos >= text.len()
+            && pattern_pos + 1 == pattern.len()
+        {
             return true;
         }
 
@@ -217,13 +222,13 @@ impl ConfigPacker {
             '*' => {
                 // * matches zero or more characters
                 // Try to match the rest of pattern with current position, or advance one character in text
-                Self::glob_match_recursive(text, text_pos, pattern, pattern_pos + 1) ||
-                Self::glob_match_recursive(text, text_pos + 1, pattern, pattern_pos)
+                Self::glob_match_recursive(text, text_pos, pattern, pattern_pos + 1)
+                    || Self::glob_match_recursive(text, text_pos + 1, pattern, pattern_pos)
             }
             c => {
                 // Literal character match
-                text[text_pos] == c &&
-                Self::glob_match_recursive(text, text_pos + 1, pattern, pattern_pos + 1)
+                text[text_pos] == c
+                    && Self::glob_match_recursive(text, text_pos + 1, pattern, pattern_pos + 1)
             }
         }
     }
@@ -518,8 +523,19 @@ impl ConfigPacker {
             .filter_entry(|e| {
                 let file_name = e.file_name().to_string_lossy();
                 // Skip hidden files (starting with .) except for specific config files
-                if file_name.starts_with('.') &&
-                   ![".claude", ".codex", ".gemini", ".aiw", "auth.json", "config.json", "settings.json"].iter().any(|&allowed| file_name == allowed) {
+                if file_name.starts_with('.')
+                    && ![
+                        ".claude",
+                        ".codex",
+                        ".gemini",
+                        ".aiw",
+                        "auth.json",
+                        "config.json",
+                        "settings.json",
+                    ]
+                    .iter()
+                    .any(|&allowed| file_name == allowed)
+                {
                     return false;
                 }
                 true
@@ -549,7 +565,10 @@ impl ConfigPacker {
         }
 
         if file_count > 0 {
-            debug!("Added directory {} with {} files ({} bytes)", tar_base_path, file_count, total_size);
+            debug!(
+                "Added directory {} with {} files ({} bytes)",
+                tar_base_path, file_count, total_size
+            );
             Ok(Some((file_count, total_size)))
         } else {
             debug!("No files included from directory: {}", tar_base_path);

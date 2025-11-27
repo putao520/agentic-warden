@@ -1050,7 +1050,7 @@ graph TB
 ##### 4. LLM Decision Engine
 - **Purpose**: Intelligent tool/method selection using semantic understanding
 - **Integration**: Ollama service with configurable endpoints
-- **Models**: qwen2.5:7b (default), configurable via environment
+- **Models**: qwen3:1.7b (default), configurable via environment
 - **Capabilities**: Clustering analysis, ambiguity handling, confidence scoring
 
 #### Data Flow Architecture (Dynamic Tool Registration)
@@ -1434,10 +1434,16 @@ impl IntelligentRouter {
 **安全沙箱配置**:
 ```rust
 pub struct BoaEngineConfig {
-    max_execution_time_ms: u64,      // 30秒超时
-    max_memory_mb: usize,             // 256MB内存限制
-    max_call_stack_depth: usize,      // 128层调用栈
+    max_execution_time_ms: u64,      // 10分钟超时
     disabled_globals: Vec<String>,    // 禁用eval, Function, etc.
+}
+
+impl Default for SecurityConfig {
+    fn default() -> Self {
+        Self {
+            max_execution_time_ms: 10 * 60 * 1000,  // 10 minutes
+        }
+    }
 }
 
 impl SecureBoaRuntime {
@@ -1451,6 +1457,8 @@ impl SecureBoaRuntime {
     }
 }
 ```
+
+**注**: 保留执行超时限制(10分钟),移除内存和调用栈深度限制
 
 **MCP函数注入**:
 ```rust
