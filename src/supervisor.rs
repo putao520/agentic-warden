@@ -13,6 +13,7 @@ use crate::storage::TaskStorage;
 use crate::task_record::TaskRecord;
 use crate::unified_registry::Registry;
 use chrono::{DateTime, Utc};
+use std::collections::VecDeque;
 use std::env;
 use std::ffi::OsString;
 use std::io;
@@ -300,6 +301,9 @@ async fn execute_cli_internal<S: TaskStorage>(
     let log_writer = Arc::new(Mutex::new(BufWriter::new(log_file)));
     let mut copy_handles = Vec::new();
 
+    // 创建共享的滚动显示缓冲区（stdout和stderr共享，保持输出顺序）
+    let scrolling_display = Arc::new(Mutex::new(ScrollingDisplay::new(DEFAULT_MAX_DISPLAY_LINES)));
+
     // Handle stdout based on strategy
     if let Some(stdout) = child.stdout.take() {
         match &output_strategy {
@@ -308,6 +312,7 @@ async fn execute_cli_internal<S: TaskStorage>(
                     stdout,
                     log_writer.clone(),
                     StreamMirror::Stdout,
+                    scrolling_display.clone(),
                 )));
             }
             OutputStrategy::Capture(buffer) => {
@@ -325,6 +330,7 @@ async fn execute_cli_internal<S: TaskStorage>(
             stderr,
             log_writer.clone(),
             StreamMirror::Stderr,
+            scrolling_display.clone(),
         )));
     }
 
@@ -473,6 +479,91 @@ fn generate_log_path(pid: u32) -> io::Result<PathBuf> {
     Ok(log_dir.join(format!("{pid}.log")))
 }
 
+/// 滚动显示缓冲区 - 只在终端显示最后N行，完整内容保存到日志
+struct ScrollingDisplay {
+    lines: VecDeque<String>,
+    max_lines: usize,
+    current_line_buffer: String,
+    displayed_count: usize,
+}
+
+impl ScrollingDisplay {
+    fn new(max_lines: usize) -> Self {
+        Self {
+            lines: VecDeque::with_capacity(max_lines),
+            max_lines,
+            current_line_buffer: String::new(),
+            displayed_count: 0,
+        }
+    }
+
+    /// 处理新数据，返回需要显示的内容
+    fn process(&mut self, data: &[u8]) -> String {
+        let text = String::from_utf8_lossy(data);
+        let mut output = String::new();
+
+        for ch in text.chars() {
+            if ch == '\n' {
+                // 完成一行
+                let line = std::mem::take(&mut self.current_line_buffer);
+                self.lines.push_back(line);
+
+                // 如果超过最大行数，移除最旧的行
+                if self.lines.len() > self.max_lines {
+                    self.lines.pop_front();
+                    // 需要清除旧行并重绘
+                    output.push_str(&self.redraw());
+                } else {
+                    // 直接输出新行
+                    if let Some(last) = self.lines.back() {
+                        output.push_str(last);
+                        output.push('\n');
+                    }
+                    self.displayed_count = self.lines.len();
+                }
+            } else if ch == '\r' {
+                // 回车符，清除当前行缓冲
+                self.current_line_buffer.clear();
+            } else {
+                self.current_line_buffer.push(ch);
+            }
+        }
+
+        output
+    }
+
+    /// 重绘整个显示区域
+    fn redraw(&mut self) -> String {
+        let mut output = String::new();
+
+        // 移动到显示区域顶部并清除
+        if self.displayed_count > 0 {
+            // 向上移动 displayed_count 行
+            output.push_str(&format!("\x1b[{}A", self.displayed_count));
+            // 清除从光标到屏幕底部
+            output.push_str("\x1b[J");
+        }
+
+        // 输出所有行
+        for line in &self.lines {
+            output.push_str(line);
+            output.push('\n');
+        }
+
+        self.displayed_count = self.lines.len();
+        output
+    }
+
+    /// 刷新未完成的行（用于最终输出）
+    fn flush_remaining(&mut self) -> String {
+        if self.current_line_buffer.is_empty() {
+            return String::new();
+        }
+        let line = std::mem::take(&mut self.current_line_buffer);
+        format!("{}\n", line)
+    }
+}
+
 #[derive(Copy, Clone)]
 enum StreamMirror {
     Stdout,
@@ -495,12 +586,20 @@ impl StreamMirror {
             }
         }
     }
+
+    async fn write_str(self, data: &str) -> io::Result<()> {
+        self.write(data.as_bytes()).await
+    }
 }
+
+/// 默认的最大显示行数
+const DEFAULT_MAX_DISPLAY_LINES: usize = 50;
 
 async fn spawn_copy<R>(
     mut reader: R,
     writer: Arc<Mutex<BufWriter<tokio::fs::File>>>,
     mirror: StreamMirror,
+    scrolling_display: Arc<Mutex<ScrollingDisplay>>,
 ) -> io::Result<()>
 where
     R: AsyncRead + Unpin + Send + 'static,
@@ -514,13 +613,33 @@ where
             break;
         }
         let chunk = &buffer[..read];
+
+        // 写入完整日志文件
         {
             let mut guard = writer.lock().await;
             guard.write_all(chunk).await?;
             guard.flush().await?;
         }
-        mirror.write(chunk).await?;
+
+        // 滚动显示到终端（只显示最后N行）
+        let display_output = {
+            let mut display = scrolling_display.lock().await;
+            display.process(chunk)
+        };
+        if !display_output.is_empty() {
+            mirror.write_str(&display_output).await?;
+        }
     }
+
+    // 刷新剩余未完成的行
+    let remaining = {
+        let mut display = scrolling_display.lock().await;
+        display.flush_remaining()
+    };
+    if !remaining.is_empty() {
+        mirror.write_str(&remaining).await?;
+    }
+
     Ok(())
 }
 
