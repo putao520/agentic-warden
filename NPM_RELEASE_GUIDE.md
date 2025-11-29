@@ -2,47 +2,38 @@
 
 ## 📋 一次性配置（第一次发布时）
 
-### 步骤1：在NPM官网创建Package
+### 步骤1：NPM账户准备
 
 1. 访问 [npmjs.com](https://www.npmjs.com)
-2. 登录你的NPM账户（或注册新账户）
-3. 在个人信息中确保：
-   - 账户已验证邮箱
-   - 已启用2FA（可选但推荐）
+2. 登录你的NPM账户（或[注册新账户](https://www.npmjs.com/signup)）
+3. 确保账户已验证邮箱
+4. **不需要提前创建package** - `npm publish` 会自动创建
 
 ### 步骤2：生成NPM Access Token
 
-**方式A：自动生成token（推荐）**
-
-1. 访问 https://www.npmjs.com/settings/~/tokens
-2. 点击 "Generate New Token"
-3. 选择 **"Granular Access Token"**（粒度token）
-4. 配置权限：
-   - **Permissions**: `Read and write` to packages and package metadata
-   - **Expiration**: 无限期 (Unlimited) 或设置足够长的期限
-   - **Package access**: 选择 `Only selected packages`
-   - **Packages**: 搜索并选择 `aiw` 包
-5. 复制生成的token（只会显示一次）
-
-**方式B：传统token（如果Granular不可用）**
-
 1. 访问 https://www.npmjs.com/settings/~/tokens/create
-2. 选择 "Automation"
-3. 复制token
+2. 选择 **"Automation"** 类型token（或 "Granular Access Token"）
+3. 配置：
+   - **Token type**: Automation
+   - **Expiration**: 无限期 (Unlimited)
+4. 复制生成的token（只会显示一次）
+
+**⚠️ 重要：** 第一次发布前，确保你拥有 `aiw` 包的发布权。如果包名已被占用，需要改名。
 
 ### 步骤3：配置GitHub Secrets
 
 1. 进入GitHub仓库 → **Settings** → **Secrets and variables** → **Actions**
-2. 点击 "New repository secret"
+2. 点击 **"New repository secret"**
 3. 创建新secret：
    - **Name**: `NPM_TOKEN`
    - **Value**: 粘贴刚才复制的NPM token
 4. 点击 "Add secret"
 
-**验证配置：**
+**验证配置（可选）：**
 ```bash
 # 本地测试（可选）
-echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+npm login
+# 输入NPM用户名、密码和邮箱
 npm whoami  # 应该显示你的NPM用户名
 ```
 
@@ -109,26 +100,47 @@ build-binaries (3个并行) ──┐
 
 ### 步骤5：验证发布
 
-**验证NPM包：**
+**验证NPM包发布成功：**
 ```bash
+# ✅ 等待5-10分钟（NPM Registry同步）
+
 # 在线验证
 npm view aiw@<version>
 
 # 例如：
 npm view aiw@6.0.5
+npm view aiw  # 查看最新版本
 
 # 本地安装测试
 npm install -g aiw@<version>
 aiw --version
+
+# 例如：
+npm install -g aiw@6.0.5
+aiw --version  # 应该显示: aiw 6.0.5
 ```
 
 **验证GitHub Release：**
-1. 进入GitHub仓库 → **Releases**
-2. 确认新的release包含：
-   - `aiw-linux-x86_64`
-   - `aiw-linux-arm64`
-   - `aiw-linux-armv7`
-   - `SHA256SUMS`
+1. 进入GitHub仓库 → **Releases** → 最新发布
+2. 确认包含以下文件：
+   - ✅ `aiw-linux-x86_64`
+   - ✅ `aiw-linux-arm64`
+   - ✅ `aiw-linux-armv7`
+   - ✅ `SHA256SUMS`
+3. 验证Release说明自动生成（包含提交信息）
+
+**验证二进制完整性：**
+```bash
+# 1. 下载Release中的SHA256SUMS
+# 2. 下载一个二进制，例如aiw-linux-x86_64
+# 3. 验证校验和
+sha256sum -c SHA256SUMS
+
+# 输出应该是：
+# aiw-linux-x86_64: OK
+# aiw-linux-arm64: OK
+# aiw-linux-armv7: OK
+```
 
 ---
 
@@ -161,22 +173,55 @@ node_modules/aiw/
 
 **原因：**
 - NPM_TOKEN已过期或权限不足
-- Package名称已被占用
+- Package名称已被占用（其他人已发布）
 - 版本号已发布过
 
-**解决：**
+**解决方案：**
+
+**情况A：包名已被占用（第一次发布失败）**
+```bash
+# 1. 检查包名是否已被占用
+npm view aiw
+
+# 2. 如果返回信息（不是404），说明包已被别人发布
+# 解决方案：
+#   - 改用其他包名（e.g., @putao520/aiw）
+#   - 或联系包名所有者
+
+# 如果是scoped包，改为：
+# npm-package/package.json:
+{
+  "name": "@putao520/aiw",
+  ...
+}
+```
+
+**情况B：Token权限不足或过期**
 ```bash
 # 1. 重新生成NPM_TOKEN
-# 访问 https://www.npmjs.com/settings/~/tokens
+# 访问 https://www.npmjs.com/settings/~/tokens/create
+# 选择 "Automation" 类型
+# 复制新token
 
 # 2. 更新GitHub Secrets
-# GitHub Settings → Secrets → 更新NPM_TOKEN
+# GitHub Settings → Secrets → 编辑NPM_TOKEN
+# 粘贴新token
 
-# 3. 确认包名未占用
-npm view aiw@<version>  # 应返回404
+# 3. 重新推送tag触发发布
+git push origin v6.0.5  # 或删除后重新push
+```
 
-# 4. 确认版本号未发布
-npm view aiw versions | grep <version>
+**情况C：版本号已发布过**
+```bash
+# 1. 检查版本
+npm view aiw@6.0.5
+
+# 2. 如果已存在，需要更新版本号
+# 编辑 SPEC/VERSION: 6.0.6
+# 编辑 npm-package/package.json: "version": "6.0.6"
+# 提交并创建新tag
+git tag v6.0.6
+git push origin v6.0.6
 ```
 
 ### 问题2：Docker编译失败
