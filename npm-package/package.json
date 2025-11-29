@@ -1,6 +1,6 @@
 {
   "name": "aiw",
-  "version": "5.0.1",
+  "version": "0.5.3",
   "description": "AI工作流编排工具 - Rust编写的高性能CLI",
   "keywords": [
     "ai",
