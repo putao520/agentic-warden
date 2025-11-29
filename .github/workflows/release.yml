@@ -59,11 +59,6 @@ jobs:
     needs: build-binaries
     if: startsWith(github.ref, 'refs/tags/')
 
-    # CRITICAL: OIDC 必需的权限
-    permissions:
-      contents: read
-      id-token: write
-
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -93,21 +88,28 @@ jobs:
       run: |
         VERSION=${GITHUB_REF#refs/tags/v}
         sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" npm-package/package.json
-        cat npm-package/package.json
+        echo "✅ 发布版本: $VERSION"
+        cat npm-package/package.json | grep version
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '20'
-        registry-url: 'https://registry.npmjs.org'  # 必需保留（即使使用OIDC）
+        registry-url: 'https://registry.npmjs.org'
 
-    - name: Upgrade npm
-      run: npm install -g npm@latest  # 升级到 npm >= 11.5.1 支持 OIDC
-
-    - name: Publish to NPM with Provenance
+    - name: Publish to NPM
       working-directory: npm-package
-      run: npm publish --provenance --access public
-      # 自动使用 OIDC，无需 NODE_AUTH_TOKEN
+      run: npm publish --access public
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+    - name: 📢 Publish success notification
+      if: success()
+      run: |
+        echo "✅ NPM包发布成功！"
+        echo "Package: aiw"
+        echo "Version: ${GITHUB_REF#refs/tags/v}"
+        echo "Registry: https://npmjs.com/package/aiw"
 
   # Job 3: 发布二进制到GitHub Release
   publish-github-release:
