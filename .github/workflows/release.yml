@@ -1,15 +1,62 @@
-name: Release to NPM
+name: Release to NPM & GitHub
 
 on:
   push:
     tags:
       - 'v*'
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  # 发布到 NPM (使用 OIDC Trusted Publishing)
+  # Job 1: 编译多平台CLI二进制
+  build-binaries:
+    name: Build CLI Binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
+          - armv7-unknown-linux-musleabihf
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build with Docker
+      run: |
+        docker build -f Dockerfile.build -t aiw-builder:latest .
+        docker run --rm \
+          -v "$(pwd):/workspace" \
+          -e "RUSTFLAGS=-C target-feature=+crt-static -C link-self-contained=yes" \
+          aiw-builder:latest \
+          cargo build --release --target ${{ matrix.target }}
+
+    - name: Verify static linking
+      run: |
+        OUTPUT_PATH="target/${{ matrix.target }}/release/aiw"
+        file "$OUTPUT_PATH"
+        if file "$OUTPUT_PATH" | grep -q "statically linked"; then
+          echo "✅ Binary is statically linked"
+        else
+          echo "⚠️  Binary may not be fully static"
+        fi
+
+    - name: Upload binary artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: aiw-${{ matrix.target }}
+        path: target/${{ matrix.target }}/release/aiw
+        retention-days: 1
+
+  # Job 2: 准备NPM包并发布
   publish-npm:
     name: Publish to NPM
     runs-on: ubuntu-latest
+    needs: build-binaries
     if: startsWith(github.ref, 'refs/tags/')
 
     # CRITICAL: OIDC 必需的权限
@@ -20,6 +67,33 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+
+    - name: Create bin directory
+      run: mkdir -p npm-package/bin
+
+    - name: Download all binaries
+      uses: actions/download-artifact@v4
+      with:
+        path: ./binaries
+
+    - name: Prepare binaries for NPM
+      run: |
+        # 复制二进制到npm-package/bin/
+        cp binaries/aiw-x86_64-unknown-linux-musl/aiw npm-package/bin/aiw-linux-x64
+        cp binaries/aiw-aarch64-unknown-linux-musl/aiw npm-package/bin/aiw-linux-arm64
+        cp binaries/aiw-armv7-unknown-linux-musleabihf/aiw npm-package/bin/aiw-linux-armv7
+
+        # 设置可执行权限
+        chmod +x npm-package/bin/*
+
+        # 列出文件
+        ls -lah npm-package/bin/
+
+    - name: Update package.json with correct version
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/v}
+        sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" npm-package/package.json
+        cat npm-package/package.json
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -34,3 +108,47 @@ jobs:
       working-directory: npm-package
       run: npm publish --provenance --access public
       # 自动使用 OIDC，无需 NODE_AUTH_TOKEN
+
+  # Job 3: 发布二进制到GitHub Release
+  publish-github-release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: build-binaries
+    if: startsWith(github.ref, 'refs/tags/')
+
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download all binaries
+      uses: actions/download-artifact@v4
+      with:
+        path: ./binaries
+
+    - name: Prepare release files
+      run: |
+        mkdir -p release-files
+        cp binaries/aiw-x86_64-unknown-linux-musl/aiw release-files/aiw-linux-x86_64
+        cp binaries/aiw-aarch64-unknown-linux-musl/aiw release-files/aiw-linux-arm64
+        cp binaries/aiw-armv7-unknown-linux-musleabihf/aiw release-files/aiw-linux-armv7
+
+        # 生成校验和
+        cd release-files
+        sha256sum * > SHA256SUMS
+        cat SHA256SUMS
+        ls -lah
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          release-files/aiw-linux-x86_64
+          release-files/aiw-linux-arm64
+          release-files/aiw-linux-armv7
+          release-files/SHA256SUMS
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

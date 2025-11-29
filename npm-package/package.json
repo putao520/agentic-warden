@@ -1,13 +1,15 @@
 {
   "name": "agentic-warden",
   "version": "5.0.1",
-  "description": "AI CLI 多账户管理和任务协调器 - 占位包",
+  "description": "AI CLI 多账户管理和任务协调器 - Rust编写的高性能工具",
   "keywords": [
     "ai",
     "cli",
     "anthropic",
     "openai",
-    "tui"
+    "tui",
+    "rust",
+    "static-binary"
   ],
   "homepage": "https://github.com/putao520/agentic-warden",
   "repository": {
@@ -17,23 +19,23 @@
   "license": "MIT",
   "author": "Putao520",
   "bin": {
-    "agentic-warden": "index.js"
+    "aiw": "./bin/aiw-linux-x64"
   },
   "files": [
-    "index.js",
     "bin/",
+    "index.js",
     "README.md"
   ],
   "engines": {
     "node": ">=14.0.0"
   },
   "os": [
-    "linux",
-    "darwin",
-    "win32"
+    "linux"
   ],
   "cpu": [
-    "x64"
+    "x64",
+    "arm64",
+    "arm"
   ],
   "bugs": {
     "url": "https://github.com/putao520/agentic-warden/issues"

@@ -1,25 +1,43 @@
 #!/usr/bin/env node
 
-console.log('\n========================================');
-console.log('Agentic Warden - Placeholder Package');
-console.log('========================================\n');
+const { spawnSync } = require('child_process');
+const path = require('path');
+const os = require('os');
 
-console.log('This is a placeholder package for agentic-warden.\n');
+// 根据架构选择正确的二进制
+const arch = os.arch();
+const platform = os.platform();
 
-console.log('To use the actual agentic-warden tool, you have several options:\n');
+let binaryPath;
 
-console.log('1. Using Cargo (Recommended for Rust users):');
-console.log('   $ cargo install --git https://github.com/putao520/agentic-warden\n');
+if (platform === 'linux') {
+  switch (arch) {
+    case 'x64':
+      binaryPath = path.join(__dirname, 'bin', 'aiw-linux-x64');
+      break;
+    case 'arm64':
+      binaryPath = path.join(__dirname, 'bin', 'aiw-linux-arm64');
+      break;
+    case 'arm':
+      binaryPath = path.join(__dirname, 'bin', 'aiw-linux-armv7');
+      break;
+    default:
+      console.error(`❌ Unsupported architecture: ${arch}`);
+      console.error('Supported: x64, arm64, arm');
+      process.exit(1);
+  }
+} else {
+  console.error(`❌ Unsupported platform: ${platform}`);
+  console.error('Currently only Linux is supported.');
+  console.error('\nAlternative options:');
+  console.error('1. Using Cargo: cargo install --git https://github.com/putao520/agentic-warden');
+  console.error('2. Download pre-built: https://github.com/putao520/agentic-warden/releases');
+  process.exit(1);
+}
 
-console.log('2. Download pre-built binaries:');
-console.log('   Visit: https://github.com/putao520/agentic-warden/releases\n');
+// 执行二进制并传递所有参数
+const result = spawnSync(binaryPath, process.argv.slice(2), {
+  stdio: 'inherit',
+});
 
-console.log('3. Build from source:');
-console.log('   $ git clone https://github.com/putao520/agentic-warden.git');
-console.log('   $ cd agentic-warden');
-console.log('   $ cargo build --release\n');
-
-console.log('For more information, visit:');
-console.log('  https://github.com/putao520/agentic-warden\n');
-
-process.exit(0);
+process.exit(result.status || 0);
