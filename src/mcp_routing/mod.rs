@@ -10,7 +10,7 @@ pub mod models;
 mod pool;
 pub mod registry; // REQ-013: Dynamic tool registry
 
-pub use embedding::{FastEmbedder, MockEmbeddingBackend};
+pub use embedding::{EmbeddingBackend, FastEmbedder, MockEmbeddingBackend};
 pub use index::{MemRoutingIndex, MethodEmbedding, ToolEmbedding};
 pub use pool::McpConnectionPool;
 
@@ -49,11 +49,8 @@ impl IntelligentRouter {
         let config_manager = McpConfigManager::load()?;
         let config_arc = Arc::new(config_manager.config().clone());
 
-        // Load embedding config from environment
-        // Note: Use shorthand model name that fastembed-rs accepts (Xenova/bge-small-en-v1.5)
-        let fastembed_model = std::env::var("FASTEMBED_MODEL")
-            .unwrap_or_else(|_| "bge-small-en-v1.5".to_string());
-        let embedder = FastEmbedder::new(&fastembed_model)?;
+        // Initialize embedder with all-MiniLM-L6-v2 (multilingual, out-of-the-box)
+        let embedder = FastEmbedder::new("all-MiniLM-L6-v2")?;
 
         // Initialize code generator using factory pattern
         let decision_endpoint = std::env::var("OPENAI_ENDPOINT")

@@ -76,7 +76,8 @@ const EXCLUDE_PATTERNS: &[&str] = &[
     "*.pb",
     "*.pt",
     "*.pth",
-    ".fastembed_cache/",
+    ".gllm/",          // gllm model cache (models are downloaded separately)
+    ".fastembed_cache/", // Legacy - for backwards compatibility
     "embeddings/",
     // === OS-specific files ===
     ".Trashes/",

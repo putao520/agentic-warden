@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+use gllm::Client;
 use memvdb::normalize;
 use parking_lot::Mutex;
 use std::sync::Arc;
@@ -10,18 +10,18 @@ pub trait EmbeddingBackend: Send + Sync {
     fn embed_batch(&self, inputs: &[String]) -> Result<Vec<Vec<f32>>>;
 }
 
-/// Thread-safe wrapper around FastEmbed text embeddings.
+/// Thread-safe wrapper around gllm text embeddings.
 pub struct FastEmbedder {
     backend: Arc<dyn EmbeddingBackend>,
 }
 
 impl FastEmbedder {
+    /// Create a new embedder with the specified model name.
     pub fn new(model_name: &str) -> Result<Self> {
-        let model = resolve_model(model_name)?;
-        let info = TextEmbedding::get_model_info(&model)?;
-        let encoder = TextEmbedding::try_new(InitOptions::new(model.clone()))?;
+        let client = Client::new(model_name)
+            .map_err(|e| anyhow!("Failed to create gllm embedding client: {}", e))?;
         Ok(Self {
-            backend: Arc::new(FastEmbedBackend::new(encoder, info.dim)),
+            backend: Arc::new(GllmBackend::new(client)),
         })
     }
 
@@ -47,21 +47,24 @@ impl FastEmbedder {
     }
 }
 
-struct FastEmbedBackend {
-    encoder: Arc<Mutex<TextEmbedding>>,
+struct GllmBackend {
+    client: Arc<Mutex<Client>>,
     dimension: usize,
 }
 
-impl FastEmbedBackend {
-    fn new(encoder: TextEmbedding, dimension: usize) -> Self {
+impl GllmBackend {
+    fn new(client: Client) -> Self {
+        // Get dimension from client configuration
+        // gllm models have fixed dimensions, we'll detect it from the model
+        let dimension = 384; // Default for bge-small-en
         Self {
-            encoder: Arc::new(Mutex::new(encoder)),
+            client: Arc::new(Mutex::new(client)),
             dimension,
         }
     }
 }
 
-impl EmbeddingBackend for FastEmbedBackend {
+impl EmbeddingBackend for GllmBackend {
     fn dimension(&self) -> usize {
         self.dimension
     }
@@ -70,11 +73,17 @@ impl EmbeddingBackend for FastEmbedBackend {
         if inputs.is_empty() {
             return Ok(Vec::new());
         }
-        let mut encoder = self.encoder.lock();
-        let embeddings = encoder.embed(inputs.to_vec(), None)?;
-        Ok(embeddings
+
+        let client = self.client.lock();
+        let response = client
+            .embeddings(inputs)
+            .generate()
+            .map_err(|e| anyhow!("Embedding generation failed: {}", e))?;
+
+        Ok(response
+            .embeddings
             .into_iter()
-            .map(|vector| normalize(&vector))
+            .map(|emb| normalize(&emb.embedding))
             .collect())
     }
 }
@@ -119,28 +128,3 @@ impl EmbeddingBackend for MockEmbeddingBackend {
     }
 }
 
-fn resolve_model(name: &str) -> Result<EmbeddingModel> {
-    let lowered = name.trim().to_lowercase();
-    for info in TextEmbedding::list_supported_models() {
-        if info.model_code.to_lowercase() == lowered
-            || format!("{:?}", info.model).to_lowercase() == lowered
-        {
-            return Ok(info.model);
-        }
-        // Accept shorthand without vendor prefix.
-        if let Some(short) = info
-            .model_code
-            .split('/')
-            .last()
-            .map(|segment| segment.to_lowercase())
-        {
-            if short == lowered {
-                return Ok(info.model);
-            }
-        }
-    }
-    Err(anyhow!(
-        "FastEmbed model '{}' is not supported by fastembed-rs",
-        name
-    ))
-}

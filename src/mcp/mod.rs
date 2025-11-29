@@ -16,7 +16,6 @@ use crate::mcp_routing::{
 };
 use crate::roles::RoleManager;
 use capability_detector::ClientCapabilities;
-use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use rmcp::{
     handler::server::tool::{ToolCallContext, ToolRouter},
     handler::server::wrapper::Parameters,
@@ -392,7 +391,7 @@ pub async fn get_task_logs(params: GetTaskLogsParams) -> Result<TaskLogsResult, 
 pub struct AgenticWardenMcpServer {
     router: Arc<IntelligentRouter>,
     tool_router: ToolRouter<Self>,
-    embedder: Arc<tokio::sync::Mutex<TextEmbedding>>,
+    embedder: Arc<tokio::sync::Mutex<gllm::Client>>,
     // Client capability detection
     client_capabilities: Arc<RwLock<Option<ClientCapabilities>>>,
     // Dynamic tool registry (SSOT for MCP tools)
@@ -418,11 +417,9 @@ impl AgenticWardenMcpServer {
         let base_tools = tool_router.list_all();
         registry.extend_base_tools(base_tools).await;
 
-        // Initialize FastEmbed for conversation search
-        let embedder = TextEmbedding::try_new(
-            InitOptions::new(EmbeddingModel::AllMiniLML6V2).with_show_download_progress(false),
-        )
-        .map_err(|e| format!("Failed to initialize FastEmbed: {e}"))?;
+        // Initialize gllm for conversation search
+        let embedder = gllm::Client::new("all-MiniLM-L6-v2")
+            .map_err(|e| format!("Failed to initialize gllm client: {e}"))?;
 
         // Initialize conversation history store
         let db_path = Self::get_history_db_path()

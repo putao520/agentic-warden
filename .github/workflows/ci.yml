@@ -48,6 +48,9 @@ jobs:
       - name: Run clippy
         run: cargo clippy -- -D warnings
 
+      - name: Test gllm compatibility
+        run: cargo test --test gllm_compatibility -- --nocapture --test-threads=1
+
   # Job 2: 集成测试（CI容器执行）
   integration-tests:
     name: Integration Tests (Containerized)

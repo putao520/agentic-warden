@@ -122,7 +122,7 @@ schemars = { version = "1.1", features = ["derive"] }
 # Memory integration dependencies
 ollama-rs = "0.3.1"
 regex = "1.10"
-fastembed = "5.2"
+gllm = { version = "0.2", features = ["cpu", "async"] }  # Pure Rust embeddings & reranking
 memvdb = "0.1.1"
 sahomedb = "0.4.0"
 ndarray = { version = "0.15", features = ["serde"] }
