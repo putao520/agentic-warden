@@ -1,0 +1,78 @@
+# Dockerfile.build - Agentic-Warden 跨平台编译环境
+#
+# 用途: 在容器中编译 musl 静态二进制
+# 支持: Linux x86_64, Linux ARM64, Windows, macOS 的代码在容器中编译
+#
+# 使用:
+#   docker build -f Dockerfile.build -t aiw-builder .
+#   docker run --rm -v $(pwd):/workspace aiw-builder cargo build --release --target x86_64-unknown-linux-musl
+
+FROM rust:latest
+
+LABEL maintainer="agentic-warden"
+LABEL description="Agentic-Warden cross-platform build environment"
+
+# 设置工作目录
+WORKDIR /workspace
+
+# 更新系统包并安装编译工具链
+RUN set -ex && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        # 基础编译工具
+        build-essential \
+        pkg-config \
+        \
+        # Musl 工具链（用于 Linux 静态编译）
+        musl-tools \
+        musl-dev \
+        \
+        # 其他有用的工具
+        git \
+        curl \
+        wget \
+        ca-certificates \
+        && \
+    rm -rf /var/lib/apt/lists/* && \
+    apt-get clean
+
+# 安装 Rust musl 目标
+RUN rustup target add x86_64-unknown-linux-musl && \
+    rustup target add aarch64-unknown-linux-musl && \
+    rustup target add armv7-unknown-linux-musleabihf && \
+    rustup target add x86_64-pc-windows-gnu && \
+    rustup target add x86_64-pc-windows-msvc
+
+# 设置 Cargo 配置用于静态编译
+RUN mkdir -p /root/.cargo && printf '%s\n' \
+    '[target.x86_64-unknown-linux-musl]' \
+    'rustflags = ["-C", "target-feature=+crt-static", "-C", "link-self-contained=yes"]' \
+    '' \
+    '[target.aarch64-unknown-linux-musl]' \
+    'rustflags = ["-C", "target-feature=+crt-static", "-C", "link-self-contained=yes"]' \
+    '' \
+    '[target.armv7-unknown-linux-musleabihf]' \
+    'rustflags = ["-C", "target-feature=+crt-static", "-C", "link-self-contained=yes"]' \
+    > /root/.cargo/config.toml
+
+# 缓存 Rust 编译器
+RUN cargo new --bin dummy_project && \
+    cd dummy_project && \
+    cargo build --release --target x86_64-unknown-linux-musl 2>/dev/null || true && \
+    cd .. && \
+    rm -rf dummy_project
+
+# 显示版本信息
+RUN echo "=== Rust Build Environment ===" && \
+    rustc --version && \
+    cargo --version && \
+    echo "" && \
+    echo "=== Installed Targets ===" && \
+    rustup target list --installed && \
+    echo "" && \
+    echo "=== System Tools ===" && \
+    gcc --version | head -n 1 && \
+    musl-gcc --version | head -n 1
+
+# 默认命令：显示帮助
+CMD ["cargo", "--help"]
