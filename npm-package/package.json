@@ -1,7 +1,7 @@
 {
-  "name": "agentic-warden",
+  "name": "aiw",
   "version": "5.0.1",
-  "description": "AI CLI 多账户管理和任务协调器 - Rust编写的高性能工具",
+  "description": "AI工作流编排工具 - Rust编写的高性能CLI",
   "keywords": [
     "ai",
     "cli",
@@ -9,7 +9,8 @@
     "openai",
     "tui",
     "rust",
-    "static-binary"
+    "static-binary",
+    "workflow"
   ],
   "homepage": "https://github.com/putao520/agentic-warden",
   "repository": {
