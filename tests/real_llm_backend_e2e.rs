@@ -79,7 +79,8 @@ mod tests {
         println!("✅ 环境设置: 强制Ollama模式 (OPENAI_TOKEN=sk-test-...)");
 
         // 2. 验证Ollama服务可用性
-        let ollama_url = env::var("OLLAMA_ENDPOINT").unwrap_or_else(|_| "http://localhost:11434".to_string());
+        let ollama_url =
+            env::var("OLLAMA_ENDPOINT").unwrap_or_else(|_| "http://localhost:11434".to_string());
         let ollama_check = reqwest::Client::new()
             .get(format!("{}/api/tags", ollama_url))
             .send()
@@ -138,10 +139,7 @@ mod tests {
 
         // 6. 验证响应
         let response_text = format!("{}", response.0.message).to_lowercase();
-        assert!(
-            !response_text.is_empty(),
-            "Ollama后端应该返回非空响应"
-        );
+        assert!(!response_text.is_empty(), "Ollama后端应该返回非空响应");
 
         // 验证响应包含工作流相关内容
         let has_workflow_content = response_text.contains("filesystem")
@@ -242,10 +240,7 @@ mod tests {
 
         // 6. 验证响应
         let response_text = format!("{}", response.0.message).to_lowercase();
-        assert!(
-            !response_text.is_empty(),
-            "AI CLI后端应该返回非空响应"
-        );
+        assert!(!response_text.is_empty(), "AI CLI后端应该返回非空响应");
 
         // 验证响应包含工作流相关内容
         let has_workflow_content = response_text.contains("filesystem")
@@ -372,10 +367,7 @@ mod tests {
                 "qwen3:1.7b".to_string(),
             );
 
-            assert!(
-                generator.is_err(),
-                "无效的CLI_TYPE应该返回错误"
-            );
+            assert!(generator.is_err(), "无效的CLI_TYPE应该返回错误");
             println!("✅ 无效CLI_TYPE正确返回错误");
         }
 
@@ -420,7 +412,10 @@ mod tests {
                 if let Some(server) = server {
                     let request = IntelligentRouteRequest {
                         user_request: test_task.to_string(),
-                        session_id: Some(format!("compare-ollama-{}", chrono::Utc::now().timestamp())),
+                        session_id: Some(format!(
+                            "compare-ollama-{}",
+                            chrono::Utc::now().timestamp()
+                        )),
                         max_candidates: None,
                         decision_mode: DecisionMode::Auto,
                         execution_mode: ExecutionMode::Dynamic,
@@ -457,7 +452,10 @@ mod tests {
                 if let Some(server) = server {
                     let request = IntelligentRouteRequest {
                         user_request: test_task.to_string(),
-                        session_id: Some(format!("compare-aicli-{}", chrono::Utc::now().timestamp())),
+                        session_id: Some(format!(
+                            "compare-aicli-{}",
+                            chrono::Utc::now().timestamp()
+                        )),
                         max_candidates: None,
                         decision_mode: DecisionMode::Auto,
                         execution_mode: ExecutionMode::Dynamic,

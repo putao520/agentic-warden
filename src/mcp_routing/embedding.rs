@@ -127,4 +127,3 @@ impl EmbeddingBackend for MockEmbeddingBackend {
         Ok(results)
     }
 }
-

@@ -31,8 +31,14 @@ fn test_real_embedding_generation() {
                 println!("Test #{}", idx + 1);
                 println!("  📄 Input text: \"{}\"", text);
                 println!("  📊 Output vector: {} dimensions", vector.len());
-                println!("  🔢 First 10 values: {:?}", &vector[..10.min(vector.len())]);
-                println!("  📈 Vector magnitude: {:.4}", vector.iter().map(|x| x * x).sum::<f32>().sqrt());
+                println!(
+                    "  🔢 First 10 values: {:?}",
+                    &vector[..10.min(vector.len())]
+                );
+                println!(
+                    "  📈 Vector magnitude: {:.4}",
+                    vector.iter().map(|x| x * x).sum::<f32>().sqrt()
+                );
                 println!("  ✅ Generated successfully\n");
             }
             Err(e) => {
@@ -52,8 +58,7 @@ fn test_embedding_consistency() {
 
     println!("\n🔄 Testing embedding consistency...\n");
 
-    let embedder = FastEmbedder::new("all-MiniLM-L6-v2")
-        .expect("Failed to initialize embedder");
+    let embedder = FastEmbedder::new("all-MiniLM-L6-v2").expect("Failed to initialize embedder");
 
     let text = "Consistency test for embeddings";
 
@@ -62,11 +67,17 @@ fn test_embedding_consistency() {
     let embedding2 = embedder.embed(text).expect("Second embedding failed");
 
     // Check if they're identical
-    let all_equal = embedding1.iter().zip(embedding2.iter()).all(|(a, b)| (a - b).abs() < 1e-6);
+    let all_equal = embedding1
+        .iter()
+        .zip(embedding2.iter())
+        .all(|(a, b)| (a - b).abs() < 1e-6);
 
     println!("  📄 Text: \"{}\"", text);
     println!("  🔄 Generated embedding twice");
-    println!("  ✅ Embeddings are {}", if all_equal { "identical" } else { "different" });
+    println!(
+        "  ✅ Embeddings are {}",
+        if all_equal { "identical" } else { "different" }
+    );
 
     assert!(all_equal, "Embeddings should be deterministic");
     println!("\n✅ Consistency test passed!");
@@ -78,8 +89,7 @@ fn test_batch_embedding() {
 
     println!("\n📦 Testing batch embedding...\n");
 
-    let embedder = FastEmbedder::new("all-MiniLM-L6-v2")
-        .expect("Failed to initialize embedder");
+    let embedder = FastEmbedder::new("all-MiniLM-L6-v2").expect("Failed to initialize embedder");
 
     let texts = vec![
         "Batch processing is efficient".to_string(),
@@ -95,10 +105,12 @@ fn test_batch_embedding() {
             }
             println!("\n  📊 Output: {} embeddings", embeddings.len());
             for (idx, emb) in embeddings.iter().enumerate() {
-                println!("    [{}] {} dimensions, magnitude: {:.4}",
+                println!(
+                    "    [{}] {} dimensions, magnitude: {:.4}",
                     idx + 1,
                     emb.len(),
-                    emb.iter().map(|x| x * x).sum::<f32>().sqrt());
+                    emb.iter().map(|x| x * x).sum::<f32>().sqrt()
+                );
             }
             println!("\n✅ Batch embedding successful!");
         }

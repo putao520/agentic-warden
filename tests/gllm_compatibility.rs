@@ -34,7 +34,10 @@ mod tests {
                 println!("✅ FastEmbedder initialized successfully");
                 let dim = embedder.dimension();
                 println!("   Embedding dimension: {}", dim);
-                assert_eq!(dim, 384, "all-MiniLM-L6-v2 should produce 384-dimensional embeddings");
+                assert_eq!(
+                    dim, 384,
+                    "all-MiniLM-L6-v2 should produce 384-dimensional embeddings"
+                );
             }
             Err(e) => {
                 panic!("❌ Failed to initialize FastEmbedder: {}", e);

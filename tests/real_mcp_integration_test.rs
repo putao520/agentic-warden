@@ -4,8 +4,8 @@
 #[cfg(test)]
 mod tests {
     use agentic_warden::mcp::AgenticWardenMcpServer;
-    use serial_test::serial;
     use anyhow::Result;
+    use serial_test::serial;
 
     #[tokio::test]
     #[serial]
