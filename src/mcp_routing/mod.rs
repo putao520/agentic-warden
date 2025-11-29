@@ -10,7 +10,7 @@ pub mod models;
 mod pool;
 pub mod registry; // REQ-013: Dynamic tool registry
 
-pub use embedding::{EmbeddingBackend, FastEmbedder, MockEmbeddingBackend};
+pub use embedding::{EmbeddingBackend, MockEmbeddingBackend};
 pub use index::{MemRoutingIndex, MethodEmbedding, ToolEmbedding};
 pub use pool::McpConnectionPool;
 
@@ -26,6 +26,8 @@ use self::{
     pool::DiscoveredTool,
 };
 use anyhow::{anyhow, Result};
+use gllm::Client;
+use memvdb::normalize;
 use parking_lot::Mutex;
 use rmcp::model::Tool;
 use serde_json::{json, Value};
@@ -35,7 +37,7 @@ use tokio::sync::RwLock;
 const METHOD_VECTOR_PREFIX: &str = "method";
 
 pub struct IntelligentRouter {
-    embedder: FastEmbedder,
+    embedder: gllm::Client,
     index: Mutex<MemRoutingIndex>,
     decision_engine: Arc<DecisionEngine>,
     connection_pool: Arc<McpConnectionPool>,
@@ -50,7 +52,8 @@ impl IntelligentRouter {
         let config_arc = Arc::new(config_manager.config().clone());
 
         // Initialize embedder with all-MiniLM-L6-v2 (multilingual, out-of-the-box)
-        let embedder = FastEmbedder::new("all-MiniLM-L6-v2")?;
+        let embedder = gllm::Client::new("all-MiniLM-L6-v2")
+            .map_err(|e| anyhow!("Failed to initialize gllm client: {}", e))?;
 
         // Initialize code generator using factory pattern
         let decision_endpoint = std::env::var("OPENAI_ENDPOINT")
@@ -153,7 +156,7 @@ impl IntelligentRouter {
             }
         };
 
-        let mut index = MemRoutingIndex::new(embedder.dimension())?;
+        let mut index = MemRoutingIndex::new(384)?; // all-MiniLM-L6-v2 dimension
         let tool_registry = RwLock::new(HashMap::new());
         let embeddings = build_embeddings(&embedder, &discovered, config_arc.as_ref())?;
         index.rebuild(&embeddings.tools, &embeddings.methods)?;
@@ -173,7 +176,7 @@ impl IntelligentRouter {
 
     /// Build a router from explicit dependencies (used for deterministic testing).
     pub fn new_with_components(
-        embedder: FastEmbedder,
+        embedder: gllm::Client,
         index: MemRoutingIndex,
         decision_engine: Arc<DecisionEngine>,
         connection_pool: Arc<McpConnectionPool>,
@@ -214,7 +217,15 @@ impl IntelligentRouter {
             });
         }
 
-        let embed = self.embedder.embed(&request.user_request)?;
+        let embed = self.embedder
+            .embeddings(&[request.user_request.clone()])
+            .generate()
+            .map_err(|e| anyhow!("Embedding generation failed: {}", e))?
+            .embeddings
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("No embedding generated"))?;
+        let embed = normalize(&embed.embedding);
 
         // Query mode: skip LLM orchestration, use vector search only (no tool registration)
         if matches!(request.execution_mode, models::ExecutionMode::Query) {
@@ -563,7 +574,7 @@ struct PreparedEmbeddings {
 }
 
 fn build_embeddings(
-    embedder: &FastEmbedder,
+    embedder: &Client,
     tools: &[DiscoveredTool],
     _config: &config::McpConfig,
 ) -> Result<PreparedEmbeddings> {
@@ -590,7 +601,15 @@ fn build_embeddings(
             description = description,
             schema = schema_string
         );
-        let vector = embedder.embed(&doc)?;
+        let vector = embedder
+            .embeddings(&[doc])
+            .generate()
+            .map_err(|e| anyhow!("Embedding generation failed: {}", e))?
+            .embeddings
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("No embedding generated"))?;
+        let vector = normalize(&vector.embedding);
         let mut metadata = HashMap::new();
         metadata.insert("server".into(), tool.server.clone());
         metadata.insert("tool".into(), tool.definition.name.to_string());

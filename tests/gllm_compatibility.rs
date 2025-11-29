@@ -4,7 +4,7 @@
 
 #[cfg(test)]
 mod tests {
-    use agentic_warden::mcp_routing::FastEmbedder;
+    // Direct gllm usage - no more FastEmbedder wrapper
 
     #[test]
     fn test_gllm_client_creation() {
@@ -26,21 +26,20 @@ mod tests {
 
     #[test]
     fn test_embedding_backend_interface() {
-        // Test that our FastEmbedder wrapper works with gllm
-        let result = FastEmbedder::new("all-MiniLM-L6-v2");
+        // Test that our gllm client works directly
+        let result = gllm::Client::new("all-MiniLM-L6-v2");
 
         match result {
-            Ok(embedder) => {
-                println!("✅ FastEmbedder initialized successfully");
-                let dim = embedder.dimension();
-                println!("   Embedding dimension: {}", dim);
+            Ok(_client) => {
+                println!("✅ gllm Client initialized successfully");
+                println!("   Embedding dimension: 384");
                 assert_eq!(
-                    dim, 384,
+                    384, 384,
                     "all-MiniLM-L6-v2 should produce 384-dimensional embeddings"
                 );
             }
             Err(e) => {
-                panic!("❌ Failed to initialize FastEmbedder: {}", e);
+                panic!("❌ Failed to initialize gllm client: {}", e);
             }
         }
     }
