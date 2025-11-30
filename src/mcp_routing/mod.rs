@@ -37,7 +37,7 @@ use tokio::sync::RwLock;
 const METHOD_VECTOR_PREFIX: &str = "method";
 
 pub struct IntelligentRouter {
-    embedder: gllm::Client,
+    embedder: Arc<Mutex<gllm::Client>>,
     index: Mutex<MemRoutingIndex>,
     decision_engine: Arc<DecisionEngine>,
     connection_pool: Arc<McpConnectionPool>,
@@ -52,8 +52,10 @@ impl IntelligentRouter {
         let config_arc = Arc::new(config_manager.config().clone());
 
         // Initialize embedder with all-MiniLM-L6-v2 (multilingual, out-of-the-box)
-        let embedder = gllm::Client::new("all-MiniLM-L6-v2")
-            .map_err(|e| anyhow!("Failed to initialize gllm client: {}", e))?;
+        let embedder = Arc::new(Mutex::new(
+            gllm::Client::new("all-MiniLM-L6-v2")
+                .map_err(|e| anyhow!("Failed to initialize gllm client: {}", e))?
+        ));
 
         // Initialize code generator using factory pattern
         let decision_endpoint = std::env::var("OPENAI_ENDPOINT")
@@ -176,7 +178,7 @@ impl IntelligentRouter {
 
     /// Build a router from explicit dependencies (used for deterministic testing).
     pub fn new_with_components(
-        embedder: gllm::Client,
+        embedder: Arc<Mutex<Client>>,
         index: MemRoutingIndex,
         decision_engine: Arc<DecisionEngine>,
         connection_pool: Arc<McpConnectionPool>,
@@ -218,6 +220,7 @@ impl IntelligentRouter {
         }
 
         let embed = self.embedder
+            .lock()
             .embeddings(&[request.user_request.clone()])
             .generate()
             .map_err(|e| anyhow!("Embedding generation failed: {}", e))?
@@ -574,7 +577,7 @@ struct PreparedEmbeddings {
 }
 
 fn build_embeddings(
-    embedder: &Client,
+    embedder: &Arc<Mutex<Client>>,
     tools: &[DiscoveredTool],
     _config: &config::McpConfig,
 ) -> Result<PreparedEmbeddings> {
@@ -602,6 +605,7 @@ fn build_embeddings(
             schema = schema_string
         );
         let vector = embedder
+            .lock()
             .embeddings(&[doc])
             .generate()
             .map_err(|e| anyhow!("Embedding generation failed: {}", e))?

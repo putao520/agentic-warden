@@ -391,7 +391,6 @@ pub async fn get_task_logs(params: GetTaskLogsParams) -> Result<TaskLogsResult, 
 pub struct AgenticWardenMcpServer {
     router: Arc<IntelligentRouter>,
     tool_router: ToolRouter<Self>,
-    embedder: Arc<tokio::sync::Mutex<gllm::Client>>,
     // Client capability detection
     client_capabilities: Arc<RwLock<Option<ClientCapabilities>>>,
     // Dynamic tool registry (SSOT for MCP tools)
@@ -417,10 +416,7 @@ impl AgenticWardenMcpServer {
         let base_tools = tool_router.list_all();
         registry.extend_base_tools(base_tools).await;
 
-        // Initialize gllm for conversation search
-        let embedder = gllm::Client::new("all-MiniLM-L6-v2")
-            .map_err(|e| format!("Failed to initialize gllm client: {e}"))?;
-
+  
         // Initialize conversation history store
         let db_path = Self::get_history_db_path()
             .map_err(|e| format!("Failed to get history DB path: {e}"))?;
@@ -449,7 +445,6 @@ impl AgenticWardenMcpServer {
         Ok(Self {
             router: Arc::new(router),
             tool_router,
-            embedder: Arc::new(tokio::sync::Mutex::new(embedder)),
             client_capabilities: Arc::new(RwLock::new(None)),
             tool_registry: registry,
             peer: Arc::new(RwLock::new(None)),

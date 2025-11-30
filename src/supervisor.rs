@@ -20,6 +20,7 @@ use std::io;
 use std::path::PathBuf;
 use std::process::{ExitStatus, Stdio};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tokio::fs::OpenOptions;
 use tokio::io::{AsyncRead, AsyncWriteExt, BufWriter};
@@ -399,9 +400,48 @@ async fn execute_cli_internal<S: TaskStorage>(
         writer.get_ref().sync_all().await?;
     }
 
-    // Display log file path to user (not in capture mode)
+    // Display enhanced log file path information to user (not in capture mode)
     if !is_capture_mode {
-        eprintln!("完整日志已保存到: {}", log_path.display());
+        let log_path_str = log_path.display().to_string();
+        eprintln!();
+        eprintln!("📄 AI CLI 任务完成!");
+        eprintln!("📍 完整日志文件: {}", log_path_str);
+        eprintln!("💡 提示: 您可以使用 'cat {}' 查看完整日志内容", log_path_str);
+        eprintln!();
+
+        // 确保只显示最后50行 - 强制清除所有旧输出
+        let mut display = scrolling_display.lock().await;
+        let final_flush = display.flush_remaining();
+        if !final_flush.is_empty() {
+            let _ = tokio::io::stderr().write_all(final_flush.as_bytes()).await;
+        }
+
+        // 强制将滚动显示输出限制在最后50行
+        let current_lines = display.current_line_count();
+        if current_lines > 50 {
+            let lines: Vec<_> = display.lines.iter().rev().take(50).map(|s| s.clone()).rev().collect();
+            display.lines = lines.into_iter().collect();
+            display.displayed_count = display.lines.len();
+        }
+
+        // 验证50行限制
+        if !display.validate_line_limit() {
+            warn(format!("警告: 滚动显示超过50行限制 (当前: {})", display.current_line_count()));
+        }
+
+        // 输出最后的50行（如果有的话）
+        let tail_output = display.redraw();
+        if !tail_output.is_empty() {
+            let _ = tokio::io::stderr().write_all(tail_output.as_bytes()).await;
+        }
+
+        // 记录最终状态
+        debug(format!("最终显示状态: {}行 (限制: 50行)", display.current_line_count()));
+
+        eprintln!();
+        eprintln!("✅ 任务结束，已严格限制输出显示最后50行");
+        eprintln!("📁 完整内容请查看: {}", log_path_str);
+        eprintln!();
     }
 
     if let Some(guard) = registration_guard {
@@ -454,7 +494,11 @@ async fn execute_cli_internal<S: TaskStorage>(
 /// - Creates directory with restrictive permissions (0700 on Unix)
 /// - Ensures logs are only accessible by the current user
 /// - Logs are automatically cleaned up on system reboot
-fn generate_log_path(pid: u32) -> io::Result<PathBuf> {
+/// - Collision-resistant filename format: {PID}-{timestamp}-{random}.log
+///   - PID: Process ID for process identification
+///   - timestamp: Milliseconds since Unix epoch for time uniqueness
+///   - random: Cryptographic random number for collision resistance
+pub fn generate_log_path(pid: u32) -> io::Result<PathBuf> {
     // Use system temp directory as per SPEC design (cross-platform)
     // Linux/macOS: /tmp/.aiw/logs/
     // Windows: %TEMP%\.aiw\logs\
@@ -476,19 +520,32 @@ fn generate_log_path(pid: u32) -> io::Result<PathBuf> {
         }
     }
 
-    Ok(log_dir.join(format!("{pid}.log")))
+    // Generate collision-resistant filename with timestamp and random number
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+    let random = {
+        let mut bytes = [0u8; 4];
+        if getrandom::getrandom(&mut bytes).is_ok() {
+            u32::from_be_bytes(bytes)
+        } else {
+            // Fallback to using PID + timestamp if random generation fails
+            (pid ^ timestamp as u32).rotate_right(timestamp as u32 % 32)
+        }
+    };
+
+    let filename = format!("{pid}-{}-{}.log", timestamp, random);
+    Ok(log_dir.join(filename))
 }
 
 /// 滚动显示缓冲区 - 只在终端显示最后N行，完整内容保存到日志
-struct ScrollingDisplay {
+pub struct ScrollingDisplay {
     lines: VecDeque<String>,
     max_lines: usize,
-    current_line_buffer: String,
-    displayed_count: usize,
+    pub current_line_buffer: String,
+    pub displayed_count: usize,
 }
 
 impl ScrollingDisplay {
-    fn new(max_lines: usize) -> Self {
+    pub fn new(max_lines: usize) -> Self {
         Self {
             lines: VecDeque::with_capacity(max_lines),
             max_lines,
@@ -498,7 +555,7 @@ impl ScrollingDisplay {
     }
 
     /// 处理新数据，返回需要显示的内容
-    fn process(&mut self, data: &[u8]) -> String {
+    pub fn process(&mut self, data: &[u8]) -> String {
         let text = String::from_utf8_lossy(data);
         let mut output = String::new();
 
@@ -508,10 +565,13 @@ impl ScrollingDisplay {
                 let line = std::mem::take(&mut self.current_line_buffer);
                 self.lines.push_back(line);
 
-                // 如果超过最大行数，移除最旧的行
-                if self.lines.len() > self.max_lines {
+                // 严格限制在最大行数内，立即移除超过的行
+                while self.lines.len() > self.max_lines {
                     self.lines.pop_front();
-                    // 需要清除旧行并重绘
+                }
+
+                // 只有在刚达到最大行数时才需要重绘
+                if self.lines.len() == self.max_lines {
                     output.push_str(&self.redraw());
                 } else {
                     // 直接输出新行
@@ -533,7 +593,7 @@ impl ScrollingDisplay {
     }
 
     /// 重绘整个显示区域
-    fn redraw(&mut self) -> String {
+    pub fn redraw(&mut self) -> String {
         let mut output = String::new();
 
         // 移动到显示区域顶部并清除
@@ -555,12 +615,22 @@ impl ScrollingDisplay {
     }
 
     /// 刷新未完成的行（用于最终输出）
-    fn flush_remaining(&mut self) -> String {
+    pub fn flush_remaining(&mut self) -> String {
         if self.current_line_buffer.is_empty() {
             return String::new();
         }
         let line = std::mem::take(&mut self.current_line_buffer);
         format!("{}\n", line)
+    }
+
+    /// 验证当前显示是否严格符合50行限制
+    pub fn validate_line_limit(&self) -> bool {
+        self.lines.len() <= self.max_lines
+    }
+
+    /// 获取当前显示的行数
+    pub fn current_line_count(&self) -> usize {
+        self.lines.len()
     }
 }
 
@@ -593,7 +663,7 @@ impl StreamMirror {
 }
 
 /// 默认的最大显示行数
-const DEFAULT_MAX_DISPLAY_LINES: usize = 50;
+pub const DEFAULT_MAX_DISPLAY_LINES: usize = 50;
 
 async fn spawn_copy<R>(
     mut reader: R,

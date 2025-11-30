@@ -32,6 +32,10 @@ Agentic-Warden 测试运行器
   tui                    - 运行TUI测试
   performance            - 运行性能测试
   coverage               - 生成代码覆盖率报告
+  gllm-embedding         - 运行gllm嵌入测试
+  gllm-rerank            - 运行gllm rerank测试
+  gllm-integration       - 运行gllm集成测试
+  gllm-all               - 运行所有gllm测试
   all                    - 运行所有测试 (默认)
   quick                  - 运行快速测试套件
   smoke                  - 运行冒烟测试
@@ -57,6 +61,10 @@ Agentic-Warden 测试运行器
   $0                          # 运行所有测试
   $0 unit                     # 只运行单元测试
   $0 -j 8 integration         # 并行运行集成测试
+  $0 gllm-embedding          # 运行gllm嵌入测试
+  $0 gllm-rerank             # 运行gllm rerank测试
+  $0 gllm-integration       # 运行gllm集成测试
+  $0 gllm-all               # 运行所有gllm测试
   $0 -o /tmp/results coverage  # 生成覆盖率报告
   $0 --docker all              # 在Docker中运行所有测试
 
@@ -315,6 +323,75 @@ run_performance_tests() {
     return 0
 }
 
+# 运行gllm嵌入测试
+run_gllm_embedding_tests() {
+    log_info "运行gllm嵌入测试..."
+
+    local test_args="--test gllm_embedding* --test gllm_direct_integration --test gllm_compatibility"
+
+    if [ "$VERBOSE" = true ]; then
+        test_args="$test_args -- --nocapture"
+    fi
+
+    if [ "$FAIL_FAST" = false ]; then
+        test_args="$test_args -- --no-fail-fast"
+    fi
+
+    if ! timeout "$TIMEOUT" cargo test $test_args 2>&1 | tee "$OUTPUT_DIR/gllm_embedding_tests.log"; then
+        log_error "gllm嵌入测试失败"
+        return 1
+    fi
+
+    log_success "gllm嵌入测试通过"
+    return 0
+}
+
+# 运行gllm rerank测试
+run_gllm_rerank_tests() {
+    log_info "运行gllm rerank测试..."
+
+    local test_args="--test gllm_rerank*"
+
+    if [ "$VERBOSE" = true ]; then
+        test_args="$test_args -- --nocapture"
+    fi
+
+    if [ "$FAIL_FAST" = false ]; then
+        test_args="$test_args -- --no-fail-fast"
+    fi
+
+    if ! timeout "$TIMEOUT" cargo test $test_args 2>&1 | tee "$OUTPUT_DIR/gllm_rerank_tests.log"; then
+        log_error "gllm rerank测试失败"
+        return 1
+    fi
+
+    log_success "gllm rerank测试通过"
+    return 0
+}
+
+# 运行gllm集成测试
+run_gllm_integration_tests() {
+    log_info "运行gllm集成测试..."
+
+    local test_args="--test gllm_embedding_demo --test gllm_rerank_embedding_integration"
+
+    if [ "$VERBOSE" = true ]; then
+        test_args="$test_args -- --nocapture"
+    fi
+
+    if [ "$FAIL_FAST" = false ]; then
+        test_args="$test_args -- --no-fail-fast"
+    fi
+
+    if ! timeout "$TIMEOUT" cargo test $test_args 2>&1 | tee "$OUTPUT_DIR/gllm_integration_tests.log"; then
+        log_error "gllm集成测试失败"
+        return 1
+    fi
+
+    log_success "gllm集成测试通过"
+    return 0
+}
+
 # 生成代码覆盖率报告
 generate_coverage() {
     log_info "生成代码覆盖率报告..."
@@ -442,7 +519,7 @@ generate_report() {
 EOF
 
     # 添加各测试结果
-    for test_log in unit_tests.log integration_tests.log cli_tests.log tui_tests.log quick_tests.log smoke_tests.log; do
+    for test_log in unit_tests.log integration_tests.log cli_tests.log tui_tests.log quick_tests.log smoke_tests.log gllm_embedding_tests.log gllm_rerank_tests.log gllm_integration_tests.log performance_tests.log; do
         if [ -f "$OUTPUT_DIR/$test_log" ]; then
             echo "### ${test_log%.log}" >> "$report_file"
             echo "\`\`\`" >> "$report_file"
@@ -504,6 +581,21 @@ main() {
         smoke)
             run_smoke_tests || exit_code=1
             ;;
+        gllm-embedding)
+            run_gllm_embedding_tests || exit_code=1
+            ;;
+        gllm-rerank)
+            run_gllm_rerank_tests || exit_code=1
+            ;;
+        gllm-integration)
+            run_gllm_integration_tests || exit_code=1
+            ;;
+        gllm-all)
+            log_info "运行所有gllm测试..."
+            run_gllm_embedding_tests || exit_code=1
+            run_gllm_rerank_tests || exit_code=1
+            run_gllm_integration_tests || exit_code=1
+            ;;
         all)
             log_info "运行所有测试..."
 
@@ -511,6 +603,9 @@ main() {
             run_integration_tests || exit_code=1
             run_cli_tests || exit_code=1
             run_tui_tests || exit_code=1
+            run_gllm_embedding_tests || exit_code=1
+            run_gllm_rerank_tests || exit_code=1
+            run_gllm_integration_tests || exit_code=1
             run_performance_tests || true # 性能测试失败不应该阻止CI
             generate_coverage || true # 覆盖率报告失败不应该阻止CI
             ;;
