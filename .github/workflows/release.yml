@@ -77,8 +77,6 @@ jobs:
       run: |
         # 复制二进制到npm-package/bin/
         cp binaries/aiw-binary-x86_64-unknown-linux-gnu/aiw npm-package/bin/aiw-linux-x64
-        cp binaries/aiw-binary-x86_64-apple-darwin/aiw npm-package/bin/aiw-macos-x64
-        cp binaries/aiw-binary-aarch64-apple-darwin/aiw npm-package/bin/aiw-macos-arm64
         cp binaries/aiw-binary-x86_64-pc-windows-gnu/aiw.exe npm-package/bin/aiw-windows-x64.exe
 
         # 设置可执行权限
@@ -137,8 +135,6 @@ jobs:
       run: |
         mkdir -p release-files
         cp binaries/aiw-binary-x86_64-unknown-linux-gnu/aiw release-files/aiw-linux-x64
-        cp binaries/aiw-binary-x86_64-apple-darwin/aiw release-files/aiw-macos-x64
-        cp binaries/aiw-binary-aarch64-apple-darwin/aiw release-files/aiw-macos-arm64
         cp binaries/aiw-binary-x86_64-pc-windows-gnu/aiw.exe release-files/aiw-windows-x64.exe
 
         # 生成校验和
@@ -152,8 +148,6 @@ jobs:
       with:
         files: |
           release-files/aiw-linux-x64
-          release-files/aiw-macos-x64
-          release-files/aiw-macos-arm64
           release-files/aiw-windows-x64.exe
           release-files/SHA256SUMS
         generate_release_notes: true
