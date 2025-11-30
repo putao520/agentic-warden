@@ -52,9 +52,17 @@ impl IntelligentRouter {
         let config_arc = Arc::new(config_manager.config().clone());
 
         // Initialize embedder with all-MiniLM-L6-v2 (multilingual, out-of-the-box)
+        // Force CPU mode for MUSL compatibility and performance
         let embedder = Arc::new(Mutex::new(
-            gllm::Client::new("all-MiniLM-L6-v2")
-                .map_err(|e| anyhow!("Failed to initialize gllm client: {}", e))?
+            gllm::Client::with_config("all-MiniLM-L6-v2",
+                gllm::ClientConfig {
+                    device: gllm::Device::Cpu,
+                    models_dir: dirs::home_dir()
+                        .ok_or_else(|| anyhow!("Failed to get home directory for models"))?
+                        .join(".gllm/models"),
+                }
+            )
+            .map_err(|e| anyhow!("Failed to initialize gllm client: {}", e))?
         ));
 
         // Initialize code generator using factory pattern

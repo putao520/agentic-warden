@@ -32,6 +32,7 @@ jobs:
         docker run --rm \
           -v "$(pwd):/workspace" \
           -e "RUSTFLAGS=-C target-feature=+crt-static -C link-self-contained=yes" \
+          -e "GLLM_TEST_MODE=1" \
           aiw-builder:latest \
           cargo build --release --target ${{ matrix.target }}
 
