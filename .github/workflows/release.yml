@@ -16,9 +16,10 @@ jobs:
     strategy:
       matrix:
         target:
-          - x86_64-unknown-linux-musl
-          - aarch64-unknown-linux-musl
-          - armv7-unknown-linux-musleabihf
+          - x86_64-unknown-linux-gnu
+          - x86_64-apple-darwin
+          - aarch64-apple-darwin
+          - x86_64-pc-windows-gnu
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -31,25 +32,20 @@ jobs:
         docker build -f Dockerfile.build -t aiw-builder:latest .
         docker run --rm \
           -v "$(pwd):/workspace" \
-          -e "RUSTFLAGS=-C target-feature=+crt-static -C link-self-contained=yes" \
-          -e "GLLM_TEST_MODE=1" \
           aiw-builder:latest \
           cargo build --release --target ${{ matrix.target }}
 
-    - name: Verify static linking
+    - name: Verify binary
       run: |
         OUTPUT_PATH="target/${{ matrix.target }}/release/aiw"
         file "$OUTPUT_PATH"
-        if file "$OUTPUT_PATH" | grep -q "statically linked"; then
-          echo "✅ Binary is statically linked"
-        else
-          echo "⚠️  Binary may not be fully static"
-        fi
+        ls -lah "$OUTPUT_PATH"
+        echo "✅ Binary built successfully"
 
     - name: Upload binary artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: aiw-${{ matrix.target }}
+        name: aiw-binary-${{ matrix.target }}
         path: target/${{ matrix.target }}/release/aiw
         retention-days: 1
 
@@ -75,9 +71,10 @@ jobs:
     - name: Prepare binaries for NPM
       run: |
         # 复制二进制到npm-package/bin/
-        cp binaries/aiw-x86_64-unknown-linux-musl/aiw npm-package/bin/aiw-linux-x64
-        cp binaries/aiw-aarch64-unknown-linux-musl/aiw npm-package/bin/aiw-linux-arm64
-        cp binaries/aiw-armv7-unknown-linux-musleabihf/aiw npm-package/bin/aiw-linux-armv7
+        cp binaries/aiw-binary-x86_64-unknown-linux-gnu/aiw npm-package/bin/aiw-linux-x64
+        cp binaries/aiw-binary-x86_64-apple-darwin/aiw npm-package/bin/aiw-macos-x64
+        cp binaries/aiw-binary-aarch64-apple-darwin/aiw npm-package/bin/aiw-macos-arm64
+        cp binaries/aiw-binary-x86_64-pc-windows-gnu/aiw.exe npm-package/bin/aiw-windows-x64.exe
 
         # 设置可执行权限
         chmod +x npm-package/bin/*
@@ -134,9 +131,10 @@ jobs:
     - name: Prepare release files
       run: |
         mkdir -p release-files
-        cp binaries/aiw-x86_64-unknown-linux-musl/aiw release-files/aiw-linux-x86_64
-        cp binaries/aiw-aarch64-unknown-linux-musl/aiw release-files/aiw-linux-arm64
-        cp binaries/aiw-armv7-unknown-linux-musleabihf/aiw release-files/aiw-linux-armv7
+        cp binaries/aiw-binary-x86_64-unknown-linux-gnu/aiw release-files/aiw-linux-x64
+        cp binaries/aiw-binary-x86_64-apple-darwin/aiw release-files/aiw-macos-x64
+        cp binaries/aiw-binary-aarch64-apple-darwin/aiw release-files/aiw-macos-arm64
+        cp binaries/aiw-binary-x86_64-pc-windows-gnu/aiw.exe release-files/aiw-windows-x64.exe
 
         # 生成校验和
         cd release-files
@@ -148,9 +146,10 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          release-files/aiw-linux-x86_64
-          release-files/aiw-linux-arm64
-          release-files/aiw-linux-armv7
+          release-files/aiw-linux-x64
+          release-files/aiw-macos-x64
+          release-files/aiw-macos-arm64
+          release-files/aiw-windows-x64.exe
           release-files/SHA256SUMS
         generate_release_notes: true
       env:
