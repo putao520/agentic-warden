@@ -42,7 +42,11 @@ jobs:
 
     - name: Verify binary
       run: |
-        OUTPUT_PATH="target/${{ matrix.target }}/release/aiw"
+        if [ "${{ matrix.target }}" = "x86_64-pc-windows-gnu" ]; then
+          OUTPUT_PATH="target/${{ matrix.target }}/release/aiw.exe"
+        else
+          OUTPUT_PATH="target/${{ matrix.target }}/release/aiw"
+        fi
         file "$OUTPUT_PATH"
         ls -lah "$OUTPUT_PATH"
         echo "✅ Binary built successfully"
@@ -51,7 +55,9 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: aiw-binary-${{ matrix.target }}
-        path: target/${{ matrix.target }}/release/aiw
+        path: |
+          target/${{ matrix.target }}/release/aiw
+          target/${{ matrix.target }}/release/aiw.exe
         retention-days: 1
 
   # Job 2: 准备NPM包并发布
