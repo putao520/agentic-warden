@@ -15,27 +15,31 @@ if (platform === 'linux') {
     case 'x64':
       binaryPath = path.join(__dirname, 'bin', 'aiw-linux-x64');
       break;
-    case 'arm64':
-      binaryPath = path.join(__dirname, 'bin', 'aiw-linux-arm64');
-      break;
-    case 'arm':
-      binaryPath = path.join(__dirname, 'bin', 'aiw-linux-armv7');
+    default:
+      console.error(`❌ Unsupported architecture: ${arch}`);
+      console.error('Supported: x64');
+      process.exit(1);
+  }
+} else if (platform === 'win32') {
+  switch (arch) {
+    case 'x64':
+      binaryPath = path.join(__dirname, 'bin', 'aiw-windows-x64.exe');
       break;
     default:
       console.error(`❌ Unsupported architecture: ${arch}`);
-      console.error('Supported: x64, arm64, arm');
+      console.error('Supported: x64');
       process.exit(1);
   }
 } else {
   console.error(`❌ Unsupported platform: ${platform}`);
-  console.error('Currently only Linux is supported.');
+  console.error('Supported: linux, win32');
   console.error('\nAlternative options:');
   console.error('1. Using Cargo: cargo install --git https://github.com/putao520/agentic-warden');
   console.error('2. Download pre-built: https://github.com/putao520/agentic-warden/releases');
   process.exit(1);
 }
 
-// 执行二进制并传递所有参数
+// Execute binary and pass all arguments
 const result = spawnSync(binaryPath, process.argv.slice(2), {
   stdio: 'inherit',
 });
