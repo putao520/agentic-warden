@@ -1,6 +1,6 @@
 {
   "name": "aiw",
-  "version": "0.5.5",
+  "version": "0.5.13",
   "description": "AI工作流编排工具 - Rust编写的高性能CLI",
   "keywords": [
     "ai",
@@ -31,7 +31,8 @@
     "node": ">=14.0.0"
   },
   "os": [
-    "linux"
+    "linux",
+    "win32"
   ],
   "cpu": [
     "x64",

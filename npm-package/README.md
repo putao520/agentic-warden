@@ -1,6 +1,6 @@
 # AIW - AI Workflow CLI
 
-A high-performance AI workflow orchestration tool written in **pure Rust** with statically-linked Linux binaries.
+A high-performance AI workflow orchestration tool written in **pure Rust** with statically-linked binaries for Linux and Windows.
 
 **AIW** (Agentic Warden) is a unified CLI management tool for multi-account environments, providing intelligent process monitoring, task coordination, and AI integration.
 
@@ -13,10 +13,9 @@ npm install -g aiw
 aiw --version
 ```
 
-This package includes pre-compiled static binaries for Linux:
-- **x86_64** - Intel/AMD 64-bit processors
-- **arm64** - Apple Silicon, Raspberry Pi 4/5
-- **armv7** - Raspberry Pi 3, older ARM devices
+This package includes pre-compiled static binaries:
+- **Linux x86_64** - Intel/AMD 64-bit processors
+- **Windows x64** - Intel/AMD 64-bit processors (Windows 10/11)
 
 ### Alternative Installation Methods
 
@@ -38,12 +37,12 @@ cd agentic-warden
 
 ## Features
 
-- 🚀 **Zero-Dependency Deployment** - Fully static Linux binaries
+- 🚀 **Zero-Dependency Deployment** - Fully static binaries for Linux and Windows
 - 🔧 **AI Multi-Account Management** - Claude, OpenAI, Gemini, etc.
 - ⚙️ **Provider Abstraction** - Unified interface for OpenRouter, LiteLLM, Cloudflare AI
 - 📁 **Smart File Sync** - Intelligent blacklist for cloud sync
 - 🎨 **Modern TUI Interface** - Interactive terminal UI with ratatui
-- 🌐 **Cross-Platform** - Compiled for x86_64, ARM64, ARMv7 Linux
+- 🌐 **Cross-Platform** - Compiled for Linux x64 and Windows x64
 
 ## Quick Start
 
