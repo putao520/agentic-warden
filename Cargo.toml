@@ -9,13 +9,10 @@ categories = ["command-line-utilities", "development-tools"]
 version = "0.5.15"
 edition = "2021"
 
-[lib]
-name = "agentic_warden"
-path = "src/lib.rs"
-
 [[bin]]
 name = "aiw"
 path = "src/main.rs"
+required-features = ["binary"]
 
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
@@ -181,7 +178,8 @@ mockito = "1.2"
 
 [features]
 default = []
-testing = []
+binary = []     # Enable binary build
+testing = []    # Testing features
 
 [package.metadata.cargo-check-cfg]
 features = ["testing"]
