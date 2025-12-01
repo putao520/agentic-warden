@@ -43,4 +43,4 @@ echo "2. 提交变更: git add . && git commit -m \"feat: 版本更新到 $NEW_V
 echo "3. 创建 Git tag: git tag v$NEW_VERSION"
 echo "4. 推送到远程: git push origin master && git push origin v$NEW_VERSION"
 echo ""
-echo "⚠️  注意: npm-package/package.json 由 GitHub Actions 自动更新"
+echo "⚠️  注意: package.json 由 GitHub Actions 自动更新"

@@ -111,3 +111,6 @@ tmp/
 temp/
 *.tmp
 *.temp
+
+# NPM publication is controlled by package.json "files" field
+# All source code can be committed to Git

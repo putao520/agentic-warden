@@ -147,12 +147,8 @@ pub enum Commands {
         command: Option<String>,
     },
 
-    /// 更新 AI CLI 工具（未安装则安装，已安装则更新）
-    Update {
-        /// 指定要更新/安装的 AI CLI 工具（claude/codex/gemini）
-        #[arg(value_name = "TOOL")]
-        tool: Option<String>,
-    },
+    /// 更新 AI CLI 工具和 AIW 自身
+    Update,
 
     /// MCP服务器管理
     #[command(subcommand)]

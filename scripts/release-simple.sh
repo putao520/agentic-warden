@@ -185,33 +185,6 @@ update_npm_version() {
             log_info "[预演] 将更新 package.json 版本到: $VERSION"
         fi
     fi
-
-    # 更新 npm-package 目录
-    local npm_package_file="$PROJECT_ROOT/npm-package/package.json"
-    if [[ -f "$npm_package_file" ]]; then
-        log_info "更新 npm-package/package.json 版本: $VERSION"
-
-        if [[ "$DRY_RUN" != true ]]; then
-            # 备份原文件
-            cp "$npm_package_file" "$npm_package_file.bak"
-
-            # 使用 sed 更新版本号
-            sed -i 's/"version": "[^"]*"/"version": "'$VERSION'"/' "$npm_package_file"
-
-            # 验证更新是否成功
-            local updated_version=$(grep '"version"' "$npm_package_file" | sed 's/.*"version": "//g' | sed 's/".*//g' | tr -d ' ')
-            if [[ "$updated_version" == "$VERSION" ]]; then
-                log_success "npm-package/package.json 更新成功"
-                rm -f "$npm_package_file.bak"
-            else
-                log_error "npm-package/package.json 更新失败，恢复备份"
-                mv "$npm_package_file.bak" "$npm_package_file"
-                return 1
-            fi
-        else
-            log_info "[预演] 将更新 npm-package/package.json 版本到: $VERSION"
-        fi
-    fi
 }
 
 # 创建 Git 提交和标签

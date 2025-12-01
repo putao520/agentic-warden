@@ -9,7 +9,7 @@ use agentic_warden::commands::{
     Cli, Commands,
 };
 use agentic_warden::error::ErrorCategory;
-use agentic_warden::execute_update;
+use agentic_warden::execute_enhanced_update;
 use agentic_warden::mcp::AgenticWardenMcpServer;
 use agentic_warden::pwait_mode;
 use agentic_warden::roles::RoleManager;
@@ -173,23 +173,34 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
             }
             Ok(ExitCode::from(0))
         }
-        Commands::Update { tool } => {
-            let tool_name = tool.as_deref();
-            match execute_update(tool_name).await {
-                Ok(results) => {
-                    let success_count = results.iter().filter(|(_, success, _)| *success).count();
-                    let total_count = results.len();
+        Commands::Update => {
+            match execute_enhanced_update().await {
+                Ok((aiw_updated, cli_results)) => {
+                    let cli_success_count = cli_results.iter().filter(|(_, success, _)| *success).count();
+                    let cli_total_count = cli_results.len();
 
-                    if success_count == total_count {
-                        println!("\n✅ All {} tool(s) updated successfully!", success_count);
-                        Ok(ExitCode::from(0))
+                    // Print AIW update status
+                    if aiw_updated {
+                        println!("\n✅ AIW updated successfully!");
                     } else {
-                        eprintln!(
-                            "\n⚠️  {}/{} tool(s) updated successfully",
-                            success_count, total_count
-                        );
-                        Ok(ExitCode::from(1))
+                        println!("\n✅ AIW is already up to date!");
                     }
+
+                    // Print AI CLI tools update status
+                    if cli_total_count > 0 {
+                        if cli_success_count == cli_total_count {
+                            println!("✅ All {} AI CLI tool(s) updated successfully!", cli_success_count);
+                        } else {
+                            eprintln!(
+                                "⚠️  {}/{} AI CLI tool(s) updated successfully",
+                                cli_success_count, cli_total_count
+                            );
+                        }
+                    } else {
+                        println!("ℹ️  No AI CLI tools found to update");
+                    }
+
+                    Ok(ExitCode::from(0))
                 }
                 Err(e) => {
                     eprintln!("❌ Update failed: {}", e);

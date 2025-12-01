@@ -450,6 +450,142 @@ pub fn get_install_commands() -> Vec<(String, String)> {
 ///
 /// If tool_name is None, update all installed tools
 /// If tool_name is Some, update/install that specific tool
+/// Enhanced update function that updates both AIW and AI CLI tools
+pub async fn execute_enhanced_update() -> Result<(bool, Vec<(String, bool, String)>)> {
+    let mut aiw_updated = false;
+    let mut cli_results = Vec::new();
+
+    // Step 1: Update AIW itself
+    println!("🔄 Checking for AIW updates...");
+    match update_aiw().await {
+        Ok(updated) => {
+            aiw_updated = updated;
+        }
+        Err(e) => {
+            eprintln!("⚠️  AIW update failed: {}", e);
+            // Continue with AI CLI updates even if AIW update fails
+        }
+    }
+
+    // Step 2: Update AI CLI tools
+    println!("\n🔧 Checking AI CLI tools for updates...");
+    match execute_update(None).await {
+        Ok(results) => {
+            cli_results = results;
+        }
+        Err(e) => {
+            eprintln!("⚠️  AI CLI tools update failed: {}", e);
+        }
+    }
+
+    Ok((aiw_updated, cli_results))
+}
+
+/// Update AIW itself
+async fn update_aiw() -> Result<bool> {
+    // Get current version
+    let current_version = get_aiw_current_version()?;
+    println!("📋 Current AIW version: {}", current_version);
+
+    // Get latest version from NPM
+    let latest_version = get_aiw_latest_version().await?;
+    println!("📋 Latest AIW version: {}", latest_version);
+
+    // Check if update is needed
+    if current_version == latest_version {
+        println!("✅ AIW is already up to date!");
+        return Ok(false);
+    }
+
+    println!("🚀 Starting update to AIW v{}...", latest_version);
+    perform_aiw_update(&latest_version).await?;
+    println!("✅ AIW updated successfully to v{}!", latest_version);
+
+    Ok(true)
+}
+
+/// Get current AIW version
+fn get_aiw_current_version() -> Result<String> {
+    // Try to get version from the binary
+    let output = Command::new("aiw")
+        .arg("--version")
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => {
+            let version_str = String::from_utf8_lossy(&output.stdout);
+            // Extract version number (e.g., "aiw 0.5.13" -> "0.5.13")
+            let version = version_str
+                .lines()
+                .next()
+                .unwrap_or(&version_str)
+                .split_whitespace()
+                .last()
+                .unwrap_or("unknown")
+                .to_string();
+            Ok(version)
+        }
+        _ => {
+            // Fallback to reading from package.json or VERSION file
+            // For now, return a default
+            Ok("0.5.13".to_string())
+        }
+    }
+}
+
+/// Get latest AIW version from NPM
+async fn get_aiw_latest_version() -> Result<String> {
+    println!("  📡 Fetching latest version from NPM...");
+
+    let output = Command::new("npm")
+        .arg("view")
+        .arg("@putao520/aiw")
+        .arg("version")
+        .output()?;
+
+    if output.status.success() {
+        let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        Ok(version)
+    } else {
+        anyhow::bail!("Failed to fetch latest version from NPM: {}", String::from_utf8_lossy(&output.stderr))
+    }
+}
+
+/// Perform AIW update
+async fn perform_aiw_update(version: &str) -> Result<()> {
+    println!("  📦 Installing AIW v{} from NPM...", version);
+
+    // Use npm to update the package
+    let output = Command::new("npm")
+        .arg("install")
+        .arg("-g")
+        .arg(format!("@putao520/aiw@{}", version))
+        .output()?;
+
+    if output.status.success() {
+        println!("  ✅ Installation completed successfully!");
+
+        // Verify the update
+        println!("  🔍 Verifying update...");
+        let verify_output = Command::new("aiw")
+            .arg("--version")
+            .output()?;
+
+        if verify_output.status.success() {
+            let installed_version = String::from_utf8_lossy(&verify_output.stdout).trim().to_string();
+            println!("  ✅ AIW v{} is now installed and ready!", installed_version);
+        } else {
+            println!("  ⚠️  Update completed but verification failed. Please restart your terminal.");
+        }
+    } else {
+        let error_msg = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("Failed to update AIW: {}", error_msg)
+    }
+
+    Ok(())
+}
+
+/// Original update function for AI CLI tools only
 pub async fn execute_update(tool_name: Option<&str>) -> Result<Vec<(String, bool, String)>> {
     // Step 0: Ensure Node.js is installed (required for all AI CLI tools)
     println!("🔍 Checking Node.js installation...");
