@@ -1,74 +1,69 @@
-# AIW - AI Workflow CLI
+# AIW - AI工作流编排工具
 
-A high-performance AI workflow orchestration tool written in **pure Rust** with statically-linked binaries for Linux and Windows.
+## 功能特性
 
-**AIW** (Agentic Warden) is a unified CLI management tool for multi-account environments, providing intelligent process monitoring, task coordination, and AI integration.
+### 🔧 AI多账户管理
+- Claude、OpenAI、Gemini等AI账户统一管理
+- 支持OpenRouter、LiteLLM、Cloudflare AI等提供商
+- 账户切换和配置管理
 
-## Installation
+### 📁 智能文件同步
+- 黑名单机制智能过滤文件
+- 支持推送和拉取操作
+- 云存储自动同步
 
-### Quick Install (Linux x86_64, ARM64, ARMv7)
+### 🎨 现代化终端界面
+- 交互式TUI界面
+- 实时状态监控
+- 可视化操作面板
 
+### 🌐 跨平台支持
+- Linux x64 / Windows x64
+- 零依赖部署
+
+## 快速开始
+
+### 安装
 ```bash
 npm install -g aiw
-aiw --version
 ```
 
-This package includes pre-compiled static binaries:
-- **Linux x86_64** - Intel/AMD 64-bit processors
-- **Windows x64** - Intel/AMD 64-bit processors (Windows 10/11)
-
-### Alternative Installation Methods
-
-**Using Cargo (Rust):**
+### 基本使用
 ```bash
-cargo install --git https://github.com/putao520/agentic-warden
-```
-
-**Download from GitHub Releases:**
-Visit [Releases](https://github.com/putao520/agentic-warden/releases) for all platform binaries.
-
-**Build from Source:**
-```bash
-git clone https://github.com/putao520/agentic-warden.git
-cd agentic-warden
-./build-in-docker.sh x86_64-unknown-linux-musl
-# Binary at: target/x86_64-unknown-linux-musl/release/aiw
-```
-
-## Features
-
-- 🚀 **Zero-Dependency Deployment** - Fully static binaries for Linux and Windows
-- 🔧 **AI Multi-Account Management** - Claude, OpenAI, Gemini, etc.
-- ⚙️ **Provider Abstraction** - Unified interface for OpenRouter, LiteLLM, Cloudflare AI
-- 📁 **Smart File Sync** - Intelligent blacklist for cloud sync
-- 🎨 **Modern TUI Interface** - Interactive terminal UI with ratatui
-- 🌐 **Cross-Platform** - Compiled for Linux x64 and Windows x64
-
-## Quick Start
-
-```bash
-# Show help
+# 显示帮助
 aiw --help
 
-# Version info
+# 查看版本
 aiw --version
 
-# Interactive TUI
+# 启动交互界面
 aiw
-
-# Manage AI providers
-aiw provider list
-aiw provider add
-
-# Sync files
-aiw push
-aiw pull
 ```
 
-## Documentation
+### AI账户管理
+```bash
+# 列出提供商
+aiw provider list
 
-For detailed documentation, visit the [GitHub repository](https://github.com/putao520/agentic-warden).
+# 添加账户
+aiw provider add
 
-## License
+# 删除账户
+aiw provider remove
+```
+
+### 文件同步
+```bash
+# 推送文件到云端
+aiw push
+
+# 从云端拉取文件
+aiw pull
+
+# 查看同步状态
+aiw status
+```
+
+## 许可证
 
 MIT
