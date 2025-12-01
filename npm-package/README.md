@@ -1,69 +1,69 @@
-# AIW - AI工作流编排工具
+# AIW - AI Workflow Orchestration Tool
 
-## 功能特性
+## Features
 
-### 🔧 AI多账户管理
-- Claude、OpenAI、Gemini等AI账户统一管理
-- 支持OpenRouter、LiteLLM、Cloudflare AI等提供商
-- 账户切换和配置管理
+### 🔧 AI Multi-Account Management
+- Unified management for Claude, OpenAI, Gemini, and other AI accounts
+- Support for OpenRouter, LiteLLM, Cloudflare AI and other providers
+- Account switching and configuration management
 
-### 📁 智能文件同步
-- 黑名单机制智能过滤文件
-- 支持推送和拉取操作
-- 云存储自动同步
+### 📁 Smart File Synchronization
+- Intelligent blacklist mechanism for file filtering
+- Push and pull operations support
+- Automatic cloud storage synchronization
 
-### 🎨 现代化终端界面
-- 交互式TUI界面
-- 实时状态监控
-- 可视化操作面板
+### 🎨 Modern Terminal Interface
+- Interactive TUI interface
+- Real-time status monitoring
+- Visualized operation panel
 
-### 🌐 跨平台支持
+### 🌐 Cross-Platform Support
 - Linux x64 / Windows x64
-- 零依赖部署
+- Zero-dependency deployment
 
-## 快速开始
+## Quick Start
 
-### 安装
+### Installation
 ```bash
 npm install -g aiw
 ```
 
-### 基本使用
+### Basic Usage
 ```bash
-# 显示帮助
+# Show help
 aiw --help
 
-# 查看版本
+# Check version
 aiw --version
 
-# 启动交互界面
+# Launch interactive interface
 aiw
 ```
 
-### AI账户管理
+### AI Account Management
 ```bash
-# 列出提供商
+# List providers
 aiw provider list
 
-# 添加账户
+# Add account
 aiw provider add
 
-# 删除账户
+# Remove account
 aiw provider remove
 ```
 
-### 文件同步
+### File Synchronization
 ```bash
-# 推送文件到云端
+# Push files to cloud
 aiw push
 
-# 从云端拉取文件
+# Pull files from cloud
 aiw pull
 
-# 查看同步状态
+# Check sync status
 aiw status
 ```
 
-## 许可证
+## License
 
 MIT
