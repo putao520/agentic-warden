@@ -8,6 +8,12 @@ keywords = ["ai", "cli", "llm", "claude", "gemini"]
 categories = ["command-line-utilities", "development-tools"]
 version = "0.5.16"
 edition = "2021"
+exclude = [
+    "bin/*",
+    "backups/**",
+    "target/**",
+    "test-results/**",
+]
 
 [[bin]]
 name = "aiw"
