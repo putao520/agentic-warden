@@ -1,6 +1,6 @@
 //! MCP配置文件编辑器
 //!
-//! 提供对 ~/.aiw/.mcp.json 的读写和操作功能
+//! 提供对 ~/.aiw/mcp.json 的读写和操作功能
 
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -43,7 +43,7 @@ impl McpConfigEditor {
         let config_path = dirs::home_dir()
             .ok_or_else(|| anyhow!("Cannot find home directory"))?
             .join(".aiw")
-            .join(".mcp.json");
+            .join("mcp.json");
 
         Ok(Self { config_path })
     }
@@ -65,6 +65,7 @@ impl McpConfigEditor {
 
     /// 读取配置文件
     pub fn read(&self) -> Result<McpConfig> {
+
         if !self.config_path.exists() {
             // 配置文件不存在，返回空配置
             return Ok(McpConfig {
@@ -204,14 +205,14 @@ mod tests {
 
     fn setup_test_env() -> (TempDir, McpConfigEditor) {
         let temp_dir = TempDir::new().unwrap();
-        let config_path = temp_dir.path().join(".mcp.json");
+        let config_path = temp_dir.path().join("mcp.json");
 
         // 临时修改HOME环境变量
         let original_home = env::var("HOME").ok();
         env::set_var("HOME", temp_dir.path());
 
         let editor = McpConfigEditor {
-            config_path: temp_dir.path().join(".aiw").join(".mcp.json"),
+            config_path: temp_dir.path().join(".aiw").join("mcp.json"),
         };
 
         // 恢复原始HOME

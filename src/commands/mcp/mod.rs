@@ -1,6 +1,6 @@
 //! MCP管理CLI命令
 //!
-//! 提供对 ~/.aiw/.mcp.json 的管理命令
+//! 提供对 ~/.aiw/mcp.json 的管理命令
 
 mod add;
 pub mod config_editor;

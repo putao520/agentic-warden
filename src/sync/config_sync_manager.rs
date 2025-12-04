@@ -591,7 +591,7 @@ impl ConfigSyncManager {
                 .interact()
                 .map_err(|err| {
                     error!(
-                        target: "agentic_warden::sync",
+                        target: "aiw::sync",
                         "Failed to get user consent: {}",
                         err
                     );
@@ -637,12 +637,12 @@ impl ConfigSyncManager {
         .with_scopes(Self::default_scopes());
 
         if let Err(err) = oauth_client.validate_config() {
-            error!(target: "agentic_warden::sync", "OAuth configuration validation failed: {}", err);
+            error!(target: "aiw::sync", "OAuth configuration validation failed: {}", err);
             return Err(Self::auth_failed_error());
         }
 
         if !oauth_client.is_authenticated() {
-            warn!(target: "agentic_warden::sync", "OAuth client missing authentication tokens, re-running SmartOAuth");
+            warn!(target: "aiw::sync", "OAuth client missing authentication tokens, re-running SmartOAuth");
             self.run_smart_oauth_flow(&mut stored_auth).await?;
             oauth_client = OAuthClient::new(
                 stored_auth.client_id.clone(),
@@ -652,12 +652,12 @@ impl ConfigSyncManager {
             .with_scopes(Self::default_scopes());
 
             if let Err(err) = oauth_client.validate_config() {
-                error!(target: "agentic_warden::sync", "OAuth configuration validation failed after SmartOAuth: {}", err);
+                error!(target: "aiw::sync", "OAuth configuration validation failed after SmartOAuth: {}", err);
                 return Err(Self::auth_failed_error());
             }
 
             if !oauth_client.is_authenticated() {
-                error!(target: "agentic_warden::sync", "SmartOAuth completed without providing usable tokens");
+                error!(target: "aiw::sync", "SmartOAuth completed without providing usable tokens");
                 return Err(Self::auth_failed_error());
             }
         }
@@ -665,14 +665,14 @@ impl ConfigSyncManager {
         let drive_service = GoogleDriveService::new(oauth_client)
             .await
             .map_err(|err| {
-                error!(target: "agentic_warden::sync", "Failed to initialize Google Drive service: {}", err);
+                error!(target: "aiw::sync", "Failed to initialize Google Drive service: {}", err);
                 Self::auth_failed_error()
             })?;
 
         self.drive_service = Some(drive_service);
         Self::save_auth_state(&stored_auth)?;
 
-        info!(target: "agentic_warden::sync", "Google Drive authentication completed");
+        info!(target: "aiw::sync", "Google Drive authentication completed");
         Ok(())
     }
 
@@ -703,7 +703,7 @@ impl ConfigSyncManager {
             .config_packer
             .pack_ai_configs(config_name, archive_path.clone())?;
 
-        info!(target: "agentic_warden::sync", "Packed configuration '{}' ({} bytes)", config_name, size);
+        info!(target: "aiw::sync", "Packed configuration '{}' ({} bytes)", config_name, size);
         Ok(size)
     }
 
@@ -741,7 +741,7 @@ impl ConfigSyncManager {
             .upload_file(archive_path, Some(&base_folder_id))
             .await?;
 
-        info!(target: "agentic_warden::sync", "Uploaded configuration '{}'", config_name);
+        info!(target: "aiw::sync", "Uploaded configuration '{}'", config_name);
         Ok(true)
     }
 
@@ -802,7 +802,7 @@ impl ConfigSyncManager {
             }
 
             service.download_file(&file.id, archive_path).await?;
-            info!(target: "agentic_warden::sync", "Downloaded configuration '{}'", config_name);
+            info!(target: "aiw::sync", "Downloaded configuration '{}'", config_name);
             Ok(true)
         } else {
             Err(SyncError::sync_config(format!(
@@ -833,7 +833,7 @@ impl ConfigSyncManager {
         self.config_packer
             .unpack_archive(&archive_path, &home_dir)?;
 
-        info!(target: "agentic_warden::sync", "Extracted configuration '{}'", config_name);
+        info!(target: "aiw::sync", "Extracted configuration '{}'", config_name);
         Ok(true)
     }
 
@@ -900,11 +900,11 @@ impl ConfigSyncManager {
         let has_gemini = gemini_dir.exists();
 
         if has_claude || has_codex || has_gemini {
-            info!(target: "agentic_warden::sync", "Verified extraction of '{}' (Claude: {}, Codex: {}, Gemini: {})",
+            info!(target: "aiw::sync", "Verified extraction of '{}' (Claude: {}, Codex: {}, Gemini: {})",
                   config_name, has_claude, has_codex, has_gemini);
             Ok(true)
         } else {
-            warn!(target: "agentic_warden::sync", "No AI CLI directories found after extracting configuration '{}'", config_name);
+            warn!(target: "aiw::sync", "No AI CLI directories found after extracting configuration '{}'", config_name);
             Ok(false)
         }
     }
@@ -925,7 +925,7 @@ impl ConfigSyncManager {
 
         if let Err(err) = fs::create_dir_all(&auth_dir) {
             error!(
-                target: "agentic_warden::sync",
+                target: "aiw::sync",
                 "Failed to create auth directory {:?}: {}",
                 auth_dir, err
             );
@@ -947,7 +947,7 @@ impl ConfigSyncManager {
                 Ok(state) => Ok(Some(state)),
                 Err(err) => {
                     warn!(
-                        target: "agentic_warden::sync",
+                        target: "aiw::sync",
                         "Failed to parse auth.json (will reinitialize): {}",
                         err
                     );
@@ -956,7 +956,7 @@ impl ConfigSyncManager {
             },
             Err(err) => {
                 warn!(
-                    target: "agentic_warden::sync",
+                    target: "aiw::sync",
                     "Failed to read auth.json (will reinitialize): {}",
                     err
                 );
@@ -968,13 +968,13 @@ impl ConfigSyncManager {
     fn save_auth_state(state: &StoredAuthState) -> ErrorResult<()> {
         let auth_path = Self::auth_file_path()?;
         let content = serde_json::to_string_pretty(state).map_err(|err| {
-            error!(target: "agentic_warden::sync", "Failed to serialize auth state: {}", err);
+            error!(target: "aiw::sync", "Failed to serialize auth state: {}", err);
             Self::auth_failed_error()
         })?;
 
         fs::write(&auth_path, content).map_err(|err| {
             error!(
-                target: "agentic_warden::sync",
+                target: "aiw::sync",
                 "Failed to write auth.json: {}",
                 err
             );
@@ -1010,7 +1010,7 @@ impl ConfigSyncManager {
             .await
             .map_err(|err| {
                 error!(
-                    target: "agentic_warden::sync",
+                    target: "aiw::sync",
                     "Device Flow authentication failed: {}",
                     err
                 );
@@ -1027,7 +1027,7 @@ impl ConfigSyncManager {
             auth.refresh_token = Some(refresh_token);
         } else if auth.refresh_token.is_none() {
             error!(
-                target: "agentic_warden::sync",
+                target: "aiw::sync",
                 "SmartOAuth did not return a refresh token"
             );
             return Err(Self::auth_failed_error());

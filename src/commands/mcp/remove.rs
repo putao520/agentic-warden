@@ -71,7 +71,7 @@ pub fn execute(name: &str, yes: bool) -> Result<()> {
     println!();
     println!("{} Removed MCP server '{}'", "✅".green(), name.cyan());
     println!();
-    println!("Configuration saved to {}", "~/.aiw/.mcp.json".cyan());
+    println!("Configuration saved to {}", "~/.aiw/mcp.json".cyan());
     println!();
 
     Ok(())

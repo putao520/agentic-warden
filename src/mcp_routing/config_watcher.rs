@@ -1,6 +1,6 @@
 //! MCP配置文件监听和热重载
 //!
-//! 监听 ~/.aiw/.mcp.json 文件变化并自动重载配置
+//! 监听 ~/.aiw/mcp.json 文件变化并自动重载配置
 
 use crate::mcp_routing::{config::McpConfigManager, McpConnectionPool};
 use anyhow::{Context, Result};
@@ -84,7 +84,7 @@ fn should_reload(event: &Event) -> bool {
         EventKind::Create(_) => event.paths.iter().any(|p| {
             p.file_name()
                 .and_then(|n| n.to_str())
-                .map(|n| n == ".mcp.json")
+                .map(|n| n == "mcp.json")
                 .unwrap_or(false)
         }),
         _ => false,

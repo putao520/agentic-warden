@@ -2,9 +2,9 @@
 //!
 //! 测试基于{PID}_task命名的共享内存隔离机制
 
-use agentic_warden::storage::SharedMemoryStorage;
-use agentic_warden::task_record::TaskRecord;
-use agentic_warden::unified_registry::Registry;
+use aiw::storage::SharedMemoryStorage;
+use aiw::task_record::TaskRecord;
+use aiw::unified_registry::Registry;
 use chrono::Utc;
 use serial_test::serial;
 
@@ -84,7 +84,7 @@ fn test_pwait_connects_to_specific_pid_shared_memory() {
         .unwrap();
 
     // 3. pwait应该能够连接到test_pid的共享内存并读取已完成的任务
-    use agentic_warden::pwait_mode;
+    use aiw::pwait_mode;
     let result = pwait_mode::run_for_pid(test_pid);
 
     assert!(result.is_ok(), "pwait should succeed: {:?}", result);

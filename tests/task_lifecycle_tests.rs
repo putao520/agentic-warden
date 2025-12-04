@@ -1,11 +1,11 @@
 #![cfg(unix)]
 
-use agentic_warden::mcp::{
+use aiw::mcp::{
     get_task_logs, list_tasks, start_task, stop_task, GetTaskLogsParams, StartTaskParams,
     StopTaskParams,
 };
-use agentic_warden::platform;
-use agentic_warden::task_record::TaskStatus;
+use aiw::platform;
+use aiw::task_record::TaskStatus;
 use serial_test::serial;
 use std::env;
 use std::fs;

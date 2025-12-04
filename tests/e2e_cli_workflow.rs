@@ -2,9 +2,9 @@
 //!
 //! 测试完整的命令行使用场景
 
-use agentic_warden::storage::SharedMemoryStorage;
-use agentic_warden::task_record::TaskRecord;
-use agentic_warden::unified_registry::Registry;
+use aiw::storage::SharedMemoryStorage;
+use aiw::task_record::TaskRecord;
+use aiw::unified_registry::Registry;
 use chrono::Utc;
 use serial_test::serial;
 
@@ -12,9 +12,9 @@ use serial_test::serial;
 #[test]
 #[serial]
 fn test_status_command_workflow() {
-    use agentic_warden::storage::SharedMemoryStorage;
-    use agentic_warden::task_record::TaskStatus;
-    use agentic_warden::unified_registry::Registry;
+    use aiw::storage::SharedMemoryStorage;
+    use aiw::task_record::TaskStatus;
+    use aiw::unified_registry::Registry;
 
     // 1. 连接到当前进程的共享内存
     let storage = SharedMemoryStorage::connect().unwrap();
@@ -23,7 +23,7 @@ fn test_status_command_workflow() {
     // 2. 清理可能存在的旧任务
     let entries = registry.entries().unwrap();
     for entry in entries {
-        if entry.record.status == agentic_warden::task_record::TaskStatus::Running {
+        if entry.record.status == aiw::task_record::TaskStatus::Running {
             let _ = registry.mark_completed(
                 entry.pid,
                 Some("cleanup".to_string()),
@@ -132,7 +132,7 @@ fn test_complete_task_lifecycle() {
     let task_entry = entries.iter().find(|e| e.pid == 310001).unwrap();
     assert_eq!(
         task_entry.record.status,
-        agentic_warden::task_record::TaskStatus::Running
+        aiw::task_record::TaskStatus::Running
     );
 
     // 3. 标记任务完成
@@ -145,7 +145,7 @@ fn test_complete_task_lifecycle() {
     let task_entry = entries.iter().find(|e| e.pid == 310001).unwrap();
     assert_eq!(
         task_entry.record.status,
-        agentic_warden::task_record::TaskStatus::CompletedButUnread
+        aiw::task_record::TaskStatus::CompletedButUnread
     );
     assert_eq!(task_entry.record.exit_code, Some(0));
 

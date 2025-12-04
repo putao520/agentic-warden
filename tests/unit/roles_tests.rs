@@ -1,4 +1,4 @@
-use agentic_warden::roles::{RoleError, RoleManager};
+use aiw::roles::{RoleError, RoleManager};
 use std::collections::HashSet;
 use std::fs;
 

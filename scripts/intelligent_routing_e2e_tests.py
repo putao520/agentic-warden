@@ -114,7 +114,7 @@ class IntelligentRoutingTester:
             }
         }
 
-        config_path = Path.home() / ".aiw" / ".mcp.json"
+        config_path = Path.home() / ".aiw" / "mcp.json"
         config_path.parent.mkdir(exist_ok=True)
 
         with open(config_path, 'w') as f:

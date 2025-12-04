@@ -50,7 +50,7 @@ test_step "CLI版本" "./target/release/aiw --version" "5.1.1"
 echo ""
 echo "⚙️  MCP配置管理"
 # 备份现有配置
-[ -f ~/.aiw/.mcp.json ] && cp ~/.aiw/.mcp.json ~/.aiw/.mcp.json.backup
+[ -f ~/.aiw/mcp.json ] && cp ~/.aiw/mcp.json ~/.aiw/mcp.json.backup
 
 test_step "添加MCP服务器" \
     "echo '' | ./target/release/aiw mcp add test-echo echo 'Hello MCP'" \
@@ -91,7 +91,7 @@ test_step "不存在的MCP服务器" \
 echo ""
 echo "🧹 清理"
 # 恢复配置
-[ -f ~/.aiw/.mcp.json.backup ] && mv ~/.aiw/.mcp.json.backup ~/.aiw/.mcp.json || rm -f ~/.aiw/.mcp.json
+[ -f ~/.aiw/mcp.json.backup ] && mv ~/.aiw/mcp.json.backup ~/.aiw/mcp.json || rm -f ~/.aiw/mcp.json
 
 echo ""
 echo "📊 检查结果"

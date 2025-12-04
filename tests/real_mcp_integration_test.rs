@@ -3,7 +3,7 @@
 
 #[cfg(test)]
 mod tests {
-    use agentic_warden::mcp::AgenticWardenMcpServer;
+    use aiw::mcp::AgenticWardenMcpServer;
     use anyhow::Result;
     use serial_test::serial;
 

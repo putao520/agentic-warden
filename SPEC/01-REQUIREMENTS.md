@@ -101,7 +101,7 @@ Agentic-Warden MUST integrate with Google Drive for selective AI CLI configurati
 - Archive size MUST be optimized (< 5MB typical)
 
 **Configuration File Selection Strategy**:
-- **Claude**: `CLAUDE.md`, `settings.json`, `agents/`, `skills/SKILL.md`, `hooks/`, `scripts/`, `commands/`, `.mcp.json`
+- **Claude**: `CLAUDE.md`, `settings.json`, `agents/`, `skills/SKILL.md`, `hooks/`, `scripts/`, `commands/`, `mcp.json`
 - **Codex**: `auth.json`, `config.toml`, `agents.md`, `history.jsonl`
 - **Gemini**: `google_accounts.json`, `oauth_creds.json`, `settings.json`, `gemini.md`
 - **Exclude**: `.cache/`, `temp/`, `logs/`, `node_modules/`, binaries
@@ -110,7 +110,7 @@ Agentic-Warden MUST integrate with Google Drive for selective AI CLI configurati
 - `hooks/`: Claude Code hook handlers and configuration files (SessionEnd/PreCompact/Stop)
 - `scripts/`: Execution scripts including ai-cli-runner.sh and custom workflow scripts
 - `commands/`: Custom slash command definitions and configurations
-- `.mcp.json`: MCP server configuration for Claude Code integration
+- `mcp.json`: MCP server configuration for Claude Code integration
 
 ---
 
@@ -148,15 +148,11 @@ Agentic-Warden MUST provide `wait` command to wait for concurrent AI CLI tasks c
 
 **Acceptance Criteria**:
 - [x] `agentic-warden wait` waits for all concurrent AI CLI tasks
-- [x] Support timeout parameter (default: 12h)
-- [x] Support verbose mode for detailed progress
 - [x] `agentic-warden pwait <PID>` waits for specific process's completed shared tasks
 - [x] Cross-process task completion detection
 
 **Technical Constraints**:
 - Use shared memory for cross-process communication
-- Timeout format: 12h, 30m, 1d
-- Default timeout: 12 hours
 
 ---
 
@@ -481,11 +477,12 @@ Agentic-Warden MUST provide an intelligent MCP (Model Context Protocol) routing 
 **Acceptance Criteria**:
 
 #### 4.1 MCP配置管理
-- [x] Support industry-standard `.mcp.json` configuration file format
+- [x] Support industry-standard `mcp.json` configuration file format
 - [x] Provide configuration schema validation and migration support
 - [x] Support per-MCP server configuration including command, args, description, category
 - [x] Enable/disable individual MCP servers with runtime configuration updates
 - [x] Support health check configuration per MCP server (interval, timeout)
+- [x] CLI semantics align with Claude Code/Cursor MCP configuration expectations (mcpServers map, command/args/env/description/category/enabled fields)
 
 #### 4.2 双模式向量数据库集成
 - [x] **MCP路由模式**: MemVDB for intelligent MCP tool routing and discovery
@@ -496,7 +493,7 @@ Agentic-Warden MUST provide an intelligent MCP (Model Context Protocol) routing 
 - [x] Maintain metadata associations between tools and methods
 - [x] Support batch indexing and incremental updates
 - [x] Provide semantic search capabilities with configurable similarity thresholds
-- [x] Memory-only MCP index rebuilt on startup from .mcp.json configuration
+- [x] Memory-only MCP index rebuilt on startup from mcp.json configuration
 
 #### 4.3 Claude Code工具刷新机制利用 [基于观察行为]
 
@@ -574,7 +571,7 @@ Agentic-Warden MUST provide an intelligent MCP (Model Context Protocol) routing 
   - [x] 数据来源: SahomeDB持久化存储的Claude Code会话历史
 
 **动态代理工具** (按需注册):
-- [x] 从.mcp.json发现的所有MCP工具
+- [x] 从mcp.json发现的所有MCP工具
 - [x] 通过`intelligent_route`选择后动态注册
 - [x] 以原始工具名+schema暴露给Claude Code
 - [x] 调用时代理到目标MCP服务器
@@ -606,11 +603,11 @@ Agentic-Warden MUST provide an intelligent MCP (Model Context Protocol) routing 
   - Persistent file storage, no external server required
   - Semantic search capabilities with configurable thresholds
 - **MemVDB**: In-memory vector database for MCP tool routing
-  - Pure memory operations, rebuilt from .mcp.json on startup
+  - Pure memory operations, rebuilt from mcp.json on startup
   - Thread-safe, multiple distance metrics supported
 - **Ollama-rs**: Retained for LLM inference (tool selection decisions), not embeddings
 
-#### Configuration Format (.mcp.json):
+#### Configuration Format (mcp.json):
 ```json
 {
   "mcpServers": {
@@ -642,7 +639,7 @@ The intelligent routing system uses hardcoded configuration constants for routin
 
 - **MemVDB** (In-Memory): MCP intelligent routing index
   - **mcp_tools**: Tool-level vectors with description embedding for routing discovery
-  - Pure memory mode, rebuilt on startup from .mcp.json configuration
+  - Pure memory mode, rebuilt on startup from mcp.json configuration
   - Metadata: MCP name, tool name, category, capabilities, health status
   - **mcp_methods**: Method-level vectors with detailed schema embedding for precise routing
   - Real-time MCP tool discovery and intelligent routing decisions
@@ -703,7 +700,7 @@ mcp_call("git_status", {
 - MemVDB for in-memory MCP routing index
 - Ollama integration for internal LLM operations
 - Existing memory module for embedding services
-- Existing configuration system for .mcp.json management
+- Existing configuration system for mcp.json management
 
 **Technical Dependencies**:
 - `memvdb` = "0.1" # Fast, lightweight in-memory vector database
@@ -1166,7 +1163,7 @@ Agentic-Warden MUST support OpenAI API configuration exclusively through environ
 - [x] Support `OPENAI_TOKEN` environment variable for OpenAI API authentication token
 - [x] Support `OPENAI_MODEL` environment variable for default model selection
 - [x] Environment variables MUST take precedence over any configuration file LLM settings
-- [x] LLM configuration in `.mcp.json` MUST be ignored when environment variables are present
+- [x] LLM configuration in `mcp.json` MUST be ignored when environment variables are present
 - [x] Support containerized deployment with environment variable injection
 - [x] Graceful fallback to default values when environment variables are not set
 - [x] Security validation for token values and endpoint URLs
@@ -1206,7 +1203,7 @@ OPENAI_MODEL="gpt-4"
 - Added REQ-012: 智能MCP路由系统
 - Status: New requirement for v0.2.0 feature (P0 Critical)
 - Complete intelligent routing system design with:
-  - Industry-standard .mcp.json configuration support
+  - Industry-standard mcp.json configuration support
   - Dual Qdrant collections for tool/method indexing
   - RMCP client integration for dynamic MCP connections
   - Internal LLM-powered intelligent tool selection

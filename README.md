@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.5.13-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.5.16-blue?style=flat-square)
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange?style=flat-square&logo=rust)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 ![MCP](https://img.shields.io/badge/MCP-Supported-purple?style=flat-square)
@@ -28,7 +28,7 @@ aiw codex "write a python script"
 aiw gemini "translate to french"
 
 # Wait for all AI CLI tasks to complete
-aiw wait --timeout 300
+aiw wait
 
 # Manage providers
 aiw provider list
@@ -103,10 +103,10 @@ Synchronize AI CLI configurations across devices using Google Drive.
 
 ```bash
 # Push configurations to Google Drive
-aiw push [config_name]
+aiw push           # uses the default configuration set
 
 # Pull configurations from Google Drive
-aiw pull [config_name]
+aiw pull           # restores the default configuration set
 
 # List available backups
 aiw list
@@ -149,7 +149,7 @@ export CLI_TYPE=claude              # claude, codex, or gemini
 export CLI_PROVIDER=llmlite         # Any provider from provider.json
 
 # MCP Server Configuration
-export MCP_CONFIG_PATH=~/.aiw/.mcp.json
+export MCP_CONFIG_PATH=~/.aiw/mcp.json
 
 # Google Drive OAuth (optional)
 export GOOGLE_CLIENT_ID=xxx
@@ -157,7 +157,7 @@ export GOOGLE_CLIENT_SECRET=xxx
 ```
 
 ### Configuration Files
-- **MCP Servers**: `~/.aiw/.mcp.json`
+- **MCP Servers**: `~/.aiw/mcp.json` (standard `mcpServers` schema compatible with Claude Code/Cursor)
 - **Providers**: `~/.aiw/providers.json`
 - **Google Drive Auth**: `~/.aiw/auth.json`
 
@@ -172,6 +172,6 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-**AIW** - Universal AI CLI Management Platform with MCP Routing v0.5.13
+**AIW** - Universal AI CLI Management Platform with MCP Routing v0.5.16
 
 For full documentation and source code, visit: [https://github.com/putao520/agentic-warden](https://github.com/putao520/agentic-warden)

@@ -2,7 +2,7 @@
 
 #[cfg(test)]
 mod tests {
-    use agentic_warden::mcp::AgenticWardenMcpServer;
+    use aiw::mcp::AgenticWardenMcpServer;
     use anyhow::Result;
 
     #[tokio::test]

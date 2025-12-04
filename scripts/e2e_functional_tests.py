@@ -111,7 +111,7 @@ class E2ETestRunner:
 
     def backup_config(self):
         """备份MCP配置文件"""
-        config_path = Path.home() / ".aiw" / ".mcp.json"
+        config_path = Path.home() / ".aiw" / "mcp.json"
         if config_path.exists():
             self.config_backup = config_path.with_suffix(".json.backup")
             shutil.copy2(config_path, self.config_backup)
@@ -119,7 +119,7 @@ class E2ETestRunner:
 
     def restore_config(self):
         """恢复MCP配置文件"""
-        config_path = Path.home() / ".aiw" / ".mcp.json"
+        config_path = Path.home() / ".aiw" / "mcp.json"
         if self.config_backup and self.config_backup.exists():
             shutil.copy2(self.config_backup, config_path)
             self.log_info("已恢复配置文件")
@@ -226,7 +226,7 @@ class E2ETestRunner:
         self.log_info(f"=== {suite_name} ===")
 
         # 清理现有配置
-        config_path = Path.home() / ".aiw" / ".mcp.json"
+        config_path = Path.home() / ".aiw" / "mcp.json"
         if config_path.exists():
             config_path.unlink()
 
@@ -289,7 +289,7 @@ class E2ETestRunner:
 
         # 测试配置文件存在性
         self.log_test("MCP配置文件存在")
-        config_path = Path.home() / ".aiw" / ".mcp.json"
+        config_path = Path.home() / ".aiw" / "mcp.json"
         if config_path.exists():
             self.log_success("MCP配置文件存在")
             suite.tests.append(TestResult("MCP配置文件存在", TestStatus.PASSED, 0, str(config_path)))

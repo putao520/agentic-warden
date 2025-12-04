@@ -16,8 +16,8 @@
 
 #[cfg(test)]
 mod tests {
-    use agentic_warden::mcp::AgenticWardenMcpServer;
-    use agentic_warden::mcp_routing::models::{
+    use aiw::mcp::AgenticWardenMcpServer;
+    use aiw::mcp_routing::models::{
         DecisionMode, ExecutionMode, IntelligentRouteRequest,
     };
     use rmcp::handler::server::wrapper::Parameters;
@@ -268,7 +268,7 @@ mod tests {
     fn test_backend_auto_detection() -> anyhow::Result<()> {
         println!("\n🧪 TEST-E2E-LLM-003: 后端自动检测机制测试");
 
-        use agentic_warden::mcp_routing::codegen::CodegenBackend;
+        use aiw::mcp_routing::codegen::CodegenBackend;
 
         // 测试1：有OPENAI_TOKEN → Ollama
         {
@@ -304,7 +304,7 @@ mod tests {
     async fn test_backend_factory_creation() -> anyhow::Result<()> {
         println!("\n🧪 TEST-E2E-LLM-004: 后端工厂创建验证");
 
-        use agentic_warden::mcp_routing::codegen::CodeGeneratorFactory;
+        use aiw::mcp_routing::codegen::CodeGeneratorFactory;
 
         // 测试1：Ollama工厂
         {

@@ -338,7 +338,7 @@ impl ProviderManager {
     ///
     /// # Example
     /// ```no_run
-    /// use agentic_warden::provider::manager::ProviderManager;
+    /// use aiw::provider::manager::ProviderManager;
     ///
     /// let manager = ProviderManager::new().unwrap();
     /// match manager.validate_all_providers() {
@@ -391,7 +391,7 @@ impl ProviderManager {
     ///
     /// # Example
     /// ```no_run
-    /// use agentic_warden::provider::manager::ProviderManager;
+    /// use aiw::provider::manager::ProviderManager;
     ///
     /// let mut manager = ProviderManager::new().unwrap();
     /// manager.reset_to_defaults().unwrap();
@@ -415,7 +415,7 @@ impl ProviderManager {
     ///
     /// # Example
     /// ```no_run
-    /// use agentic_warden::provider::manager::ProviderManager;
+    /// use aiw::provider::manager::ProviderManager;
     /// use std::path::PathBuf;
     ///
     /// let manager = ProviderManager::new().unwrap();
@@ -440,7 +440,7 @@ impl ProviderManager {
     ///
     /// # Example
     /// ```no_run
-    /// use agentic_warden::provider::manager::ProviderManager;
+    /// use aiw::provider::manager::ProviderManager;
     /// use std::path::PathBuf;
     ///
     /// let mut manager = ProviderManager::new().unwrap();

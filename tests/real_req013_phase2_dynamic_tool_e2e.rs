@@ -22,8 +22,8 @@
 
 #[cfg(test)]
 mod tests {
-    use agentic_warden::mcp::AgenticWardenMcpServer;
-    use agentic_warden::mcp_routing::models::{
+    use aiw::mcp::AgenticWardenMcpServer;
+    use aiw::mcp_routing::models::{
         DecisionMode, ExecutionMode, IntelligentRouteRequest,
     };
     use anyhow::Result;

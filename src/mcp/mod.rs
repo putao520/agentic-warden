@@ -432,7 +432,7 @@ impl AgenticWardenMcpServer {
         let config_path = dirs::home_dir()
             .ok_or_else(|| "Cannot find home directory".to_string())?
             .join(".aiw")
-            .join(".mcp.json");
+            .join("mcp.json");
 
         if config_path.exists() {
             use crate::mcp_routing::config_watcher;

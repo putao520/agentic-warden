@@ -213,7 +213,7 @@ fn test_real_world_aws_environment_variables() -> Result<(), Box<dyn std::error:
 
 #[test]
 fn test_provider_environment_mapping() -> Result<(), Box<dyn std::error::Error>> {
-    use agentic_warden::provider::{env_mapping, config::AiType};
+    use aiw::provider::{env_mapping, config::AiType};
 
     // Test that Claude's environment variables are correctly mapped
     let claude_env_vars = env_mapping::get_env_vars_for_ai_type(AiType::Claude);

@@ -1,6 +1,6 @@
 //! Integration tests for DynamicToolRegistry behaviors (TTL, eviction, performance).
 
-use agentic_warden::mcp_routing::registry::{DynamicToolRegistry, RegistryConfig};
+use aiw::mcp_routing::registry::{DynamicToolRegistry, RegistryConfig};
 use rmcp::model::Tool;
 use std::sync::Arc;
 use std::time::{Duration, Instant};

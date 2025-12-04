@@ -5,8 +5,8 @@
 //! - 与 MCP 注册表的集成
 //! - 存储隔离验证
 
-use agentic_warden::registry_factory::RegistryFactory;
-use agentic_warden::task_record::TaskRecord;
+use aiw::registry_factory::RegistryFactory;
+use aiw::task_record::TaskRecord;
 use chrono::Utc;
 use serial_test::serial;
 use std::time::Duration;
@@ -15,7 +15,7 @@ use std::time::Duration;
 #[test]
 #[serial]
 fn test_pwait_with_no_tasks() {
-    use agentic_warden::pwait_mode;
+    use aiw::pwait_mode;
 
     let registry = RegistryFactory::instance().get_mcp_registry();
 
@@ -45,8 +45,8 @@ fn test_pwait_with_no_tasks() {
 #[test]
 #[serial]
 fn test_pwait_with_completed_task() {
-    use agentic_warden::pwait_mode;
-    use agentic_warden::task_record::TaskStatus;
+    use aiw::pwait_mode;
+    use aiw::task_record::TaskStatus;
 
     let registry = RegistryFactory::instance().get_mcp_registry();
 
@@ -171,7 +171,7 @@ fn test_storage_isolation_mcp_vs_cli() {
 #[test]
 #[serial]
 fn test_pwait_does_not_see_cli_tasks() {
-    use agentic_warden::pwait_mode;
+    use aiw::pwait_mode;
 
     let mcp_registry = RegistryFactory::instance().get_mcp_registry();
     let cli_registry = RegistryFactory::instance()
@@ -228,8 +228,8 @@ fn test_pwait_does_not_see_cli_tasks() {
 #[test]
 #[serial]
 fn test_pwait_with_multiple_concurrent_tasks() {
-    use agentic_warden::pwait_mode;
-    use agentic_warden::task_record::TaskStatus;
+    use aiw::pwait_mode;
+    use aiw::task_record::TaskStatus;
 
     let registry = RegistryFactory::instance().get_mcp_registry();
 

@@ -24,7 +24,7 @@ pub fn execute() -> Result<()> {
         return Ok(());
     }
 
-    println!("{}", format!("MCP Servers ({})", "~/.aiw/.mcp.json".cyan()));
+    println!("{}", format!("MCP Servers ({})", "~/.aiw/mcp.json".cyan()));
     println!();
 
     let mut table = Table::new();

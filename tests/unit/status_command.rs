@@ -2,9 +2,9 @@
 //!
 //! 测试 status 命令的文本输出功能
 
-use agentic_warden::storage::SharedMemoryStorage;
-use agentic_warden::task_record::TaskRecord;
-use agentic_warden::unified_registry::Registry;
+use aiw::storage::SharedMemoryStorage;
+use aiw::task_record::TaskRecord;
+use aiw::unified_registry::Registry;
 use chrono::Utc;
 use serial_test::serial;
 
@@ -20,13 +20,13 @@ fn test_status_with_no_tasks() {
     let entries = registry.entries().unwrap();
     let running_count = entries
         .iter()
-        .filter(|e| e.record.status == agentic_warden::task_record::TaskStatus::Running)
+        .filter(|e| e.record.status == aiw::task_record::TaskStatus::Running)
         .count();
 
     // 如果有残留任务，清理它们
     if running_count > 0 {
         for entry in entries {
-            if entry.record.status == agentic_warden::task_record::TaskStatus::Running {
+            if entry.record.status == aiw::task_record::TaskStatus::Running {
                 let _ = registry.mark_completed(
                     entry.pid,
                     Some("cleaned up".to_string()),
@@ -41,7 +41,7 @@ fn test_status_with_no_tasks() {
     let entries = registry.entries().unwrap();
     let running_count = entries
         .iter()
-        .filter(|e| e.record.status == agentic_warden::task_record::TaskStatus::Running)
+        .filter(|e| e.record.status == aiw::task_record::TaskStatus::Running)
         .count();
 
     assert_eq!(running_count, 0, "Should have no running tasks");
@@ -72,7 +72,7 @@ fn test_status_with_running_tasks() {
     let running_count = entries
         .iter()
         .filter(|e| {
-            e.record.status == agentic_warden::task_record::TaskStatus::Running
+            e.record.status == aiw::task_record::TaskStatus::Running
                 && test_pids.contains(&e.pid)
         })
         .count();
@@ -99,7 +99,7 @@ fn test_status_workflow() {
     let entries = registry.entries().unwrap();
     let _initial_running = entries
         .iter()
-        .filter(|e| e.record.status == agentic_warden::task_record::TaskStatus::Running)
+        .filter(|e| e.record.status == aiw::task_record::TaskStatus::Running)
         .count();
 
     // 2. 注册任务
@@ -119,7 +119,7 @@ fn test_status_workflow() {
     let current_running = entries
         .iter()
         .filter(|e| {
-            e.record.status == agentic_warden::task_record::TaskStatus::Running
+            e.record.status == aiw::task_record::TaskStatus::Running
                 && test_pids.contains(&e.pid)
         })
         .count();

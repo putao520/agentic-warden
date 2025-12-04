@@ -132,7 +132,7 @@ test_mcp_configuration() {
     log_info "=== 测试2: MCP配置管理 ==="
 
     # 清理现有配置
-    rm -f ~/.aiw/.mcp.json
+    rm -f ~/.aiw/mcp.json
 
     # 测试添加MCP服务器
     run_test "添加filesystem MCP服务器" \
@@ -167,7 +167,7 @@ test_mcp_server_startup() {
 
     # 测试配置文件存在性
     run_test "MCP配置文件存在" \
-        "test -f ~/.aiw/.mcp.json && echo 'Config file exists'" \
+        "test -f ~/.aiw/mcp.json && echo 'Config file exists'" \
         "Config file exists"
 }
 
@@ -218,12 +218,12 @@ test_config_hot_reload() {
     log_info "=== 测试6: 配置热重载 ==="
 
     # 备份原配置
-    if [ -f ~/.aiw/.mcp.json ]; then
-        cp ~/.aiw/.mcp.json ~/.aiw/.mcp.json.backup
+    if [ -f ~/.aiw/mcp.json ]; then
+        cp ~/.aiw/mcp.json ~/.aiw/mcp.json.backup
     fi
 
     # 修改配置文件
-    cat > ~/.aiw/.mcp.json << 'EOF'
+    cat > ~/.aiw/mcp.json << 'EOF'
 {
   "mcpServers": {
     "test-server": {
@@ -241,10 +241,10 @@ EOF
         "test-server.*enabled"
 
     # 恢复原配置
-    if [ -f ~/.aiw/.mcp.json.backup ]; then
-        mv ~/.aiw/.mcp.json.backup ~/.aiw/.mcp.json
+    if [ -f ~/.aiw/mcp.json.backup ]; then
+        mv ~/.aiw/mcp.json.backup ~/.aiw/mcp.json
     else
-        rm -f ~/.aiw/.mcp.json
+        rm -f ~/.aiw/mcp.json
     fi
 }
 
@@ -279,8 +279,8 @@ cleanup() {
     rm -f "$PROJECT_ROOT"/test_mcp_hot_reload.py
 
     # 恢复MCP配置
-    if [ -f ~/.aiw/.mcp.json.backup ]; then
-        mv ~/.aiw/.mcp.json.backup ~/.aiw/.mcp.json
+    if [ -f ~/.aiw/mcp.json.backup ]; then
+        mv ~/.aiw/mcp.json.backup ~/.aiw/mcp.json
     fi
 }
 

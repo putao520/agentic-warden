@@ -18,8 +18,8 @@ use std::sync::Arc;
 /// # 示例
 ///
 /// ```rust
-/// use agentic_warden::unified_registry::Registry;
-/// use agentic_warden::storage::{InProcessStorage, SharedMemoryStorage};
+/// use aiw::unified_registry::Registry;
+/// use aiw::storage::{InProcessStorage, SharedMemoryStorage};
 ///
 /// // 进程内注册表（用于MCP启动的任务）
 /// let mcp_registry = Registry::new(InProcessStorage::new());

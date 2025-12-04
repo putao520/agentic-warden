@@ -23,7 +23,7 @@ aiw mcp remove <name> [-y]                # 移除MCP服务器
 aiw mcp get <name>                        # 查看服务器详细配置
 aiw mcp enable <name>                     # 启用服务器
 aiw mcp disable <name>                    # 禁用服务器
-aiw mcp edit                              # 用编辑器打开.mcp.json
+aiw mcp edit                              # 用编辑器打开mcp.json
 ```
 
 **功能特性**:
@@ -56,7 +56,7 @@ aiw mcp edit
 实现MCP配置文件的自动监听和热重载，无需重启进程即可应用配置更改。
 
 **核心功能**:
-- ✅ 使用 `notify` 库监听 `~/.aiw/.mcp.json` 文件变化
+- ✅ 使用 `notify` 库监听 `~/.aiw/mcp.json` 文件变化
 - ✅ 智能生命周期管理:
   - 🗑️ 自动关闭被删除的MCP服务器
   - ⏸️ 自动关闭被禁用的MCP服务器
@@ -103,7 +103,7 @@ notify = "8.2"           # 文件系统事件监听
 ### 🎯 Design Principles
 
 - **简单实用** - 只做配置管理，不做包注册表
-- **单一级别** - 只操作 `~/.aiw/.mcp.json`
+- **单一级别** - 只操作 `~/.aiw/mcp.json`
 - **Claude Code兼容** - 配置格式100%兼容
 - **用户友好** - 丰富的彩色输出和清晰的错误提示
 
@@ -134,7 +134,7 @@ notify = "8.2"           # 文件系统事件监听
 - 移除对 `~/.agentic-warden/` 和 `~/.config/agentic-warden/` 的支持
 - 运行时数据保持在系统临时目录 `/tmp/.aiw/` (Linux/macOS) 或 `%TEMP%\.aiw\` (Windows)
 - 配置文件路径标准化：
-  - `~/.aiw/.mcp.json` - MCP服务器配置(全局唯一)
+  - `~/.aiw/mcp.json` - MCP服务器配置(全局唯一)
   - `~/.aiw/provider.json` - Provider配置
   - `~/.aiw/auth.json` - 认证信息
   - `~/.aiw/config.json` - 主配置文件
@@ -142,7 +142,7 @@ notify = "8.2"           # 文件系统事件监听
 
 **Claude Code 100% Compatibility**:
 - MCP配置完全兼容Claude Code格式
-- 仅支持全局配置文件 `~/.aiw/.mcp.json`(移除项目级.mcp.json支持)
+- 仅支持全局配置文件 `~/.aiw/mcp.json`(移除项目级mcp.json支持)
 - 新增可选字段支持：
   - `description`: MCP服务器描述
   - `category`: 服务器分类(system, development, search等)
@@ -171,7 +171,7 @@ notify = "8.2"           # 文件系统事件监听
 - `src/sync/sync_config.rs` - 路径更新
 - `src/sync/sync_config_manager.rs` - 路径更新
 - `src/mcp/mod.rs` - 路径更新
-- `.mcp.json.example` - 更新为Claude Code兼容格式
+- `mcp.json.example` - 更新为Claude Code兼容格式
 
 **Commits**:
 - `b889314`: refactor: 优化MCP配置管理,100%兼容Claude Code
@@ -213,7 +213,7 @@ notify = "8.2"           # 文件系统事件监听
 - `aiw mcp tools <name>` - 列出服务器提供的工具
 
 **高级功能**:
-- `aiw mcp validate` - 验证.mcp.json配置
+- `aiw mcp validate` - 验证mcp.json配置
 - `aiw mcp export` - 导出配置
 - `aiw mcp import <file>` - 导入配置
 
@@ -233,8 +233,8 @@ mv ~/.config/agentic-warden ~/.aiw
 ```
 
 **MCP配置文件位置变更**:
-- 旧: `~/.config/agentic-warden/.mcp.json` 或项目目录 `.mcp.json`
-- 新: `~/.aiw/.mcp.json` (仅全局配置)
+- 旧: `~/.config/agentic-warden/mcp.json` 或项目目录 `mcp.json`
+- 新: `~/.aiw/mcp.json` (仅全局配置)
 
 ---
 

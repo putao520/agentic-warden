@@ -14,7 +14,7 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 ///
 /// # Examples
 /// ```no_run
-/// use agentic_warden::utils::logger::init_logger;
+/// use aiw::utils::logger::init_logger;
 ///
 /// // 使用默认配置（从环境变量读取）
 /// init_logger(None, None).unwrap();
@@ -33,7 +33,7 @@ pub fn init_logger(log_level: Option<&str>, log_file: Option<PathBuf>) -> Result
     } else {
         EnvFilter::try_from_default_env().unwrap_or_else(|_| {
             // 默认级别：库代码 info，应用代码 debug
-            EnvFilter::new("info,agentic_warden=debug")
+            EnvFilter::new("info,aiw=debug")
         })
     };
 

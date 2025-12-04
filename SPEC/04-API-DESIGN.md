@@ -111,13 +111,13 @@ Default Provider: openrouter
 
 ### API-003: Synchronization Commands
 
-#### Command: `agentic-warden push [directories...]`
+#### Command: `agentic-warden push`
 **Related**: REQ-003, ARCH-003
 
 **Request Parameters**:
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `directories` | path[] | ✗ | Directories to push (default: all) |
+| _none_ | | | Uses built-in selection of supported AI CLI config directories |
 
 **Success Response**: Progress indication and completion status
 ```
@@ -147,24 +147,12 @@ Default Provider: openrouter
 
 ### API-004: Wait Mode Commands
 
-#### Command: `agentic-warden wait [options]`
+#### Command: `agentic-warden wait`
 **Related**: REQ-005, ARCH-005
 
-**Request Parameters**:
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `--timeout` | duration | ✗ | 12h | Maximum wait time |
-| `--verbose` | flag | ✗ | false | Detailed progress output |
+**Request Parameters**: _none_
 
-**Success Response**: Completion report
-```
-Waiting for AI CLI tasks... (timeout: 12h)
-✓ claude-1234: Completed (15s)
-✓ codex-5678: Completed (32s)
-✓ gemini-9012: Failed (timeout after 2m)
-
-Summary: 2 completed, 1 failed, 0 running
-```
+**Success Response**: Completion report showing finished tasks and any still running items
 
 #### Command: `agentic-warden pwait <pid>`
 **Related**: REQ-005, ARCH-005

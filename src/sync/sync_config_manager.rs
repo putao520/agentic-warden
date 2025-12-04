@@ -41,7 +41,7 @@ impl SyncConfigManager {
     ///
     /// # Examples
     /// ```
-    /// use agentic_warden::sync::sync_config_manager::SyncConfigManager;
+/// use aiw::sync::sync_config_manager::SyncConfigManager;
     /// use std::path::Path;
     ///
     /// // In tests, use a temporary path

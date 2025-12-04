@@ -6,8 +6,8 @@
 //! - pwait等待MCP任务完成
 //! - 验证与CLI任务的存储隔离
 
-use agentic_warden::registry_factory::{create_cli_registry, create_mcp_registry};
-use agentic_warden::task_record::TaskRecord;
+use aiw::registry_factory::{create_cli_registry, create_mcp_registry};
+use aiw::task_record::TaskRecord;
 use chrono::Utc;
 use serial_test::serial;
 use std::process::{Command, Stdio};
@@ -65,7 +65,7 @@ fn test_mcp_registry_task_registration() {
 #[test]
 #[serial]
 fn test_mcp_concurrent_task_launching() {
-    use agentic_warden::pwait_mode;
+    use aiw::pwait_mode;
 
     // 1. 获取MCP注册表
     let mcp_registry = create_mcp_registry();
@@ -223,7 +223,7 @@ fn test_mcp_cli_storage_isolation_during_launch() {
 #[test]
 #[serial]
 fn test_mcp_task_quick_completion() {
-    use agentic_warden::pwait_mode;
+    use aiw::pwait_mode;
 
     let mcp_registry = create_mcp_registry();
 

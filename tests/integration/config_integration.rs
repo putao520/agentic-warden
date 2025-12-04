@@ -1,5 +1,5 @@
-use agentic_warden::provider::config::{ProvidersConfig, Region};
-use agentic_warden::provider::manager::ProviderManager;
+use aiw::provider::config::{ProvidersConfig, Region};
+use aiw::provider::manager::ProviderManager;
 use std::fs;
 use tempfile::TempDir;
 

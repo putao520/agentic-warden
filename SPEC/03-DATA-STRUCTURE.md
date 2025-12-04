@@ -651,7 +651,7 @@ Prevention:
 
 #### MCP Configuration Data Model
 
-##### .mcp.json Configuration Schema
+##### mcp.json Configuration Schema
 ```json
 {
   "mcpServers": {

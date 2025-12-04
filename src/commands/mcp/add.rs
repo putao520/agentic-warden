@@ -65,7 +65,7 @@ pub fn execute(
         }
     );
     println!();
-    println!("Configuration saved to {}", "~/.aiw/.mcp.json".cyan());
+    println!("Configuration saved to {}", "~/.aiw/mcp.json".cyan());
     println!("Restart your AI CLI to apply changes.");
     println!();
 

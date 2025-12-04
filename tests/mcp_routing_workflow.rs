@@ -2,8 +2,8 @@
 //!
 //! Tests the complete routing pipeline from request to tool selection.
 
-use agentic_warden::mcp_routing::models::{DecisionMode, ExecutionMode, IntelligentRouteRequest};
-use agentic_warden::mcp_routing::registry::{DynamicToolRegistry, RegisteredTool, RegistryConfig};
+use aiw::mcp_routing::models::{DecisionMode, ExecutionMode, IntelligentRouteRequest};
+use aiw::mcp_routing::registry::{DynamicToolRegistry, RegisteredTool, RegistryConfig};
 use rmcp::model::Tool;
 use std::sync::Arc;
 use std::time::Duration;
@@ -112,8 +112,8 @@ async fn test_routing_request_construction() {
 
 #[tokio::test]
 async fn test_concurrent_tool_operations() {
-    let registry = Arc::new(DynamicToolRegistry::new(vec![]));
-    let registry_clone = Arc::clone(&registry);
+    let registry: Arc<DynamicToolRegistry> = Arc::new(DynamicToolRegistry::new(vec![]));
+    let registry_clone: Arc<DynamicToolRegistry> = Arc::clone(&registry);
 
     // Spawn concurrent registration tasks
     let handle1 = {

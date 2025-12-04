@@ -1,6 +1,6 @@
 //! Tests for MCP client capability detection.
 
-use agentic_warden::mcp::capability_detector::ClientCapabilities;
+use aiw::mcp::capability_detector::ClientCapabilities;
 use rmcp::model::{Implementation, InitializeRequestParam, ProtocolVersion};
 
 #[test]

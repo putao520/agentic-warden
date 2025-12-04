@@ -1,22 +1,21 @@
 // Binary-specific modules
 mod help;
 
-use agentic_warden::cli_type::{parse_cli_selector_strict, parse_cli_type};
-use agentic_warden::commands::ai_cli::AiCliCommand;
-use agentic_warden::commands::{
+use aiw::cli_type::{parse_cli_selector_strict, parse_cli_type};
+use aiw::commands::ai_cli::AiCliCommand;
+use aiw::commands::{
     parse_external_as_ai_cli,
     parser::{McpAction, RolesAction},
     Cli, Commands,
 };
-use agentic_warden::error::ErrorCategory;
-use agentic_warden::execute_enhanced_update;
-use agentic_warden::mcp::AgenticWardenMcpServer;
-use agentic_warden::pwait_mode;
-use agentic_warden::roles::RoleManager;
-use agentic_warden::tui;
-use agentic_warden::wait_mode;
+use aiw::error::ErrorCategory;
+use aiw::execute_enhanced_update;
+use aiw::mcp::AgenticWardenMcpServer;
+use aiw::pwait_mode;
+use aiw::roles::RoleManager;
+use aiw::tui;
+use aiw::wait_mode;
 use help::{print_command_help, print_general_help, print_quick_examples};
-use std::path::PathBuf;
 use std::process::ExitCode;
 
 #[tokio::main]
@@ -129,14 +128,7 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
         Commands::Push => launch_tui(Some(tui::ScreenType::Push)).await,
         Commands::Pull => launch_tui(Some(tui::ScreenType::Pull)).await,
         Commands::List => handle_sync_command("list", None).await,
-        Commands::Wait { timeout, verbose } => {
-            // CLI参数已完整实现，支持timeout和verbose参数
-            if verbose {
-                eprintln!(
-                    "Waiting for all concurrent AI CLI tasks to complete (timeout: {})...",
-                    timeout
-                );
-            }
+        Commands::Wait => {
             wait_mode::run().map_err(|e| e.to_string())?;
             Ok(ExitCode::from(0))
         }
@@ -229,9 +221,9 @@ async fn launch_tui(initial_screen: Option<tui::ScreenType>) -> Result<ExitCode,
 
 /// 处理status命令（文本模式）
 fn handle_status_command() -> Result<ExitCode, String> {
-    use agentic_warden::storage::SharedMemoryStorage;
-    use agentic_warden::task_record::TaskStatus;
-    use agentic_warden::unified_registry::Registry;
+    use aiw::storage::SharedMemoryStorage;
+    use aiw::task_record::TaskStatus;
+    use aiw::unified_registry::Registry;
 
     // 连接到当前进程的共享内存
     let storage = SharedMemoryStorage::connect()
@@ -317,7 +309,7 @@ fn handle_help_command(topic: Option<String>) -> Result<ExitCode, String> {
 async fn handle_mcp_action(action: McpAction) -> Result<ExitCode, String> {
     match action {
         McpAction::List => {
-            use agentic_warden::commands::mcp::{handle_mcp_command, McpCommand};
+            use aiw::commands::mcp::{handle_mcp_command, McpCommand};
             match handle_mcp_command(McpCommand::List) {
                 Ok(_) => Ok(ExitCode::from(0)),
                 Err(e) => {
@@ -335,7 +327,7 @@ async fn handle_mcp_action(action: McpAction) -> Result<ExitCode, String> {
             env_vars,
             disabled,
         } => {
-            use agentic_warden::commands::mcp::{handle_mcp_command, McpCommand};
+            use aiw::commands::mcp::{handle_mcp_command, McpCommand};
 
             // 解析环境变量
             let mut env = Vec::new();
@@ -368,7 +360,7 @@ async fn handle_mcp_action(action: McpAction) -> Result<ExitCode, String> {
             }
         }
         McpAction::Remove { name, yes } => {
-            use agentic_warden::commands::mcp::{handle_mcp_command, McpCommand};
+            use aiw::commands::mcp::{handle_mcp_command, McpCommand};
             match handle_mcp_command(McpCommand::Remove { name, yes }) {
                 Ok(_) => Ok(ExitCode::from(0)),
                 Err(e) => {
@@ -378,7 +370,7 @@ async fn handle_mcp_action(action: McpAction) -> Result<ExitCode, String> {
             }
         }
         McpAction::Get { name } => {
-            use agentic_warden::commands::mcp::{handle_mcp_command, McpCommand};
+            use aiw::commands::mcp::{handle_mcp_command, McpCommand};
             match handle_mcp_command(McpCommand::Get { name }) {
                 Ok(_) => Ok(ExitCode::from(0)),
                 Err(e) => {
@@ -388,7 +380,7 @@ async fn handle_mcp_action(action: McpAction) -> Result<ExitCode, String> {
             }
         }
         McpAction::Enable { name } => {
-            use agentic_warden::commands::mcp::{handle_mcp_command, McpCommand};
+            use aiw::commands::mcp::{handle_mcp_command, McpCommand};
             match handle_mcp_command(McpCommand::Enable { name }) {
                 Ok(_) => Ok(ExitCode::from(0)),
                 Err(e) => {
@@ -398,7 +390,7 @@ async fn handle_mcp_action(action: McpAction) -> Result<ExitCode, String> {
             }
         }
         McpAction::Disable { name } => {
-            use agentic_warden::commands::mcp::{handle_mcp_command, McpCommand};
+            use aiw::commands::mcp::{handle_mcp_command, McpCommand};
             match handle_mcp_command(McpCommand::Disable { name }) {
                 Ok(_) => Ok(ExitCode::from(0)),
                 Err(e) => {
@@ -408,7 +400,7 @@ async fn handle_mcp_action(action: McpAction) -> Result<ExitCode, String> {
             }
         }
         McpAction::Edit => {
-            use agentic_warden::commands::mcp::{handle_mcp_command, McpCommand};
+            use aiw::commands::mcp::{handle_mcp_command, McpCommand};
             match handle_mcp_command(McpCommand::Edit) {
                 Ok(_) => Ok(ExitCode::from(0)),
                 Err(e) => {
@@ -512,7 +504,7 @@ async fn handle_sync_command(
     command: &str,
     _args: Option<Vec<PathBuf>>,
 ) -> Result<ExitCode, String> {
-    match agentic_warden::sync::sync_command::handle_sync_command(command, None).await {
+    match aiw::sync::sync_command::handle_sync_command(command, None).await {
         Ok(code) => {
             // Convert i32 to u8 for ExitCode
             let exit_code = if code >= 0 && code <= 255 {

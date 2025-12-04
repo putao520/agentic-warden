@@ -106,7 +106,7 @@ fi
 # 6. 验证MCP配置
 echo ""
 echo "6. MCP配置验证"
-mcp_config="$HOME/.aiw/.mcp.json"
+mcp_config="$HOME/.aiw/mcp.json"
 if [ -f "$mcp_config" ]; then
     echo -e "${GREEN}✅ MCP配置文件存在${NC}"
 

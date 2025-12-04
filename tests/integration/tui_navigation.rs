@@ -1,4 +1,4 @@
-use agentic_warden::tui::screens::{
+use aiw::tui::screens::{
     dashboard::DashboardScreen, provider::ProviderScreen, status::StatusScreen, ScreenAction,
     ScreenType,
 };

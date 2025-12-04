@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 #[tokio::test]
 async fn test_dynamic_registry_base_tools() {
-    use agentic_warden::mcp_routing::registry::{DynamicToolRegistry, RegistryConfig};
+    use aiw::mcp_routing::registry::{DynamicToolRegistry, RegistryConfig};
 
     let base_tools = vec![Tool {
         name: Cow::Borrowed("intelligent_route"),
@@ -49,7 +49,7 @@ async fn test_dynamic_registry_base_tools() {
 
 #[tokio::test]
 async fn test_dynamic_registry_fifo_eviction() {
-    use agentic_warden::mcp_routing::registry::{DynamicToolRegistry, RegistryConfig};
+    use aiw::mcp_routing::registry::{DynamicToolRegistry, RegistryConfig};
     use serde_json::json;
 
     let registry = DynamicToolRegistry::with_config(
@@ -93,7 +93,7 @@ async fn test_dynamic_registry_fifo_eviction() {
 
 #[tokio::test]
 async fn test_dynamic_registry_mixed_tools() {
-    use agentic_warden::mcp_routing::registry::{DynamicToolRegistry, RegistryConfig};
+    use aiw::mcp_routing::registry::{DynamicToolRegistry, RegistryConfig};
     use serde_json::json;
 
     let base_tools = vec![Tool {
@@ -155,7 +155,7 @@ async fn test_dynamic_registry_mixed_tools() {
 
 #[tokio::test]
 async fn test_tool_registry_has_tool() {
-    use agentic_warden::mcp_routing::registry::DynamicToolRegistry;
+    use aiw::mcp_routing::registry::DynamicToolRegistry;
     use serde_json::json;
 
     let base_tools = vec![Tool {

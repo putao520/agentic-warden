@@ -9,7 +9,7 @@ use std::{
 };
 use tracing::debug;
 
-const DEFAULT_CONFIG_FILE: &str = ".mcp.json";
+const DEFAULT_CONFIG_FILE: &str = "mcp.json";
 const DEFAULT_VERSION: &str = "1.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,7 +74,7 @@ impl McpConfigManager {
             let mut config: McpConfig = serde_json::from_str(&content)
                 .with_context(|| format!("Invalid JSON in {}", path.display()))?;
 
-            // Apply environment variable overrides based on .mcp.json structure
+            // Apply environment variable overrides based on mcp.json structure
             Self::apply_env_overrides(&mut config)?;
             config.validate()?;
 
@@ -196,7 +196,7 @@ impl McpConfigManager {
 impl McpConfig {
     fn validate(&self) -> Result<()> {
         if self.mcp_servers.is_empty() {
-            return Err(anyhow!("No MCP servers configured in .mcp.json"));
+            return Err(anyhow!("No MCP servers configured in mcp.json"));
         }
 
         for (name, server) in &self.mcp_servers {
@@ -209,7 +209,7 @@ impl McpConfig {
 }
 
 fn resolve_config_path() -> Result<PathBuf> {
-    // Only support global config at ~/.aiw/.mcp.json
+    // Only support global config at ~/.aiw/mcp.json
     // 100% compatible with Claude Code and other AI tools
     let home = home_dir().ok_or_else(|| anyhow!("Cannot find home directory"))?;
     Ok(home.join(".aiw").join(DEFAULT_CONFIG_FILE))

@@ -26,8 +26,8 @@ Google Drive OAuth认证和云同步功能与CC历史会话系统无技术依赖
 ### 恢复的CLI命令
 
 ```bash
-aiw push [DIRS...]    # 推送配置到Google Drive
-aiw pull              # 从Google Drive拉取配置  
+aiw push              # 推送默认配置到Google Drive
+aiw pull              # 从Google Drive拉取默认配置  
 aiw list              # 列出远程备份
 ```
 
@@ -83,4 +83,3 @@ aiw list              # 列出远程备份
 | 2025-11-25 | 功能恢复 | 恢复Google Drive OAuth和同步 |
 | 2025-11-25 | 功能删除 | 删除CC会话历史系统 |
 | 2025-11-22 | v6.0.0发布 | 重大版本发布 |
-

@@ -2,7 +2,7 @@
 
 #[cfg(test)]
 mod tests {
-    use agentic_warden::supervisor::generate_log_path;
+    use aiw::supervisor::generate_log_path;
     use std::fs;
     use tempfile::tempdir;
 

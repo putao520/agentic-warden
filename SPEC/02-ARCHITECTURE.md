@@ -1029,7 +1029,7 @@ graph TB
 ##### 2. Dual-Mode Vector Database Layer
 - **MemVDB (In-Memory)**:
   - Collections: `mcp_tools`, `mcp_methods`
-  - Purpose: Fast MCP routing index, rebuilt on startup from .mcp.json
+  - Purpose: Fast MCP routing index, rebuilt on startup from mcp.json
   - Features: Thread-safe, cosine similarity, batch operations
   - Lifecycle: Memory-only, destroyed on shutdown
   - Rebuild: Automatically reconstructed from MCP configuration
@@ -1105,7 +1105,7 @@ sequenceDiagram
 
 ##### Existing Component Integration:
 - **Memory Module**: Refactored to use FastEmbed embeddings + SahomeDB for conversation history
-- **Configuration System**: Extends .mcp.json validation and management
+- **Configuration System**: Extends mcp.json validation and management
 - **Process Supervisor**: Integrates with MCP server lifecycle management
 - **Embedding Service**: Replaced Ollama-based embedding with FastEmbed local generation
 
@@ -1119,7 +1119,7 @@ sequenceDiagram
 - **Conversation History Search**: < 200ms for semantic queries
 - **MCP Connections**: Support 10+ concurrent client connections
 - **Memory Usage**: < 50MB for MemVDB index, < 200MB for SahomeDB storage
-- **Startup Time**: < 500ms for MemVDB index reconstruction from .mcp.json
+- **Startup Time**: < 500ms for MemVDB index reconstruction from mcp.json
 
 ##### Scalability Considerations:
 - **Horizontal Scaling**: Multiple MCP server connections
@@ -1268,13 +1268,13 @@ tokio::spawn(async move {
 **关键架构设计 - base_tools vs dynamic_tools双层结构**:
 
 **设计理念**:
-- **base_tools (永久工具)**: 来自.mcp.json配置文件定义的MCP服务器工具,启动时通过warm_up()一次性扫描并永久驻留内存,无TTL限制
+- **base_tools (永久工具)**: 来自mcp.json配置文件定义的MCP服务器工具,启动时通过warm_up()一次性扫描并永久驻留内存,无TTL限制
 - **dynamic_tools (临时工具)**: 运行时LLM动态生成的JS编排工具,带TTL=600秒,最多100个,LRU驱逐策略
 
 **数据结构优化**:
 ```rust
 pub struct DynamicToolRegistry {
-    // 永久工具 (来自.mcp.json)
+    // 永久工具 (来自mcp.json)
     base_tools: HashMap<String, BaseToolDefinition>,
     base_snapshot: Arc<Vec<Tool>>,  // ✅ Arc共享,避免重复clone
 
@@ -1291,7 +1291,7 @@ pub struct DynamicToolRegistry {
 // src/mcp_routing/mod.rs:100-105
 pub async fn initialize() -> Result<Self> {
     // 1. 一次性warm_up所有MCP服务器
-    let discovered = connection_pool.warm_up().await?;  // ✅ 扫描.mcp.json
+    let discovered = connection_pool.warm_up().await?;  // ✅ 扫描mcp.json
 
     // 2. 构建向量索引 (MemVDB内存数据库)
     let embeddings = build_embeddings(&embedder, &discovered, config)?;
@@ -1333,7 +1333,7 @@ pub async fn get_all_tool_definitions(&self) -> Arc<Vec<Tool>> {
 
 | 维度 | base_tools | dynamic_tools | 性能影响 |
 |------|-----------|---------------|---------|
-| **来源** | .mcp.json配置文件 | LLM运行时生成 | - |
+| **来源** | mcp.json配置文件 | LLM运行时生成 | - |
 | **生命周期** | 启动时构建,永久存在 | TTL=600s,自动过期 | 避免重启重新扫描 |
 | **数量限制** | 无限制(取决于MCP服务器数量) | 最多100个,LRU驱逐 | 内存可控 |
 | **存储方式** | Arc<Vec<Tool>>共享 | RwLock<HashMap>隔离 | list_tools零拷贝 |

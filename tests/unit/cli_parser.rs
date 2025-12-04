@@ -1,5 +1,5 @@
-use agentic_warden::commands::parser::Cli;
-use agentic_warden::commands::{parse_external_as_ai_cli, Commands, RolesAction};
+use aiw::commands::parser::Cli;
+use aiw::commands::{parse_external_as_ai_cli, Commands, RolesAction};
 
 fn parse(args: &[&str]) -> Commands {
     let argv: Vec<String> = std::iter::once("agentic-warden")
@@ -66,9 +66,30 @@ fn parses_roles_list_command() {
 }
 
 #[test]
-fn parses_update_command_with_no_tool() {
+fn parses_update_command() {
     match parse(&["update"]) {
-        Commands::Update { tool: None } => {}
+        Commands::Update => {}
         other => panic!("expected update command with no tool, got {other:?}"),
+    }
+}
+
+#[test]
+fn parses_push_and_pull_commands() {
+    match parse(&["push"]) {
+        Commands::Push => {}
+        other => panic!("expected push command, got {other:?}"),
+    }
+
+    match parse(&["pull"]) {
+        Commands::Pull => {}
+        other => panic!("expected pull command, got {other:?}"),
+    }
+}
+
+#[test]
+fn parses_wait_command() {
+    match parse(&["wait"]) {
+        Commands::Wait => {}
+        other => panic!("expected wait command, got {other:?}"),
     }
 }

@@ -2,7 +2,7 @@
 
 #[cfg(test)]
 mod tests {
-    use agentic_warden::supervisor::{ScrollingDisplay, DEFAULT_MAX_DISPLAY_LINES};
+    use aiw::supervisor::{ScrollingDisplay, DEFAULT_MAX_DISPLAY_LINES};
 
     #[test]
     fn test_scrolling_display_strict_line_limit() {

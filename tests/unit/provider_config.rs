@@ -1,4 +1,4 @@
-use agentic_warden::provider::config::Provider;
+use aiw::provider::config::Provider;
 use std::collections::HashMap;
 
 #[test]

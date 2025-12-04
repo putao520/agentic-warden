@@ -3,9 +3,9 @@
 //! 测试pwait命令的新需求：必须指定PID参数
 //! - pwait <PID>: 等待指定进程的共享内存任务
 
-use agentic_warden::storage::SharedMemoryStorage;
-use agentic_warden::task_record::TaskRecord;
-use agentic_warden::unified_registry::Registry;
+use aiw::storage::SharedMemoryStorage;
+use aiw::task_record::TaskRecord;
+use aiw::unified_registry::Registry;
 use chrono::Utc;
 use serial_test::serial;
 
@@ -33,7 +33,7 @@ fn test_pwait_requires_pid_parameter() {
 #[test]
 #[serial]
 fn test_pwait_connects_to_specific_pid_shared_memory() {
-    use agentic_warden::pwait_mode;
+    use aiw::pwait_mode;
 
     // 创建一个测试用的PID
     let test_pid = 60000u32;
@@ -82,7 +82,7 @@ fn test_pwait_connects_to_specific_pid_shared_memory() {
 #[test]
 #[serial]
 fn test_pwait_current_process_shared_memory() {
-    use agentic_warden::pwait_mode;
+    use aiw::pwait_mode;
 
     let current_pid = std::process::id();
 
@@ -125,7 +125,7 @@ fn test_pwait_current_process_shared_memory() {
 #[test]
 #[serial]
 fn test_pwait_with_nonexistent_pid_tasks() {
-    use agentic_warden::pwait_mode;
+    use aiw::pwait_mode;
 
     // 使用一个很大的PID，很可能没有对应的共享内存
     let nonexistent_pid = 99999u32;
@@ -347,7 +347,7 @@ fn test_pwait_cli_integration() {
         .expect("Failed to mark completed");
 
     // 3. 调用pwait_mode（模拟CLI命令）
-    let result = agentic_warden::pwait_mode::run_for_pid(test_pid);
+    let result = aiw::pwait_mode::run_for_pid(test_pid);
 
     assert!(result.is_ok(), "CLI integration should work");
 

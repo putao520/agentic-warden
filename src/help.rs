@@ -20,8 +20,8 @@ AGENT SELECTORS:
 
 COMMANDS:
     wait                     Monitor task completion
-    push [DIR...]           Push configurations to cloud
-    pull [DIR...]           Pull configurations from cloud
+    push                    Push configurations to cloud (default set)
+    pull                    Pull configurations from cloud (default set)
     status                  Show sync status
     list                    List configurable directories
 
@@ -168,15 +168,10 @@ fn print_push_help() -> io::Result<()> {
 PUSH COMMAND
 
 USAGE:
-    agentic-warden push [CONFIG_NAME]
-
-ARGUMENTS:
-    <CONFIG_NAME>    Name for this configuration set
-                    (optional, defaults to "default")
-                    e.g., "work", "home", "dev"
+    agentic-warden push
 
 DESCRIPTION:
-    Save current AI CLI configurations to Google Drive with a name.
+    Save current AI CLI configurations to Google Drive using the default name.
 
     Scans and uploads only specific configuration files.
     All directories and files are optional - only existing items will be backed up.
@@ -214,7 +209,7 @@ DESCRIPTION:
     - Debug/IDE/shell snapshot files
 
     All files are saved in a single zip file:
-    Google Drive: .aiw/<CONFIG_NAME>.zip
+    Google Drive: .aiw/default.zip
 
     OVERWRITE PROTECTION:
     - Before uploading, the system checks if a configuration with the same name
@@ -226,9 +221,6 @@ DESCRIPTION:
 
 EXAMPLES:
     agentic-warden push            # Save as default.zip
-    agentic-warden push work      # Save as work.zip
-    agentic-warden push home      # Save as home.zip
-    agentic-warden push dev       # Save as dev.zip
 
 SETUP:
     Requires Google Drive OAuth configuration in ~/.aiw/auth.json
@@ -243,18 +235,13 @@ fn print_pull_help() -> io::Result<()> {
 PULL COMMAND
 
 USAGE:
-    agentic-warden pull [CONFIG_NAME]
-
-ARGUMENTS:
-    <CONFIG_NAME>    Name of configuration set to restore
-                    (optional, defaults to "default")
-                    e.g., "work", "home", "dev"
+    agentic-warden pull
 
 DESCRIPTION:
-    Download and restore AI CLI configurations from Google Drive.
+    Download and restore AI CLI configurations from Google Drive using the default name.
 
     Downloads and extracts:
-    - Google Drive: .aiw/<CONFIG_NAME>.zip
+    - Google Drive: .aiw/default.zip
     - Extracts to: ~/.claude, ~/.codex, ~/.gemini (directories will be created if needed)
 
     Restores only the specific configuration files that were backed up.
@@ -267,15 +254,12 @@ DESCRIPTION:
 
 EXAMPLES:
     agentic-warden pull            # Restore default.zip
-    agentic-warden pull work      # Restore work.zip
-    agentic-warden pull home      # Restore home.zip
-    agentic-warden pull dev       # Restore dev.zip
 
 NOTES:
     - Local configurations are overwritten
     - No backup is created before restoring
     - All three AI configs are restored together
-    - CONFIG_NAME is optional (defaults to "default")
+    - Uses the default configuration name ("default")
 
 SETUP:
     Requires Google Drive OAuth configuration in ~/.aiw/auth.json
