@@ -1,0 +1,54 @@
+{
+  "name": "@putao520/aiw",
+  "version": "0.5.14",
+  "description": "Universal AI CLI management platform with intelligent MCP routing, process tracking, and configuration synchronization",
+  "keywords": [
+    "ai",
+    "cli",
+    "anthropic",
+    "openai",
+    "mcp",
+    "model-context-protocol",
+    "claude-code",
+    "tui",
+    "rust",
+    "static-binary",
+    "workflow"
+  ],
+  "homepage": "https://github.com/putao520/agentic-warden",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/putao520/agentic-warden.git"
+  },
+  "license": "MIT",
+  "author": "Putao520",
+  "bin": {
+    "aiw": "./bin/aiw-linux-x64"
+  },
+  "files": [
+    "bin/aiw-linux-x64",
+    "bin/aiw-windows-x64.exe",
+    "index.js",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "os": [
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64",
+    "arm"
+  ],
+  "bugs": {
+    "url": "https://github.com/putao520/agentic-warden/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/",
+    "provenance": true
+  }
+}

@@ -1,0 +1,126 @@
+# Rust
+/target/
+**/*.rlib
+**/*.rmeta
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Local configuration (keep templates)
+auth.json
+sync.json
+*.state
+
+# Backup files
+*.backup
+*_old.*
+
+# Temporary files
+*.tmp
+*.temp
+
+# Test output
+/tests/output/
+/tests/temp/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Debug
+debug/
+target/debug/
+target/release/
+
+# Rust Analyzer
+/rust-analyzer/
+
+# Local build artifacts
+*.pdb
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Compilation artifacts (Rust specific)
+*.o
+*.obj
+*.rcgu.o
+*.a
+*.lib
+
+# Code review and temp files
+codex_review*
+review_request*
+debug_test*.rs
+test_registry*.rs
+test_special_chars.*
+
+# Claude and AI assistant files
+claude*
+ai_*.log
+integration*.log
+
+# Schema and temporary config
+/schema/
+*.schema.json
+
+# Cache and models
+.fastembed_cache/
+.cache/
+.model_cache/
+**/*.onnx
+**/*.bin
+**/*.safetensors
+
+# Pre-built binaries
+/bin/
+
+# Python virtual environment
+venv/
+.env/
+.envrc
+
+# Test files
+test-*.py
+real_*.py
+final_*.py
+*_test.py
+*.test.*
+
+# Test binaries (exclude executable test files, keep .rs source files)
+/test_*
+!test_*.rs
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# NPM publication is controlled by package.json "files" field
+# All source code can be committed to Git

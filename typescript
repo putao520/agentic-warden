@@ -1,0 +1,27 @@
+Script started on 2025-11-22 22:28:41+08:00 [COMMAND="/home/putao/.nvm/versions/node/v24.5.0/bin/codex exec --dangerously-bypass-approvals-and-sandbox 'hello world'" <not executed on terminal>]
+OpenAI Codex v0.61.0 (research preview)
+--------
+[1mworkdir:[0m /home/putao/code/rust/agentic-warden
+[1mmodel:[0m gpt-5.1-codex-max
+[1mprovider:[0m openai
+[1mapproval:[0m never
+[1msandbox:[0m danger-full-access
+[1mreasoning effort:[0m xhigh
+[1mreasoning summaries:[0m auto
+[1msession id:[0m 019aabf7-9650-7ec1-9660-0efaaced98c5
+--------
+[36muser[0m
+hello world
+[36mmcp:[0m playwright starting
+[36mmcp:[0m playwright ready
+[36mmcp startup:[0m ready: playwright
+
+[35m[3mthinking[0m[0m
+**Responding to simple greeting**
+[35m[3mcodex[0m[0m
+Hi! What can I help you build today?
+[3m[35mtokens used[0m[0m
+1,995
+Hi! What can I help you build today?
+
+Script done on 2025-11-22 22:28:45+08:00 [COMMAND_EXIT_CODE="0"]

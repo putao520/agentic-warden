@@ -1,0 +1,87 @@
+# Build artifacts
+target/
+Cargo.lock
+
+# Large binaries and build artifacts
+*.bin
+*.exe
+*.so
+*.dylib
+*.dll
+
+# Testing and CI artifacts
+test-results/
+test-results/**/
+scripts/__pycache__/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+
+# Development and configuration files
+.claude/
+.git/
+.github/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Documentation and guides (keep essential ones)
+CROSS_PLATFORM_MUSL_GUIDE.md
+DOCKER_BUILD_GUIDE.md
+MUSL_COMPATIBILITY_ANALYSIS.md
+NPM_RELEASE_GUIDE.md
+OAUTH_SETUP.md
+README-NPM.md
+RING_REPLACEMENT_ANALYSIS.md
+SPEC/DOCS/
+SPEC/TRACEABILITY.md
+SPEC/RECOVERY_NOTES.md
+
+# Templates and examples
+*.template
+*.example
+config/
+examples/
+index.js
+package.json
+.npmignore-placeholder
+
+# Debug and temporary files
+debug_oauth.rs
+quick_fix.rs
+*.log
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# Build scripts
+build-in-docker.sh
+docker-compose.ci.yml
+Dockerfile.build
+Dockerfile.ci
+scripts/
+
+# NPM related files
+npm/
+node_modules/
+
+# Backup files
+backups/
+**/*.bak
+**/*.backup
+
+# Large data files
+*.db
+*.sqlite
+*.sqlite3
+*.tar.gz
+*.zip
+*.7z
+
+# Test binaries (should not be published)
+test_*
+!test_*.rs

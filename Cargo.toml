@@ -1,0 +1,191 @@
+[package]
+name = "aiw"
+description = "AIW (AI Warden) - Universal AI CLI management platform with intelligent process tracking, semantic memory, and provider coordination."
+license = "MIT"
+repository = "https://github.com/putao520/agentic-warden"
+readme = "README.md"
+keywords = ["ai", "cli", "llm", "claude", "gemini"]
+categories = ["command-line-utilities", "development-tools"]
+version = "0.5.25"
+edition = "2021"
+exclude = [
+    "bin/*",
+    "backups/**",
+    "target/**",
+    "test-results/**",
+]
+
+[[bin]]
+name = "aiw"
+path = "src/main.rs"
+required-features = ["binary"]
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+shared_hashmap = "0.1.2"      # Current cross-process shared memory implementation
+shared_memory = "0.12"         # Shared memory backend
+crossbeam = "0.8.2"           # Modern concurrency primitives for safer implementation
+dashmap = "6.0"               # High-performance concurrent HashMap for in-process storage
+thiserror = "1.0"
+uuid = { version = "1", features = ["v4"] }
+raw_sync = "0.1.5"
+
+# Google OAuth and Drive support - Modernized
+reqwest = { version = "0.12", features = ["json", "multipart", "cookies"] }
+url = "2.4"
+base64 = "0.22"
+sha2 = "0.10"
+md5 = "0.7"
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "signal", "process", "sync", "time"] }
+urlencoding = "2.1"
+
+# Google Official APIs
+yup-oauth2 = "8.3"
+mime_guess = "2.0"
+
+# Additional dependencies for official Google APIs
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+parking_lot = "0.12"
+futures = "0.3"
+async-trait = "0.1"
+clap = { version = "4.4", features = ["derive"] }
+
+# Dependency Injection Framework
+shaku = { version = "0.6", features = ["derive"] }
+
+# Enhanced Configuration Management
+config = { version = "0.14", features = ["toml", "json", "yaml"] }
+confy = "0.6"
+
+# TUI Framework - 使用 ratatui 作为唯一的 TUI 库
+# 根据 SPEC 设计，不使用其他 TUI 组件库
+
+# User Experience Enhancements
+arboard = "3.3"
+webbrowser = "0.8"
+notify-rust = "4.10"
+
+# State Management
+state = "0.6"
+
+# Serialization Enhancements
+bincode = "1.3"
+rmp-serde = "1.1"
+
+# Security and Encryption
+secrecy = "0.8"
+
+# Search Functionality
+tantivy = "0.19"
+
+# CLI UI and graphics - Modernized
+ratatui = { version = "0.26", features = ["all-widgets", "serde"] }
+crossterm = { version = "0.28", features = ["event-stream"] }
+plotters = "0.3"
+plotters-bitmap = "0.3"
+color-eyre = "0.6"
+
+# Configuration and directories
+dirs = "5.0"
+walkdir = "2.5"
+toml = "0.8"
+which = "6.0"
+
+# Interactive UI
+dialoguer = { version = "0.11", features = ["fuzzy-select"] }
+console = "0.15"
+indicatif = "0.17"
+copypasta = "0.8"
+
+# File system operations
+tar = "0.4"
+flate2 = "1.0"
+
+# Browser integration
+open = "5.0"
+
+# Removed: HTTP server for OAuth callbacks (now using OOB flow)
+# axum = "0.7"
+# axum-server = "0.6"
+# tower = "0.4"
+# tower-http = { version = "0.5", features = ["trace"] }
+
+# Temporary files
+tempfile = "3.0"
+
+# MCP Server support
+env_logger = "0.11"
+rmcp = { version = "0.8", features = ["client", "server", "transport-io", "transport-child-process", "macros"] }
+schemars = { version = "1.1", features = ["derive"] }
+
+# Memory integration dependencies
+ollama-rs = "0.3.1"
+regex = "1.10"
+gllm = { version = "0.3.1", features = ["cpu"] }  # Pure Rust embeddings & reranking
+memvdb = "0.1.1"
+ndarray = { version = "0.15", features = ["serde"] }
+once_cell = "1.19"
+getrandom = "0.2"  # For collision-resistant filename generation
+
+# JS Orchestration dependencies (REQ-013) - Context7 verified latest versions
+boa_engine = "0.21"         # JavaScript engine with built-in parser (latest stable)
+boa_gc = "0.21"             # Boa garbage collector
+# Note: Using Boa's built-in parser for JS validation instead of swc
+# swc has compatibility issues with current serde version
+deadpool = { version = "0.12", features = ["rt_tokio_1"] }           # Connection pool for Boa runtime instances (latest stable)
+colored = "3.0.0"
+prettytable-rs = "0.10.0"
+notify = { version = "8.2.0", features = ["serde"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+psutil = "3.2"
+nix = { version = "0.29", features = ["signal", "process"] }
+
+[target.'cfg(windows)'.dependencies]
+sysinfo = "0.32"
+windows = { version = "0.54", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Console",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Threading",
+    "Win32_System_WindowsProgramming",
+    "Win32_System_JobObjects",
+    "Win32_System_Diagnostics_ToolHelp"
+] }
+
+[dev-dependencies]
+tempfile = "3.0"
+walkdir = "2.4"
+# Additional dependencies for integration testing
+dialoguer = "0.11"
+console = "0.15"
+indicatif = "0.17"
+# For safety and cleanup mechanisms
+uuid = { version = "1", features = ["v4"] }
+
+# Testing framework dependencies
+mockall = "0.12"  # For mocking external dependencies
+tokio-test = "0.4"  # For async testing
+wiremock = "0.6"  # For HTTP API mocking
+criterion = "0.5"  # For performance testing
+proptest = "1.0"  # For property-based testing
+pretty_assertions = "1.4"  # For better test output
+test-case = "3.3"  # For parameterized tests
+serial_test = "3.0"  # For serial test execution
+assert_cmd = "2.0"  # For CLI testing
+predicates = "3.1"  # For command output assertions
+mockito = "1.2"
+
+[features]
+default = []
+binary = []     # Enable binary build
+testing = []    # Testing features
+
+[package.metadata.cargo-check-cfg]
+features = ["testing"]

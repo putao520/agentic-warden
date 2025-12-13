@@ -1,0 +1,176 @@
+# Agentic-Warden E2E测试配置
+# 定义各类测试的范围和要求
+
+test_suites:
+  # 基础功能测试套件
+  basic_functionality:
+    name: "基础功能测试"
+    description: "验证CLI基础命令和核心功能"
+    tests:
+      - name: "CLI帮助命令"
+        command: "./target/release/aiw --help"
+        expected_output: "AI CLI manager with process tracking"
+        timeout: 5
+        critical: true
+
+      - name: "CLI状态命令"
+        command: "./target/release/aiw status"
+        expected_output: "No tasks"
+        timeout: 5
+        critical: true
+
+      - name: "CLI版本信息"
+        command: "./target/release/aiw --version"
+        expected_output: "5.1.1"
+        timeout: 5
+        critical: true
+
+  # MCP配置管理测试套件
+  mcp_configuration:
+    name: "MCP配置管理"
+    description: "验证MCP服务器的添加、删除、启用、禁用功能"
+    setup:
+      - "rm -f ~/.aiw/mcp.json"
+    tests:
+      - name: "添加MCP服务器"
+        command: "echo '' | ./target/release/aiw mcp add test-server echo 'Hello MCP'"
+        expected_output: "Added MCP server"
+        timeout: 10
+        critical: true
+
+      - name: "列出MCP服务器"
+        command: "./target/release/aiw mcp list"
+        expected_output: "test-server"
+        timeout: 5
+        critical: true
+
+      - name: "禁用MCP服务器"
+        command: "echo '' | ./target/release/aiw mcp disable test-server"
+        expected_output: "Disabled MCP server"
+        timeout: 5
+        critical: true
+
+      - name: "启用MCP服务器"
+        command: "echo '' | ./target/release/aiw mcp enable test-server"
+        expected_output: "Enabled MCP server"
+        timeout: 5
+        critical: true
+
+    cleanup:
+      - "rm -f ~/.aiw/mcp.json"
+
+  # 进程追踪测试套件
+  process_tracking:
+    name: "进程追踪功能"
+    description: "验证任务管理和进程追踪功能"
+    tests:
+      - name: "wait命令功能"
+        command: "timeout 5s ./target/release/aiw wait --timeout 3s"
+        expected_output: "任务执行完成报告"
+        timeout: 10
+        critical: true
+
+      - name: "pwait命令功能"
+        command: "./target/release/aiw pwait \$\$"
+        expected_output: "No tasks found"
+        timeout: 5
+        critical: false
+
+  # MCP服务器测试套件
+  mcp_server_lifecycle:
+    name: "MCP服务器生命周期"
+    description: "验证MCP服务器启动、配置热重载、RMCP路由"
+    setup:
+      - "echo '' | ./target/release/aiw mcp add filesystem npx @modelcontextprotocol/server-filesystem /tmp"
+    tests:
+      - name: "MCP配置文件存在"
+        command: "test -f ~/.aiw/mcp.json && echo 'Config file exists'"
+        expected_output: "Config file exists"
+        timeout: 5
+        critical: true
+
+      - name: "MCP服务器启动"
+        command: "echo '{}' | timeout 10s ./target/release/aiw mcp serve 2>&1 | head -20"
+        expected_output: "MCP.*ready|router.*ready"
+        timeout: 15
+        critical: false
+
+      - name: "MCP服务器列表"
+        command: "./target/release/aiw mcp list"
+        expected_output: "filesystem.*enabled"
+        timeout: 5
+        critical: true
+
+    cleanup:
+      - "rm -f ~/.aiw/mcp.json"
+
+  # 错误处理测试套件
+  error_handling:
+    name: "错误处理和边界情况"
+    description: "验证系统对异常情况的处理"
+    tests:
+      - name: "无效命令处理"
+        command: "./target/release/aiw invalid-command 2>&1"
+        expected_output: "Unrecognized|invalid"
+        timeout: 5
+        critical: true
+
+      - name: "不存在的MCP服务器"
+        command: "./target/release/aiw mcp get nonexistent-server 2>&1"
+        expected_output: "not found"
+        timeout: 5
+        critical: true
+
+      - name: "无效PID处理"
+        command: "./target/release/aiw pwait 999999"
+        expected_output: "No tasks found"
+        timeout: 5
+        critical: false
+
+# 测试配置
+configuration:
+  parallel_execution: false
+  continue_on_failure: true
+  generate_reports: true
+  report_format: "markdown"
+
+  # 测试环境
+  environment:
+    RUST_LOG: "info"
+    RUST_BACKTRACE: "1"
+
+  # 超时设置
+  timeouts:
+    default: 30
+    mcp_server: 60
+    task_operation: 15
+
+# 报告设置
+reporting:
+  output_directory: "test-results"
+  include_command_output: true
+  include_environment_info: true
+  generate_summary: true
+
+# 测试阶段
+phases:
+  quick:
+    description: "快速检查（关键功能）"
+    suites:
+      - basic_functionality
+      - mcp_configuration
+
+  comprehensive:
+    description: "全面测试（所有功能）"
+    suites:
+      - basic_functionality
+      - mcp_configuration
+      - process_tracking
+      - mcp_server_lifecycle
+      - error_handling
+
+  smoke:
+    description: "冒烟测试（基础验证）"
+    suites:
+      - basic_functionality
+      - error_handling

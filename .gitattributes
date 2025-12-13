@@ -1,0 +1,21 @@
+# 自动检测文本文件并进行规范化
+* text=auto
+
+# JavaScript 文件使用 LF 行尾符
+*.js text eol=lf
+
+# JSON 文件使用 LF 行尾符
+*.json text eol=lf
+
+# 图片文件为二进制
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+
+# 压缩文件为二进制
+*.gz binary
+*.zip binary
+*.tar binary
+*.tar.gz binary

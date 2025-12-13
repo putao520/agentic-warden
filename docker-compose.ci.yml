@@ -1,0 +1,129 @@
+version: '3.8'
+
+# CI环境配置 - 用于集成测试和E2E测试
+# 严格遵循SPEC CI容器化测试铁律
+
+services:
+  # Rust应用主服务
+  aiw:
+    build:
+      context: .
+      dockerfile: Dockerfile.ci
+    container_name: aiw-ci
+    volumes:
+      - ./test-results:/app/test-results
+      - ./tests:/app/tests
+    environment:
+      - RUST_LOG=debug
+      - AIW_ENV=ci
+      # LLM服务配置（用于智能路由）
+      - OLLAMA_HOST=ollama:11434
+      # 测试模式
+      - TEST_MODE=true
+    depends_on:
+      ollama:
+        condition: service_healthy
+    networks:
+      - aiw-ci-network
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "aiw", "--version"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Ollama服务（用于LLM路由决策）
+  ollama:
+    image: ollama/ollama:latest
+    container_name: aiw-ollama-ci
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - aiw-ci-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # MCP测试服务器（用于测试MCP协议）
+  mcp-test-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp-test
+    container_name: aiw-mcp-test-ci
+    command: ["python", "/app/mcp_test_env/server.py"]
+    environment:
+      - PYTHONUNBUFFERED=1
+    networks:
+      - aiw-ci-network
+    healthcheck:
+      test: ["CMD", "python", "/app/mcp_test_env/health_check.py"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 集成测试运行器
+  integration-tester:
+    build:
+      context: .
+      dockerfile: Dockerfile.ci
+    container_name: aiw-integration-tester
+    command: ["cargo", "test", "--test", "integration", "--", "--nocapture"]
+    volumes:
+      - ./test-results:/app/test-results
+    environment:
+      - RUST_LOG=info
+      - TEST_ENV=ci
+    depends_on:
+      aiw:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    networks:
+      - aiw-ci-network
+    profiles:
+      - testing
+
+  # E2E测试运行器
+  e2e-tester:
+    build:
+      context: .
+      dockerfile: Dockerfile.ci
+    container_name: aiw-e2e-tester
+    command: ["cargo", "test", "--test", "e2e", "--", "--nocapture"]
+    volumes:
+      - ./test-results:/app/test-results
+      - ./tests/e2e:/app/tests/e2e
+    environment:
+      - RUST_LOG=info
+      - TEST_ENV=ci
+      - AIW_ENDPOINT=http://aiw:8080
+      - OLLAMA_ENDPOINT=http://ollama:11434
+      - MCP_TEST_ENDPOINT=http://mcp-test-server:8000
+    depends_on:
+      aiw:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+      mcp-test-server:
+        condition: service_healthy
+    networks:
+      - aiw-ci-network
+    profiles:
+      - testing
+
+volumes:
+  ollama-data:
+    driver: local
+
+networks:
+  aiw-ci-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

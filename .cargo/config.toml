@@ -1,0 +1,57 @@
+# Cargo configuration for agentic-warden
+#
+# IMPORTANT: Tests must run single-threaded to avoid shared memory deadlocks.
+#
+# The SharedMemoryStorage uses cross-process mutexes that can deadlock when:
+# 1. Multiple test BINARIES run in parallel (cargo's default behavior)
+# 2. Multiple test THREADS run in parallel within a binary
+#
+# Use `cargo t` (alias below) or `cargo test -j1 -- --test-threads=1`
+
+[alias]
+# Run all tests safely with single-threaded execution
+t = "test -j1 -- --test-threads=1"
+# Run specific test file safely
+tt = "test -j1 --test"
+
+# =============================================================================
+# Static Linking Configuration
+# =============================================================================
+# For fully static binaries on Linux, use musl target.
+# GNU/glibc does NOT support full static linking (will cause proc-macro errors).
+#
+# Build commands:
+#   Linux static:   cargo build --release --target x86_64-unknown-linux-musl
+#   Windows static: cargo build --release --target x86_64-pc-windows-msvc
+#   Normal build:   cargo build --release
+
+# Linux musl: Fully static binary (zero external dependencies)
+[target.x86_64-unknown-linux-musl]
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-self-contained=yes"]
+
+[target.aarch64-unknown-linux-musl]
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-self-contained=yes"]
+
+# Windows MSVC: Static link CRT (no vcruntime dependency)
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+# Windows GNU: Static link CRT
+[target.x86_64-pc-windows-gnu]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+# =============================================================================
+# Default Target for Static Builds
+# =============================================================================
+# To build fully static binaries on Linux, use musl target explicitly:
+#   cargo build --release --target x86_64-unknown-linux-musl
+#
+# Prerequisites (Ubuntu/Debian):
+#   sudo apt-get install musl-tools musl-dev
+#
+# To make musl the default, uncomment the following:
+# [build]
+# target = "x86_64-unknown-linux-musl"
