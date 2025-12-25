@@ -26,7 +26,7 @@ AIW is an intelligent platform for managing AI CLI tools (Claude, Codex, Gemini)
 # Basic usage with provider management
 aiw claude "explain this code"                              # Use default provider
 aiw claude -p openrouter "explain this code"                 # Use OpenRouter provider
-aiw claude -p glm "解释这段代码"                              # Use custom GLM provider
+aiw claude -p glm "explain this code"                        # Use custom GLM provider
 
 # 🆕 Transparent Parameter Forwarding (v0.5.23+)
 aiw claude -p glm --model sonnet --debug api "explain this code"
@@ -44,7 +44,7 @@ aiw wait
 aiw provider
 ```
 
-### 5. Update (更新AIW和AI CLI工具)
+### 5. Update
 - **AIW Self-Update**: Update AIW itself to latest version from NPM
 - **AI CLI Tools Update**: Update all installed AI CLI tools (claude, codex, gemini)
 - **Combined Update**: Update both AIW and AI CLI tools in one command
@@ -227,7 +227,7 @@ AIW now supports transparent parameter forwarding, allowing you to use **all** A
 # Parameter parsing logic:
 aiw <ai_type> -p <provider> <cli_params...> <prompt>
 #           ^^^^^^^^  ^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^
-#           AIW处理     AIW处理        透明转发到AI CLI
+#           AIW args    AIW args       Forward to AI CLI
 ```
 
 ### Rules
