@@ -34,9 +34,12 @@ const BUILTIN_ROLES_ZH_CN: &[(&str, &str)] = &[
 ];
 
 // English (en) builtin roles
-// Note: Currently only common.md has English translation, others fallback to zh-CN
+// Note: Currently 4 roles have English translations, others fallback to zh-CN
 const BUILTIN_ROLES_EN: &[(&str, &str)] = &[
+    ("assistant-programmer", include_str!("builtin/en/assistant-programmer.md")),
     ("common", include_str!("builtin/en/common.md")),
+    ("deployment", include_str!("builtin/en/deployment.md")),
+    ("quality", include_str!("builtin/en/quality.md")),
     // Other roles will be added as translations are completed
     // For now, missing English roles will fallback to Chinese version
 ];
