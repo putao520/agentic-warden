@@ -203,13 +203,21 @@ fn print_full_detail(detail: &PluginDetail, marketplace: &str) -> MarketResult<(
         println!("\nMCP Servers:");
         for (name, server) in config.mcp_servers.iter() {
             println!("  {}:", name);
-            println!("    Command: {}", server.command);
-            println!("    Args: {}", server.args.join(", "));
-            if !server.env.is_empty() {
-                println!("    Environment Variables:");
-                for key in server.env.keys() {
-                    println!("      - {}", key);
+            if let Some(command) = server.get_command() {
+                println!("    Command: {}", command);
+                if let Some(args) = server.get_args() {
+                    println!("    Args: {}", args.join(", "));
                 }
+                if let Some(env) = server.get_env() {
+                    if !env.is_empty() {
+                        println!("    Environment Variables:");
+                        for key in env.keys() {
+                            println!("      - {}", key);
+                        }
+                    }
+                }
+            } else {
+                println!("    Type: HTTP/SSE (not yet supported by AIW)");
             }
         }
     } else {

@@ -141,9 +141,11 @@ fn normalize_mcp_env(
 ) -> MarketResult<McpServersFile> {
     let mut required = HashSet::new();
     for server in config.mcp_servers.values() {
-        for (key, value) in &server.env {
-            if is_placeholder(value) {
-                required.insert(key.clone());
+        if let Some(env) = server.get_env() {
+            for (key, value) in env {
+                if is_placeholder(value) {
+                    required.insert(key.clone());
+                }
             }
         }
     }
@@ -199,12 +201,13 @@ fn normalize_mcp_env(
     }
 
     for server in config.mcp_servers.values_mut() {
-        for (key, value) in server.env.iter_mut() {
-            if is_placeholder(value) {
-                if let Some(resolved_value) = resolved.get(key) {
-                    std::env::set_var(key, resolved_value);
+        if let Some(env) = server.get_env_mut() {
+            for (key, value) in env.iter() {
+                if is_placeholder(value) {
+                    if let Some(resolved_value) = resolved.get(key) {
+                        std::env::set_var(key, resolved_value);
+                    }
                 }
-                *value = format!("${{{}}}", key);
             }
         }
     }

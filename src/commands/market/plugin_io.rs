@@ -117,6 +117,23 @@ pub enum PluginSourceLocation {
 fn resolve_plugin_base(plugin_root: &Path, path: &str) -> PathBuf {
     let normalized = path.trim_start_matches("./");
     let first = normalized.split('/').next().unwrap_or_default();
+
+    // Check if path starts with known top-level directories
+    // These should be resolved relative to marketplace root
+    if first == "external_plugins" || first == "plugins" {
+        if let Some(parent) = plugin_root.parent() {
+            // Go up to marketplace root (parent of ./plugins or ./external_plugins)
+            if parent.file_name().and_then(|s| s.to_str()) == Some("plugins") {
+                // If we're at ./plugins, parent is marketplace root
+                if let Some(grandparent) = parent.parent() {
+                    return grandparent.to_path_buf();
+                }
+            }
+            return parent.to_path_buf();
+        }
+    }
+
+    // Original logic for checking if path is under plugin_root
     if let Some(root_name) = plugin_root.file_name().and_then(|s| s.to_str()) {
         if first == root_name {
             if let Some(parent) = plugin_root.parent() {
@@ -131,43 +148,50 @@ pub fn extract_mcp_config(
     manifest: &PluginManifest,
     plugin_root: &Path,
 ) -> MarketResult<Option<McpServersFile>> {
-    let Some(value) = &manifest.mcp_servers else {
-        return Ok(None);
-    };
-
-    if value.is_string() {
-        let path_value = value.as_str().unwrap_or_default();
-        let resolved = resolve_path_placeholder(plugin_root, path_value);
-        return load_mcp_config(&resolved).map(Some);
-    }
-
-    if value.is_object() {
-        if value.get("mcpServers").is_some() {
-            let file: McpServersFile = serde_json::from_value(value.clone()).map_err(|err| {
-                MarketError::with_source(
-                    MarketErrorCode::McpExtractionFailed,
-                    "Invalid mcpServers object",
-                    err.into(),
-                )
-            })?;
-            return Ok(Some(file));
+    // First check manifest.mcp_servers field if present
+    if let Some(value) = &manifest.mcp_servers {
+        if value.is_string() {
+            let path_value = value.as_str().unwrap_or_default();
+            let resolved = resolve_path_placeholder(plugin_root, path_value);
+            return load_mcp_config(&resolved).map(Some);
         }
 
-        let map: HashMap<String, crate::commands::market::plugin::McpServerConfig> =
-            serde_json::from_value(value.clone()).map_err(|err| {
-                MarketError::with_source(
-                    MarketErrorCode::McpExtractionFailed,
-                    "Invalid mcpServers map",
-                    err.into(),
-                )
-            })?;
-        return Ok(Some(McpServersFile { mcp_servers: map }));
+        if value.is_object() {
+            if value.get("mcpServers").is_some() {
+                let file: McpServersFile = serde_json::from_value(value.clone()).map_err(|err| {
+                    MarketError::with_source(
+                        MarketErrorCode::McpExtractionFailed,
+                        "Invalid mcpServers object",
+                        err.into(),
+                    )
+                })?;
+                return Ok(Some(file));
+            }
+
+            let map: HashMap<String, crate::commands::market::plugin::McpServerConfig> =
+                serde_json::from_value(value.clone()).map_err(|err| {
+                    MarketError::with_source(
+                        MarketErrorCode::McpExtractionFailed,
+                        "Invalid mcpServers map",
+                        err.into(),
+                    )
+                })?;
+            return Ok(Some(McpServersFile { mcp_servers: map }));
+        }
+
+        return Err(MarketError::new(
+            MarketErrorCode::McpExtractionFailed,
+            "Unsupported mcpServers format",
+        ));
     }
 
-    Err(MarketError::new(
-        MarketErrorCode::McpExtractionFailed,
-        "Unsupported mcpServers format",
-    ))
+    // Check for .mcp.json file in plugin directory
+    let mcp_json_path = plugin_root.join(".mcp.json");
+    if mcp_json_path.exists() {
+        return load_mcp_config(&mcp_json_path).map(Some);
+    }
+
+    Ok(None)
 }
 
 pub fn load_mcp_config(path: &Path) -> MarketResult<McpServersFile> {
@@ -178,14 +202,37 @@ pub fn load_mcp_config(path: &Path) -> MarketResult<McpServersFile> {
             err.into(),
         )
     })?;
-    let config: McpServersFile = serde_json::from_str(&contents).map_err(|err| {
-        MarketError::with_source(
+
+    // Try parsing with mcpServers wrapper first
+    if let Ok(config) = serde_json::from_str::<McpServersFile>(&contents) {
+        return Ok(config);
+    }
+
+    // Try parsing as plain HashMap (without mcpServers wrapper)
+    use crate::commands::market::plugin::McpServerConfig;
+    let server_map: HashMap<String, McpServerConfig> =
+        serde_json::from_str(&contents).map_err(|err| {
+            MarketError::with_source(
+                MarketErrorCode::McpExtractionFailed,
+                "Invalid MCP config format (expected stdio command/args or http/sse type/url)",
+                err.into(),
+            )
+        })?;
+
+    // Filter to only stdio transports (supported by AIW)
+    let stdio_map: HashMap<String, McpServerConfig> = server_map
+        .into_iter()
+        .filter(|(_, config)| config.is_stdio())
+        .collect();
+
+    if stdio_map.is_empty() {
+        return Err(MarketError::new(
             MarketErrorCode::McpExtractionFailed,
-            "Invalid MCP config format",
-            err.into(),
-        )
-    })?;
-    Ok(config)
+            "No stdio-based MCP servers found (only http/sse transports which are not yet supported)",
+        ));
+    }
+
+    Ok(McpServersFile { mcp_servers: stdio_map })
 }
 
 pub fn build_metadata(

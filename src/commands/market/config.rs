@@ -1,6 +1,6 @@
 //! JSON config management and legacy migration.
 
-use crate::commands::market::plugin::McpServerConfig;
+use crate::commands::market::plugin::{McpServerConfig, McpServerConfigWrite};
 use crate::commands::market::source::{
     default_marketplaces, MarketError, MarketErrorCode, MarketResult, MarketplaceSettingsEntry,
 };
@@ -32,10 +32,71 @@ pub struct InstalledPlugin {
     pub source: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+/// Internal format for MCP config (uses parsed McpServerConfig enum)
+#[derive(Debug, Clone, Default)]
 pub struct McpConfigFile {
-    #[serde(rename = "mcpServers")]
     pub mcp_servers: HashMap<String, McpServerConfig>,
+}
+
+/// Serializable format for mcp.json (stdio only)
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct McpConfigFileWrite {
+    #[serde(rename = "mcpServers")]
+    pub mcp_servers: HashMap<String, McpServerConfigWrite>,
+}
+
+impl From<&McpConfigFile> for McpConfigFileWrite {
+    fn from(file: &McpConfigFile) -> Self {
+        let mcp_servers = file
+            .mcp_servers
+            .iter()
+            .filter_map(|(name, config)| {
+                config.to_write_format().map(|write_cfg| (name.clone(), write_cfg))
+            })
+            .collect();
+
+        Self { mcp_servers }
+    }
+}
+
+impl Serialize for McpConfigFile {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let write_format: McpConfigFileWrite = self.into();
+        write_format.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for McpConfigFile {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Try to deserialize as the tagged enum format
+        let write_format = McpConfigFileWrite::deserialize(deserializer)?;
+
+        // Convert all configs to the parsed format
+        let mcp_servers = write_format
+            .mcp_servers
+            .into_iter()
+            .map(|(name, write_cfg)| {
+                let config = McpServerConfig::Stdio {
+                    command: write_cfg.command,
+                    args: write_cfg.args,
+                    env: if write_cfg.env.is_empty() {
+                        None
+                    } else {
+                        Some(write_cfg.env)
+                    },
+                };
+                (name, config)
+            })
+            .collect();
+
+        Ok(McpConfigFile { mcp_servers })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -126,10 +187,14 @@ impl ConfigStore {
         })?;
         let mut mcp_config = self.load_mcp()?;
         for (name, server) in legacy.mcp_servers {
-            mcp_config.mcp_servers.entry(name).or_insert(McpServerConfig {
+            mcp_config.mcp_servers.entry(name).or_insert(McpServerConfig::Stdio {
                 command: server.command,
                 args: server.args,
-                env: server.env,
+                env: if server.env.is_empty() {
+                    None
+                } else {
+                    Some(server.env)
+                },
             });
         }
         self.save_mcp(&mcp_config)?;
