@@ -1,6 +1,6 @@
 {
   "name": "@putao520/aiw",
-  "version": "0.5.14",
+  "version": "0.5.26",
   "description": "Universal AI CLI management platform with intelligent MCP routing, process tracking, and configuration synchronization",
   "keywords": [
     "ai",
@@ -23,12 +23,14 @@
   "license": "MIT",
   "author": "Putao520",
   "bin": {
-    "aiw": "./bin/aiw-linux-x64"
+    "aiw": "./index.js"
+  },
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js"
   },
   "files": [
-    "bin/aiw-linux-x64",
-    "bin/aiw-windows-x64.exe",
     "index.js",
+    "scripts/postinstall.js",
     "README.md"
   ],
   "engines": {
@@ -39,9 +41,7 @@
     "win32"
   ],
   "cpu": [
-    "x64",
-    "arm64",
-    "arm"
+    "x64"
   ],
   "bugs": {
     "url": "https://github.com/putao520/agentic-warden/issues"

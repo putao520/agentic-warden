@@ -3,39 +3,48 @@
 const { spawnSync } = require('child_process');
 const path = require('path');
 const os = require('os');
+const fs = require('fs');
 
-// 根据架构选择正确的二进制
 const arch = os.arch();
 const platform = os.platform();
 
+let binaryName;
 let binaryPath;
 
-if (platform === 'linux') {
-  switch (arch) {
-    case 'x64':
-      binaryPath = path.join(__dirname, 'bin', 'aiw-linux-x64');
-      break;
-    default:
-      console.error(`❌ Unsupported architecture: ${arch}`);
-      console.error('Supported: x64');
-      process.exit(1);
-  }
-} else if (platform === 'win32') {
-  switch (arch) {
-    case 'x64':
-      binaryPath = path.join(__dirname, 'bin', 'aiw-windows-x64.exe');
-      break;
-    default:
-      console.error(`❌ Unsupported architecture: ${arch}`);
-      console.error('Supported: x64');
-      process.exit(1);
-  }
+// Determine binary name based on platform
+if (platform === 'linux' && arch === 'x64') {
+  binaryName = 'aiw-linux-x64';
+} else if (platform === 'win32' && arch === 'x64') {
+  binaryName = 'aiw-windows-x64.exe';
 } else {
-  console.error(`❌ Unsupported platform: ${platform}`);
-  console.error('Supported: linux, win32');
-  console.error('\nAlternative options:');
-  console.error('1. Using Cargo: cargo install --git https://github.com/putao520/agentic-warden');
-  console.error('2. Download pre-built: https://github.com/putao520/agentic-warden/releases');
+  console.error(`Error: Unsupported platform: ${platform}-${arch}`);
+  console.error('');
+  console.error('Supported platforms:');
+  console.error('  - linux-x64');
+  console.error('  - win32-x64');
+  console.error('');
+  console.error('Alternative installation:');
+  console.error('  cargo install --git https://github.com/putao520/agentic-warden');
+  console.error('  https://github.com/putao520/agentic-warden/releases');
+  process.exit(1);
+}
+
+binaryPath = path.join(__dirname, 'bin', binaryName);
+
+// Check if binary exists
+if (!fs.existsSync(binaryPath)) {
+  console.error(`Error: Binary not found: ${binaryPath}`);
+  console.error('');
+  console.error('The postinstall script may have failed to download the binary.');
+  console.error('');
+  console.error('Try reinstalling:');
+  console.error('  npm uninstall -g @putao520/aiw && npm install -g @putao520/aiw');
+  console.error('');
+  console.error('Or run postinstall manually:');
+  console.error(`  node ${path.join(__dirname, 'scripts', 'postinstall.js')}`);
+  console.error('');
+  console.error('Alternative installation:');
+  console.error('  cargo install --git https://github.com/putao520/agentic-warden');
   process.exit(1);
 }
 
