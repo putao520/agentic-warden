@@ -37,11 +37,31 @@ impl AiCliCommand {
         }
     }
 
+    /// 获取用户首选语言
+    /// 检查环境变量 AIW_ROLE_LANGUAGE，未设置则默认为 "zh-CN"
+    fn get_preferred_language() -> String {
+        std::env::var("AIW_ROLE_LANGUAGE")
+            .ok()
+            .filter(|lang| lang == "en" || lang == "zh-CN")
+            .unwrap_or_else(|| {
+                // Fallback to system LANG variable
+                if let Ok(lang) = std::env::var("LANG") {
+                    if lang.starts_with("en") {
+                        return "en".to_string();
+                    }
+                }
+                "zh-CN".to_string()
+            })
+    }
+
     /// 应用角色到提示词
     fn apply_role(&self, prompt: &str) -> Result<String> {
         if let Some(role_name) = &self.role {
-            // 优先从内置角色加载
-            if let Ok(role) = get_builtin_role(role_name, "zh-CN") {
+            // 获取用户首选语言
+            let lang = Self::get_preferred_language();
+
+            // 优先从内置角色加载（支持语言选择）
+            if let Ok(role) = get_builtin_role(role_name, &lang) {
                 return Ok(format!("{}\n\n---\n\n{}", role.content, prompt));
             }
 
