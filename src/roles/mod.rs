@@ -11,6 +11,8 @@
 //! - Description: short summary shown in listings.
 //! - Content: full role prompt used by downstream tools.
 
+pub mod builtin;
+
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::fs;

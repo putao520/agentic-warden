@@ -1,45 +1,77 @@
-//! AI CLI 鍚姩鍛戒护澶勭悊閫昏緫
+//! AI CLI 启动命令处理逻辑
 //!
-//! 澶勭悊 codex銆乧laude銆乬emini 绛?AI CLI 鐨勫惎鍔ㄥ拰绠＄悊
+//! 处理 codex、claude、gemini 等 AI CLI 的启动和管理
 
 use crate::cli_type::{parse_cli_selector_strict, CliType};
 use crate::registry_factory::create_cli_registry;
+use crate::roles::{builtin::get_builtin_role, RoleManager};
 use crate::supervisor;
 use anyhow::{anyhow, Result};
 use std::ffi::OsString;
 use std::process::ExitCode;
 
-/// AI CLI 鍚姩鍙傛暟
+/// AI CLI 启动参数
 pub struct AiCliCommand {
     pub ai_types: Vec<CliType>,
+    pub role: Option<String>,
     pub provider: Option<String>,
     pub prompt: String,
     pub cli_args: Vec<String>,
 }
 
 impl AiCliCommand {
-    /// 鍒涘缓鏂扮殑 AI CLI 鍛戒护
+    /// 创建新的 AI CLI 命令
     pub fn new(
         ai_types: Vec<CliType>,
+        role: Option<String>,
         provider: Option<String>,
         prompt: String,
         cli_args: Vec<String>,
     ) -> Self {
         Self {
             ai_types,
+            role,
             provider,
             prompt,
             cli_args,
         }
     }
 
-    /// 鎵ц AI CLI 鍛戒护
+    /// 应用角色到提示词
+    fn apply_role(&self, prompt: &str) -> Result<String> {
+        if let Some(role_name) = &self.role {
+            // 优先从内置角色加载
+            if let Ok(role) = get_builtin_role(role_name, "zh-CN") {
+                return Ok(format!("{}\n\n---\n\n{}", role.content, prompt));
+            }
+
+            // 尝试从用户角色目录加载
+            if let Ok(manager) = RoleManager::new() {
+                if let Ok(role) = manager.get_role(role_name) {
+                    return Ok(format!("{}\n\n---\n\n{}", role.content, prompt));
+                }
+            }
+
+            return Err(anyhow!("Role '{}' not found. Use 'aiw roles list' to see available roles.", role_name));
+        }
+
+        Ok(prompt.to_string())
+    }
+
+    /// 执行 AI CLI 命令
     pub async fn execute(&self) -> Result<ExitCode> {
         let registry = create_cli_registry()?;
 
-        // 妫€鏌ユ槸鍚︽槸浜や簰妯″紡锛堟棤鎻愮ず璇嶏級
-        if self.prompt.is_empty() {
-            // 浜や簰妯″紡浠呮敮鎸佸崟涓?CLI
+        // 应用角色到提示词
+        let final_prompt = if !self.prompt.is_empty() {
+            self.apply_role(&self.prompt)?
+        } else {
+            self.prompt.clone()
+        };
+
+        // 检查是否是交互模式（无提示词）
+        if final_prompt.is_empty() {
+            // 交互模式只支持单个 CLI
             if self.ai_types.len() != 1 {
                 return Err(anyhow!(
                     "Interactive mode only supports single CLI. Please provide a task description for multiple CLI execution."
@@ -57,12 +89,12 @@ impl AiCliCommand {
                 .await?;
             Ok(ExitCode::from((exit_code & 0xFF) as u8))
         } else {
-            // 浠诲姟妯″紡
+            // 任务模式
             if self.ai_types.len() == 1 {
-                // 鍗曚釜 CLI 鎵ц
+                // 单个 CLI 执行
                 let cli_type = &self.ai_types[0];
                 let cli_args =
-                    cli_type.build_full_access_args_with_cli(&self.prompt, &self.cli_args);
+                    cli_type.build_full_access_args_with_cli(&final_prompt, &self.cli_args);
                 let os_args: Vec<OsString> = cli_args.into_iter().map(|s| s.into()).collect();
 
                 let exit_code =
@@ -70,14 +102,14 @@ impl AiCliCommand {
                         .await?;
                 Ok(ExitCode::from((exit_code & 0xFF) as u8))
             } else {
-                // 澶氫釜 CLI 鎵归噺鎵ц
+                // 多个 CLI 批量执行
                 println!(
                     "Starting tasks for CLI(s): {}",
                     self.ai_types
                         .iter()
                         .map(|t| t.display_name())
                         .collect::<Vec<_>>()
-                    .join(", ")
+                        .join(", ")
                 );
 
                 let cli_selector = crate::cli_type::CliSelector {
@@ -87,13 +119,13 @@ impl AiCliCommand {
                 let exit_codes = supervisor::execute_multiple_clis(
                     &registry,
                     &cli_selector,
-                    &self.prompt,
+                    &final_prompt,
                     self.provider.clone(),
                     &self.cli_args,
                 )
                 .await?;
 
-                // 杩斿洖绗竴涓け璐ョ殑 exit code锛屾垨鑰?0 濡傛灉鍏ㄩ儴鎴愬姛
+                // 返回第一个失败的 exit code，或者 0 如果全部成功
                 let final_exit_code = exit_codes
                     .iter()
                     .find(|&&code| code != 0)
@@ -106,7 +138,7 @@ impl AiCliCommand {
     }
 }
 
-/// 瑙ｆ瀽 AI 绫诲瀷瀛楃涓?
+/// 解析 AI 类型字符串
 pub fn parse_ai_types(input: &str) -> Result<Vec<CliType>> {
     let selector = parse_cli_selector_strict(input).map_err(|err| anyhow!(err.to_string()))?;
     Ok(selector.types)

@@ -97,6 +97,7 @@ async fn handle_external_ai_cli(args: &[String]) -> Result<ExitCode, String> {
 
     let ai_command = AiCliCommand::new(
         selector.types,
+        ai_args.role.clone(),
         ai_args.provider.clone(),
         ai_args.prompt_text(),
         ai_args.cli_args.clone(),
@@ -283,6 +284,7 @@ async fn handle_external_command(tokens: Vec<String>) -> Result<ExitCode, String
     let ai_types = selector.types.clone();
     let ai_command = AiCliCommand::new(
         ai_types,
+        ai_args.role.clone(),
         ai_args.provider.clone(),
         ai_args.prompt_text(),
         ai_args.cli_args.clone(),

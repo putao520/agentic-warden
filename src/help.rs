@@ -52,14 +52,21 @@ OPTIONS:
     --version, -V               Show version information
 
 EXAMPLES:
+    # AI CLI with role injection
+    aiw claude -r common "explain this code"
+    aiw claude -r debugger -p glm "debug this issue"
+    aiw codex -r security "review this code"
+
     # AI CLI with provider selection
     aiw claude "explain this code"
     aiw claude -p openrouter "explain this code"
     aiw codex -p glm "write tests"
 
+    # AI CLI with role + provider
+    aiw claude -r frontend -p glm "build a React component"
+
     # AI CLI with parameter forwarding
-    aiw claude -p glm --model sonnet --debug api "explain this"
-    aiw claude -p glm --print --output-format json "summarize"
+    aiw claude -r security -p glm --model sonnet --debug api "explain this"
 
     # Multiple AI agents
     aiw all "review this code"
@@ -77,6 +84,7 @@ EXAMPLES:
 For more detailed information about a specific command:
     aiw help <command>
     aiw help claude
+    aiw help roles
     aiw help mcp
 
 Project home: https://github.com/putao520/agentic-warden
@@ -115,13 +123,20 @@ fn print_ai_cli_help(agent: &str) -> io::Result<()> {
 {} AGENT
 
 USAGE:
-    aiw {} [-p PROVIDER] [CLI_OPTIONS] ["<TASK>"]
-    aiw {} [-p PROVIDER] [CLI_OPTIONS]
+    aiw {} [-r ROLE] [-p PROVIDER] [CLI_OPTIONS] ["<TASK>"]
+    aiw {} [-r ROLE] [-p PROVIDER] [CLI_OPTIONS]
 
 DESCRIPTION:
-    Run the {} AI agent with provider management and transparent parameter forwarding.
+    Run the {} AI agent with role injection, provider management, and transparent parameter forwarding.
 
     Agent selector can be: claude, codex, or gemini
+
+ROLE INJECTION:
+    -r, --role <ROLE>          Use predefined role (e.g., common, debugger, security)
+
+    Roles are prepended to your prompt to provide context and guidelines.
+    22 builtin roles available (run 'aiw roles list' to see all).
+    Custom roles can be placed in ~/.aiw/role/*.md
 
 PROVIDER SELECTION:
     -p, --provider <PROVIDER>    Use specific provider (e.g., openrouter, glm)
@@ -141,48 +156,88 @@ TRANSPARENT PARAMETER FORWARDING:
         --allowed-tools <list>   Restrict available tools
         --no-session-persistence Disable session persistence
 
-    Parameter order rule: -p/--provider must come BEFORE other CLI parameters
+    Parameter order rule: -r/--role must come BEFORE -p/--provider.
+    Both must come BEFORE other CLI parameters.
 
 INTERACTIVE MODE:
-    aiw {} [-p PROVIDER] [CLI_OPTIONS]
+    aiw {} [-r ROLE] [-p PROVIDER] [CLI_OPTIONS]
 
     Start {} in interactive mode (no task specified).
     Useful for extended conversations with the AI.
 
 TASK MODE:
-    aiw {} [-p PROVIDER] [CLI_OPTIONS] "your task here"
+    aiw {} [-r ROLE] [-p PROVIDER] [CLI_OPTIONS] "your task here"
 
     Run a single task and exit.
 
 EXAMPLES:
 
-    # Basic usage (default provider)
+    # Basic usage (default provider, no role)
     aiw {} "write a Rust function"
     aiw {} "explain this code"
+
+    # With role injection
+    aiw {} -r common "write a function following coding standards"
+    aiw {} -r debugger "help me fix this bug"
+    aiw {} -r security -p glm "review this code for vulnerabilities"
 
     # With provider selection
     aiw {} -p openrouter "write python code"
     aiw {} -p glm "write tests"
 
-    # With parameter forwarding
-    aiw {} -p glm --model sonnet --debug api "explain this"
-    aiw {} -p glm --print --output-format json "summarize file"
-    aiw {} -p glm --temperature 0.3 --max-tokens 500 "translate text"
+    # With role + provider
+    aiw {} -r frontend -p glm "build a React component"
+    aiw {} -r database -p openrouter "design a schema"
 
-    # Interactive mode with custom settings
-    aiw {} -p glm --model sonnet --debug api
+    # With parameter forwarding
+    aiw {} -r security -p glm --model sonnet --debug api "explain this"
+    aiw {} -r ml -p glm --print --output-format json "analyze this data"
+
+    # Interactive mode with role
+    aiw {} -r code-reviewer -p glm --model sonnet
 
     # Multi-agent selection
     aiw all "review this code"
     aiw "claude|gemini" "compare implementations"
 
+AVAILABLE ROLES:
+    common              General programming standards
+    debugger            Code debugging and analysis
+    security            Security review and best practices
+    frontend-standards  Frontend development standards
+    database-standards  Database development standards
+    testing-standards   Testing and quality assurance
+    deployment          Deployment and DevOps
+    devops              DevOps and CI/CD
+    quality             Code quality and review
+    blockchain          Blockchain development
+    ml                  Machine learning
+    embedded            Embedded systems
+    iot                 IoT development
+    mobile-android      Android development
+    mobile-ios          iOS development
+    game                Game development
+    game-unity          Unity game development
+    game-unreal         Unreal game development
+    graphics            Graphics programming
+    multimedia          Multimedia processing
+    big-data-standards  Big data processing
+    assistant-programmer Assistant programming specialist
+
 CONFIGURATION:
     Providers: ~/.aiw/providers.json
     MCP servers: ~/.aiw/mcp.json
+    Custom roles: ~/.aiw/role/*.md
 
-For more information on MCP integration:
-    aiw help mcp
+For more information:
+    aiw help roles    - Role management and usage
+    aiw help mcp      - MCP integration
+    aiw roles list    - List all available roles
 "#,
+        agent.to_uppercase(),
+        agent,
+        agent,
+        agent,
         agent.to_uppercase(),
         agent,
         agent,
@@ -210,14 +265,16 @@ fn print_all_agents_help() -> io::Result<()> {
 ALL AGENTS
 
 USAGE:
-    aiw all [-p PROVIDER] [CLI_OPTIONS] "<TASK>"
+    aiw all [-r ROLE] [-p PROVIDER] [CLI_OPTIONS] "<TASK>"
 
 DESCRIPTION:
     Send the same task to all available AI agents (claude, codex, gemini).
 
+    Role injection applies to all agents.
+
 EXAMPLES:
     aiw all "review this code and suggest improvements"
-    aiw all "explain this algorithm in detail"
+    aiw all -r common "explain this algorithm in detail"
     aiw all -p glm "write comprehensive documentation"
 
 Each agent will process the task independently and provide their
@@ -405,6 +462,11 @@ EXAMPLES:
         aiw codex -p glm "explain this function"
         aiw gemini "refactor this code"
 
+    Role Injection:
+        aiw claude -r common "write code following standards"
+        aiw claude -r debugger "debug this issue"
+        aiw codex -r security "review for vulnerabilities"
+
     Provider Management:
         aiw claude -p openrouter "write tests"
         aiw codex -p glm --temperature 0.7 "generate code"
@@ -543,42 +605,89 @@ SUBCOMMANDS:
 DESCRIPTION:
     Manage AI CLI role configurations.
 
-    Roles are markdown files stored in ~/.aiw/role/ that define
-    custom system prompts and behaviors for AI CLI tools.
+    AIW provides 22 builtin roles that define coding standards, best practices,
+    and specialized knowledge areas. These roles are embedded in the binary and
+    always available.
+
+    You can also create custom roles in ~/.aiw/role/ directory.
 
 EXAMPLES:
     aiw roles list
 
-ROLE FILES:
-    Location: ~/.aiw/role/*.md
-    Format: Description followed by delimiter (------------) then content
+BUILTIN ROLES:
+    common              General programming standards and best practices
+    debugger            Code debugging and error analysis
+    security            Security review and vulnerability assessment
+    frontend-standards  Frontend development guidelines
+    database-standards  Database development standards
+    testing-standards   Testing and quality assurance standards
+    deployment          Deployment strategies and DevOps
+    devops              DevOps and CI/CD pipelines
+    quality             Code quality standards and review
+    blockchain          Blockchain and cryptocurrency development
+    ml                  Machine learning engineering
+    embedded            Embedded systems programming
+    iot                 IoT development and edge computing
+    mobile-android      Android development
+    mobile-ios          iOS development
+    game                Game development fundamentals
+    game-unity          Unity game engine development
+    game-unreal         Unreal game engine development
+    graphics            Graphics and GPU programming
+    multimedia          Multimedia and signal processing
+    big-data-standards  Big data processing and analytics
+    assistant-programmer Assistant programming specialist
 
-    Example role file (~/.aiw/role/code-reviewer.md):
-        Expert code reviewer for security and performance
-        ------------
-        You are an expert code reviewer. Focus on:
-        - Security vulnerabilities
-        - Performance issues
-        - Code style and best practices
-        - Test coverage
+CUSTOM ROLES:
+    Location: ~/.aiw/role/*.md
+    Format: Markdown with first line as description
+
+    Example custom role (~/.aiw/role/my-specialist.md):
+        My Domain Expert
+        ---
+        You are an expert in this specific domain.
+        Focus on:
+        - Domain-specific patterns
+        - Best practices
+        - Common pitfalls
 
 ROLE INJECTION:
-    Roles can be injected when using AIW as an MCP server.
-    The 'launch_ai_cli_task' MCP tool accepts an optional 'role' parameter
-    that prepends the role content to the task prompt.
+    Use -r/--role parameter to inject roles into AI CLI sessions.
 
-    Example (via Claude Code MCP):
-        Call 'launch_ai_cli_task' with:
-        - ai_type: "claude"
-        - task: "review this PR"
-        - role: "code-reviewer"
+    Examples:
+        aiw claude -r common "write code following standards"
+        aiw claude -r debugger -p glm "help debug this issue"
+        aiw codex -r security "review for vulnerabilities"
 
-    The actual prompt sent to claude will be:
-        [role content from code-reviewer.md]
+    Role content is prepended to your prompt with a separator:
+        [role content]
 
         ---
 
-        review this PR
+        [your prompt]
+
+ROLE PRIORITY:
+    1. Builtin roles (embedded in binary, always available)
+    2. Custom roles (from ~/.aiw/role/, if exists)
+
+    If a role name exists in both, builtin takes precedence.
+
+ADVANCED USAGE:
+    # Use role with provider and custom parameters
+    aiw claude -r security -p glm --model sonnet "audit this code"
+
+    # Use role in interactive mode
+    aiw claude -r code-reviewer -p glm
+    # Then interact with the AI in the review context
+
+    # Use role with multi-agent
+    aiw all -r frontend "review the UI code"
+
+For role usage with AI CLI:
+    aiw help claude
+
+For role usage with MCP server:
+    aiw help mcp
 "#;
     print!("{}", help_text);
     io::stdout().flush()
@@ -610,32 +719,40 @@ QUICK START EXAMPLES:
    aiw codex "Generate Python data visualization code"
    aiw gemini "Explain microservices architecture"
 
-3. Provider selection:
+3. Role injection:
+   aiw claude -r common "Write code following standards"
+   aiw claude -r debugger "Help me debug this issue"
+   aiw codex -r security "Review for vulnerabilities"
+
+4. Provider selection:
    aiw claude -p openrouter "write code"
    aiw codex -p glm "explain this"
 
-4. Parameter forwarding:
+5. Parameter forwarding:
    aiw claude -p glm --model sonnet --debug api "explain this"
    aiw claude -p glm --print --output-format json "summarize"
 
-5. Multiple AI agents:
+6. Multiple AI agents:
    aiw all "Review this code"
    aiw "claude|gemini" "Compare these approaches"
 
-6. MCP management:
+7. MCP management:
    aiw mcp browse
    aiw mcp install @anthropic/filesystem
    aiw mcp list
 
-7. Task monitoring:
+8. Task monitoring:
    aiw wait
    aiw status
    aiw status --tui
 
-8. Dashboard:
+9. Dashboard:
    aiw
    aiw dashboard
    aiw provider
+
+10. List available roles:
+    aiw roles list
 
 For detailed help on any command:
     aiw help <command>

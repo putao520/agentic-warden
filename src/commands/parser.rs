@@ -5,9 +5,10 @@
 use clap::{Parser, Subcommand};
 use std::ffi::OsString;
 
-/// Separated CLI arguments with provider and forwarded params
+/// Separated CLI arguments with role, provider and forwarded params
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SeparatedArgs {
+    pub role: Option<String>,
     pub provider: Option<String>,
     pub cli_args: Vec<String>,
     pub prompt: Vec<String>,
@@ -243,6 +244,7 @@ impl Cli {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AiCliArgs {
     pub selector: String,
+    pub role: Option<String>,
     pub provider: Option<String>,
     pub cli_args: Vec<String>,
     pub prompt: Vec<String>,
@@ -263,6 +265,7 @@ pub fn parse_external_as_ai_cli(tokens: &[String]) -> Result<AiCliArgs, String> 
 
     let selector = tokens[0].clone();
     let SeparatedArgs {
+        role,
         provider,
         cli_args,
         prompt,
@@ -270,21 +273,25 @@ pub fn parse_external_as_ai_cli(tokens: &[String]) -> Result<AiCliArgs, String> 
 
     Ok(AiCliArgs {
         selector,
+        role,
         provider,
         cli_args,
         prompt,
     })
 }
 
-/// 分离 provider、CLI 参数和提示词，支持透明参数转发
+/// 分离 role、provider、CLI 参数和提示词，支持透明参数转发
 pub fn separate_provider_and_cli_args(tokens: &[String]) -> Result<SeparatedArgs, String> {
-    const PROVIDER_ORDER_ERR: &str = "Error: -p/--provider must be specified before other CLI parameters.\nUsage: agentic-warden claude -p provider --cli-param 'prompt'";
+    const ROLE_ORDER_ERR: &str = "Error: -r/--role must be specified before -p/--provider.\nUsage: aiw claude -r role -p provider 'prompt'";
+    const PROVIDER_ORDER_ERR: &str = "Error: -p/--provider must be specified before other CLI parameters.\nUsage: aiw claude -r role -p provider --cli-param 'prompt'";
 
+    let mut role: Option<String> = None;
     let mut provider: Option<String> = None;
     let mut cli_args: Vec<String> = Vec::new();
     let mut prompt: Vec<String> = Vec::new();
 
     let mut iter = tokens.iter().enumerate().peekable();
+    let mut saw_provider = false;
     let mut saw_cli_flag = false;
 
     while let Some((idx, token)) = iter.next() {
@@ -294,6 +301,21 @@ pub fn separate_provider_and_cli_args(tokens: &[String]) -> Result<SeparatedArgs
         }
 
         match token.as_str() {
+            "-r" | "--role" => {
+                if saw_provider || saw_cli_flag {
+                    return Err(ROLE_ORDER_ERR.to_string());
+                }
+                if role.is_some() {
+                    return Err("Error: role specified multiple times".to_string());
+                }
+                let (_, value) = iter
+                    .next()
+                    .ok_or_else(|| "Missing role name after -r/--role flag".to_string())?;
+                if value.starts_with('-') || value.is_empty() || value == "--" {
+                    return Err("Missing role name after -r/--role flag".to_string());
+                }
+                role = Some(value.clone());
+            }
             "-p" | "--provider" => {
                 if saw_cli_flag {
                     return Err(PROVIDER_ORDER_ERR.to_string());
@@ -301,6 +323,7 @@ pub fn separate_provider_and_cli_args(tokens: &[String]) -> Result<SeparatedArgs
                 if provider.is_some() {
                     return Err("Error: provider specified multiple times".to_string());
                 }
+                saw_provider = true;
                 let (_, value) = iter
                     .next()
                     .ok_or_else(|| "Missing provider name after -p/--provider flag".to_string())?;
@@ -344,6 +367,7 @@ pub fn separate_provider_and_cli_args(tokens: &[String]) -> Result<SeparatedArgs
     }
 
     Ok(SeparatedArgs {
+        role,
         provider,
         cli_args,
         prompt,
