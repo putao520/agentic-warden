@@ -2,8 +2,9 @@
 
 # build-in-docker.sh - 在 Docker 容器中编译 agentic-warden
 #
-# 用途: 跨平台编译 musl 静态二进制
-# 支持: Linux x86_64, macOS, Windows（任何平台都能编译）
+# 用途: 跨平台编译静态二进制
+# 支持目标: Linux (musl), Windows (MinGW)
+# 支持宿主: Linux, macOS, Windows（任何平台都能编译）
 
 set -e
 
@@ -66,19 +67,32 @@ build_target() {
         echo "  x86_64-unknown-linux-musl      - Linux x86_64 静态二进制"
         echo "  aarch64-unknown-linux-musl     - Linux ARM64 静态二进制"
         echo "  armv7-unknown-linux-musleabihf - Linux ARMv7 静态二进制"
+        echo "  x86_64-pc-windows-gnu          - Windows x86_64 二进制"
         exit 1
     fi
 
     print_info "编译目标: $target"
     print_info "代码目录: $PROJECT_DIR"
 
-    docker run --rm \
-        -v "$PROJECT_DIR:/workspace" \
-        -e "RUSTFLAGS=-C target-feature=+crt-static -C link-self-contained=yes" \
-        aiw-builder:latest \
-        cargo build --release --target "$target"
+    # Windows 目标不需要 musl 的 RUSTFLAGS
+    if [[ "$target" == *"windows"* ]]; then
+        docker run --rm \
+            -v "$PROJECT_DIR:/workspace" \
+            aiw-builder:latest \
+            cargo build --release --target "$target"
+    else
+        docker run --rm \
+            -v "$PROJECT_DIR:/workspace" \
+            -e "RUSTFLAGS=-C target-feature=+crt-static -C link-self-contained=yes" \
+            aiw-builder:latest \
+            cargo build --release --target "$target"
+    fi
 
+    # 确定输出文件路径（Windows 有 .exe 后缀）
     local output_path="target/$target/release/aiw"
+    if [[ "$target" == *"windows"* ]]; then
+        output_path="target/$target/release/aiw.exe"
+    fi
 
     if [ -f "$output_path" ]; then
         print_success "编译完成！"
@@ -95,11 +109,15 @@ build_target() {
         local size=$(du -h "$output_path" | cut -f1)
         echo "💾 文件大小: $size"
 
-        # 验证静态链接
-        if [[ "$file_info" == *"statically linked"* ]]; then
-            echo "🔒 状态: 完全静态链接 ✅"
+        # 验证静态链接（仅 Linux）
+        if [[ "$target" != *"windows"* ]]; then
+            if [[ "$file_info" == *"statically linked"* ]]; then
+                echo "🔒 状态: 完全静态链接 ✅"
+            else
+                echo "🔗 状态: 动态链接"
+            fi
         else
-            echo "🔗 状态: 动态链接"
+            echo "🪟 平台: Windows PE32+ 可执行文件"
         fi
     else
         print_error "编译失败，未找到二进制文件"
@@ -109,12 +127,13 @@ build_target() {
 
 # 编译所有目标
 build_all() {
-    print_info "编译所有 musl 目标..."
+    print_info "编译所有目标 (Linux + Windows)..."
 
     local targets=(
         "x86_64-unknown-linux-musl"
         "aarch64-unknown-linux-musl"
         "armv7-unknown-linux-musleabihf"
+        "x86_64-pc-windows-gnu"
     )
 
     for target in "${targets[@]}"; do
@@ -147,7 +166,9 @@ ${YELLOW}命令:${NC}
     x86_64-unknown-linux-musl               编译 Linux x86_64 静态二进制
     aarch64-unknown-linux-musl              编译 Linux ARM64 静态二进制
     armv7-unknown-linux-musleabihf          编译 Linux ARMv7 静态二进制
-    all                                     编译所有 musl 目标
+    x86_64-pc-windows-gnu                   编译 Windows x86_64 二进制
+    windows                                 编译 Windows x86_64 (简写)
+    all                                     编译所有目标 (Linux + Windows)
     shell                                   进入容器交互 shell
     clean                                   清理 Docker 缓存
     help                                    显示此帮助
@@ -159,7 +180,10 @@ ${YELLOW}示例:${NC}
     # 编译 Linux x86_64 静态二进制
     $0 x86_64-unknown-linux-musl
 
-    # 编译所有目标
+    # 编译 Windows x86_64 二进制
+    $0 windows
+
+    # 编译所有目标 (Linux + Windows)
     $0 all
 
     # 进入容器修改和调试
@@ -216,6 +240,11 @@ main() {
             check_docker
             [ ! -f "$PROJECT_DIR/Dockerfile.build" ] && build_image
             build_target "armv7-unknown-linux-musleabihf"
+            ;;
+        x86_64-pc-windows-gnu|windows)
+            check_docker
+            [ ! -f "$PROJECT_DIR/Dockerfile.build" ] && build_image
+            build_target "x86_64-pc-windows-gnu"
             ;;
         all)
             check_docker
