@@ -139,9 +139,8 @@ ROLE INJECTION:
     Custom roles can be placed in ~/.aiw/role/*.md
 
     Language is automatically detected from your system locale:
-    - English locales (en_*) use English role versions
-    - Other locales (zh-CN, zh_TW, etc.) use Chinese versions
-    - Missing English translations fallback to Chinese
+    - Chinese locales (zh_*) use Chinese role versions
+    - All other locales (en_*, ja_*, ko_*, etc.) use English versions
 
 PROVIDER SELECTION:
     -p, --provider <PROVIDER>    Use specific provider (e.g., openrouter, glm)

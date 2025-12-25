@@ -42,14 +42,14 @@ impl AiCliCommand {
     fn get_preferred_language() -> String {
         // Get system locale string
         if let Some(locale) = sys_locale::get_locale() {
-            // Check if locale starts with "en" (English)
-            if locale.starts_with("en") {
-                return "en".to_string();
+            // Check if locale starts with "zh" (Chinese)
+            // Only Chinese locales use Chinese, all others use English
+            if locale.starts_with("zh") {
+                return "zh-CN".to_string();
             }
-            // For all other locales (including zh-CN, zh_TW, ja, etc.), default to Chinese
-            // This provides Chinese for Chinese locales and fallback for others
         }
-        "zh-CN".to_string()
+        // Default to English for all non-Chinese locales (en_*, ja_*, ko_*, de_*, etc.)
+        "en".to_string()
     }
 
     /// 应用角色到提示词
