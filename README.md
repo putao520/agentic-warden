@@ -154,27 +154,27 @@ Browse and install plugins from Claude Code-compatible plugin marketplaces.
 aiw plugin browse
 
 # Search plugins
-aiw plugin search "filesystem"
-aiw plugin search "git" --market claude-code-official
+aiw plugin search "git"
+aiw plugin search "playwright" --market claude-code-official
 
 # View plugin details
-aiw plugin info github-mcp@claude-code-official
+aiw plugin info playwright@claude-code-official
 
 # Install plugin (interactive setup)
-aiw plugin install brave-search-mcp
+aiw plugin install playwright@claude-code-official
 
 # Install with environment variables
-aiw plugin install github-mcp --env GITHUB_TOKEN=xxx
+aiw plugin install serena@claude-code-official --env MY_VAR=value
 
 # List installed plugins
 aiw plugin list
 
 # Enable/disable plugins
-aiw plugin enable github-mcp
-aiw plugin disable filesystem-mcp
+aiw plugin enable playwright
+aiw plugin disable serena
 
 # Remove plugin
-aiw plugin remove github-mcp
+aiw plugin remove playwright
 ```
 
 **Marketplace Management:**
@@ -203,6 +203,19 @@ aiw plugin marketplace update
 - **JSON Configuration**: Modern JSON format (automatic YAML migration)
 - **Interactive Setup**: Configure environment variables during installation
 - **Hot-Reload**: Changes apply instantly without restart
+- **Transport Type Support**: Supports stdio transport (local executables). HTTP/SSE transports coming soon.
+
+**Environment Variables:**
+Plugins can use environment variable placeholders in their MCP configuration:
+```json
+{
+  "env": {
+    "API_KEY": "${API_KEY}",
+    "GITHUB_TOKEN": "${GITHUB_TOKEN}"
+  }
+}
+```
+During installation, AIW will prompt for values or you can provide them via `--env` flag. Placeholders are preserved in the config and expanded at runtime.
 
 ## 🔄 Transparent Parameter Forwarding (v0.5.23+)
 
