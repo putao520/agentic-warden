@@ -34,14 +34,29 @@ const BUILTIN_ROLES_ZH_CN: &[(&str, &str)] = &[
 ];
 
 // English (en) builtin roles
-// Note: Currently 4 roles have English translations, others fallback to zh-CN
 const BUILTIN_ROLES_EN: &[(&str, &str)] = &[
     ("assistant-programmer", include_str!("builtin/en/assistant-programmer.md")),
+    ("big-data-standards", include_str!("builtin/en/big-data-standards.md")),
+    ("blockchain", include_str!("builtin/en/blockchain.md")),
     ("common", include_str!("builtin/en/common.md")),
+    ("database-standards", include_str!("builtin/en/database-standards.md")),
+    ("debugger", include_str!("builtin/en/debugger.md")),
     ("deployment", include_str!("builtin/en/deployment.md")),
+    ("devops", include_str!("builtin/en/devops.md")),
+    ("embedded", include_str!("builtin/en/embedded.md")),
+    ("frontend-standards", include_str!("builtin/en/frontend-standards.md")),
+    ("game", include_str!("builtin/en/game.md")),
+    ("game-unity", include_str!("builtin/en/game-unity.md")),
+    ("game-unreal", include_str!("builtin/en/game-unreal.md")),
+    ("graphics", include_str!("builtin/en/graphics.md")),
+    ("iot", include_str!("builtin/en/iot.md")),
+    ("ml", include_str!("builtin/en/ml.md")),
+    ("mobile-android", include_str!("builtin/en/mobile-android.md")),
+    ("mobile-ios", include_str!("builtin/en/mobile-ios.md")),
+    ("multimedia", include_str!("builtin/en/multimedia.md")),
     ("quality", include_str!("builtin/en/quality.md")),
-    // Other roles will be added as translations are completed
-    // For now, missing English roles will fallback to Chinese version
+    ("security", include_str!("builtin/en/security.md")),
+    ("testing-standards", include_str!("builtin/en/testing-standards.md")),
 ];
 
 /// Get a builtin role by name and language
@@ -162,15 +177,16 @@ mod tests {
     }
 
     #[test]
-    fn test_english_fallback_to_chinese() {
-        // debugger is not yet translated to English, should fallback to Chinese
-        let role = get_builtin_role("debugger", "en").unwrap();
-        assert_eq!(role.name, "debugger");
-        // Should be Chinese content since English doesn't exist
-        assert!(role.content.contains("调试"));
-        // Path should indicate it's the Chinese fallback
-        let path_str = role.file_path.display().to_string();
-        assert!(path_str.starts_with("builtin:zh-CN:"));
+    fn test_all_english_roles_available() {
+        // All 22 roles now have English translations
+        let role_names = list_builtin_roles();
+        for role_name in role_names {
+            let role = get_builtin_role(&role_name, "en").unwrap();
+            assert_eq!(role.name, role_name);
+            // Verify it's the English version (path indicates "en")
+            let path_str = role.file_path.display().to_string();
+            assert!(path_str.starts_with("builtin:en:"), "{} should use English version", role_name);
+        }
     }
 
     #[test]
