@@ -162,7 +162,8 @@ pub async fn list_installed(show_disabled: bool) -> MarketResult<()> {
 
 pub async fn remove_plugin(plugin: String) -> MarketResult<()> {
     let installer = PluginInstaller::new()?;
-    let removed = installer.remove_plugin(&plugin)?;
+    let (plugin_name, _market) = split_plugin_key(&plugin);
+    let removed = installer.remove_plugin(plugin_name)?;
     println!("Removing {}...", plugin);
     for entry in removed {
         println!("✓ Removed {}", entry);
@@ -172,7 +173,8 @@ pub async fn remove_plugin(plugin: String) -> MarketResult<()> {
 
 pub async fn set_plugin_enabled(plugin: String, enabled: bool) -> MarketResult<()> {
     let installer = PluginInstaller::new()?;
-    installer.set_enabled(&plugin, enabled)?;
+    let (plugin_name, _market) = split_plugin_key(&plugin);
+    installer.set_enabled(plugin_name, enabled)?;
     if enabled {
         println!("✓ Enabled {}", plugin);
     } else {
