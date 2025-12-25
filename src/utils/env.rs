@@ -26,9 +26,9 @@ pub fn expand_env_var(value: &str) -> String {
     {
         // Windows environment variables are case-insensitive
         std::env::vars()
-            .find(|(k, _)| k.eq_ignore_case(var_name))
+            .find(|(k, _)| k.eq_ignore_ascii_case(var_name))
             .map(|(_, v)| v)
-            .unwrap_or_else(|_| value.to_string())
+            .unwrap_or_else(|| value.to_string())
     }
 
     #[cfg(not(windows))]
