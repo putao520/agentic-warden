@@ -138,6 +138,11 @@ ROLE INJECTION:
     22 builtin roles available (run 'aiw roles list' to see all).
     Custom roles can be placed in ~/.aiw/role/*.md
 
+    Language is automatically detected from your system locale:
+    - English locales (en_*) use English role versions
+    - Other locales (zh-CN, zh_TW, etc.) use Chinese versions
+    - Missing English translations fallback to Chinese
+
 PROVIDER SELECTION:
     -p, --provider <PROVIDER>    Use specific provider (e.g., openrouter, glm)
 
@@ -610,6 +615,16 @@ DESCRIPTION:
     always available.
 
     You can also create custom roles in ~/.aiw/role/ directory.
+
+LANGUAGE SUPPORT:
+    Roles are available in multiple languages. The system automatically detects
+    your locale and selects the appropriate language version:
+
+    - English locales (en_US, en_GB, etc.) → English role versions
+    - Chinese and other locales → Chinese role versions (default)
+
+    Currently, only the "common" role has an English translation. Other roles
+    will use Chinese as fallback. Additional translations will be added gradually.
 
 EXAMPLES:
     aiw roles list

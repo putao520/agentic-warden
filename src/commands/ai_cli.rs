@@ -38,20 +38,18 @@ impl AiCliCommand {
     }
 
     /// 获取用户首选语言
-    /// 检查环境变量 AIW_ROLE_LANGUAGE，未设置则默认为 "zh-CN"
+    /// 使用系统 locale 自动检测语言
     fn get_preferred_language() -> String {
-        std::env::var("AIW_ROLE_LANGUAGE")
-            .ok()
-            .filter(|lang| lang == "en" || lang == "zh-CN")
-            .unwrap_or_else(|| {
-                // Fallback to system LANG variable
-                if let Ok(lang) = std::env::var("LANG") {
-                    if lang.starts_with("en") {
-                        return "en".to_string();
-                    }
-                }
-                "zh-CN".to_string()
-            })
+        // Get system locale string
+        if let Some(locale) = sys_locale::get_locale() {
+            // Check if locale starts with "en" (English)
+            if locale.starts_with("en") {
+                return "en".to_string();
+            }
+            // For all other locales (including zh-CN, zh_TW, ja, etc.), default to Chinese
+            // This provides Chinese for Chinese locales and fallback for others
+        }
+        "zh-CN".to_string()
     }
 
     /// 应用角色到提示词

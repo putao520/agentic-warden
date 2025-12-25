@@ -141,6 +141,9 @@ colored = "3.0.0"
 prettytable-rs = "0.10.0"
 notify = { version = "8.2.0", features = ["serde"] }
 
+# System locale detection
+sys-locale = "0.3"
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 psutil = "3.2"
