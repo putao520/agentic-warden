@@ -3,6 +3,7 @@
 //! 提供各种工具函数和辅助功能
 
 pub mod config_paths;
+pub mod env;
 pub mod logger;
 pub mod version;
 

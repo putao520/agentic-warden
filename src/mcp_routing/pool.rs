@@ -1,4 +1,5 @@
 use crate::mcp_routing::config::{McpConfig, McpServerConfig};
+use crate::utils::env;
 use anyhow::{anyhow, Context, Result};
 use parking_lot::Mutex;
 use rmcp::{
@@ -246,18 +247,19 @@ impl McpServerHandle {
     }
 }
 
+/// Expand environment variable placeholder (${VAR_NAME})
+/// Windows: case-insensitive, Linux/macOS: case-sensitive
+fn expand_env_var(value: &str) -> String {
+    env::expand_env_var(value)
+}
+
 async fn spawn_client(config: &McpServerConfig) -> Result<RunningService<RoleClient, ClientInfo>> {
     let transport = TokioChildProcess::new(Command::new(&config.command).configure(|cmd| {
         cmd.args(&config.args);
         // Pass environment variables to the MCP server process
         for (key, value) in &config.env {
             // Expand environment variable placeholders (${VAR_NAME})
-            let expanded_value = if value.starts_with("${") && value.ends_with('}') {
-                let var_name = &value[2..value.len()-1];
-                std::env::var(var_name).unwrap_or_else(|_| value.clone())
-            } else {
-                value.clone()
-            };
+            let expanded_value = expand_env_var(value);
             cmd.env(key, expanded_value);
         }
         cmd.kill_on_drop(true);
