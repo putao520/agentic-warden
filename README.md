@@ -142,6 +142,68 @@ aiw mcp update
 - **Interactive Install**: Configure environment variables during installation
 - **Source Tracking**: Track where each server was installed from
 
+### 5. Plugin Marketplace ⭐
+Browse and install plugins from Claude Code-compatible plugin marketplaces.
+
+**Default Marketplaces:**
+- **Claude Code Official** (anthropics/claude-plugins-official)
+- **AIW Official** (putao520/aiw-plugins)
+
+```bash
+# Browse MCP plugins interactively
+aiw plugin browse
+
+# Search plugins
+aiw plugin search "filesystem"
+aiw plugin search "git" --market claude-code-official
+
+# View plugin details
+aiw plugin info github-mcp@claude-code-official
+
+# Install plugin (interactive setup)
+aiw plugin install brave-search-mcp
+
+# Install with environment variables
+aiw plugin install github-mcp --env GITHUB_TOKEN=xxx
+
+# List installed plugins
+aiw plugin list
+
+# Enable/disable plugins
+aiw plugin enable github-mcp
+aiw plugin disable filesystem-mcp
+
+# Remove plugin
+aiw plugin remove github-mcp
+```
+
+**Marketplace Management:**
+```bash
+# List marketplaces
+aiw plugin marketplace list
+
+# Add custom marketplace
+aiw plugin marketplace add my-market https://github.com/user/marketplace
+
+# Remove marketplace
+aiw plugin marketplace remove my-market
+
+# Update marketplace indexes
+aiw plugin marketplace update
+```
+
+**Configuration Files:**
+- `~/.aiw/settings.json`: Marketplace sources and plugin states
+- `~/.aiw/plugins.json`: Installed plugin records
+- `~/.aiw/mcp.json`: Extracted MCP server configurations
+
+**Features:**
+- **MCP-Only Filtering**: Only shows plugins with MCP servers (mcpServers field)
+- **Claude Code Compatible**: Uses same plugin format as Claude Code
+- **JSON Configuration**: Modern JSON format (automatic YAML migration)
+- **Interactive Setup**: Configure environment variables during installation
+- **Hot-Reload**: Changes apply instantly without restart
+
 ## 🔄 Transparent Parameter Forwarding (v0.5.23+)
 
 AIW now supports transparent parameter forwarding, allowing you to use **all** AI CLI features while maintaining provider management capabilities.

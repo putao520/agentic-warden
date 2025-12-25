@@ -188,7 +188,7 @@ predicates = "3.1"  # For command output assertions
 mockito = "1.2"
 
 [features]
-default = []
+default = ["binary"]  # Enable binary by default for CLI tool
 binary = []     # Enable binary build
 testing = []    # Testing features
 
