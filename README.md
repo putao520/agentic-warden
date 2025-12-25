@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.5.23--developing-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.5.25--developing-blue?style=flat-square)
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange?style=flat-square&logo=rust)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 ![MCP](https://img.shields.io/badge/MCP-Supported-purple?style=flat-square)
@@ -272,6 +272,6 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-**AIW** - Universal AI CLI Management Platform with MCP Routing v0.5.22
+**AIW** - Universal AI CLI Management Platform with MCP Routing v0.5.25
 
 For full documentation and source code, visit: [https://github.com/putao520/agentic-warden](https://github.com/putao520/agentic-warden)
