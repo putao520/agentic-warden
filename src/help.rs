@@ -551,19 +551,34 @@ EXAMPLES:
 
 ROLE FILES:
     Location: ~/.aiw/role/*.md
-    Format: Markdown with YAML frontmatter
+    Format: Description followed by delimiter (------------) then content
 
     Example role file (~/.aiw/role/code-reviewer.md):
-        ---
-        name: Code Reviewer
-        description: Expert code reviewer
-        ---
-
+        Expert code reviewer for security and performance
+        ------------
         You are an expert code reviewer. Focus on:
         - Security vulnerabilities
         - Performance issues
         - Code style and best practices
         - Test coverage
+
+ROLE INJECTION:
+    Roles can be injected when using AIW as an MCP server.
+    The 'launch_ai_cli_task' MCP tool accepts an optional 'role' parameter
+    that prepends the role content to the task prompt.
+
+    Example (via Claude Code MCP):
+        Call 'launch_ai_cli_task' with:
+        - ai_type: "claude"
+        - task: "review this PR"
+        - role: "code-reviewer"
+
+    The actual prompt sent to claude will be:
+        [role content from code-reviewer.md]
+
+        ---
+
+        review this PR
 "#;
     print!("{}", help_text);
     io::stdout().flush()
