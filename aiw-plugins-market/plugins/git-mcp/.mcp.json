@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "git": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-git",
+        "${AIW_GIT_REPO:-.}"
+      ]
+    }
+  },
+  "envVars": [
+    {
+      "name": "AIW_GIT_REPO",
+      "description": "Path to git repository (defaults to current directory if not set)",
+      "required": false
+    }
+  ]
+}

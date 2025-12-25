@@ -1,0 +1,14 @@
+{
+  "name": "filesystem-mcp",
+  "version": "1.0.0",
+  "description": "File system operations via MCP - read, write, and manage files",
+  "author": {
+    "name": "Putao520",
+    "email": "putao520@example.com"
+  },
+  "homepage": "https://github.com/modelcontextprotocol/servers",
+  "repository": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
+  "license": "MIT",
+  "keywords": ["filesystem", "mcp", "files", "io", "storage"],
+  "mcpServers": "./.mcp.json"
+}

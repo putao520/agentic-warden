@@ -3,14 +3,11 @@ mod help;
 
 use aiw::cli_type::parse_cli_selector_strict;
 use aiw::commands::ai_cli::AiCliCommand;
-use aiw::commands::{
-    parse_external_as_ai_cli,
-    parser::{McpAction, RolesAction},
-    Cli, Commands,
-};
+use aiw::commands::{parse_external_as_ai_cli, parser::{McpAction, RolesAction}, Cli, Commands};
 use aiw::error::ErrorCategory;
 use aiw::execute_enhanced_update;
 use aiw::mcp::AgenticWardenMcpServer;
+use aiw::commands::market::handle_plugin_action;
 use aiw::pwait_mode;
 use aiw::roles::RoleManager;
 use aiw::tui;
@@ -196,6 +193,7 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
             }
         }
         Commands::Mcp(action) => handle_mcp_action(action).await,
+        Commands::Plugin(action) => handle_plugin_action(action).await.map_err(|e| e.to_string()),
         Commands::Roles(action) => handle_roles_command(action).await,
         Commands::External(tokens) => handle_external_command(tokens).await,
     }

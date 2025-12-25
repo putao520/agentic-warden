@@ -1428,6 +1428,444 @@ impl ConfigWriter {
 
 ---
 
+### API-017: AIW插件市场系统
+
+**Version**: v0.7.0
+**Status**: 🟡 Design
+**Related**: REQ-017, ARCH-017, DATA-017
+
+#### Overview
+
+AIW插件市场提供Claude Code兼容的插件管理功能，支持多市场源、MCP插件过滤、JSON配置格式。
+
+#### Command: `aiw plugin marketplace add <repo-url>`
+
+**Description**: 添加插件市场源
+
+**Request Parameters**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| repo-url | string | 是 | GitHub仓库URL（https://github.com/owner/repo） |
+| --name | string | 否 | 市场源别名（默认从repo推断） |
+
+**Success Response**:
+```
+✓ Added marketplace: aiw-official
+  Source: https://github.com/putao520/aiw-plugins
+  Cache: ~/.aiw/cache/market/aiw-official
+  Plugins: 4 found
+```
+
+**Error Response**:
+| 错误码 | 说明 | 恢复动作 |
+|--------|------|----------|
+| MCP-MKT-001 | 仓库无效或无法访问 | 检查URL和网络 |
+| MCP-MKT-002 | marketplace.json格式错误 | 联系仓库维护者 |
+| MCP-MKT-003 | 市场源已存在 | 使用--name指定不同别名 |
+
+---
+
+#### Command: `aiw plugin marketplace list`
+
+**Description**: 列出所有已添加的市场源
+
+**Request Parameters**: 无
+
+**Success Response**:
+```
+Plugin Marketplaces:
+  ✓ claude-code-official (anthropics/claude-plugins-official)
+    - 45 plugins (32 MCP-compatible)
+    - Updated: 2025-12-26 10:30:00
+  ✓ aiw-official (putao520/aiw-plugins)
+    - 4 plugins (4 MCP-compatible)
+    - Updated: 2025-12-26 10:30:00
+```
+
+---
+
+#### Command: `aiw plugin marketplace remove <name>`
+
+**Description**: 移除市场源
+
+**Request Parameters**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| name | string | 是 | 市场源名称 |
+
+**Success Response**:
+```
+✓ Removed marketplace: aiw-official
+  Cache cleared: ~/.aiw/cache/market/aiw-official
+```
+
+**Error Response**:
+| 错误码 | 说明 |
+|--------|------|
+| MCP-MKT-004 | 市场源不存在 |
+
+---
+
+#### Command: `aiw plugin marketplace update [name]`
+
+**Description**: 更新市场源缓存（克隆/拉取最新版本）
+
+**Request Parameters**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| name | string | 否 | 市场源名称（省略则更新全部） |
+
+**Success Response**:
+```
+🔄 Updating marketplace caches...
+  ✓ claude-code-official: 45 plugins
+  ✓ aiw-official: 4 plugins
+
+Updated: 2025-12-26 10:35:00
+```
+
+---
+
+#### Command: `aiw plugin browse`
+
+**Description**: 浏览所有MCP插件（自动过滤非MCP插件）
+
+**Request Parameters**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| --market | string | 否 | 过滤指定市场源 |
+| --category | string | 否 | 过滤分类（development/system/utilities/integration） |
+| --tags | string | 否 | 过滤标签（逗号分隔） |
+
+**Success Response**:
+```
+MCP Plugins (36 total):
+
+claude-code-official/github-mcp
+  Description: GitHub operations via MCP
+  Version: 1.0.0
+  Category: development
+  Tags: mcp, github, git
+  MCP Servers: github (npx -y @modelcontextprotocol/server-github)
+
+claude-code-official/filesystem-mcp
+  Description: Local filesystem access
+  Version: 1.2.0
+  Category: system
+  Tags: mcp, filesystem, io
+  MCP Servers: filesystem (npx -y @modelcontextprotocol/server-filesystem /allowed/path)
+
+aiw-official/brave-search-mcp
+  Description: Web search via Brave Search API
+  Version: 1.0.0
+  Category: utilities
+  Tags: mcp, search, web
+  MCP Servers: brave-search (npx -y @modelcontextprotocol/server-brave-search)
+
+... (33 more)
+```
+
+**过滤规则**:
+- 只显示plugin.json中包含mcpServers字段的插件
+- 忽略仅包含commands/agents/skills/hooks的插件
+
+---
+
+#### Command: `aiw plugin search <query>`
+
+**Description**: 搜索MCP插件
+
+**Request Parameters**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| query | string | 是 | 搜索关键词（匹配name/description/tags） |
+| --market | string | 否 | 限制搜索范围 |
+
+**Success Response**:
+```
+Searching for "github"... (4 results found)
+
+claude-code-official/github-mcp
+  Description: GitHub operations via MCP
+  Tags: mcp, github, git
+
+aiw-official/git-mcp
+  Description: Git repository operations
+  Tags: mcp, git, repository
+```
+
+---
+
+#### Command: `aiw plugin info <plugin>@<market>`
+
+**Description**: 查看插件详细信息
+
+**Request Parameters**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| plugin | string | 是 | 插件名称 |
+| market | string | 是 | 市场源名称 |
+
+**Success Response**:
+```
+Plugin: github-mcp@claude-code-official
+Version: 1.0.0
+Author: Anthropic
+License: MIT
+Homepage: https://github.com/anthropics/claude-plugins-official
+
+Description: GitHub operations via MCP server
+
+MCP Servers:
+  github:
+    Command: npx
+    Args: -y, @modelcontextprotocol/server-github
+    Environment Variables:
+      - GITHUB_TOKEN (required)
+        Get your token at: https://github.com/settings/tokens
+
+Category: development
+Tags: mcp, github, git
+```
+
+**Error Response**:
+| 错误码 | 说明 |
+|--------|------|
+| MCP-MKT-005 | 插件不存在 |
+| MCP-MKT-006 | 插件不包含MCP服务器配置 |
+
+---
+
+#### Command: `aiw plugin install <plugin>@<market>`
+
+**Description**: 安装插件（提取MCP配置到~/.aiw/mcp.json）
+
+**Request Parameters**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| plugin | string | 是 | 插件名称 |
+| market | string | 是 | 市场源名称 |
+| --env | string | 否 | 环境变量（key=value，可多次使用） |
+
+**Success Response**:
+```
+Installing github-mcp from claude-code-official...
+
+📦 Plugin metadata loaded
+🔍 Detected 1 MCP server: github
+⚙️  Extracting MCP configuration...
+
+Environment Variables Required:
+  GITHUB_TOKEN: GitHub Personal Access Token
+  Get token at: https://github.com/settings/tokens
+
+Enter GITHUB_TOKEN (or press Enter to skip): ********
+
+✓ MCP configuration installed
+  Server: github
+  Config: ~/.aiw/mcp.json
+  Enabled: true
+
+✓ Plugin record added
+  Registry: ~/.aiw/plugins.json
+
+You can now use the GitHub MCP server in AIW!
+```
+
+**Error Response**:
+| 错误码 | 说明 |
+|--------|------|
+| MCP-MKT-007 | MCP配置提取失败 |
+| MCP-MKT-008 | 配置文件写入失败 |
+| MCP-MKT-009 | 环境变量配置无效 |
+
+**安装流程**:
+1. 从市场源读取plugin.json和.mcp.json
+2. 验证mcpServers字段存在
+3. 提取MCP服务器配置
+4. 交互式收集必需环境变量
+5. 写入~/.aiw/mcp.json（Claude Code兼容格式）
+6. 添加记录到~/.aiw/plugins.json
+7. 更新~/.aiw/settings.json的enabledPlugins
+
+---
+
+#### Command: `aiw plugin list`
+
+**Description**: 列出已安装的插件
+
+**Request Parameters**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| --show-disabled | flag | 否 | 显示已禁用的插件 |
+
+**Success Response**:
+```
+Installed Plugins (3):
+
+✓ github-mcp (claude-code-official)
+  Status: enabled
+  MCP Servers: github
+  Installed: 2025-12-26 10:40:00
+
+✓ filesystem-mcp (claude-code-official)
+  Status: enabled
+  MCP Servers: filesystem
+  Installed: 2025-12-26 10:42:00
+
+⊘ brave-search-mcp (aiw-official)
+  Status: disabled
+  MCP Servers: brave-search
+  Installed: 2025-12-26 10:45:00
+```
+
+---
+
+#### Command: `aiw plugin remove <plugin>`
+
+**Description**: 移除已安装的插件
+
+**Request Parameters**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| plugin | string | 是 | 插件名称 |
+
+**Success Response**:
+```
+Removing github-mcp...
+
+✓ Removed from plugins.json
+✓ Removed MCP config from mcp.json
+✓ Updated settings.json
+
+Plugin removed successfully
+```
+
+---
+
+#### Command: `aiw plugin enable <plugin>`
+
+**Description**: 启用插件（更新settings.json）
+
+**Request Parameters**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| plugin | string | 是 | 插件名称 |
+
+**Success Response**:
+```
+✓ Enabled github-mcp
+  MCP server is now active
+```
+
+---
+
+#### Command: `aiw plugin disable <plugin>`
+
+**Description**: 禁用插件（更新settings.json）
+
+**Request Parameters**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| plugin | string | 是 | 插件名称 |
+
+**Success Response**:
+```
+✓ Disabled github-mcp
+  MCP server is now inactive
+```
+
+---
+
+### Internal Rust API
+
+#### MarketSource Trait
+
+```rust
+#[async_trait]
+pub trait MarketSource: Send + Sync {
+    fn source_name(&self) -> &'static str;
+    fn source_url(&self) -> &str;
+    async fn fetch_plugins(&self) -> Result<Vec<PluginMetadata>>;
+    async fn get_plugin(&self, name: &str) -> Result<PluginDetail>;
+    async fn update_cache(&self) -> Result<()>;
+}
+```
+
+#### PluginMetadata Structure
+
+```rust
+pub struct PluginMetadata {
+    pub name: String,
+    pub source: String,  // Relative path to plugin root
+    pub version: String,
+    pub description: String,
+    pub author: AuthorInfo,
+    pub mcp_servers: Option<HashMap<String, McpServerConfig>>,
+    pub category: String,
+    pub tags: Vec<String>,
+}
+
+pub struct McpServerConfig {
+    pub command: String,
+    pub args: Vec<String>,
+    pub env: HashMap<String, String>,  // Supports ${VAR} placeholders
+}
+```
+
+#### PluginInstaller Interface
+
+```rust
+pub struct PluginInstaller {
+    config_path: PathBuf,  // ~/.aiw/mcp.json
+    plugins_path: PathBuf, // ~/.aiw/plugins.json
+    settings_path: PathBuf, // ~/.aiw/settings.json
+}
+
+impl PluginInstaller {
+    pub fn new() -> Result<Self>;
+    pub async fn install(&self, plugin: &PluginDetail, env_vars: HashMap<String, String>) -> Result<()>;
+    pub async fn remove(&self, plugin_name: &str) -> Result<()>;
+    pub async fn enable(&self, plugin_name: &str) -> Result<()>;
+    pub async fn disable(&self, plugin_name: &str) -> Result<()>;
+    pub fn list_installed(&self) -> Result<Vec<InstalledPlugin>>;
+}
+```
+
+#### McpFilter Trait
+
+```rust
+pub trait McpFilter {
+    fn is_mcp_plugin(plugin: &PluginMetadata) -> bool;
+    fn filter_mcp_plugins(plugins: Vec<PluginMetadata>) -> Vec<PluginMetadata>;
+}
+
+// Implementation: Only plugins with mcpServers field
+impl McpFilter for PluginMetadata {
+    fn is_mcp_plugin(plugin: &Self) -> bool {
+        plugin.mcp_servers.is_some() && !plugin.mcp_servers.as_ref().unwrap().is_empty()
+    }
+}
+```
+
+---
+
+### Error Code Definitions
+
+| Error Code | Description | Recovery Action |
+|------------|-------------|-----------------|
+| MCP-MKT-001 | Marketplace repository invalid or unreachable | Check URL and network |
+| MCP-MKT-002 | marketplace.json format error | Contact marketplace maintainer |
+| MCP-MKT-003 | Marketplace source already exists | Use --name for different alias |
+| MCP-MKT-004 | Marketplace source not found | Check marketplace list |
+| MCP-MKT-005 | Plugin not found | Verify plugin name and marketplace |
+| MCP-MKT-006 | Plugin does not contain MCP servers | Only MCP plugins are supported |
+| MCP-MKT-007 | MCP config extraction failed | Check .mcp.json format |
+| MCP-MKT-008 | Config file write error | Check file permissions |
+| MCP-MKT-009 | Environment variable configuration invalid | Use key=value format |
+
+---
+
 ## Deprecated APIs
 
 ### [v0] Historical API Changes (Not applicable for v0)

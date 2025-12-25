@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "${AIW_FS_PATH:-$HOME}"
+      ]
+    }
+  },
+  "envVars": [
+    {
+      "name": "AIW_FS_PATH",
+      "description": "Base path for filesystem operations (defaults to $HOME if not set)",
+      "required": false
+    }
+  ]
+}

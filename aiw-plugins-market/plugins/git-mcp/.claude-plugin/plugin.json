@@ -1,0 +1,14 @@
+{
+  "name": "git-mcp",
+  "version": "1.0.0",
+  "description": "Git operations via MCP - status, commit, branch management",
+  "author": {
+    "name": "Putao520",
+    "email": "putao520@example.com"
+  },
+  "homepage": "https://github.com/modelcontextprotocol/servers",
+  "repository": "https://github.com/modelcontextprotocol/servers/tree/main/src/git",
+  "license": "MIT",
+  "keywords": ["git", "mcp", "version-control", "development", "commit", "branch"],
+  "mcpServers": "./.mcp.json"
+}

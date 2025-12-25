@@ -142,6 +142,105 @@ pub enum McpAction {
     },
 }
 
+/// 插件市场管理动作
+#[derive(Subcommand, Debug, Clone)]
+pub enum MarketplaceAction {
+    /// 添加插件市场源
+    Add {
+        /// GitHub仓库/本地路径/远程URL
+        #[arg(value_name = "REPO_URL")]
+        repo_url: String,
+        /// 市场源别名
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// 列出市场源
+    List,
+    /// 移除市场源
+    Remove {
+        /// 市场源名称
+        name: String,
+    },
+    /// 更新市场源索引
+    Update {
+        /// 市场源名称（可选）
+        name: Option<String>,
+    },
+}
+
+/// 插件市场动作
+#[derive(Subcommand, Debug, Clone)]
+pub enum PluginAction {
+    /// 市场源管理
+    #[command(subcommand)]
+    Marketplace(MarketplaceAction),
+
+    /// 浏览MCP插件
+    Browse {
+        /// 指定市场源
+        #[arg(long)]
+        market: Option<String>,
+        /// 指定分类
+        #[arg(long)]
+        category: Option<String>,
+        /// 指定标签（逗号分隔）
+        #[arg(long)]
+        tags: Option<String>,
+    },
+
+    /// 搜索插件
+    Search {
+        /// 搜索关键词
+        query: String,
+        /// 指定市场源
+        #[arg(long)]
+        market: Option<String>,
+    },
+
+    /// 查看插件详情
+    Info {
+        /// 插件名称@市场
+        plugin: String,
+    },
+
+    /// 安装插件
+    Install {
+        /// 插件名称@市场
+        plugin: String,
+        /// 环境变量 (KEY=VALUE格式，可多次使用)
+        #[arg(long = "env")]
+        env_vars: Vec<String>,
+        /// 跳过环境变量配置
+        #[arg(long = "skip-env")]
+        skip_env: bool,
+    },
+
+    /// 列出已安装插件
+    List {
+        /// 显示已禁用插件
+        #[arg(long = "show-disabled")]
+        show_disabled: bool,
+    },
+
+    /// 移除插件
+    Remove {
+        /// 插件名称
+        plugin: String,
+    },
+
+    /// 启用插件
+    Enable {
+        /// 插件名称
+        plugin: String,
+    },
+
+    /// 禁用插件
+    Disable {
+        /// 插件名称
+        plugin: String,
+    },
+}
+
 /// AIW - AI CLI 工具的统一管理和进程监控平台
 #[derive(Parser, Debug, Clone)]
 #[command(
@@ -197,6 +296,10 @@ pub enum Commands {
     /// MCP服务器管理
     #[command(subcommand)]
     Mcp(McpAction),
+
+    /// 插件市场管理
+    #[command(subcommand)]
+    Plugin(PluginAction),
 
     /// AI CLI 角色管理
     #[command(subcommand)]

@@ -1,0 +1,14 @@
+{
+  "name": "brave-search-mcp",
+  "version": "1.0.0",
+  "description": "Web search integration via Brave Search API",
+  "author": {
+    "name": "Putao520",
+    "email": "putao520@example.com"
+  },
+  "homepage": "https://github.com/modelcontextprotocol/servers",
+  "repository": "https://github.com/modelcontextprotocol/servers/tree/main/src/brave-search",
+  "license": "MIT",
+  "keywords": ["search", "mcp", "web", "brave", "api"],
+  "mcpServers": "./.mcp.json"
+}

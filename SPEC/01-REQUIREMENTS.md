@@ -1443,7 +1443,159 @@ indicatif = "0.17"     # 进度条和spinner
 
 ---
 
+---
+
+### REQ-017: AIW插件市场系统
+**Status**: 🟡 Design
+**Priority**: P1 (High)
+**Version**: v0.7.0
+**Related**: ARCH-017, DATA-017, API-017
+
+**Description**:
+Agentic-Warden MUST provide a complete plugin marketplace system compatible with Claude Code plugin format,专注于MCP服务器的管理和安装。系统支持多个市场源（Claude Code官方市场、AIW官方市场），自动过滤只显示包含MCP服务器配置的插件，并从插件中提取MCP配置写入AIW的MCP配置文件。
+
+**Background**:
+AIW当前的MCP Registry CLI（REQ-016）从远程API搜索和安装MCP服务器。Claude Code提供了标准的插件市场格式（marketplace.json + plugin.json），包含了大量高质量的MCP服务器插件。本需求将MCP Registry CLI升级为完整的插件市场系统，复用Claude Code插件生态。
+
+**Acceptance Criteria**:
+
+#### 7.1 市场源管理
+- 支持添加GitHub仓库作为市场源
+- 支持添加本地路径作为市场源
+- 支持添加远程URL作为市场源
+- 默认包含Claude Code官方市场（anthropics/claude-plugins-official）
+- 默认包含AIW官方市场（putao520/aiw-plugins）
+- 列出所有已配置的市场源
+- 移除指定的市场源
+- 更新市场源索引（从GitHub拉取最新marketplace.json）
+
+#### 7.2 插件发现和过滤
+- 从所有市场源并行查询插件列表
+- 读取marketplace.json获取插件清单
+- 读取plugin.json获取插件元数据
+- **严格MCP-only过滤**：只显示plugin.json中包含mcpServers字段的插件
+- 忽略仅包含commands/agents/skills/hooks的插件
+- 支持按名称、描述、分类、标签搜索插件
+- 显示插件的完整元数据（名称、版本、描述、作者、类别）
+
+#### 7.3 插件浏览
+- 交互式TUI界面浏览所有可用插件
+- 显示插件列表（名称、描述、来源市场）
+- 支持模糊搜索插件
+- 支持按类别筛选插件
+- 支持按来源市场筛选插件
+- 显示插件详细信息（版本、作者、仓库、许可证）
+- 显示插件包含的MCP服务器列表
+
+#### 7.4 插件安装
+- 从指定市场源安装插件
+- 克隆/下载插件到本地缓存目录
+- 解析plugin.json和.mcp.json
+- **提取MCP配置**：从插件中提取mcpServers配置
+- **写入~/.aiw/mcp.json**：将提取的MCP配置合并到AIW的MCP配置文件
+- 交互式环境变量配置
+- 检测必需的环境变量
+- 提示用户输入环境变量值
+- 自动检测已存在的系统环境变量
+- 支持--env参数直接传入环境变量
+- 支持--skip-env跳过环境变量配置
+- 配置文件中使用${ENV_VAR}引用格式
+- 记录插件安装信息（名称、版本、市场源、安装时间）
+
+#### 7.5 插件管理
+- 列出所有已安装的插件
+- 显示插件详细信息
+- 启用/禁用已安装的插件
+- 卸载插件（从mcp.json移除对应的MCP服务器配置）
+- 更新插件（拉取最新版本并重新安装）
+
+#### 7.6 配置文件格式（JSON）
+- **~/.aiw/settings.json**：市场源和插件启用状态
+- **~/.aiw/plugins.json**：已安装插件记录
+- **~/.aiw/mcp.json**：MCP服务器配置（与Claude Code格式一致）
+
+**CLI Commands**:
+```bash
+# 市场源管理
+aiw plugin marketplace add <repo-url>
+aiw plugin marketplace add putao520/aiw-plugins
+aiw plugin marketplace list
+aiw plugin marketplace remove <marketplace-name>
+aiw plugin marketplace update
+
+# 插件浏览和搜索
+aiw plugin browse                       # 交互式TUI浏览
+aiw plugin search <query>               # 搜索插件
+aiw plugin search "git" --source aiw-official
+aiw plugin search "filesystem" --category system
+
+# 插件安装
+aiw plugin install <plugin-name>@<marketplace>
+aiw plugin install github-mcp@aiw-official
+aiw plugin install github-mcp@aiw-official --env GITHUB_TOKEN=$GITHUB_TOKEN
+aiw plugin install filesystem-mcp@claude-code-official --skip-env
+
+# 插件管理
+aiw plugin list                        # 列出已安装插件
+aiw plugin info <plugin-name>           # 查看插件详情
+aiw plugin remove <plugin-name>         # 卸载插件
+aiw plugin enable <plugin-name>         # 启用插件
+aiw plugin disable <plugin-name>        # 禁用插件
+```
+
+**Technical Constraints**:
+
+**新增依赖**:
+```toml
+dialoguer = "0.11"     # 交互式CLI提示（已有）
+indicatif = "0.17"     # 进度条和spinner（已有）
+git2 = "0.18"          # Git仓库克隆
+```
+
+**Claude Code插件格式兼容性**:
+- 支持读取.claude-plugin/marketplace.json
+- 支持读取.claude-plugin/plugin.json
+- 支持相对路径和GitHub仓库source格式
+- 支持环境变量${CLAUDE_PLUGIN_ROOT}引用
+- 严格验证plugin.json schema
+
+**MCP配置提取规则**:
+- 从plugin.json的mcpServers字段读取配置
+- 支持内联MCP配置（mcpServers为对象）
+- 支持外部MCP配置文件（mcpServers为文件路径字符串）
+- 支持${ENV_VAR}环境变量引用格式
+- 合并多个插件的MCP配置到同一个mcp.json
+- 冲突处理：后安装的插件覆盖同名MCP服务器（警告用户）
+
+**性能要求**:
+- 市场源更新: < 5s（克隆GitHub仓库）
+- 插件搜索: < 2s（扫描本地缓存）
+- 插件安装: < 10s（不含克隆时间）
+- 配置写入: < 100ms
+
+**安全要求**:
+- 私有仓库访问通过SSH认证
+- 环境变量值在日志中脱敏
+- 配置文件权限0600
+- 插件缓存目录权限0700
+- 验证plugin.json签名（未来）
+
+**数据迁移**:
+- 从mcp_servers.yaml迁移到mcp.json
+- 自动检测并迁移旧配置文件
+- 备份旧配置文件
+
+---
+
 <!--
+更新记录 (2025-12-26):
+- 添加REQ-017: AIW插件市场系统
+- 状态: v0.7.0新功能设计
+- 架构决策: 完全重构（统一Market系统）
+- 命名空间: 独立plugin命令
+- 配置格式: 迁移到JSON（与Claude Code一致）
+- 过滤策略: 严格MCP-only
+
 更新记录 (2025-12-09):
 - 添加REQ-016: MCP仓库CLI - 多源聚合搜索与安装
 - 状态: v0.6.0新功能规划

@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
+      "env": {
+        "GITHUB_TOKEN": "${GITHUB_TOKEN}"
+      }
+    }
+  },
+  "envVars": [
+    {
+      "name": "GITHUB_TOKEN",
+      "description": "GitHub personal access token with repo permissions",
+      "required": true,
+      "link": "https://github.com/settings/tokens"
+    }
+  ]
+}

@@ -1,0 +1,78 @@
+{
+  "name": "aiw-official",
+  "owner": {
+    "name": "Putao520",
+    "email": "putao520@example.com"
+  },
+  "metadata": {
+    "description": "Official AIW (Agentic Warden) Plugin Marketplace - MCP servers for AI CLI management",
+    "version": "1.0.0",
+    "pluginRoot": "./plugins"
+  },
+  "plugins": [
+    {
+      "name": "github-mcp",
+      "source": "./plugins/github-mcp",
+      "description": "GitHub integration via MCP - manage repositories, issues, and PRs",
+      "version": "1.0.0",
+      "author": {
+        "name": "Putao520"
+      },
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "repository": "https://github.com/modelcontextprotocol/servers/tree/main/src/github",
+      "license": "MIT",
+      "keywords": ["github", "mcp", "git", "development"],
+      "category": "development",
+      "tags": ["github", "git", "repository", "issues", "pull-requests"],
+      "strict": false
+    },
+    {
+      "name": "filesystem-mcp",
+      "source": "./plugins/filesystem-mcp",
+      "description": "File system operations via MCP - read, write, and manage files",
+      "version": "1.0.0",
+      "author": {
+        "name": "Putao520"
+      },
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "repository": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
+      "license": "MIT",
+      "keywords": ["filesystem", "mcp", "files", "io"],
+      "category": "system",
+      "tags": ["filesystem", "files", "io", "storage"],
+      "strict": false
+    },
+    {
+      "name": "brave-search-mcp",
+      "source": "./plugins/brave-search-mcp",
+      "description": "Web search integration via Brave Search API",
+      "version": "1.0.0",
+      "author": {
+        "name": "Putao520"
+      },
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "repository": "https://github.com/modelcontextprotocol/servers/tree/main/src/brave-search",
+      "license": "MIT",
+      "keywords": ["search", "mcp", "web", "brave"],
+      "category": "utilities",
+      "tags": ["search", "web", "api", "brave"],
+      "strict": false
+    },
+    {
+      "name": "git-mcp",
+      "source": "./plugins/git-mcp",
+      "description": "Git operations via MCP - status, commit, branch management",
+      "version": "1.0.0",
+      "author": {
+        "name": "Putao520"
+      },
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "repository": "https://github.com/modelcontextprotocol/servers/tree/main/src/git",
+      "license": "MIT",
+      "keywords": ["git", "mcp", "version-control", "development"],
+      "category": "development",
+      "tags": ["git", "version-control", "commit", "branch"],
+      "strict": false
+    }
+  ]
+}

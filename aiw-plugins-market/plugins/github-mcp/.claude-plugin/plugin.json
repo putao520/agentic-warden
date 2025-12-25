@@ -1,0 +1,14 @@
+{
+  "name": "github-mcp",
+  "version": "1.0.0",
+  "description": "GitHub integration via MCP - manage repositories, issues, and pull requests",
+  "author": {
+    "name": "Putao520",
+    "email": "putao520@example.com"
+  },
+  "homepage": "https://github.com/modelcontextprotocol/servers",
+  "repository": "https://github.com/modelcontextprotocol/servers/tree/main/src/github",
+  "license": "MIT",
+  "keywords": ["github", "mcp", "git", "development", "repository", "issues", "pull-requests"],
+  "mcpServers": "./.mcp.json"
+}

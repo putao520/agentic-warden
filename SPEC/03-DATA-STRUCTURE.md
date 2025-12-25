@@ -882,6 +882,173 @@ pub struct RoutingStatistics {
 
 ---
 
+### DATA-017: AIW插件市场数据结构
+**Version**: v0.7.0
+**Related Requirements**: REQ-017
+**Storage Location**:
+- `~/.aiw/settings.json`
+- `~/.aiw/plugins.json`
+- `~/.aiw/mcp.json`
+
+#### Plugin Marketplace Configuration
+
+##### Marketplace Metadata Schema
+
+marketplace.json格式（Claude Code标准）：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `name` | String | 是 | 市场名称（kebab-case） |
+| `owner.name` | String | 是 | 维护者名称 |
+| `owner.email` | String | 否 | 维护者邮箱 |
+| `metadata.description` | String | 否 | 市场描述 |
+| `metadata.version` | String | 否 | 市场版本 |
+| `metadata.pluginRoot` | String | 否 | 插件根目录（默认"./plugins"） |
+| `plugins` | Array | 是 | 插件列表 |
+
+##### Plugin Entry Schema
+
+marketplace.json中的插件条目：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `name` | String | 是 | 插件名称（kebab-case） |
+| `source` | String/Object | 是 | 插件来源（相对路径或GitHub配置） |
+| `description` | String | 否 | 插件描述 |
+| `version` | String | 否 | 插件版本 |
+| `author.name` | String | 否 | 作者名称 |
+| `author.email` | String | 否 | 作者邮箱 |
+| `category` | String | 否 | 插件分类 |
+| `tags` | Array<String> | 否 | 插件标签 |
+| `strict` | Boolean | 否 | 是否要求plugin.json（默认false） |
+
+#### Plugin Manifest Schema
+
+plugin.json格式（Claude Code标准）：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `name` | String | 是 | 插件名称 |
+| `version` | String | 是 | 插件版本（semver） |
+| `description` | String | 是 | 插件描述 |
+| `author` | Object | 是 | 作者信息 |
+| `author.name` | String | 是 | 作者名称 |
+| `author.email` | String | 否 | 作者邮箱 |
+| `homepage` | String | 否 | 主页URL |
+| `repository` | String | 否 | 仓库URL |
+| `license` | String | 否 | 许可证 |
+| `keywords` | Array<String> | 否 | 关键词 |
+| `mcpServers` | String/Object | 否 | MCP服务器配置或文件路径 |
+| `commands` | String/Array | 否 | 命令路径（AIW忽略） |
+| `agents` | String/Array | 否 | 代理路径（AIW忽略） |
+| `hooks` | String/Object | 否 | Hooks配置（AIW忽略） |
+
+#### MCP Servers Configuration Schema
+
+.mcp.json格式或内联配置：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `mcpServers` | Object | 是 | MCP服务器配置对象 |
+| `mcpServers.<server-name>` | Object | - | 服务器配置 |
+| `.command` | String | 是 | 启动命令 |
+| `.args` | Array<String> | 是 | 命令参数 |
+| `.env` | Object | 否 | 环境变量 |
+
+#### AIW Settings Schema
+
+~/.aiw/settings.json：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `extraKnownMarketplaces` | Object | 否 | 额外市场源配置 |
+| `enabledPlugins` | Object | 否 | 插件启用状态 |
+
+##### extraKnownMarketplaces结构
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `<marketplace-name>` | Object | - | 市场源配置 |
+| `.source` | Object | 是 | 来源配置 |
+| `.source.type` | String | 是 | 来源类型（github/local/remote） |
+| `.source.repo` | String | 条件 | GitHub仓库（type=github） |
+| `.source.url` | String | 条件 | 远程URL（type=remote） |
+| `.source.path` | String | 条件 | 本地路径（type=local） |
+| `.enabled` | Boolean | 否 | 是否启用（默认true） |
+
+#### Installed Plugins Schema
+
+~/.aiw/plugins.json：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `plugins` | Object | 是 | 已安装插件对象 |
+| `plugins.<plugin-id>` | Object | - | 插件安装信息 |
+| `.version` | String | 是 | 插件版本 |
+| `.installed_at` | Timestamp | 是 | 安装时间（ISO 8601） |
+| `.enabled` | Boolean | 是 | 是否启用 |
+| `.source` | String | 是 | 来源市场名称 |
+
+#### MCP Configuration Schema
+
+~/.aiw/mcp.json（与Claude Code一致）：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `mcpServers` | Object | 是 | MCP服务器配置 |
+| `mcpServers.<server-name>` | Object | - | 服务器配置 |
+| `.command` | String | 是 | 启动命令（npx/node/python等） |
+| `.args` | Array<String> | 是 | 命令参数列表 |
+| `.env` | Object | 否 | 环境变量映射 |
+
+#### Cache Data Schema
+
+##### 市场源缓存
+
+~/.aiw/cache/market/<marketplace-name>/：
+
+| 文件/目录 | 类型 | 说明 |
+|----------|------|------|
+| `.claude-plugin/marketplace.json` | File | 市场配置文件 |
+| `plugins/<plugin-name>/.claude-plugin/plugin.json` | File | 插件清单 |
+| `plugins/<plugin-name>/.mcp.json` | File | MCP配置 |
+| `.last_update` | File | 最后更新时间戳 |
+
+##### 插件缓存
+
+~/.aiw/cache/plugins/<plugin-name>@<marketplace>/：
+
+| 文件/目录 | 类型 | 说明 |
+|----------|------|------|
+| `.claude-plugin/` | Directory | 插件根目录 |
+| `.claude-plugin/plugin.json` | File | 插件清单 |
+| `.mcp.json` | File | MCP配置 |
+| `README.md` | File | 插件文档 |
+| `.installed_at` | File | 安装时间戳 |
+
+#### Environment Variable Schema
+
+插件环境变量定义（从.mcp.json或plugin.json解析）：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `name` | String | 是 | 环境变量名称 |
+| `description` | String | 否 | 变量说明 |
+| `required` | Boolean | 是 | 是否必需 |
+| `link` | String | 否 | 获取链接 |
+
+#### Migration Data Schema
+
+从旧配置迁移：
+
+| 源文件 | 目标文件 | 迁移策略 |
+|--------|---------|---------|
+| `~/.aiw/mcp_servers.yaml` | `~/.aiw/mcp.json` | YAML转JSON，备份原文件 |
+| `~/.aiw/registry.yaml` | `~/.aiw/settings.json` | 合并到settings.json |
+| 旧MCP配置格式 | 新MCP配置格式 | 转换command/args/env字段 |
+
+---
+
 ## Deprecated Data Structures
 
 ### Historical Data Models (Not applicable for v0)

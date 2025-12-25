@@ -1,4 +1,4 @@
-use aiw::commands::parser::{Cli, McpAction};
+use aiw::commands::parser::{Cli, MarketplaceAction, McpAction, PluginAction};
 use aiw::commands::{parse_external_as_ai_cli, Commands, RolesAction};
 
 fn parse(args: &[&str]) -> Commands {
@@ -154,5 +154,50 @@ fn parses_mcp_update_command() {
     match parse(&["mcp", "update"]) {
         Commands::Mcp(McpAction::Update) => {}
         other => panic!("expected mcp update command, got {other:?}"),
+    }
+}
+
+#[test]
+fn parses_plugin_marketplace_add_command() {
+    match parse(&["plugin", "marketplace", "add", "https://github.com/acme/market", "--name", "acme"]) {
+        Commands::Plugin(PluginAction::Marketplace(MarketplaceAction::Add { repo_url, name })) => {
+            assert_eq!(repo_url, "https://github.com/acme/market");
+            assert_eq!(name.as_deref(), Some("acme"));
+        }
+        other => panic!("expected plugin marketplace add command, got {other:?}"),
+    }
+}
+
+#[test]
+fn parses_plugin_search_command() {
+    match parse(&["plugin", "search", "filesystem", "--market", "aiw-official"]) {
+        Commands::Plugin(PluginAction::Search { query, market }) => {
+            assert_eq!(query, "filesystem");
+            assert_eq!(market.as_deref(), Some("aiw-official"));
+        }
+        other => panic!("expected plugin search command, got {other:?}"),
+    }
+}
+
+#[test]
+fn parses_plugin_install_command() {
+    match parse(&[
+        "plugin",
+        "install",
+        "github-mcp@aiw-official",
+        "--env",
+        "TOKEN=abc",
+        "--skip-env",
+    ]) {
+        Commands::Plugin(PluginAction::Install {
+            plugin,
+            env_vars,
+            skip_env,
+        }) => {
+            assert_eq!(plugin, "github-mcp@aiw-official");
+            assert_eq!(env_vars, vec!["TOKEN=abc".to_string()]);
+            assert!(skip_env);
+        }
+        other => panic!("expected plugin install command, got {other:?}"),
     }
 }

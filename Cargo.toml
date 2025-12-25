@@ -40,6 +40,8 @@ sha2 = "0.10"
 md5 = "0.7"
 tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "signal", "process", "sync", "time"] }
 urlencoding = "2.1"
+git2 = { version = "0.18", features = ["https", "ssh"] }
+serde_yaml = "0.9"
 
 # Google Official APIs
 yup-oauth2 = "8.3"

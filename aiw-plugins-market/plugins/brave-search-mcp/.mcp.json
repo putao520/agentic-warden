@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "brave-search": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-brave-search"
+      ],
+      "env": {
+        "BRAVE_API_KEY": "${BRAVE_API_KEY}"
+      }
+    }
+  },
+  "envVars": [
+    {
+      "name": "BRAVE_API_KEY",
+      "description": "Brave Search API key for web search access",
+      "required": true,
+      "link": "https://api.search.brave.com/app/keys"
+    }
+  ]
+}
