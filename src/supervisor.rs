@@ -14,7 +14,6 @@ use crate::task_record::TaskRecord;
 use crate::unified_registry::Registry;
 use chrono::{DateTime, Utc};
 use std::collections::VecDeque;
-use std::env;
 use std::ffi::OsString;
 use std::io;
 use std::path::PathBuf;
@@ -41,75 +40,16 @@ pub enum ProcessError {
     Other(String),
 }
 
-async fn get_cli_command(cli_type: &CliType) -> Result<String, ProcessError> {
-    // First try environment variable
-    if let Ok(custom_path) = env::var(cli_type.env_var_name()) {
-        if custom_path.is_empty() {
-            return Err(ProcessError::CliNotFound(format!(
-                "{} environment variable is empty",
-                cli_type.env_var_name()
-            )));
-        }
-        return Ok(custom_path);
+fn get_cli_command(cli_type: &CliType) -> Result<String, ProcessError> {
+    let cmd_name = cli_type.command_name();
+
+    match which::which(cmd_name) {
+        Ok(path) => Ok(path.to_string_lossy().to_string()),
+        Err(_) => Err(ProcessError::CliNotFound(format!(
+            "'{}' not found in PATH",
+            cmd_name
+        ))),
     }
-
-    // Fall back to default command name
-    let default_cmd = cli_type.command_name();
-
-    // On Windows, try to find the actual executable path
-    if cfg!(windows) {
-        let output = Command::new("where")
-            .arg(default_cmd)
-            .output()
-            .await
-            .map_err(|_| {
-                ProcessError::CliNotFound(format!(
-                    "Failed to check if '{}' exists in PATH",
-                    default_cmd
-                ))
-            })?;
-
-        if output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            // Prefer .cmd files on Windows, otherwise use first result
-            for line in stdout.lines() {
-                if line.ends_with(".cmd") || line.ends_with(".bat") || line.ends_with(".exe") {
-                    return Ok(line.to_string());
-                }
-            }
-            // Fallback to first line if no Windows executable found
-            if let Some(first_line) = stdout.lines().next() {
-                return Ok(first_line.to_string());
-            }
-        }
-
-        return Err(ProcessError::CliNotFound(format!(
-            "'{}' not found in PATH. Set {} environment variable or ensure it's in PATH",
-            default_cmd,
-            cli_type.env_var_name()
-        )));
-    } else {
-        let output = Command::new("which")
-            .arg(default_cmd)
-            .output()
-            .await
-            .map_err(|_| {
-                ProcessError::CliNotFound(format!(
-                    "Failed to check if '{}' exists in PATH",
-                    default_cmd
-                ))
-            })?;
-
-        if !output.status.success() {
-            return Err(ProcessError::CliNotFound(format!(
-                "'{}' not found in PATH. Set {} environment variable or ensure it's in PATH",
-                default_cmd,
-                cli_type.env_var_name()
-            )));
-        }
-    }
-
-    Ok(default_cmd.to_string())
 }
 
 /// Output handling strategy for CLI execution
@@ -233,7 +173,7 @@ async fn execute_cli_internal<S: TaskStorage>(
         );
     }
 
-    let cli_command = get_cli_command(cli_type).await?;
+    let cli_command = get_cli_command(cli_type)?;
 
     let mut command = Command::new(&cli_command);
     command.args(args);
@@ -876,7 +816,7 @@ pub async fn start_interactive_cli<S: TaskStorage>(
         );
     }
 
-    let cli_command = get_cli_command(cli_type).await?;
+    let cli_command = get_cli_command(cli_type)?;
 
     // Interactive mode: launch CLI with stdin/stdout/stderr inherited
     let mut command = Command::new(&cli_command);
