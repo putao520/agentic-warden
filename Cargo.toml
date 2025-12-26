@@ -6,7 +6,7 @@ repository = "https://github.com/putao520/agentic-warden"
 readme = "README.md"
 keywords = ["ai", "cli", "llm", "claude", "gemini"]
 categories = ["command-line-utilities", "development-tools"]
-version = "0.5.26"
+version = "0.5.27"
 edition = "2021"
 exclude = [
     "bin/*",
@@ -173,6 +173,7 @@ console = "0.15"
 indicatif = "0.17"
 # For safety and cleanup mechanisms
 uuid = { version = "1", features = ["v4"] }
+fake = "4.4.0" # Faker test data generation
 
 # Testing framework dependencies
 mockall = "0.12"  # For mocking external dependencies
