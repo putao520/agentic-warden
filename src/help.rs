@@ -6,8 +6,9 @@ use std::io::{self, Write};
 
 /// Print general help information
 pub fn print_general_help() -> io::Result<()> {
-    let help_text = r#"
-aiw v0.5.25 - Universal AI CLI Management Platform
+    let version = env!("CARGO_PKG_VERSION");
+    let help_text = format!(r#"
+aiw v{} - Universal AI CLI Management Platform
 
 USAGE:
     aiw [OPTIONS] <COMMAND>
@@ -46,6 +47,15 @@ MCP COMMANDS:
 
 ROLE COMMANDS:
     roles list                  List all available role configurations
+
+PLUGIN COMMANDS:
+    plugin list                 List installed plugins
+    plugin search <query>       Search plugins in marketplace
+    plugin install <name>       Install plugin from marketplace
+    plugin remove <name>        Remove installed plugin
+    plugin info <name>          Show plugin details
+    plugin update               Update all plugins
+    plugin browse               Interactive plugin browser
 
 OPTIONS:
     --help, -h                  Show this help message
@@ -88,7 +98,7 @@ For more detailed information about a specific command:
     aiw help mcp
 
 Project home: https://github.com/putao520/agentic-warden
-"#;
+"#, version);
     print!("{}", help_text);
     io::stdout().flush()
 }
@@ -107,6 +117,7 @@ pub fn print_command_help(command: &str) -> io::Result<()> {
         "update" => print_update_help(),
         "mcp" => print_mcp_help(),
         "roles" => print_roles_help(),
+        "plugin" | "plugins" | "market" => print_plugin_help(),
         "version" | "v" => print_version(),
         _ => {
             eprintln!("Unknown command: {}", command);
@@ -707,10 +718,66 @@ For role usage with MCP server:
     io::stdout().flush()
 }
 
+/// Print help for plugin command
+fn print_plugin_help() -> io::Result<()> {
+    let help_text = r#"
+PLUGIN COMMANDS
+
+USAGE:
+    aiw plugin <SUBCOMMAND> [ARGS]
+
+PLUGIN MANAGEMENT:
+    list                        List installed plugins
+    search <query>              Search plugins in marketplace
+    install <name>              Install plugin from marketplace
+    remove <name>               Remove installed plugin
+    info <name>                 Show plugin details
+    update                      Update all installed plugins
+    browse                      Interactive plugin browser (TUI)
+
+DESCRIPTION:
+    The plugin system extends AIW functionality through a marketplace
+    of community-contributed plugins. Plugins can provide additional
+    AI providers, tools, integrations, and workflows.
+
+EXAMPLES:
+
+    # Browse available plugins
+    aiw plugin browse
+
+    # Search for plugins
+    aiw plugin search "openai"
+    aiw plugin search "translator"
+
+    # Install a plugin
+    aiw plugin install openai-provider
+    aiw plugin install code-formatter
+
+    # List installed plugins
+    aiw plugin list
+
+    # Update all plugins
+    aiw plugin update
+
+    # Remove a plugin
+    aiw plugin remove openai-provider
+
+PLUGIN LOCATIONS:
+    Plugins are stored in: ~/.aiw/plugins/
+    Plugin registry cache: ~/.aiw/cache/plugins/
+
+For more information:
+    Visit https://github.com/putao520/agentic-warden
+"#;
+    print!("{}", help_text);
+    io::stdout().flush()
+}
+
 /// Print version information
 #[allow(dead_code)]
 pub fn print_version() -> io::Result<()> {
-    println!("aiw 0.5.25");
+    let version = env!("CARGO_PKG_VERSION");
+    println!("aiw {}", version);
     println!("Universal AI CLI Management Platform");
     println!();
     println!("Project home: https://github.com/putao520/agentic-warden");
