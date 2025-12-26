@@ -176,15 +176,19 @@ PROVIDER SELECTION:
 TRANSPARENT PARAMETER FORWARDING:
     All CLI parameters after the provider selection are forwarded directly to {}.
 
+    To see ALL available {} parameters:
+        aiw {} --help
+
     Common parameters:
         --model <name>           Select model (e.g., sonnet, opus, gpt-4)
         --debug <level>          Enable debugging (api, all)
         --print                  Print mode (skip interactive features)
         --output-format <fmt>    Output format (json, stream-json)
-        --temperature <n>        Sampling temperature
-        --max-tokens <n>         Maximum tokens to generate
+        --system-prompt <text>   Custom system prompt
         --allowed-tools <list>   Restrict available tools
-        --no-session-persistence Disable session persistence
+        --permission-mode <mode> Permission mode (default, plan, delegate)
+        --continue, -c           Continue most recent conversation
+        --max-tokens <n>         Maximum tokens to generate
 
     Parameter order rule: -r/--role must come BEFORE -p/--provider.
     Both must come BEFORE other CLI parameters.
@@ -269,6 +273,8 @@ For more information:
         agent,
         agent,
         agent.to_uppercase(),
+        agent,
+        agent,
         agent,
         agent,
         agent,
