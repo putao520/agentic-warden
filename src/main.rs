@@ -550,33 +550,37 @@ async fn handle_mcp_serve(transport: String, log_level: String) -> Result<ExitCo
 
 /// Handle role management commands
 async fn handle_roles_command(action: RolesAction) -> Result<ExitCode, String> {
+    use aiw::roles::builtin::list_builtin_roles;
+
     match action {
         RolesAction::List => {
+            // List builtin roles first
+            let builtin_roles = list_builtin_roles();
+            println!("Builtin roles ({}):", builtin_roles.len());
+            for role_name in &builtin_roles {
+                println!("  {}", role_name);
+            }
+
+            // List user roles
             let manager = RoleManager::new().map_err(|e| format!("Failed to load roles: {}", e))?;
-            let roles = manager
+            let user_roles = manager
                 .list_all_roles()
                 .map_err(|e| format!("Failed to list roles: {}", e))?;
 
-            if roles.is_empty() {
-                if let Some(dir) = dirs::home_dir().map(|home| home.join(".aiw").join("role")) {
+            if !user_roles.is_empty() {
+                println!("\nUser roles ({}):", user_roles.len());
+                for role in user_roles {
                     println!(
-                        "No roles found. Add markdown role files under {}",
-                        dir.display()
-                    );
-                } else {
-                    println!("No roles found. Add markdown role files under ~/.aiw/role");
-                }
-            } else {
-                println!("Available roles ({}):", roles.len());
-                for role in roles {
-                    println!(
-                        "- {}: {} ({})",
+                        "  {}: {} ({})",
                         role.name,
                         role.description,
                         role.file_path.display()
                     );
                 }
             }
+
+            println!("\nUsage: aiw claude -r <role_name> \"your task\"");
+            println!("Custom roles: ~/.aiw/role/*.md");
 
             Ok(ExitCode::from(0))
         }
