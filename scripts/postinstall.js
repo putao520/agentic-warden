@@ -122,9 +122,27 @@ function makeExecutable(filepath) {
 }
 
 /**
- * Check if binary already exists and is valid
+ * Get binary version by executing it
  */
-function binaryExists(filepath) {
+function getBinaryVersion(filepath) {
+  try {
+    const result = execSync(`"${filepath}" --version`, {
+      encoding: 'utf8',
+      timeout: 5000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    // Extract version number (e.g., "aiw 0.5.26" -> "0.5.26")
+    const match = result.match(/(\d+\.\d+\.\d+)/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check if binary already exists and matches current package version
+ */
+function binaryExists(filepath, expectedVersion) {
   try {
     if (!fs.existsSync(filepath)) {
       return false;
@@ -134,6 +152,15 @@ function binaryExists(filepath) {
     const stat = fs.statSync(filepath);
     if (stat.size < 1000) {
       // File too small, probably corrupted
+      return false;
+    }
+
+    // Check version match (critical for upgrades!)
+    const binaryVersion = getBinaryVersion(filepath);
+    if (binaryVersion && binaryVersion !== expectedVersion) {
+      console.log(`  Existing binary version: ${binaryVersion}`);
+      console.log(`  Expected version: ${expectedVersion}`);
+      console.log('  Version mismatch, will download new binary.');
       return false;
     }
 
@@ -174,16 +201,15 @@ async function install() {
   }
 
   const binaryPath = path.join(BIN_DIR, platformInfo.filename);
+  const version = getPackageVersion();
 
-  // Check if binary already exists
-  if (binaryExists(binaryPath)) {
-    console.log(`  Binary already exists: ${platformInfo.filename}`);
+  // Check if binary already exists AND matches expected version
+  if (binaryExists(binaryPath, version)) {
+    console.log(`  Binary already exists: ${platformInfo.filename} (v${version})`);
     console.log('  Skipping download.');
     console.log('');
     return;
   }
-
-  const version = getPackageVersion();
   const downloadUrl = `https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/v${version}/${platformInfo.asset}`;
 
   console.log(`  Platform: ${platformKey}`);
