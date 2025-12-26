@@ -160,6 +160,9 @@ docker-compose -f docker-compose.ci.yml run --rm e2e-tester
 | REQ-013 | 动态JS编排工具系统 (Phase 2: 动态工具注册和调用) | P0 | E2E | real_req013_phase2_dynamic_tool_e2e.rs | ✅ 已覆盖 |
 | REQ-014 | AI CLI角色系统 | P1 | 单元 | roles_tests.rs | ⚠️ 待验证 |
 | REQ-016 | MCP Registry CLI多源聚合 | P1 | 单元/E2E | mcp_registry.rs, real_mcp_registry_cli_e2e.rs | ✅ 已覆盖 |
+| REQ-018 | 快速跳过可选环保变量 | P2 | 集成/单元 | browse.rs (单元25), mcp_browse_018_skip_optional.rs, mcp_browse_complete_workflow.rs | ✅ 已覆盖 |
+| REQ-019 | 查看已安装MCP服务器列表 | P2 | 集成/E2E | installed_mcp.rs (单元0), mcp_browse_019_installed_mcps.rs, mcp_browse_complete_workflow.rs | ✅ 已覆盖 |
+| REQ-020 | 编辑已安装MCP环保变量 | P2 | 集成/E2E | installed_mcp.rs (单元0), mcp_browse_020_edit_env_vars.rs, mcp_browse_complete_workflow.rs | ✅ 已覆盖 |
 
 **覆盖率状态说明**:
 - ✅ 已覆盖: 测试文件存在且通过了验证
@@ -167,7 +170,44 @@ docker-compose -f docker-compose.ci.yml run --rm e2e-tester
 - ❌ 未覆盖: 测试文件缺失
 - 🔧 需要修复: 功能变更后测试需要更新
 
-### 3.2 模块1: AI CLI管理系统测试覆盖
+### 3.2 模块0: MCP Browse TUI功能测试覆盖（NEW - REQ-018/019/020）
+
+**功能描述**: MCP Registry浏览、环保变量输入、快速跳过、已安装MCP管理
+
+```
+功能组件              | REQ-ID | 测试类型 | 测试文件                      | 状态
+---------------------|--------|----------|-------------------------------|--------
+环保变量输入框       | 018    | 单元     | browse.rs (25 tests)          | ✅ 已覆盖
+快速跳过可选变量     | 018    | 集成     | mcp_browse_018_skip_optional  | ✅ 已覆盖
+已安装MCP列表查看    | 019    | 集成/E2E | mcp_browse_019_installed_mcps | ✅ 已覆盖
+已安装MCP编辑环保变量| 020    | 集成/E2E | mcp_browse_020_edit_env_vars  | ✅ 已覆盖
+MCP Browser完整流程  | 018-020| E2E      | mcp_browse_complete_workflow  | ✅ 已覆盖
+```
+
+**当前单元测试**（共25个，全部通过✅）:
+- `test_env_input_skip_all_optional` - REQ-018 快速跳过功能单元测试
+- `test_env_input_next` - 变量导航测试
+- `test_env_input_input_char` - 字符输入测试
+- 其他EnvInputState功能测试
+
+**已补充的集成/E2E测试**:
+- [x] `tests/integration/mcp_browse_018_skip_optional.rs` - 快速跳过在UI中的应用
+- [x] `tests/integration/mcp_browse_019_installed_mcps.rs` - InstalledMcpScreen导航和搜索功能
+- [x] `tests/integration/mcp_browse_020_edit_env_vars.rs` - 编辑流程和持久化验证
+- [x] `tests/e2e/agentic-warden/mcp_browse_complete_workflow.rs` - 完整用户旅程
+
+**外部依赖**:
+- ~/.aiw/mcp.json 配置文件（McpConfigManager加载）
+- 终端UI事件（crossterm KeyEvent模拟）
+- 列表状态管理（ListState验证）
+
+**关键测试场景**:
+1. **REQ-018快速跳过**: 环保输入时按'a'/'A'键跳过所有剩余可选变量
+2. **REQ-019列表操作**: 加载MCPs → 搜索 → 过滤状态 → 查看详情 → 返回列表
+3. **REQ-020编辑操作**: 选择MCP → 进入编辑模式 → 预加载值 → 修改 → 保存到mcp.json
+4. **完整工作流**: Browse → 按'i'进入InstalledMcpScreen → 编辑 → 返回Browse
+
+### 3.3 模块1: AI CLI管理系统测试覆盖
 
 ```
 功能组件              | REQ-ID | 测试类型 | 测试文件               | 状态
@@ -184,7 +224,7 @@ Wait模式             | 005    | E2E      | pwait_command          | ⚠️
 - [ ] `tests/integration/sync_integration.rs` - Google Drive同步集成测试
 - [ ] `tests/e2e/agentic-warden/google_drive_sync_e2e.rs` - Google Drive同步E2E测试
 
-### 3.3 模块2: Google Drive同步系统测试覆盖
+### 3.4 模块2: Google Drive同步系统测试覆盖
 
 **注意**: Google Drive同步功能在v6.0.0中恢复，相关测试需要重建。
 
@@ -198,7 +238,7 @@ Wait模式             | 005    | E2E      | pwait_command          | ⚠️
 
 **紧急**: Google Drive同步功能恢复后，测试尚未重建，需要在下一个版本(v6.1.0)中补充。
 
-### 3.4 模块3: MCP代理路由系统测试覆盖
+### 3.5 模块3: MCP代理路由系统测试覆盖
 
 ```
 功能组件              | REQ-ID | 测试类型 | 测试文件                          | 状态
@@ -218,7 +258,7 @@ JS工具执行           | 013-P2 | E2E      | mcp_js_tool_e2e_tests            
   - 测试覆盖：基础动态工具流程、JS编排工具、LRU缓存驱逐、工具复用、Query vs Dynamic模式对比
 - REQ-012的智能路由功能已移除会话历史依赖，相关测试需要验证是否仍然能通过。
 
-### 3.5 已删除模块测试
+### 3.6 已删除模块测试
 
 **CC会话管理系统** (REQ-010) - 保持删除状态，相关测试已删除：
 
@@ -448,7 +488,7 @@ REQ-012移除会话历史依赖后，需要验证测试完整性。
 
 | 日期 | 版本 | 作者 | 变更内容 |
 |------|------|------|----------|
+| 2025-12-26 | v6.1.0 | Claude | 补充 REQ-018/019/020 MCP Browse TUI测试策略、单元测试结果、集成/E2E测试缺口分析 |
 | 2025-12-09 | v6.0.3 | Claude | 补充 REQ-016 MCP Registry CLI E2E测试 |
 | 2025-11-27 | v6.0.2 | Claude | 补充 REQ-013 Phase 1 真实环境E2E测试 |
 | 2025-11-26 | v6.0.0 | Claude | 初始版本 - 根据v6.0.0代码库状态创建 |
-

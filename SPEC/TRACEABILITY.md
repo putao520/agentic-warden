@@ -242,6 +242,53 @@ This matrix provides complete traceability from:
 
 ---
 
+### REQ-018: MCP Browse 环境变量快速跳过
+
+| Layer | ID | Component | Status | Implementation Files |
+|-------|----|-----------|---------|----------------------|
+| **Requirement** | REQ-018 | MCP Browse 环境变量快速跳过 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-018 |
+| **Architecture** | ARCH-018 | EnvInputState 快速跳过扩展 | 🟢 Done | SPEC/02-ARCHITECTURE.md#ARCH-018 |
+| **Implementation** | - | EnvInputState + Browse事件处理 | 🟢 Done | `src/commands/mcp/registry/browse.rs` |
+| **Tests** | - | MCP Browse Skip Optional Tests | 🟢 Done | `tests/integration/mcp_browse_018_skip_optional.rs`, `tests/e2e/agentic-warden/mcp_browse_complete_workflow.rs` |
+
+**Key Insights**:
+- 快速跳过仅在可选变量场景触发，避免破坏必填输入
+- 提示文案与输入逻辑复用EnvInputState，保持交互一致
+
+---
+
+### REQ-019: MCP Browse 已安装MCP服务器查看
+
+| Layer | ID | Component | Status | Implementation Files |
+|-------|----|-----------|---------|----------------------|
+| **Requirement** | REQ-019 | 已安装MCP服务器查看 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-019 |
+| **Architecture** | ARCH-019 | InstalledMcpScreen 列表与导航 | 🟢 Done | SPEC/02-ARCHITECTURE.md#ARCH-019 |
+| **Data** | DATA-019 | Installed MCP 列表数据结构 | 🟢 Done | SPEC/03-DATA-STRUCTURE.md#DATA-019 |
+| **Implementation** | - | Installed MCP Screen | 🟢 Done | `src/tui/screens/installed_mcp.rs` |
+| **Tests** | - | Installed MCP List Tests | 🟢 Done | `tests/integration/mcp_browse_019_installed_mcps.rs`, `tests/e2e/agentic-warden/mcp_browse_complete_workflow.rs` |
+
+**Key Insights**:
+- 列表加载复用McpConfigManager，按名称排序以保证可预测导航
+- 搜索与过滤在同一过滤流程中完成，保持UI状态一致性
+
+---
+
+### REQ-020: MCP Browse 已安装MCP环境变量编辑
+
+| Layer | ID | Component | Status | Implementation Files |
+|-------|----|-----------|---------|----------------------|
+| **Requirement** | REQ-020 | 已安装MCP环境变量编辑 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-020 |
+| **Architecture** | ARCH-020 | EditEnvState 编辑流程 | 🟢 Done | SPEC/02-ARCHITECTURE.md#ARCH-020 |
+| **Data** | DATA-020 | MCP环境变量编辑状态结构 | 🟢 Done | SPEC/03-DATA-STRUCTURE.md#DATA-020 |
+| **Implementation** | - | Installed MCP Edit Flow | 🟢 Done | `src/tui/screens/installed_mcp.rs` |
+| **Tests** | - | MCP Edit Env Tests | 🟢 Done | `tests/integration/mcp_browse_020_edit_env_vars.rs`, `tests/e2e/agentic-warden/mcp_browse_complete_workflow.rs` |
+
+**Key Insights**:
+- 预加载原值并跟踪modified状态，确保取消编辑不污染配置
+- 保存路径通过McpConfigManager更新并记录变更日志
+
+---
+
 ## Cross-Cutting Concerns Traceability
 
 ### Security Architecture
