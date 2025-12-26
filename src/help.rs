@@ -49,13 +49,15 @@ ROLE COMMANDS:
     roles list                  List all available role configurations
 
 PLUGIN COMMANDS:
-    plugin list                 List installed plugins
+    plugin browse               Interactive plugin browser (TUI)
     plugin search <query>       Search plugins in marketplace
     plugin install <name>       Install plugin from marketplace
     plugin remove <name>        Remove installed plugin
     plugin info <name>          Show plugin details
-    plugin update               Update all plugins
-    plugin browse               Interactive plugin browser
+    plugin list                 List installed plugins
+    plugin enable <name>        Enable installed plugin
+    plugin disable <name>       Disable installed plugin
+    plugin marketplace ...      Marketplace source management
 
 OPTIONS:
     --help, -h                  Show this help message
@@ -554,36 +556,54 @@ USAGE:
 
 MCP SERVER MANAGEMENT:
     list                        List all configured MCP servers
-    add <name> <cmd> [ARGS]      Add a new MCP server
-    remove <name>               Remove an MCP server
+    add <name> <cmd> [ARGS] [OPTIONS]
+                                Add a new MCP server
+        --description <desc>    Server description
+        --category <cat>        Server category
+        --env KEY=VALUE         Environment variables (repeatable)
+        --disabled              Add but don't enable
+    remove <name> [-y]          Remove an MCP server
     enable <name>               Enable a disabled server
     disable <name>              Disable an enabled server
     edit                        Edit MCP configuration in editor
     get <name>                  Show server configuration
 
 MCP REGISTRY:
-    search <query>              Search MCP registries for servers
-    install <name>              Install server from registry
-    info <name>                 Show detailed server information
+    browse [--source <src>]     Interactive server browser
+    search <query> [OPTIONS]    Search MCP registries for servers
+        --source <src>          Specify source (registry|smithery)
+        --limit <n>             Limit results count
+    install <name> [OPTIONS]    Install server from registry
+        --source <src>          Specify source
+        --env KEY=VALUE         Environment variables (repeatable)
+        --skip-env              Skip environment variable configuration
+    info <name> [--source <src>]
+                                Show detailed server information
     update                      Update registry cache
-    browse                      Interactive server browser
 
 INTERNAL:
-    serve                       Start MCP server (for Claude Code)
+    serve [--transport <type>] [--log-level <level>]
+                                Start MCP server (for Claude Code)
+        --transport             Transport type (stdio, default: stdio)
+        --log-level             Log level (debug|info|warn|error)
 
 EXAMPLES:
 
     # Server management
     aiw mcp list
     aiw mcp add filesystem npx -- -y @modelcontextprotocol/server-filesystem $HOME
+    aiw mcp add myserver node server.js --env API_KEY=xxx --description "My server"
     aiw mcp enable filesystem
     aiw mcp disable filesystem
-    aiw mcp remove filesystem
+    aiw mcp remove filesystem -y
 
     # Registry operations
     aiw mcp browse
+    aiw mcp browse --source smithery
     aiw mcp search "filesystem"
+    aiw mcp search "database" --source registry --limit 10
     aiw mcp install @anthropic/filesystem
+    aiw mcp install myserver --env API_KEY=xxx
     aiw mcp info @anthropic/filesystem
     aiw mcp update
 
@@ -592,8 +612,8 @@ EXAMPLES:
     aiw mcp edit
 
 MCP CONFIGURATION:
-    Servers are stored in: ~/.aiw/mcp.json
-    This file is compatible with Claude Code's mcpServers configuration
+    Servers: ~/.aiw/mcp.json
+    Compatible with Claude Code's mcpServers configuration
 
 REGISTRIES:
     - Official MCP Registry (registry.modelcontextprotocol.io)
@@ -727,44 +747,69 @@ USAGE:
     aiw plugin <SUBCOMMAND> [ARGS]
 
 PLUGIN MANAGEMENT:
-    list                        List installed plugins
-    search <query>              Search plugins in marketplace
-    install <name>              Install plugin from marketplace
-    remove <name>               Remove installed plugin
-    info <name>                 Show plugin details
-    update                      Update all installed plugins
-    browse                      Interactive plugin browser (TUI)
+    browse [--market <name>] [--category <cat>] [--tags <tags>]
+                                Interactive plugin browser (TUI)
+    search <query> [--market <name>]
+                                Search plugins in marketplace
+    install <plugin> [--env KEY=VALUE] [--skip-env]
+                                Install plugin from marketplace
+    remove <plugin>             Remove installed plugin
+    info <plugin>               Show plugin details
+    list [--show-disabled]      List installed plugins
+    enable <plugin>             Enable installed plugin
+    disable <plugin>            Disable installed plugin
+
+MARKETPLACE SOURCE MANAGEMENT:
+    marketplace add <repo_url> [--name <alias>]
+                                Add marketplace source (GitHub repo/URL)
+    marketplace list            List configured marketplace sources
+    marketplace remove <name>   Remove marketplace source
+    marketplace update [name]   Update marketplace index cache
 
 DESCRIPTION:
     The plugin system extends AIW functionality through a marketplace
     of community-contributed plugins. Plugins can provide additional
     AI providers, tools, integrations, and workflows.
 
+    Plugin names can include marketplace source: <plugin_name>@<market>
+
 EXAMPLES:
 
     # Browse available plugins
     aiw plugin browse
+    aiw plugin browse --category "ai-tools"
+    aiw plugin browse --market my-market
 
     # Search for plugins
     aiw plugin search "openai"
-    aiw plugin search "translator"
+    aiw plugin search "translator" --market official
 
     # Install a plugin
     aiw plugin install openai-provider
-    aiw plugin install code-formatter
+    aiw plugin install my-plugin@my-market
+    aiw plugin install my-plugin --env API_KEY=xxx
 
     # List installed plugins
     aiw plugin list
+    aiw plugin list --show-disabled
 
-    # Update all plugins
-    aiw plugin update
+    # Enable/disable plugins
+    aiw plugin enable my-plugin
+    aiw plugin disable my-plugin
 
     # Remove a plugin
     aiw plugin remove openai-provider
 
+    # Marketplace source management
+    aiw plugin marketplace add https://github.com/user/plugins --name my-market
+    aiw plugin marketplace list
+    aiw plugin marketplace update
+    aiw plugin marketplace remove my-market
+
 PLUGIN LOCATIONS:
-    Plugins are stored in: ~/.aiw/plugins/
-    Plugin registry cache: ~/.aiw/cache/plugins/
+    Plugins: ~/.aiw/plugins/
+    Marketplace config: ~/.aiw/marketplaces.json
+    Registry cache: ~/.aiw/cache/plugins/
 
 For more information:
     Visit https://github.com/putao520/agentic-warden
