@@ -1451,7 +1451,7 @@ indicatif = "0.17"     # 进度条和spinner
 ---
 
 ### REQ-018: MCP Browse 环境变量快速跳过
-**Status**: 🟡 Design
+**Status**: ✅ 已实现 (2025-12-26) [commit: 3a9f72a]
 **Priority**: P1 (High)
 **Version**: v0.6.1
 **Related**: ARCH-018, REQ-016
@@ -1476,7 +1476,7 @@ Agentic-Warden MCP Browse TUI MUST support one-key skip for all remaining option
 ---
 
 ### REQ-019: MCP Browse - 已安装MCP服务器查看
-**Status**: 🟡 Design
+**Status**: ✅ 已实现 (2025-12-26) [commit: 3a9f72a]
 **Priority**: P1 (High)
 **Version**: v0.6.1
 **Related**: ARCH-019, REQ-016, DATA-019
@@ -1525,7 +1525,7 @@ struct InstalledMcpScreen {
 ---
 
 ### REQ-020: MCP Browse - 已安装MCP环境变量编辑
-**Status**: 🟡 Design
+**Status**: ✅ 已实现 (2025-12-26) [commit: 3a9f72a]
 **Priority**: P1 (High)
 **Version**: v0.6.1
 **Related**: ARCH-020, REQ-019, DATA-020
