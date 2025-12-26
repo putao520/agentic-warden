@@ -62,11 +62,7 @@ impl OAuthConfig {
 
 impl Default for OAuthConfig {
     fn default() -> Self {
-        println!("DEBUG: OAuthConfig::default() called");
-        println!("DEBUG: Calling Self::for_google_drive()");
-        let result = Self::for_google_drive();
-        println!("DEBUG: Self::for_google_drive() completed successfully");
-        result
+        Self::for_google_drive()
     }
 }
 

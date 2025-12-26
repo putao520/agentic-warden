@@ -48,9 +48,7 @@ async fn main() -> ExitCode {
     }
 
     // 处理其他命令
-    println!("DEBUG: Parsing command...");
     let command = Cli::parse_command();
-    println!("DEBUG: Command parsed: {:?}", command);
     match main_impl(command).await {
         Ok(code) => code,
         Err(err) => {

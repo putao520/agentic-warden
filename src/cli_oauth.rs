@@ -18,31 +18,17 @@ impl CliOAuthHandler {
     /// Create new CLI OAuth handler with built-in public client
     /// As per SPEC REQ-015, uses the built-in public OAuth client without any external configuration
     pub fn new() -> Result<Self> {
-        eprintln!("[EPRINTLN] CliOAuthHandler::new() START");
-
-        eprintln!("[EPRINTLN] About to call OAuthConfig::default()");
         let config = OAuthConfig::default();
-        eprintln!("[EPRINTLN] OAuthConfig::default() completed");
-        println!("DEBUG: OAuthConfig::default() completed, client_id: {}",
-            if config.client_id.is_empty() { "empty" } else { "set" });
-
-        eprintln!("[EPRINTLN] About to create SmartOAuthAuthenticator");
         let authenticator = SmartOAuthAuthenticator::new(config);
-        eprintln!("[EPRINTLN] SmartOAuthAuthenticator created successfully");
-        println!("DEBUG: SmartOAuthAuthenticator created successfully");
-        eprintln!("[EPRINTLN] CliOAuthHandler::new() END");
         Ok(Self { authenticator })
     }
 
     /// Start CLI device authorization flow
     pub async fn start_device_flow(&self) -> Result<()> {
         println!("🔐 Starting Google Drive authorization flow...");
-        println!("DEBUG: About to call self.authenticator.start_device_flow()...");
 
         // Start device authorization
         let device_code = self.authenticator.start_device_flow().await?;
-
-        println!("DEBUG: Device flow successful, got device code");
 
         // Display authorization information
         self.display_auth_info(&device_code).await?;
@@ -123,22 +109,14 @@ impl CliOAuthHandler {
 
 /// Handle CLI authorization flow entry point
 pub async fn handle_cli_auth() -> Result<()> {
-    eprintln!("[EPRINTLN] DEBUG: handle_cli_auth() ENTRY POINT");
-    println!("DEBUG: handle_cli_auth() called");
-    println!("DEBUG: Creating CliOAuthHandler with built-in public client...");
-    eprintln!("[EPRINTLN] DEBUG: About to create CliOAuthHandler");
-
     let handler = CliOAuthHandler::new()?;
-    println!("DEBUG: CliOAuthHandler created successfully");
 
     // Show warning if using public client
-    println!("DEBUG: Getting warning message from authenticator");
     if let Some(warning) = handler.authenticator.get_warning_message_async().await {
         println!("⚠️  {}", warning);
         println!();
     }
 
-    println!("DEBUG: About to start device flow");
     handler.start_device_flow().await
 }
 
