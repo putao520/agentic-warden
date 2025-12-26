@@ -1251,6 +1251,11 @@ Agentic-Warden MUST meet performance criteria for process tracking and task mana
 | REQ-012 | 智能MCP路由系统 | P0 | 🟢 Done | v0.2.0 | ARCH-012, DATA-012, API-012 | Intelligent routing system design |
 | REQ-013 | OpenAI环境变量配置 | P0 | 🟢 Done | v5.1.1 | ARCH-013, API-013 | OpenAI environment variable configuration |
 | REQ-015 | 简化的Google Drive OAuth授权流程 | P0 | 🟢 Done | v0.5.18 | ARCH-003, DATA-003 | Simplified OAuth authorization with built-in public client |
+| REQ-016 | MCP仓库CLI - 多源聚合搜索与安装 | P1 | ✅ Done | v0.6.0 | ARCH-016, API-016 | MCP Registry CLI implementation |
+| REQ-018 | MCP Browse 环境变量快速跳过 | P1 | 🟡 Design | v0.6.1 | ARCH-018 | Skip optional env vars feature |
+| REQ-019 | MCP Browse - 已安装MCP服务器查看 | P1 | 🟡 Design | v0.6.1 | ARCH-019, DATA-019 | View installed MCPs feature |
+| REQ-020 | MCP Browse - 已安装MCP环境变量编辑 | P1 | 🟡 Design | v0.6.1 | ARCH-020, DATA-020 | Edit env vars for installed MCPs |
+| REQ-017 | AIW插件市场系统 | P1 | 🟡 Design | v0.7.0 | ARCH-017, DATA-017, API-017 | Plugin marketplace system |
 
 ---
 
@@ -1442,6 +1447,141 @@ indicatif = "0.17"     # 进度条和spinner
 - 配置文件中敏感值使用引用格式
 
 ---
+
+---
+
+### REQ-018: MCP Browse 环境变量快速跳过
+**Status**: 🟡 Design
+**Priority**: P1 (High)
+**Version**: v0.6.1
+**Related**: ARCH-018, REQ-016
+
+**Description**:
+Agentic-Warden MCP Browse TUI MUST support one-key skip for all remaining optional environment variables during interactive MCP installation. Users can quickly skip optional configuration steps without entering individual values.
+
+**Acceptance Criteria**:
+- [ ] In environment variable input dialog, display hint when optional variables remain
+- [ ] Pressing 'a' or 'A' key skips all remaining optional environment variables
+- [ ] Only works when current variable is optional (skip has no effect on required vars)
+- [ ] Returns to MCP installation with remaining required variables still collected
+- [ ] Behavior is intuitive and non-destructive (can still edit optional vars individually)
+- [ ] Unit test: test_env_input_skip_all_optional passes
+
+**Technical Constraints**:
+- Integration with existing `EnvInputState` in `src/commands/mcp/registry/browse.rs`
+- Extends enum-based event handling pattern (no major refactor)
+- Display hint in env dialog footer when optional vars exist
+- Call `skip_all_optional()` method on `EnvInputState`
+
+---
+
+### REQ-019: MCP Browse - 已安装MCP服务器查看
+**Status**: 🟡 Design
+**Priority**: P1 (High)
+**Version**: v0.6.1
+**Related**: ARCH-019, REQ-016, DATA-019
+
+**Description**:
+Agentic-Warden MCP Browse MUST support viewing, searching, and filtering installed MCP servers from `~/.aiw/mcp.json`. Users can browse their installed ecosystem without leaving the TUI.
+
+**Acceptance Criteria**:
+- [ ] New menu option "Installed MCPs" in Browse main screen (Press 'i')
+- [ ] Display list of installed MCP servers with name, description, enabled status
+- [ ] Search by name using '/' key (real-time filtering)
+- [ ] Filter by status (enabled/disabled) using keyboard
+- [ ] Show environment variable count per MCP
+- [ ] Press Enter on MCP to view detailed configuration
+- [ ] Details view shows: name, source, environment variables, command
+- [ ] Return to list with ESC key
+- [ ] Return to main Browse menu with ESC from list view
+- [ ] Handle empty list gracefully (no installed MCPs)
+- [ ] Integration test passes
+
+**Data Structures**:
+```rust
+struct InstalledMcpListItem {
+    name: String,
+    description: String,
+    enabled: bool,
+    env_var_count: usize,
+    source: String,
+}
+
+struct InstalledMcpScreen {
+    items: Vec<InstalledMcpListItem>,
+    selected_index: usize,
+    search_query: String,
+    filtered_items: Vec<usize>,
+}
+```
+
+**Technical Constraints**:
+- Read from `McpConfigManager::load()` existing implementation
+- Reuse existing screen pattern from `DashboardScreen`, `StatusScreen`
+- Implement `Screen` trait
+- No new dependencies required
+- File: `src/tui/screens/installed_mcp.rs` (new)
+
+---
+
+### REQ-020: MCP Browse - 已安装MCP环境变量编辑
+**Status**: 🟡 Design
+**Priority**: P1 (High)
+**Version**: v0.6.1
+**Related**: ARCH-020, REQ-019, DATA-020
+
+**Description**:
+Agentic-Warden MCP Browse MUST support editing and resetting environment variables for already-installed MCP servers. Users can modify MCP configurations without manual file editing.
+
+**Acceptance Criteria**:
+- [ ] From installed MCP list (REQ-019), press 'e' to enter edit mode
+- [ ] Reuse existing `EnvInputState` component for variable input
+- [ ] Preload existing variable values for editing
+- [ ] Support updating variables to new values
+- [ ] Support clearing optional variables
+- [ ] Press 's' to save changes back to `~/.aiw/mcp.json`
+- [ ] Press 'Esc' to cancel editing without saving
+- [ ] Show confirmation before overwriting config
+- [ ] Graceful error handling for file write failures
+- [ ] Log changes for audit trail
+- [ ] Integration test passes
+
+**Edit Mode Workflow**:
+```
+InstalledMcpScreen
+    ↓ (select MCP, press 'e')
+EditEnvState (setup)
+    ↓ (preload existing values)
+EnvInputState (use existing component)
+    ↓ (user modifies values)
+Save confirmation (press 's')
+    ↓ (persist to mcp.json)
+Return to list (show success/error)
+```
+
+**Data Structures**:
+```rust
+struct EditEnvState {
+    server_name: String,
+    env_input: EnvInputState,
+    original_values: HashMap<String, String>,
+    modified: bool,
+}
+
+impl EditEnvState {
+    fn apply_changes(&self) -> Result<()> {
+        // Update McpConfigManager and save to mcp.json
+    }
+}
+```
+
+**Technical Constraints**:
+- Reuse `EnvInputState` from REQ-018
+- Use existing `McpConfigManager::update_server_env()` method
+- Extend `InstalledMcpScreen` or create new `EditEnvScreen`
+- Persist changes using `McpConfigManager::save()`
+- Handle file locking for concurrent access
+- File: modify `src/tui/screens/installed_mcp.rs`
 
 ---
 

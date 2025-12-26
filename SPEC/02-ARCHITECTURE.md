@@ -2688,6 +2688,147 @@ src/commands/
 
 ---
 
+### ARCH-018: MCP Browse 环境变量快速跳过
+**Date**: 2025-12-26
+**Status**: 🟡 Design
+**Version**: v0.6.1
+**Related Requirements**: REQ-018, REQ-016
+
+#### Background
+MCP Browse TUI在交互式环境变量配置过程中，用户需要逐个输入每个变量值。对于有大量可选环境变量的MCP服务器，用户体验不佳。
+
+#### Decision
+在 `EnvInputState` 中添加快速跳过功能，允许用户按 'a'/'A' 键一键跳过所有剩余的可选环境变量，加速配置过程。
+
+#### Component Changes
+| 组件 | 修改说明 |
+|------|---------|
+| `EnvInputState` | 新增 `skip_all_optional()` 方法，支持跳过剩余可选变量 |
+| `EnvInputState` | 新增 `has_remaining_optional()` 方法，检查是否有剩余可选变量 |
+| 事件处理器 | 添加 'a'/'A' 按键识别和处理 |
+| 对话框UI | 在底部显示"Press 'a' to skip optional variables"提示 |
+
+#### Rationale
+- ✅ **最小改动**：仅扩展现有 `EnvInputState`，无需新建类
+- ✅ **直观体验**：'a' 键含义明确（all skip）
+- ✅ **非破坏性**：用户仍可单独编辑可选变量
+- ✅ **无状态污染**：与现有输入流程完全兼容
+
+---
+
+### ARCH-019: MCP Browse 已安装MCP列表查看
+**Date**: 2025-12-26
+**Status**: 🟡 Design
+**Version**: v0.6.1
+**Related Requirements**: REQ-019, REQ-016, DATA-019
+
+#### Background
+用户已安装的MCP服务器列表存储在 `~/.aiw/mcp.json` 中，目前只能通过文本编辑器查看。需要在Browse TUI中提供友好的列表界面，支持搜索、过滤等操作。
+
+#### Decision
+创建新的 `InstalledMcpScreen`，在Browse主菜单中新增"Installed MCPs"选项（按'i'键），显示已安装MCP列表，支持实时搜索和详情查看。
+
+#### System Architecture
+```
+Browse Main Menu
+       ↓ (Press 'i')
+InstalledMcpScreen (新 Screen)
+       ├── List View
+       │   ├── Items: name, description, status, env_var_count
+       │   ├── Search: '/' key enters search mode
+       │   └── Filter: status filtering via keyboard
+       └── Details View
+           ├── name, source, command, environment variables
+           └── Edit mode trigger (REQ-020, Press 'e')
+```
+
+#### Component Details
+| 组件 | 职责 | 文件位置 |
+|------|------|---------|
+| `InstalledMcpScreen` | 实现 Screen trait，管理列表状态和导航 | `src/tui/screens/installed_mcp.rs` |
+| `InstalledMcpListItem` | 列表数据结构，包含name/description/status | 同上 |
+| `ListState` (ratatui) | 管理选中项目和滚动位置 | (复用) |
+| `McpConfigManager` | 加载MCP配置 | (既有) |
+
+#### Navigation Flow
+| 按键 | 操作 | 目标 |
+|------|------|------|
+| 'i' | 从Browse菜单进入 | InstalledMcpScreen |
+| 上/下 | 导航列表项 | 更改selected_index |
+| '/' | 进入搜索模式 | 启用search_mode |
+| Esc | 返回上级菜单 | Browse主菜单 |
+| Enter | 查看详情 | 详情视图 |
+| 'e' | 进入编辑模式 | EditEnvState (REQ-020) |
+
+#### Rationale
+- ✅ **无新依赖**：复用ratatui ListState
+- ✅ **架构一致**：遵循Screen trait模式
+- ✅ **集成紧凑**：复用McpConfigManager
+- ✅ **扩展性强**：可轻松添加导入/导出功能
+
+---
+
+### ARCH-020: MCP Browse 已安装MCP环境变量编辑
+**Date**: 2025-12-26
+**Status**: 🟡 Design
+**Version**: v0.6.1
+**Related Requirements**: REQ-020, REQ-019, REQ-016, DATA-020
+
+#### Background
+用户需要修改已安装MCP的环境变量配置，当前只能手动编辑JSON文件。需要在TUI中提供统一的编辑界面，支持修改和保存配置。
+
+#### Decision
+创建 `EditEnvState` 组件，从 `InstalledMcpScreen` 触发编辑模式，复用 `EnvInputState` 进行变量输入，修改后持久化到 `~/.aiw/mcp.json`。
+
+#### Component Architecture
+```
+InstalledMcpScreen (selected MCP)
+       ↓ (Press 'e')
+EditEnvState (setup)
+       ├── Load original values
+       ├── Setup EnvInputState with preloaded values
+       └── Display edit dialog
+              ↓ (User modifies)
+       ├── Capture changes
+       └── Show save/cancel options
+              ↓ (Press 's' to save)
+       Save to ~/.aiw/mcp.json
+       Return to list with status message
+```
+
+#### Component Details
+| 组件 | 职责 | 文件位置 |
+|------|------|---------|
+| `EditEnvState` | 管理编辑对话框状态和流程 | `browse.rs` 内 |
+| `EnvInputState` | 复用已有的变量输入逻辑 | (既有，从REQ-018) |
+| Save Handler | 调用McpConfigManager::update_server() | `browse.rs` 内 |
+
+#### Edit Workflow Detailed Steps
+1. 从InstalledMcpScreen选择MCP
+2. 按 'e' 键触发编辑模式
+3. EditEnvState 从mcp.json加载服务器的环境变量规格
+4. Preload existing values into EnvInputState
+5. 显示env input dialog，用户修改值
+6. 用户按 's' 键确认保存
+7. 确认对话框："Save changes to [server_name]? (y/n)"
+8. 保存成功后返回list view，显示"Saved!"消息
+9. 按 'Esc' 取消编辑（不保存）
+
+#### Data Persistence
+| 操作 | 方法 | 验证 |
+|------|------|------|
+| 加载原值 | `McpConfigManager::read()` 获取mcp.json | 验证服务器存在 |
+| 修改值 | EnvInputState捕获用户输入 | 验证必填字段 |
+| 保存配置 | `McpConfigManager::update_server()` | 验证JSON写入成功 |
+
+#### Rationale
+- ✅ **最大复用**：完全复用EnvInputState和McpConfigManager
+- ✅ **低耦合**：EditEnvState仅协调流程，不实现细节
+- ✅ **安全保障**：保留原值，支持取消编辑
+- ✅ **用户友好**：确认对话框和成功反馈
+
+---
+
 ## Deprecated Architecture Solutions
 
 ### Historical Decisions (Not applicable for v0)

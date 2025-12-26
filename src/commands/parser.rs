@@ -478,6 +478,8 @@ pub fn separate_provider_and_cli_args(tokens: &[String]) -> Result<SeparatedArgs
 }
 
 fn is_valueless_flag(flag: &str) -> bool {
+    // Only AIW's own valueless flags, not AI CLI flags
+    // AI CLI flags are transparently forwarded - we don't need to understand them
     matches!(
         flag,
         "-c"
@@ -486,9 +488,8 @@ fn is_valueless_flag(flag: &str) -> bool {
     ) || flag.starts_with("--no-")
 }
 
-fn is_prompt_separator_flag(flag: &str) -> bool {
-    matches!(
-        flag,
-        "--print" | "--prompt" | "--prompt-interactive"
-    )
+fn is_prompt_separator_flag(_flag: &str) -> bool {
+    // All flags are forwarded to AI CLI, none are prompt separators
+    // The prompt is determined by the first non-flag argument
+    false
 }

@@ -10,11 +10,13 @@ mod render_helpers;
 
 // Include the available screens
 pub mod dashboard;
+pub mod installed_mcp;
 pub mod provider;
 pub mod status;
 
 // Re-export key screens
 pub use dashboard::DashboardScreen;
+pub use installed_mcp::InstalledMcpScreen;
 pub use provider::ProviderScreen;
 pub use status::StatusScreen;
 
@@ -29,6 +31,15 @@ pub enum ScreenAction {
     Back,
     /// Quit the application
     Quit,
+    /// Launch external TUI (e.g., MCP Browse)
+    LaunchExternal(ExternalScreen),
+}
+
+/// External screens that have their own TUI
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExternalScreen {
+    /// MCP Server Browser
+    McpBrowse,
 }
 
 // Available screen types - simplified

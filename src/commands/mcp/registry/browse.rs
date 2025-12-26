@@ -6,7 +6,9 @@
 //! - Search/filter functionality
 //! - Tab to toggle focus between panels
 
-use super::{aggregator::RegistryAggregator, install, McpServerInfo};
+use super::{aggregator::RegistryAggregator, install, types::EnvVarSpec, McpServerInfo};
+use crate::tui::screens::InstalledMcpScreen;
+use crate::tui::{Screen, ScreenAction};
 use anyhow::Result;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
@@ -23,6 +25,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
     Frame, Terminal,
 };
+use std::collections::HashMap;
 
 // Modern color palette using RGB
 mod colors {
@@ -30,7 +33,6 @@ mod colors {
 
     // Primary colors
     pub const PRIMARY: Color = Color::Rgb(99, 102, 241); // Indigo
-    pub const PRIMARY_DIM: Color = Color::Rgb(79, 82, 201);
     pub const SECONDARY: Color = Color::Rgb(168, 85, 247); // Purple
 
     // Accent colors
@@ -50,6 +52,111 @@ mod colors {
 }
 use std::io;
 
+/// Environment variable input state
+pub(crate) struct EnvInputState {
+    env_specs: Vec<EnvVarSpec>,
+    current_index: usize,
+    values: HashMap<String, String>,
+    input_buffer: String,
+}
+
+impl EnvInputState {
+    pub(crate) fn new(specs: Vec<EnvVarSpec>) -> Self {
+        Self {
+            env_specs: specs,
+            current_index: 0,
+            values: HashMap::new(),
+            input_buffer: String::new(),
+        }
+    }
+
+    pub(crate) fn current_spec(&self) -> Option<&EnvVarSpec> {
+        self.env_specs.get(self.current_index)
+    }
+
+    pub(crate) fn is_complete(&self) -> bool {
+        self.current_index >= self.env_specs.len()
+    }
+
+    pub(crate) fn next(&mut self) {
+        if let Some(spec) = self.current_spec().cloned() {
+            let trimmed = self.input_buffer.trim();
+            // Only store non-empty values or required variables that need to be tracked
+            if !trimmed.is_empty() {
+                self.values
+                    .insert(spec.name.clone(), trimmed.to_string());
+            } else if spec.required {
+                // For required variables, even if empty, we track them
+                // (though this would normally be caught by validation)
+                self.values.insert(spec.name.clone(), String::new());
+            } else {
+                self.values.remove(&spec.name);
+            }
+            // Optional empty variables are not stored
+        }
+        self.current_index += 1;
+        self.sync_input_buffer();
+    }
+
+    pub(crate) fn get_values(&self) -> Vec<(String, String)> {
+        self.values.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+    }
+
+    pub(crate) fn has_remaining_optional(&self) -> bool {
+        self.env_specs[self.current_index..]
+            .iter()
+            .any(|spec| !spec.required)
+    }
+
+    pub(crate) fn skip_all_optional(&mut self) {
+        while self.current_index < self.env_specs.len() {
+            let spec = self.env_specs[self.current_index].clone();
+            if spec.required {
+                break;
+            }
+            self.values.remove(&spec.name);
+            self.current_index += 1;
+        }
+        self.sync_input_buffer();
+    }
+
+    pub(crate) fn preload_values(&mut self, values: HashMap<String, String>) {
+        self.values = values;
+        self.sync_input_buffer();
+    }
+
+    pub(crate) fn input_buffer(&self) -> &str {
+        &self.input_buffer
+    }
+
+    pub(crate) fn push_char(&mut self, c: char) {
+        self.input_buffer.push(c);
+    }
+
+    pub(crate) fn pop_char(&mut self) {
+        self.input_buffer.pop();
+    }
+
+    pub(crate) fn current_index(&self) -> usize {
+        self.current_index
+    }
+
+    pub(crate) fn total_specs(&self) -> usize {
+        self.env_specs.len()
+    }
+
+    pub(crate) fn env_specs(&self) -> &[EnvVarSpec] {
+        &self.env_specs
+    }
+
+    fn sync_input_buffer(&mut self) {
+        self.input_buffer = self
+            .current_spec()
+            .and_then(|spec| self.values.get(&spec.name).cloned())
+            .unwrap_or_default();
+    }
+}
+
 /// Browser state
 struct BrowserState {
     servers: Vec<McpServerInfo>,
@@ -60,6 +167,8 @@ struct BrowserState {
     show_help: bool,
     scroll_offset: u16,
     source_filter: Option<String>,
+    env_input: Option<EnvInputState>,
+    installed_screen: Option<InstalledMcpScreen>,
 }
 
 impl BrowserState {
@@ -74,6 +183,8 @@ impl BrowserState {
             show_help: false,
             scroll_offset: 0,
             source_filter,
+            env_input: None,
+            installed_screen: None,
         };
         if !state.filtered.is_empty() {
             state.list_state.select(Some(0));
@@ -209,16 +320,16 @@ pub async fn execute(source: Option<String>) -> Result<()> {
     }
 
     // Run TUI
-    let selected = run_tui(results, source)?;
+    let selected = run_tui(results, source, &aggregator).await?;
 
     // Handle selection
-    if let Some(server) = selected {
+    if let Some((server, env_vars)) = selected {
         println!("\nInstalling {}...", server.qualified_name);
         install::install_with_aggregator(
             &aggregator,
             &server.qualified_name,
             Some(server.source.clone()),
-            Vec::new(),
+            env_vars,
             false,
         )
         .await?;
@@ -227,7 +338,11 @@ pub async fn execute(source: Option<String>) -> Result<()> {
     Ok(())
 }
 
-fn run_tui(servers: Vec<McpServerInfo>, source: Option<String>) -> Result<Option<McpServerInfo>> {
+async fn run_tui(
+    servers: Vec<McpServerInfo>,
+    source: Option<String>,
+    aggregator: &RegistryAggregator,
+) -> Result<Option<(McpServerInfo, Vec<(String, String)>)>> {
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -236,7 +351,7 @@ fn run_tui(servers: Vec<McpServerInfo>, source: Option<String>) -> Result<Option
     let mut terminal = Terminal::new(backend)?;
 
     let mut state = BrowserState::new(servers, source);
-    let result = run_event_loop(&mut terminal, &mut state);
+    let result = run_event_loop(&mut terminal, &mut state, aggregator).await;
 
     // Restore terminal
     disable_raw_mode()?;
@@ -250,15 +365,75 @@ fn run_tui(servers: Vec<McpServerInfo>, source: Option<String>) -> Result<Option
     result
 }
 
-fn run_event_loop(
+async fn run_event_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     state: &mut BrowserState,
-) -> Result<Option<McpServerInfo>> {
+    aggregator: &RegistryAggregator,
+) -> Result<Option<(McpServerInfo, Vec<(String, String)>)>> {
     loop {
         terminal.draw(|f| draw_ui(f, state))?;
 
         if let Event::Key(key) = event::read()? {
             if key.kind != KeyEventKind::Press {
+                continue;
+            }
+
+            if let Some(installed_screen) = state.installed_screen.as_mut() {
+                match installed_screen.handle_key(key)? {
+                    ScreenAction::Back => {
+                        state.installed_screen = None;
+                    }
+                    ScreenAction::Quit => {
+                        return Ok(None);
+                    }
+                    _ => {}
+                }
+                continue;
+            }
+
+            // Handle environment variable input mode
+            if let Some(ref mut env_input) = state.env_input {
+                match key.code {
+                    KeyCode::Enter => {
+                        env_input.next();
+                        if env_input.is_complete() {
+                            // Environment variable input complete
+                            let env_vars = env_input.get_values();
+                            if let Some(server) = state.selected_server() {
+                                return Ok(Some((server.clone(), env_vars)));
+                            }
+                            state.env_input = None;
+                        }
+                    }
+                    KeyCode::Backspace => {
+                        env_input.pop_char();
+                    }
+                    KeyCode::Char(c) if c == 'a' || c == 'A' => {
+                        let should_skip = env_input
+                            .current_spec()
+                            .map(|spec| !spec.required)
+                            .unwrap_or(false);
+                        if should_skip {
+                            env_input.skip_all_optional();
+                            if env_input.is_complete() {
+                                let env_vars = env_input.get_values();
+                                if let Some(server) = state.selected_server() {
+                                    return Ok(Some((server.clone(), env_vars)));
+                                }
+                                state.env_input = None;
+                            }
+                        } else {
+                            env_input.push_char(c);
+                        }
+                    }
+                    KeyCode::Char(c) => {
+                        env_input.push_char(c);
+                    }
+                    KeyCode::Esc => {
+                        state.env_input = None;
+                    }
+                    _ => {}
+                }
                 continue;
             }
 
@@ -299,6 +474,9 @@ fn run_event_loop(
                     state.search_query.clear();
                     state.apply_filter();
                 }
+                KeyCode::Char('i') | KeyCode::Char('I') => {
+                    state.installed_screen = Some(InstalledMcpScreen::new()?);
+                }
                 KeyCode::Up | KeyCode::Char('k') => {
                     state.move_up();
                 }
@@ -325,7 +503,21 @@ fn run_event_loop(
                 }
                 KeyCode::Enter => {
                     if let Some(server) = state.selected_server() {
-                        return Ok(Some(server.clone()));
+                        // Fetch server details to get environment variable requirements
+                        let detail = aggregator
+                            .get_server_detail(&server.qualified_name, Some(server.source.as_str()))
+                            .await;
+
+                        match detail {
+                            Ok(detail) if !detail.required_env.is_empty() => {
+                                // Enter environment variable input mode
+                                state.env_input = Some(EnvInputState::new(detail.required_env));
+                            }
+                            _ => {
+                                // No environment variables required, proceed with installation
+                                return Ok(Some((server.clone(), Vec::new())));
+                            }
+                        }
                     }
                 }
                 _ => {}
@@ -336,6 +528,11 @@ fn run_event_loop(
 
 fn draw_ui(f: &mut Frame, state: &mut BrowserState) {
     let size = f.size();
+
+    if let Some(installed_screen) = state.installed_screen.as_mut() {
+        installed_screen.render(f, size);
+        return;
+    }
 
     // Create layout: main area + status bar
     let main_chunks = Layout::default()
@@ -361,6 +558,11 @@ fn draw_ui(f: &mut Frame, state: &mut BrowserState) {
     // Draw help popup if needed
     if state.show_help {
         draw_help_popup(f, size);
+    }
+
+    // Draw environment variable input dialog if in env input mode
+    if state.env_input.is_some() {
+        draw_env_input_dialog(f, state, size);
     }
 }
 
@@ -618,6 +820,8 @@ fn draw_status_bar(f: &mut Frame, state: &BrowserState, area: Rect) {
         Span::styled(" Nav ", Style::default().fg(colors::TEXT_DIM)),
         Span::styled("/", Style::default().fg(colors::WARNING)),
         Span::styled(" Search ", Style::default().fg(colors::TEXT_DIM)),
+        Span::styled("i", Style::default().fg(colors::WARNING)),
+        Span::styled(" Installed ", Style::default().fg(colors::TEXT_DIM)),
         Span::styled("Enter", Style::default().fg(colors::SUCCESS)),
         Span::styled(" Install ", Style::default().fg(colors::TEXT_DIM)),
         Span::styled("?", Style::default().fg(colors::SECONDARY)),
@@ -652,7 +856,7 @@ fn draw_search_bar(f: &mut Frame, state: &BrowserState, size: Rect) {
 
 fn draw_help_popup(f: &mut Frame, size: Rect) {
     let popup_width = 55;
-    let popup_height = 18;
+    let popup_height = 19;
     let area = Rect {
         x: (size.width.saturating_sub(popup_width)) / 2,
         y: (size.height.saturating_sub(popup_height)) / 2,
@@ -694,6 +898,10 @@ fn draw_help_popup(f: &mut Frame, size: Rect) {
             Span::styled("    c             ", Style::default().fg(colors::WARNING)),
             Span::styled("Clear current filter", Style::default().fg(colors::TEXT)),
         ]),
+        Line::from(vec![
+            Span::styled("    i             ", Style::default().fg(colors::WARNING)),
+            Span::styled("View installed MCPs", Style::default().fg(colors::TEXT)),
+        ]),
         Line::from(""),
         Line::from(vec![
             Span::styled("    Enter         ", Style::default().fg(colors::SUCCESS)),
@@ -723,6 +931,125 @@ fn draw_help_popup(f: &mut Frame, size: Rect) {
 
     f.render_widget(Clear, area);
     f.render_widget(paragraph, area);
+}
+
+fn draw_env_input_dialog(f: &mut Frame, state: &mut BrowserState, area: Rect) {
+    if let Some(ref env_input) = state.env_input {
+        // Create dialog area (centered, 70% width, variable height)
+        let dialog_width = (area.width as f32 * 0.7) as u16;
+        let extra_hint = if env_input.has_remaining_optional() { 1 } else { 0 };
+        let dialog_height = (env_input.total_specs() as u16 + 6 + extra_hint)
+            .min(area.height.saturating_sub(2));
+        let dialog_x = area.x + (area.width.saturating_sub(dialog_width)) / 2;
+        let dialog_y = area.y + (area.height.saturating_sub(dialog_height)) / 2;
+
+        let dialog_area = Rect {
+            x: dialog_x,
+            y: dialog_y,
+            width: dialog_width,
+            height: dialog_height,
+        };
+
+        // Draw background
+        f.render_widget(Clear, dialog_area);
+
+        // Build dialog content
+        let mut lines = vec![];
+
+        if let Some(spec) = env_input.current_spec() {
+            // Variable name
+            let name_line = Line::from(vec![
+                Span::styled(
+                    format!("{}", spec.name),
+                    Style::default()
+                        .fg(colors::PRIMARY)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(if spec.required {
+                    " (required)"
+                } else {
+                    " (optional)"
+                }),
+            ]);
+            lines.push(name_line);
+            lines.push(Line::from(""));
+
+            // Description
+            if let Some(desc) = &spec.description {
+                lines.push(Line::from(Span::styled(
+                    desc.clone(),
+                    Style::default().fg(colors::TEXT_DIM),
+                )));
+            }
+
+            // Default value
+            if let Some(default) = &spec.default {
+                lines.push(Line::from(Span::styled(
+                    format!("Default: {}", default),
+                    Style::default().fg(colors::TEXT_DIM),
+                )));
+            }
+
+            lines.push(Line::from(""));
+
+            // Input field
+            let input_line = Line::from(vec![
+                Span::raw("Value: "),
+                Span::styled(
+                    format!("{}_", env_input.input_buffer()),
+                    Style::default()
+                        .fg(colors::SUCCESS)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]);
+            lines.push(input_line);
+
+            lines.push(Line::from(""));
+
+            // Progress indicator
+            let progress = format!(
+                "{} / {}",
+                env_input.current_index() + 1,
+                env_input.total_specs()
+            );
+            lines.push(Line::from(Span::styled(
+                progress,
+                Style::default().fg(colors::INFO),
+            )));
+
+            lines.push(Line::from(""));
+
+            // Instructions
+            lines.push(Line::from(Span::styled(
+                "Press Enter to continue, ESC to cancel",
+                Style::default().fg(colors::TEXT_DIM).add_modifier(Modifier::DIM),
+            )));
+            if env_input.has_remaining_optional() {
+                lines.push(Line::from(Span::styled(
+                    "Press 'a' to skip optional variables",
+                    Style::default().fg(colors::TEXT_DIM).add_modifier(Modifier::DIM),
+                )));
+            }
+        }
+
+        let paragraph = Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_set(border::ROUNDED)
+                    .title(Line::from(vec![Span::styled(
+                        " Environment Variables ",
+                        Style::default()
+                            .fg(colors::TEXT)
+                            .add_modifier(Modifier::BOLD),
+                    )]))
+                    .border_style(Style::default().fg(colors::PRIMARY))
+                    .style(Style::default().bg(Color::Rgb(15, 23, 42))), // Slate 900
+            )
+            .style(Style::default().fg(colors::TEXT));
+
+        f.render_widget(paragraph, dialog_area);
+    }
 }
 
 #[cfg(test)]
@@ -985,5 +1312,211 @@ mod tests {
         state.scroll_offset = 5;
         state.page_up(10);
         assert_eq!(state.scroll_offset, 0);
+    }
+
+    #[test]
+    fn test_env_input_state_new() {
+        let specs = vec![
+            EnvVarSpec {
+                name: "API_KEY".to_string(),
+                description: Some("Your API key".to_string()),
+                required: true,
+                default: None,
+            },
+            EnvVarSpec {
+                name: "API_URL".to_string(),
+                description: Some("API endpoint URL".to_string()),
+                required: false,
+                default: Some("https://api.example.com".to_string()),
+            },
+        ];
+
+        let env_input = EnvInputState::new(specs);
+        assert_eq!(env_input.env_specs.len(), 2);
+        assert_eq!(env_input.current_index, 0);
+        assert!(env_input.values.is_empty());
+        assert!(env_input.input_buffer.is_empty());
+    }
+
+    #[test]
+    fn test_env_input_state_current_spec() {
+        let specs = vec![
+            EnvVarSpec {
+                name: "VAR1".to_string(),
+                description: None,
+                required: true,
+                default: None,
+            },
+            EnvVarSpec {
+                name: "VAR2".to_string(),
+                description: None,
+                required: false,
+                default: None,
+            },
+        ];
+
+        let mut env_input = EnvInputState::new(specs);
+        assert_eq!(env_input.current_spec().unwrap().name, "VAR1");
+
+        env_input.next();
+        assert_eq!(env_input.current_spec().unwrap().name, "VAR2");
+
+        env_input.next();
+        assert!(env_input.current_spec().is_none());
+        assert!(env_input.is_complete());
+    }
+
+    #[test]
+    fn test_env_input_state_next_with_value() {
+        let specs = vec![
+            EnvVarSpec {
+                name: "API_KEY".to_string(),
+                description: None,
+                required: true,
+                default: None,
+            },
+            EnvVarSpec {
+                name: "OPTIONAL_VAR".to_string(),
+                description: None,
+                required: false,
+                default: None,
+            },
+        ];
+
+        let mut env_input = EnvInputState::new(specs);
+        env_input.input_buffer = "secret-key-123".to_string();
+        env_input.next();
+
+        assert_eq!(env_input.values.get("API_KEY"), Some(&"secret-key-123".to_string()));
+        assert_eq!(env_input.current_index, 1);
+        assert!(env_input.input_buffer.is_empty());
+    }
+
+    #[test]
+    fn test_env_input_state_next_empty_optional() {
+        let specs = vec![
+            EnvVarSpec {
+                name: "OPTIONAL_VAR".to_string(),
+                description: None,
+                required: false,
+                default: None,
+            },
+        ];
+
+        let mut env_input = EnvInputState::new(specs);
+        env_input.input_buffer = String::new(); // Empty input for optional
+        env_input.next();
+
+        // Empty optional variable should not be stored
+        assert!(!env_input.values.contains_key("OPTIONAL_VAR"));
+    }
+
+    #[test]
+    fn test_env_input_skip_all_optional() {
+        let specs = vec![
+            EnvVarSpec {
+                name: "REQ1".to_string(),
+                description: None,
+                required: true,
+                default: None,
+            },
+            EnvVarSpec {
+                name: "OPT1".to_string(),
+                description: None,
+                required: false,
+                default: None,
+            },
+            EnvVarSpec {
+                name: "OPT2".to_string(),
+                description: None,
+                required: false,
+                default: None,
+            },
+            EnvVarSpec {
+                name: "REQ2".to_string(),
+                description: None,
+                required: true,
+                default: None,
+            },
+        ];
+
+        let mut env_input = EnvInputState::new(specs);
+        env_input.next(); // Move to OPT1
+        env_input.skip_all_optional();
+
+        assert_eq!(env_input.current_spec().unwrap().name, "REQ2");
+    }
+
+    #[test]
+    fn test_env_input_state_get_values() {
+        let specs = vec![
+            EnvVarSpec {
+                name: "VAR1".to_string(),
+                description: None,
+                required: true,
+                default: None,
+            },
+            EnvVarSpec {
+                name: "VAR2".to_string(),
+                description: None,
+                required: true,
+                default: None,
+            },
+        ];
+
+        let mut env_input = EnvInputState::new(specs);
+
+        // Input VAR1
+        env_input.input_buffer = "value1".to_string();
+        env_input.next();
+
+        // Input VAR2
+        env_input.input_buffer = "value2".to_string();
+        env_input.next();
+
+        let values = env_input.get_values();
+        assert_eq!(values.len(), 2);
+        assert!(values.iter().any(|(k, v)| k == "VAR1" && v == "value1"));
+        assert!(values.iter().any(|(k, v)| k == "VAR2" && v == "value2"));
+    }
+
+    #[test]
+    fn test_env_input_state_whitespace_trimming() {
+        let specs = vec![EnvVarSpec {
+            name: "VAR".to_string(),
+            description: None,
+            required: true,
+            default: None,
+        }];
+
+        let mut env_input = EnvInputState::new(specs);
+        env_input.input_buffer = "  spaced value  ".to_string();
+        env_input.next();
+
+        assert_eq!(
+            env_input.values.get("VAR"),
+            Some(&"spaced value".to_string())
+        );
+    }
+
+    #[test]
+    fn test_browser_state_with_env_input() {
+        let servers = create_test_servers(5);
+        let state = BrowserState::new(servers, None);
+
+        assert!(state.env_input.is_none());
+
+        // Can create and manage env input
+        let specs = vec![EnvVarSpec {
+            name: "TEST_VAR".to_string(),
+            description: None,
+            required: true,
+            default: None,
+        }];
+
+        let mut env_input = EnvInputState::new(specs);
+        env_input.input_buffer = "test_value".to_string();
+
+        assert_eq!(env_input.current_spec().unwrap().name, "TEST_VAR");
     }
 }

@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.5.25--developing-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.5.26-blue?style=flat-square)
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange?style=flat-square&logo=rust)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 ![MCP](https://img.shields.io/badge/MCP-Supported-purple?style=flat-square)
@@ -232,9 +232,9 @@ aiw <ai_type> -p <provider> <cli_params...> <prompt>
 
 ### Rules
 
-- **AIW Consumes**: `-p` / `--provider` parameters for provider selection
+- **AIW Consumes**: `-r` / `--role` for role injection, `-p` / `--provider` for provider selection
 - **Transparent Forwarding**: All other `-` prefixed parameters are passed directly to the AI CLI
-- **Parameter Order**: Provider flags must come **before** other CLI parameters
+- **Parameter Order**: AIW flags (-r, -p) must come **before** other CLI parameters
 - **Full Compatibility**: Maintain complete access to all AI CLI features
 
 ### Examples
@@ -248,7 +248,7 @@ aiw claude -p glm --model sonnet --debug api "explain this code"
 aiw claude -p glm --print --output-format json "summarize the file"
 
 # Tool restrictions
-aiw claude -p glm --allowed-tools Bash,Edit --print "modify this file"
+aiw claude -p glm --allowed-tools Bash,Edit "modify this file"
 
 # Multiple parameters
 aiw claude -p glm --model sonnet --max-budget-usd 5 --dangerously-skip-permissions "help me debug"
@@ -265,20 +265,20 @@ aiw claude -p glm --print --output-format stream-json
 # Interactive with specific tools
 aiw claude -p glm --tools "Bash,Edit,Read" --no-session-persistence
 
-# Multi-AI with same provider and parameters
-aiw claude,codex -p glm --temperature 0.7 --print "compare approaches"
+# Multi-AI with same provider
+aiw "claude|codex" -p glm --temperature 0.7 "compare approaches"
 ```
 
 #### Provider-Specific Examples
 ```bash
 # Claude with structured output
-aiw claude -p glm --json-schema '{"type":"object","properties":{"summary":{"type":"string"}}}' --print "summarize"
+aiw claude -p glm --json-schema '{"type":"object","properties":{"summary":{"type":"string"}}}' "summarize this"
 
 # Codex with custom settings
 aiw codex -p glm --temperature 0.3 --max-tokens 500 "write python function"
 
 # Gemini with approval mode
-aiw gemini -p glm --approval-mode yolo --print "translate this text"
+aiw gemini -p glm --approval-mode yolo "translate this text"
 ```
 
 ### Benefits
@@ -347,6 +347,6 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-**AIW** - Universal AI CLI Management Platform with MCP Routing v0.5.25
+**AIW** - Universal AI CLI Management Platform with MCP Routing v0.5.26
 
 For full documentation and source code, visit: [https://github.com/putao520/agentic-warden](https://github.com/putao520/agentic-warden)

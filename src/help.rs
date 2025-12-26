@@ -15,19 +15,22 @@ USAGE:
     aiw [OPTIONS] <AI_CLI> [AI_OPTIONS] "<TASK>"
 
 AI CLI COMMANDS:
-    aiw <agent> [-r ROLE] [-p PROVIDER] [OPTIONS] ["TASK"]
+    aiw <agent> [-r ROLE] [-p PROVIDER] [CLI_OPTIONS] ["TASK"]
 
     Agents:     claude | codex | gemini | all | "agent1|agent2"
-    -r ROLE     Inject role prompt (e.g., common, debugger, security)
+    -r ROLE     Inject role prompt (run 'aiw roles list' to see all)
     -p PROVIDER Use specific provider (e.g., openrouter, glm)
-    [OPTIONS]   Forward to AI CLI (--model, --debug, --print, etc.)
+    [CLI_OPTIONS] Forwarded to AI CLI (run 'aiw claude --help' to see all)
     "TASK"      Task description (omit for interactive mode)
+
+    ⚠️  Parameter order: -r and -p must come BEFORE CLI options!
 
     Quick start:
         aiw claude "explain this code"           # Simple task
         aiw claude                               # Interactive mode
         aiw claude -r common "write a function"  # With role
         aiw claude -p glm "help me debug"        # With provider
+        aiw claude -r common -p glm "full example"  # Role + provider
 
     For detailed AI CLI help:  aiw help claude
 
@@ -211,12 +214,12 @@ EXAMPLES:
     aiw {} -r frontend -p glm "build a React component"
     aiw {} -r database -p openrouter "design a schema"
 
-    # With parameter forwarding
-    aiw {} -r security -p glm --model sonnet --debug api "explain this"
-    aiw {} -r ml -p glm --print --output-format json "analyze this data"
+    # With parameter forwarding (note: prompt must be last)
+    aiw {} -r security -p glm --model sonnet "explain this"
+    aiw {} -r ml -p glm --output-format json "analyze this data"
 
-    # Interactive mode with role
-    aiw {} -r code-reviewer -p glm --model sonnet
+    # Interactive mode with role (no task = interactive)
+    aiw {} -r code-reviewer -p glm
 
     # Multi-agent selection
     aiw all "review this code"
@@ -497,8 +500,8 @@ EXAMPLES:
         aiw codex -p glm --temperature 0.7 "generate code"
 
     Parameter Forwarding:
-        aiw claude -p glm --model sonnet --debug api "explain"
-        aiw claude -p glm --print --output-format json "summarize"
+        aiw claude -p glm --model sonnet "explain this code"
+        aiw claude -p glm --output-format json "summarize this"
         aiw claude -p glm --allowed-tools Bash,Edit "modify file"
 
     Multi-Agent:
@@ -863,8 +866,8 @@ QUICK START EXAMPLES:
    aiw codex -p glm "explain this"
 
 5. Parameter forwarding:
-   aiw claude -p glm --model sonnet --debug api "explain this"
-   aiw claude -p glm --print --output-format json "summarize"
+   aiw claude -p glm --model sonnet "explain this code"
+   aiw claude -p glm --output-format json "summarize this"
 
 6. Multiple AI agents:
    aiw all "Review this code"

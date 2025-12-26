@@ -2,7 +2,7 @@
 //!
 //! 基于成熟TUI库的应用启动和管理
 
-use crate::tui::App;
+use crate::tui::{App, ExternalScreen};
 
 /// TUI应用启动器
 pub struct TuiApp;
@@ -11,7 +11,20 @@ impl TuiApp {
     /// 启动TUI应用
     pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         let mut app = App::new();
-        app.run()
+        loop {
+            match app.run()? {
+                Some(ExternalScreen::McpBrowse) => {
+                    // Launch MCP Browse TUI (async function, need to block on it)
+                    tokio::runtime::Runtime::new()
+                        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?
+                        .block_on(crate::commands::mcp::registry::browse::execute(None))?;
+                    // After MCP Browse exits, continue with our TUI
+                    app = App::new();
+                }
+                None => break,
+            }
+        }
+        Ok(())
     }
 
     /// 启动TUI应用并指定初始屏幕
@@ -19,10 +32,26 @@ impl TuiApp {
         initial_screen: Option<crate::tui::ScreenType>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut app = App::new();
-        if let Some(screen) = initial_screen {
+        if let Some(screen) = initial_screen.clone() {
             app.set_initial_screen(screen);
         }
-        app.run()
+        loop {
+            match app.run()? {
+                Some(ExternalScreen::McpBrowse) => {
+                    // Launch MCP Browse TUI (async function, need to block on it)
+                    tokio::runtime::Runtime::new()
+                        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?
+                        .block_on(crate::commands::mcp::registry::browse::execute(None))?;
+                    // After MCP Browse exits, recreate app with initial screen
+                    app = App::new();
+                    if let Some(screen) = initial_screen.clone() {
+                        app.set_initial_screen(screen);
+                    }
+                }
+                None => break,
+            }
+        }
+        Ok(())
     }
 
     /// 初始化TUI环境

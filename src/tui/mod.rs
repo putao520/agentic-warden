@@ -28,7 +28,7 @@ pub mod screens;
 use self::data_binding::DataBindingController;
 
 // 重新导出常用类型
-pub use screens::{Screen, ScreenAction, ScreenType};
+pub use screens::{ExternalScreen, Screen, ScreenAction, ScreenType};
 
 /// 全局 TUI 应用容器
 pub struct App {
@@ -39,6 +39,8 @@ pub struct App {
     #[allow(dead_code)]
     data_binding: DataBindingController,
     last_update: Instant,
+    /// External screen to launch after TUI exits
+    launch_external: Option<ExternalScreen>,
 }
 
 impl App {
@@ -55,6 +57,7 @@ impl App {
             history,
             data_binding: DataBindingController::start(),
             last_update: Instant::now(),
+            launch_external: None,
         }
     }
 
@@ -65,7 +68,9 @@ impl App {
         self.history.push(screen);
     }
 
-    pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    /// Run the TUI application
+    /// Returns Ok(Some(external)) if an external screen should be launched after exit
+    pub fn run(&mut self) -> Result<Option<ExternalScreen>, Box<dyn std::error::Error>> {
         enable_raw_mode()?;
         let mut stdout = stdout();
         execute!(
@@ -106,7 +111,7 @@ impl App {
                 }
             }
 
-            if self.should_quit {
+            if self.should_quit || self.launch_external.is_some() {
                 break;
             }
         }
@@ -117,7 +122,7 @@ impl App {
             crossterm::terminal::Clear(ClearType::All)
         )?;
         disable_raw_mode()?;
-        Ok(())
+        Ok(self.launch_external.take())
     }
 
     fn ensure_screen_ready(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -155,6 +160,11 @@ impl App {
             KeyCode::Char('3') => {
                 self.current_screen = crate::tui::ScreenType::Provider;
                 self.history.push(crate::tui::ScreenType::Provider);
+                return Ok(());
+            }
+            KeyCode::Char('m') | KeyCode::Char('M') => {
+                // Launch MCP Browse external TUI
+                self.launch_external = Some(ExternalScreen::McpBrowse);
                 return Ok(());
             }
             KeyCode::Char('q') | KeyCode::Char('Q') => {
@@ -202,6 +212,9 @@ impl App {
             ScreenAction::Quit => {
                 self.should_quit = true;
             }
+            ScreenAction::LaunchExternal(external) => {
+                self.launch_external = Some(external);
+            }
         }
 
         Ok(())
@@ -238,7 +251,7 @@ impl App {
     }
 
     fn render_key_hints(&self, frame: &mut ratatui::Frame, area: ratatui::layout::Rect) {
-        let hints = vec!["1:Dashboard 2:Status 3:Provider 4:Push/Pull  q:Quit  ESC:Back"];
+        let hints = vec!["1:Dashboard 2:Status 3:Provider  m:MCP Browse  q:Quit  ESC:Back"];
 
         let text: Vec<ratatui::text::Line> = hints
             .into_iter()

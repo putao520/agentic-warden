@@ -11,13 +11,11 @@ use ratatui::{
     widgets::{Block, Borders, Cell, Paragraph, Row, Table, Wrap},
     Frame,
 };
-use std::time::{Duration as StdDuration, Instant};
 
 use crate::cli_manager::{CliToolDetector, InstallType};
-use crate::tui::app_state::{
-    AppState, AuthStatus, GoogleDriveAuthSnapshot, SyncPhase, TaskUiState, TransferKind,
-    TransferProgress,
-};
+use crate::mcp_routing::config::McpConfigManager;
+use crate::roles::{builtin, RoleManager};
+use crate::tui::app_state::{AppState, TaskUiState};
 
 use super::{Screen, ScreenAction, ScreenType};
 
@@ -48,22 +46,15 @@ struct DashboardState {
     default_provider: Option<String>,
     running_tasks: Vec<TaskSummary>,
     total_running_tasks: usize,
-    sync_overview: SyncOverview,
+    system_overview: SystemOverview,
 }
 
 #[derive(Debug, Clone, Default)]
-struct SyncOverview {
-    drive: GoogleDriveAuthSnapshot,
-    push: Option<TransferProgress>,
-    pull: Option<TransferProgress>,
-    oauth: Option<OAuthFlowSummary>,
-}
-
-#[derive(Debug, Clone)]
-struct OAuthFlowSummary {
-    provider: String,
-    status: AuthStatus,
-    updated_at: Instant,
+struct SystemOverview {
+    mcp_enabled: usize,
+    mcp_total: usize,
+    roles_builtin: usize,
+    roles_custom: usize,
 }
 
 pub struct DashboardScreen {
@@ -115,7 +106,7 @@ impl DashboardScreen {
         let (running_tasks, total_running_tasks) = self.collect_running_tasks();
         self.state.running_tasks = running_tasks;
         self.state.total_running_tasks = total_running_tasks;
-        self.state.sync_overview = self.collect_sync_overview();
+        self.state.system_overview = self.collect_system_overview();
     }
 
     fn resolve_default_provider(&self) -> Option<String> {
@@ -152,26 +143,30 @@ impl DashboardScreen {
         (running, total_running)
     }
 
-    fn collect_sync_overview(&self) -> SyncOverview {
-        let drive = self.app_state.google_drive_auth_snapshot();
-        let push = self.app_state.get_sync_progress(&TransferKind::Push);
-        let pull = self.app_state.get_sync_progress(&TransferKind::Pull);
-        let oauth_flow = self
-            .app_state
-            .recent_oauth_flows(StdDuration::from_secs(600))
-            .into_iter()
-            .next()
-            .map(|flow| OAuthFlowSummary {
-                provider: flow.provider,
-                status: flow.dialog.status.clone(),
-                updated_at: flow.updated_at,
-            });
+    fn collect_system_overview(&self) -> SystemOverview {
+        // Collect MCP server stats
+        let (mcp_enabled, mcp_total) = match McpConfigManager::load() {
+            Ok(manager) => {
+                let total = manager.config().mcp_servers.len();
+                let enabled = manager.enabled_servers().len();
+                (enabled, total)
+            }
+            Err(_) => (0, 0),
+        };
 
-        SyncOverview {
-            drive,
-            push,
-            pull,
-            oauth: oauth_flow,
+        // Collect role stats
+        let roles_builtin = builtin::list_builtin_roles().len();
+        let roles_custom = RoleManager::new()
+            .ok()
+            .and_then(|manager| manager.list_all_roles().ok())
+            .map(|roles| roles.len())
+            .unwrap_or(0);
+
+        SystemOverview {
+            mcp_enabled,
+            mcp_total,
+            roles_builtin,
+            roles_custom,
         }
     }
 
@@ -330,81 +325,35 @@ impl DashboardScreen {
         }
     }
 
-    fn render_sync_overview(&self, frame: &mut Frame, area: Rect) {
-        let overview = &self.state.sync_overview;
+    fn render_system_overview(&self, frame: &mut Frame, area: Rect) {
+        let overview = &self.state.system_overview;
         let mut lines = Vec::new();
-        lines.push(self.describe_drive_status(&overview.drive));
-        lines.push(self.describe_transfer_status("Push", overview.push.as_ref()));
-        lines.push(self.describe_transfer_status("Pull", overview.pull.as_ref()));
-        lines.push(self.describe_oauth_status(overview.oauth.as_ref()));
+
+        // MCP Servers line
+        if overview.mcp_total > 0 {
+            lines.push(format!(
+                "MCP Servers: {} enabled ({} total)",
+                overview.mcp_enabled, overview.mcp_total
+            ));
+        } else {
+            lines.push("MCP Servers: not configured".to_string());
+        }
+
+        // Roles line
+        let total_roles = overview.roles_builtin + overview.roles_custom;
+        lines.push(format!(
+            "Roles: {} available ({} builtin, {} custom)",
+            total_roles, overview.roles_builtin, overview.roles_custom
+        ));
 
         let paragraph = Paragraph::new(lines.join("\n"))
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title("Sync Activity"),
+                    .title("System Overview"),
             )
             .wrap(Wrap { trim: true });
         frame.render_widget(paragraph, area);
-    }
-
-    fn describe_drive_status(&self, snapshot: &GoogleDriveAuthSnapshot) -> String {
-        if let Some(err) = &snapshot.error {
-            return format!("✗ Google Drive error: {}", truncate(err, 48));
-        }
-
-        if !snapshot.configured {
-            return "✗ Google Drive credentials missing – open OAuth to connect.".to_string();
-        }
-
-        if !snapshot.has_refresh_token {
-            return "⚠ Google Drive connected without refresh token – re-run OAuth.".to_string();
-        }
-
-        if let Some(expires_at) = snapshot.expires_at {
-            let remaining = (expires_at - Utc::now()).num_minutes();
-            if remaining > 0 {
-                return format!("✓ Google Drive connected (token refreshes in {remaining}m)");
-            }
-        }
-
-        "✓ Google Drive connected".to_string()
-    }
-
-    fn describe_transfer_status(&self, label: &str, progress: Option<&TransferProgress>) -> String {
-        match progress {
-            Some(progress) => {
-                let phase = sync_phase_label(progress.phase);
-                let mut message = progress
-                    .message
-                    .clone()
-                    .unwrap_or_else(|| phase.to_string());
-                if message.contains('\n') {
-                    message = message.replace('\n', " ");
-                }
-                let message = truncate(&message, 48);
-                format!("{label}: {phase} · {:>3}% · {}", progress.percent, message)
-            }
-            None => format!("{label}: idle"),
-        }
-    }
-
-    fn describe_oauth_status(&self, summary: Option<&OAuthFlowSummary>) -> String {
-        match summary {
-            Some(flow) => {
-                let status = match &flow.status {
-                    AuthStatus::Waiting => "waiting for approval".to_string(),
-                    AuthStatus::CallbackStarted => "processing authorization".to_string(),
-                    AuthStatus::Authorized => "completed successfully".to_string(),
-                    AuthStatus::Failed(reason) => {
-                        format!("failed: {}", truncate(reason, 32))
-                    }
-                };
-                let age = human_duration(flow.updated_at.elapsed());
-                format!("OAuth ({}) updated {} ago – {}", flow.provider, age, status)
-            }
-            None => "OAuth: no recent activity".to_string(),
-        }
     }
 }
 
@@ -427,7 +376,7 @@ impl Screen for DashboardScreen {
 
         self.render_cli_status(frame, layout[0]);
         self.render_task_summary(frame, mid[0]);
-        self.render_sync_overview(frame, mid[1]);
+        self.render_system_overview(frame, mid[1]);
         self.render_shortcuts(frame, layout[2]);
         self.render_error(frame, layout[3]);
     }
@@ -483,33 +432,6 @@ fn format_duration(duration: ChronoDuration) -> String {
         format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
     } else {
         format!("{:02}:{:02}", minutes, seconds)
-    }
-}
-
-fn human_duration(duration: StdDuration) -> String {
-    let secs = duration.as_secs();
-    if secs >= 3600 {
-        format!("{:02}h{:02}m", secs / 3600, (secs % 3600) / 60)
-    } else if secs >= 60 {
-        format!("{:02}m{:02}s", secs / 60, secs % 60)
-    } else {
-        format!("{:02}s", secs)
-    }
-}
-
-fn sync_phase_label(phase: SyncPhase) -> &'static str {
-    match phase {
-        SyncPhase::Idle => "Idle",
-        SyncPhase::Preparing => "Preparing",
-        SyncPhase::Authentication => "Authenticating",
-        SyncPhase::Listing => "Listing",
-        SyncPhase::Compressing => "Compressing",
-        SyncPhase::Uploading => "Uploading",
-        SyncPhase::Downloading => "Downloading",
-        SyncPhase::Verifying => "Verifying",
-        SyncPhase::Applying => "Restoring",
-        SyncPhase::Completed => "Completed",
-        SyncPhase::Failed => "Failed",
     }
 }
 
@@ -598,7 +520,7 @@ mod tests {
                 status: TaskUiState::Running,
             }],
             total_running_tasks: 1,
-            sync_overview: SyncOverview::default(),
+            system_overview: SystemOverview::default(),
         };
         screen.last_refresh = Some(Utc::now());
 

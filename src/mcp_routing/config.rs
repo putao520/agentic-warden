@@ -4,8 +4,12 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     fs,
+    fs::OpenOptions,
+    io::Write,
     path::{Path, PathBuf},
-    time::SystemTime,
+    process,
+    thread,
+    time::{Duration, SystemTime},
 };
 use tracing::debug;
 
@@ -164,6 +168,33 @@ impl McpConfigManager {
         &self.config
     }
 
+    pub fn update_server_env(
+        &mut self,
+        name: &str,
+        env: HashMap<String, String>,
+    ) -> Result<()> {
+        let server = self
+            .config
+            .mcp_servers
+            .get_mut(name)
+            .ok_or_else(|| anyhow!("MCP server '{}' not found", name))?;
+        server.env = env;
+        Ok(())
+    }
+
+    pub fn save(&mut self) -> Result<()> {
+        self.ensure_config_dir()?;
+        let _lock = ConfigLock::acquire(&self.path)?;
+        let content = serde_json::to_string_pretty(&self.config)
+            .with_context(|| format!("Failed to serialize MCP config for {}", self.path.display()))?;
+        fs::write(&self.path, content)
+            .with_context(|| format!("Failed to write MCP config to {}", self.path.display()))?;
+        self.last_loaded = fs::metadata(&self.path)
+            .ok()
+            .and_then(|metadata| metadata.modified().ok());
+        Ok(())
+    }
+
     pub fn enabled_servers(&self) -> Vec<(String, McpServerConfig)> {
         self.config
             .mcp_servers
@@ -193,6 +224,92 @@ impl McpConfigManager {
         self.last_loaded = modified;
         Ok(true)
     }
+
+    fn ensure_config_dir(&self) -> Result<()> {
+        if let Some(parent) = self.path.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create MCP config directory {}", parent.display())
+            })?;
+        }
+        Ok(())
+    }
+}
+
+const LOCK_RETRY_COUNT: usize = 10;
+const LOCK_RETRY_DELAY: Duration = Duration::from_millis(100);
+const LOCK_STALE_SECS: u64 = 30;
+
+struct ConfigLock {
+    path: PathBuf,
+    _file: fs::File,
+}
+
+impl ConfigLock {
+    fn acquire(config_path: &Path) -> Result<Self> {
+        let lock_path = lock_path_for(config_path)?;
+
+        for _ in 0..=LOCK_RETRY_COUNT {
+            match OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&lock_path)
+            {
+                Ok(mut file) => {
+                    let _ = writeln!(file, "pid={}", process::id());
+                    let _ = writeln!(
+                        file,
+                        "started={}",
+                        SystemTime::now()
+                            .duration_since(SystemTime::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs()
+                    );
+                    return Ok(Self {
+                        path: lock_path,
+                        _file: file,
+                    });
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                    if is_lock_stale(&lock_path)? {
+                        let _ = fs::remove_file(&lock_path);
+                        continue;
+                    }
+                    thread::sleep(LOCK_RETRY_DELAY);
+                }
+                Err(err) => return Err(err.into()),
+            }
+        }
+
+        Err(anyhow!(
+            "MCP config is locked by another process. Try again later."
+        ))
+    }
+}
+
+impl Drop for ConfigLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+fn lock_path_for(config_path: &Path) -> Result<PathBuf> {
+    let file_name = config_path
+        .file_name()
+        .ok_or_else(|| anyhow!("Invalid MCP config path"))?;
+    Ok(config_path.with_file_name(format!("{}.lock", file_name.to_string_lossy())))
+}
+
+fn is_lock_stale(path: &Path) -> Result<bool> {
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => return Err(err.into()),
+    };
+    let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+    let age = SystemTime::now()
+        .duration_since(modified)
+        .unwrap_or(Duration::ZERO);
+    Ok(age > Duration::from_secs(LOCK_STALE_SECS))
 }
 
 impl McpConfig {

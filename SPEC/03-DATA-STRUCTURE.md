@@ -1049,6 +1049,106 @@ plugin.json格式（Claude Code标准）：
 
 ---
 
+### DATA-019: 已安装MCP列表数据结构
+
+**数据来源**: `~/.aiw/mcp.json` 中的已安装MCP服务器配置
+**访问方式**: McpConfigManager::read()
+**用途**: InstalledMcpScreen列表显示和搜索
+
+#### 列表数据结构
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| name | String | 是 | MCP服务器名称（唯一标识） |
+| description | String | 否 | 服务器描述 |
+| source | String | 是 | 来源标识（github/local/manual） |
+| enabled | bool | 是 | 是否启用该MCP |
+| command | String | 是 | 启动命令 |
+| env_vars | HashMap<String, String> | 否 | 环境变量配置 |
+| created_at | timestamp | 否 | 创建时间 |
+
+#### 派生字段（UI显示）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| env_var_count | usize | 环境变量数量（从env_vars.len()派生） |
+| status_text | String | 状态显示（"Enabled"/"Disabled"） |
+| source_icon | char | 来源图标（📦/📁/✏️） |
+
+#### ListState管理
+
+| 属性 | 类型 | 说明 |
+|------|------|------|
+| selected_index | usize | 当前选中项目索引 |
+| scroll_offset | usize | 滚动偏移量 |
+| filtered_items | Vec<usize> | 搜索过滤后的项目索引 |
+| search_query | String | 当前搜索字符串 |
+| search_mode | bool | 是否处于搜索模式 |
+
+#### 搜索过滤规则
+
+- **搜索范围**: name, description字段
+- **搜索方式**: 包含匹配（case-insensitive）
+- **实时更新**: 每次输入/删除字符后更新filtered_items
+- **保留原序**: 搜索结果保持原始顺序
+
+---
+
+### DATA-020: MCP环境变量编辑状态数据结构
+
+**数据来源**: InstalledMcpScreen选中的MCP项目
+**访问方式**: 从mcp.json加载指定服务器配置
+**用途**: EditEnvState中的变量编辑和保存
+
+#### 编辑状态结构
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| server_name | String | 是 | 正在编辑的MCP服务器名称 |
+| original_values | HashMap<String, String> | 是 | 原始环境变量值（编辑前备份） |
+| current_values | HashMap<String, String> | 是 | 当前修改的环境变量值 |
+| modified | bool | 是 | 是否有未保存的修改 |
+| env_specs | Vec<EnvVarSpec> | 是 | 环境变量规格列表（从MCP配置加载） |
+
+#### EnvVarSpec（环境变量规格）
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| name | String | 是 | 变量名称 |
+| required | bool | 是 | 是否为必填变量 |
+| description | String | 否 | 变量说明 |
+| default_value | Option<String> | 否 | 默认值 |
+| validation_rule | Option<String> | 否 | 验证规则（如正则表达式） |
+
+#### 编辑操作状态
+
+| 操作 | 前置条件 | 后置状态 | 说明 |
+|------|----------|---------|------|
+| 进入编辑模式 | 已选中MCP项目 | modified=false | 加载原值，重置modified |
+| 修改变量值 | 在EnvInputState中修改 | modified=true | 跟踪用户输入 |
+| 按's'确认保存 | modified=true | 等待确认 | 显示确认对话框 |
+| 确认保存 | 用户选择'y' | 保存到mcp.json | 调用McpConfigManager::update_server() |
+| 取消编辑 | 按'Esc' | 放弃修改 | 返回列表，不保存 |
+
+#### 保存验证规则
+
+| 验证项 | 规则 | 失败处理 |
+|--------|------|---------|
+| 必填变量 | 所有required字段必须有值 | 显示错误，不允许保存 |
+| JSON序列化 | 修改后的值需成功序列化为JSON | 显示错误，保留编辑状态 |
+| 文件写入 | mcp.json成功写入 | 显示错误，保留备份 |
+
+#### 错误处理
+
+| 错误类型 | 触发条件 | 用户提示 |
+|----------|----------|----------|
+| 变量验证失败 | 必填字段为空 | "Required: {var_name}" |
+| JSON错误 | 值序列化失败 | "Invalid value for {var_name}" |
+| 文件写入失败 | mcp.json不可写 | "Failed to save config: {error}" |
+| 配置缺失 | MCP配置文件损坏 | "Server configuration not found" |
+
+---
+
 ## Deprecated Data Structures
 
 ### Historical Data Models (Not applicable for v0)
