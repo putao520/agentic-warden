@@ -52,6 +52,9 @@ impl AiCliCommand {
         "en".to_string()
     }
 
+    /// Default fallback role when specified role is not found
+    const DEFAULT_ROLE: &'static str = "common";
+
     /// 应用角色到提示词
     fn apply_role(&self, prompt: &str) -> Result<String> {
         if let Some(role_name) = &self.role {
@@ -70,7 +73,14 @@ impl AiCliCommand {
                 }
             }
 
-            return Err(anyhow!("Role '{}' not found. Use 'aiw roles list' to see available roles.", role_name));
+            // Fallback to default role if specified role not found
+            eprintln!(
+                "Warning: Role '{}' not found, falling back to '{}' role.",
+                role_name, Self::DEFAULT_ROLE
+            );
+            if let Ok(role) = get_builtin_role(Self::DEFAULT_ROLE, &lang) {
+                return Ok(format!("{}\n\n---\n\n{}", role.content, prompt));
+            }
         }
 
         Ok(prompt.to_string())
