@@ -173,25 +173,13 @@ PROVIDER SELECTION:
 
     Without -p, uses the default provider configured in ~/.aiw/providers.json
 
-TRANSPARENT PARAMETER FORWARDING:
-    All CLI parameters after the provider selection are forwarded directly to {}.
+PARAMETER FORWARDING:
+    All other parameters are forwarded directly to {} CLI.
 
-    To see ALL available {} parameters:
+    To see all {} CLI parameters:
         aiw {} --help
 
-    Common parameters:
-        --model <name>           Select model (e.g., sonnet, opus, gpt-4)
-        --debug <level>          Enable debugging (api, all)
-        --print                  Print mode (skip interactive features)
-        --output-format <fmt>    Output format (json, stream-json)
-        --system-prompt <text>   Custom system prompt
-        --allowed-tools <list>   Restrict available tools
-        --permission-mode <mode> Permission mode (default, plan, delegate)
-        --continue, -c           Continue most recent conversation
-        --max-tokens <n>         Maximum tokens to generate
-
-    Parameter order rule: -r/--role must come BEFORE -p/--provider.
-    Both must come BEFORE other CLI parameters.
+    Parameter order: AIW options (-r, -p) must come BEFORE {} CLI options.
 
 INTERACTIVE MODE:
     aiw {} [-r ROLE] [-p PROVIDER] [CLI_OPTIONS]
@@ -273,6 +261,7 @@ For more information:
         agent,
         agent,
         agent.to_uppercase(),
+        agent,
         agent,
         agent,
         agent,
