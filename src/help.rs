@@ -14,12 +14,24 @@ USAGE:
     aiw [OPTIONS] <COMMAND>
     aiw [OPTIONS] <AI_CLI> [AI_OPTIONS] "<TASK>"
 
-AI CLI SELECTORS:
-    claude | codex | gemini    Single AI agent
-    all                         All available agents
-    "agent1|agent2"             Multiple agents (quotes required)
+AI CLI COMMANDS:
+    aiw <agent> [-r ROLE] [-p PROVIDER] [OPTIONS] ["TASK"]
 
-MAIN COMMANDS:
+    Agents:     claude | codex | gemini | all | "agent1|agent2"
+    -r ROLE     Inject role prompt (e.g., common, debugger, security)
+    -p PROVIDER Use specific provider (e.g., openrouter, glm)
+    [OPTIONS]   Forward to AI CLI (--model, --debug, --print, etc.)
+    "TASK"      Task description (omit for interactive mode)
+
+    Quick start:
+        aiw claude "explain this code"           # Simple task
+        aiw claude                               # Interactive mode
+        aiw claude -r common "write a function"  # With role
+        aiw claude -p glm "help me debug"        # With provider
+
+    For detailed AI CLI help:  aiw help claude
+
+MANAGEMENT COMMANDS:
     dashboard                   Show Dashboard (default when no args)
     status [--tui]              Show task status
     provider                    Launch Provider Management TUI
@@ -95,9 +107,10 @@ EXAMPLES:
 
 For more detailed information about a specific command:
     aiw help <command>
-    aiw help claude
-    aiw help roles
-    aiw help mcp
+    aiw help claude     # AI CLI usage and parameters
+    aiw help roles      # Role injection system
+    aiw help mcp        # MCP server management
+    aiw help plugin     # Plugin marketplace
 
 Project home: https://github.com/putao520/agentic-warden
 "#, version);
