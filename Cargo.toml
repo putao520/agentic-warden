@@ -6,7 +6,7 @@ repository = "https://github.com/putao520/agentic-warden"
 readme = "README.md"
 keywords = ["ai", "cli", "llm", "claude", "gemini"]
 categories = ["command-line-utilities", "development-tools"]
-version = "0.5.27"
+version = "0.5.28"
 edition = "2021"
 exclude = [
     "bin/*",
