@@ -1016,9 +1016,9 @@ regex = "1.10"              # 危险模式检测
 ### REQ-014: AI CLI任务生命周期管理和角色系统
 
 **Priority**: High
-**Status**: 🟢 Done (Phase 1-3 ✅ Completed)
+**Status**: 🟡 In Progress (Phase 1-3 ✅ Completed, Phase 4 🟡 Design)
 **Related**: ARCH-014
-**Version**: v0.2.0
+**Version**: v0.2.0 → v0.6.x (Phase 4)
 
 #### 背景和动机
 
@@ -1164,6 +1164,79 @@ schemars = "0.8"       # MCP schema生成 (已有)
 - [x] 角色验证错误返回清晰消息
 - [x] 实现文件: `src/mcp/mod.rs:115-412` (4个MCP工具), `tests/task_lifecycle_tests.rs` (5个集成测试)
 
+#### Phase 4: 多角色支持 (🟡 v0.6.x 设计中)
+
+**4.1 多角色参数语法**:
+- [ ] CLI支持逗号分隔的多角色参数: `-r common,security,testing`
+- [ ] 解析角色列表，去除空白字符
+- [ ] 角色名称验证复用现有字符集限制: `[A-Za-z0-9_-]`
+- [ ] 角色顺序保持用户指定顺序（影响组合顺序）
+
+**4.2 多角色加载和组合**:
+- [ ] 遍历角色列表，逐个调用`RoleManager::get_role()`
+- [ ] 跳过无效/不存在的角色，记录警告日志
+- [ ] 组合所有有效角色的content，使用分隔符连接
+- [ ] 组合格式: `{role1.content}\n\n---\n\n{role2.content}\n\n---\n\n{task}`
+
+**4.3 错误处理和兜底策略**:
+- [ ] 部分角色无效: 跳过无效角色，继续使用有效角色
+- [ ] **全部角色无效: 使用`common`角色作为兜底**
+- [ ] 兜底角色不存在: 报错，不执行任务
+- [ ] 显示警告信息告知用户哪些角色被跳过
+
+**4.4 MCP工具支持**:
+- [ ] `start_task`工具的`role`参数支持逗号分隔格式
+- [ ] 返回结果包含实际使用的角色列表
+- [ ] 记录多角色组合到任务元数据
+
+**4.5 单元测试**:
+- [ ] 多角色解析测试（逗号分隔、空白处理）
+- [ ] 部分角色无效的处理测试
+- [ ] 全部角色无效的兜底测试（使用common）
+- [ ] 角色组合格式测试
+- [ ] MCP工具多角色支持测试
+
+**Phase 4 技术约束**:
+
+**角色组合格式**:
+```
+# 多角色注入格式（按用户指定顺序）
+{role1.content}
+
+---
+
+{role2.content}
+
+---
+
+{role3.content}
+
+---
+
+{user_task}
+```
+
+**错误处理矩阵**:
+
+| 场景 | 处理方式 | 用户提示 |
+|------|----------|----------|
+| 全部角色有效 | 组合所有角色 | 无 |
+| 部分角色无效 | 跳过无效，使用有效 | ⚠️ 角色 'xxx' 不存在，已跳过 |
+| 全部角色无效 | 使用`common`角色兜底 | ⚠️ 所有指定角色无效，使用默认角色 common |
+| `common`角色也不存在 | 报错，不执行任务 | ❌ 默认角色 common 不存在，请检查角色配置 |
+
+**性能要求**:
+- 多角色解析: < 10ms
+- 多角色加载(10个): < 100ms
+- 角色组合: < 10ms
+
+**Phase 4 验收标准**:
+- [ ] `cargo test --test multi_role_tests`全部通过
+- [ ] CLI命令`aiw claude -r common,security "task"`正常工作
+- [ ] MCP工具`start_task`支持多角色参数
+- [ ] 全部角色无效时正确使用common兜底
+- [ ] 警告信息清晰明确
+
 ---
 
 ## Non-Functional Requirements
@@ -1261,6 +1334,7 @@ Agentic-Warden MUST meet performance criteria for process tracking and task mana
 | REQ-011 | AI CLI 更新/安装管理 | P1 | 🟢 Done | v0.1.0 | ARCH-008, MODULE-002, API-004 | Update command implementation |
 | REQ-012 | 智能MCP路由系统 | P0 | 🟢 Done | v0.2.0 | ARCH-012, DATA-012, API-012 | Intelligent routing system design |
 | REQ-013 | OpenAI环境变量配置 | P0 | 🟢 Done | v5.1.1 | ARCH-013, API-013 | OpenAI environment variable configuration |
+| REQ-014 | AI CLI任务生命周期管理和角色系统 | P1 | 🟡 In Progress | v0.2.0→v0.6.x | ARCH-014 | Phase 1-3 Done, Phase 4 (Multi-role) Design |
 | REQ-015 | 简化的Google Drive OAuth授权流程 | P0 | 🟢 Done | v0.5.18 | ARCH-003, DATA-003 | Simplified OAuth authorization with built-in public client |
 | REQ-016 | MCP仓库CLI - 多源聚合搜索与安装 | P1 | ✅ Done | v0.6.0 | ARCH-016, API-016 | MCP Registry CLI implementation |
 | REQ-018 | MCP Browse 环境变量快速跳过 | P1 | 🟡 Design | v0.6.1 | ARCH-018 | Skip optional env vars feature |

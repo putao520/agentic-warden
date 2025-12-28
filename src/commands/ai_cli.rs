@@ -4,7 +4,7 @@
 
 use crate::cli_type::{parse_cli_selector_strict, CliType};
 use crate::registry_factory::create_cli_registry;
-use crate::roles::{builtin::get_builtin_role, RoleManager};
+use crate::roles::{builtin::get_builtin_role, RoleManager, Role};
 use crate::supervisor;
 use anyhow::{anyhow, Result};
 use std::ffi::OsString;
@@ -55,32 +55,92 @@ impl AiCliCommand {
     /// Default fallback role when specified role is not found
     const DEFAULT_ROLE: &'static str = "common";
 
-    /// 应用角色到提示词
+    /// 解析逗号分隔的角色字符串（去重，保持顺序）
+    fn parse_role_names(role_str: &str) -> Vec<&str> {
+        let mut seen = std::collections::HashSet::new();
+        role_str
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .filter(|s| seen.insert(*s))  // 去重：只保留首次出现
+            .collect()
+    }
+
+    /// 加载单个角色（优先内置，其次用户目录）
+    fn load_single_role(name: &str, lang: &str) -> Option<Role> {
+        // Try builtin first
+        if let Ok(role) = get_builtin_role(name, lang) {
+            return Some(role);
+        }
+        // Try user roles
+        if let Ok(manager) = RoleManager::new() {
+            if let Ok(role) = manager.get_role(name) {
+                return Some(role);
+            }
+        }
+        None
+    }
+
+    /// 加载多个角色
+    /// Returns: (valid_roles, invalid_names)
+    fn load_roles(names: &[&str], lang: &str) -> (Vec<Role>, Vec<String>) {
+        let mut valid_roles = Vec::new();
+        let mut invalid_names = Vec::new();
+
+        for name in names {
+            if let Some(role) = Self::load_single_role(name, lang) {
+                valid_roles.push(role);
+            } else {
+                invalid_names.push(name.to_string());
+            }
+        }
+
+        (valid_roles, invalid_names)
+    }
+
+    /// 组合多个角色内容
+    fn combine_role_contents(roles: &[Role], prompt: &str) -> String {
+        if roles.is_empty() {
+            return prompt.to_string();
+        }
+
+        let role_contents: Vec<&str> = roles.iter().map(|r| r.content.as_str()).collect();
+        let combined = role_contents.join("\n\n---\n\n");
+        format!("{}\n\n---\n\n{}", combined, prompt)
+    }
+
+    /// 应用角色到提示词（支持多角色）
     fn apply_role(&self, prompt: &str) -> Result<String> {
-        if let Some(role_name) = &self.role {
-            // 获取用户首选语言
+        if let Some(role_str) = &self.role {
             let lang = Self::get_preferred_language();
+            let role_names = Self::parse_role_names(role_str);
 
-            // 优先从内置角色加载（支持语言选择）
-            if let Ok(role) = get_builtin_role(role_name, &lang) {
-                return Ok(format!("{}\n\n---\n\n{}", role.content, prompt));
+            if role_names.is_empty() {
+                return Ok(prompt.to_string());
             }
 
-            // 尝试从用户角色目录加载
-            if let Ok(manager) = RoleManager::new() {
-                if let Ok(role) = manager.get_role(role_name) {
-                    return Ok(format!("{}\n\n---\n\n{}", role.content, prompt));
+            let (valid_roles, invalid_names) = Self::load_roles(&role_names, &lang);
+
+            // Warn about invalid roles
+            for name in &invalid_names {
+                eprintln!("Warning: Role '{}' not found, skipping.", name);
+            }
+
+            // If all roles are invalid, fallback to default
+            if valid_roles.is_empty() {
+                eprintln!(
+                    "Warning: All specified roles not found, falling back to '{}' role.",
+                    Self::DEFAULT_ROLE
+                );
+                if let Some(fallback) = Self::load_single_role(Self::DEFAULT_ROLE, &lang) {
+                    return Ok(Self::combine_role_contents(&[fallback], prompt));
                 }
+                // Even fallback failed
+                eprintln!("Warning: Default role '{}' also not available.", Self::DEFAULT_ROLE);
+                return Ok(prompt.to_string());
             }
 
-            // Fallback to default role if specified role not found
-            eprintln!(
-                "Warning: Role '{}' not found, falling back to '{}' role.",
-                role_name, Self::DEFAULT_ROLE
-            );
-            if let Ok(role) = get_builtin_role(Self::DEFAULT_ROLE, &lang) {
-                return Ok(format!("{}\n\n---\n\n{}", role.content, prompt));
-            }
+            return Ok(Self::combine_role_contents(&valid_roles, prompt));
         }
 
         Ok(prompt.to_string())

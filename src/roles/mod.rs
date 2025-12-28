@@ -151,6 +151,24 @@ impl RoleManager {
         self.parse_role_file(&candidate_path, &base_dir)
     }
 
+    /// Retrieve multiple roles by names.
+    ///
+    /// Returns a tuple of (valid_roles, invalid_role_names).
+    /// Invalid roles are skipped with their names collected for reporting.
+    pub fn get_roles(&self, names: &[&str]) -> (Vec<Role>, Vec<String>) {
+        let mut valid_roles = Vec::new();
+        let mut invalid_names = Vec::new();
+
+        for name in names {
+            match self.get_role(name) {
+                Ok(role) => valid_roles.push(role),
+                Err(_) => invalid_names.push(name.to_string()),
+            }
+        }
+
+        (valid_roles, invalid_names)
+    }
+
     fn canonicalize_base_dir(&self) -> RoleResult<PathBuf> {
         fs::canonicalize(&self.base_dir).map_err(|source| RoleError::Io {
             path: self.base_dir.display().to_string(),
@@ -276,5 +294,99 @@ impl RoleManager {
             .and_then(|ext| ext.to_str())
             .map(|ext| ext.eq_ignore_ascii_case(ROLE_FILE_EXTENSION))
             .unwrap_or(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn create_test_role_file(dir: &Path, name: &str, description: &str, content: &str) {
+        let file_path = dir.join(format!("{}.md", name));
+        let file_content = format!("{}\n------------\n{}", description, content);
+        std::fs::write(file_path, file_content).unwrap();
+    }
+
+    #[test]
+    fn test_get_roles_all_valid() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_dir = temp_dir.path();
+
+        create_test_role_file(base_dir, "role1", "Role 1 Description", "Role 1 Content");
+        create_test_role_file(base_dir, "role2", "Role 2 Description", "Role 2 Content");
+        create_test_role_file(base_dir, "role3", "Role 3 Description", "Role 3 Content");
+
+        let manager = RoleManager::with_base_dir(base_dir).unwrap();
+        let (valid_roles, invalid_names) = manager.get_roles(&["role1", "role2", "role3"]);
+
+        assert_eq!(valid_roles.len(), 3);
+        assert!(invalid_names.is_empty());
+        assert_eq!(valid_roles[0].name, "role1");
+        assert_eq!(valid_roles[1].name, "role2");
+        assert_eq!(valid_roles[2].name, "role3");
+    }
+
+    #[test]
+    fn test_get_roles_some_invalid() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_dir = temp_dir.path();
+
+        create_test_role_file(base_dir, "valid1", "Valid 1", "Content 1");
+        create_test_role_file(base_dir, "valid2", "Valid 2", "Content 2");
+
+        let manager = RoleManager::with_base_dir(base_dir).unwrap();
+        let (valid_roles, invalid_names) = manager.get_roles(&["valid1", "invalid1", "valid2", "invalid2"]);
+
+        assert_eq!(valid_roles.len(), 2);
+        assert_eq!(invalid_names.len(), 2);
+        assert_eq!(valid_roles[0].name, "valid1");
+        assert_eq!(valid_roles[1].name, "valid2");
+        assert!(invalid_names.contains(&"invalid1".to_string()));
+        assert!(invalid_names.contains(&"invalid2".to_string()));
+    }
+
+    #[test]
+    fn test_get_roles_all_invalid() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_dir = temp_dir.path();
+
+        let manager = RoleManager::with_base_dir(base_dir).unwrap();
+        let (valid_roles, invalid_names) = manager.get_roles(&["nonexistent1", "nonexistent2"]);
+
+        assert!(valid_roles.is_empty());
+        assert_eq!(invalid_names.len(), 2);
+    }
+
+    #[test]
+    fn test_get_roles_empty_input() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_dir = temp_dir.path();
+
+        let manager = RoleManager::with_base_dir(base_dir).unwrap();
+        let (valid_roles, invalid_names) = manager.get_roles(&[]);
+
+        assert!(valid_roles.is_empty());
+        assert!(invalid_names.is_empty());
+    }
+
+    #[test]
+    fn test_single_role_backward_compatible() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_dir = temp_dir.path();
+
+        create_test_role_file(base_dir, "single", "Single Role", "Single Content");
+
+        let manager = RoleManager::with_base_dir(base_dir).unwrap();
+
+        // Single role via get_role
+        let role = manager.get_role("single").unwrap();
+        assert_eq!(role.name, "single");
+
+        // Single role via get_roles (should work the same)
+        let (valid_roles, invalid_names) = manager.get_roles(&["single"]);
+        assert_eq!(valid_roles.len(), 1);
+        assert!(invalid_names.is_empty());
+        assert_eq!(valid_roles[0].name, "single");
     }
 }

@@ -59,6 +59,24 @@ const BUILTIN_ROLES_EN: &[(&str, &str)] = &[
     ("testing-standards", include_str!("builtin/en/testing-standards.md")),
 ];
 
+/// Get multiple builtin roles by names and language
+///
+/// Returns a tuple of (valid_roles, invalid_role_names).
+/// Invalid roles are skipped with their names collected for reporting.
+pub fn get_builtin_roles(names: &[&str], lang: &str) -> (Vec<Role>, Vec<String>) {
+    let mut valid_roles = Vec::new();
+    let mut invalid_names = Vec::new();
+
+    for name in names {
+        match get_builtin_role(name, lang) {
+            Ok(role) => valid_roles.push(role),
+            Err(_) => invalid_names.push(name.to_string()),
+        }
+    }
+
+    (valid_roles, invalid_names)
+}
+
 /// Get a builtin role by name and language
 ///
 /// # Arguments
@@ -199,5 +217,37 @@ mod tests {
                 role_name
             );
         }
+    }
+
+    #[test]
+    fn test_get_builtin_roles_all_valid() {
+        let (valid_roles, invalid_names) = get_builtin_roles(&["common", "security", "debugger"], "en");
+        assert_eq!(valid_roles.len(), 3);
+        assert!(invalid_names.is_empty());
+        assert_eq!(valid_roles[0].name, "common");
+        assert_eq!(valid_roles[1].name, "security");
+        assert_eq!(valid_roles[2].name, "debugger");
+    }
+
+    #[test]
+    fn test_get_builtin_roles_some_invalid() {
+        let (valid_roles, invalid_names) = get_builtin_roles(&["common", "nonexistent", "security"], "en");
+        assert_eq!(valid_roles.len(), 2);
+        assert_eq!(invalid_names.len(), 1);
+        assert_eq!(invalid_names[0], "nonexistent");
+    }
+
+    #[test]
+    fn test_get_builtin_roles_all_invalid() {
+        let (valid_roles, invalid_names) = get_builtin_roles(&["fake1", "fake2"], "en");
+        assert!(valid_roles.is_empty());
+        assert_eq!(invalid_names.len(), 2);
+    }
+
+    #[test]
+    fn test_get_builtin_roles_empty() {
+        let (valid_roles, invalid_names) = get_builtin_roles(&[], "en");
+        assert!(valid_roles.is_empty());
+        assert!(invalid_names.is_empty());
     }
 }

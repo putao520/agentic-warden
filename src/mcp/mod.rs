@@ -14,7 +14,7 @@ use crate::mcp_routing::{
     models::{IntelligentRouteRequest, IntelligentRouteResponse},
     IntelligentRouter,
 };
-use crate::roles::RoleManager;
+use crate::roles::{builtin::get_builtin_role, RoleManager, Role};
 use capability_detector::ClientCapabilities;
 use rmcp::{
     handler::server::tool::{ToolCallContext, ToolRouter},
@@ -185,6 +185,48 @@ pub struct TaskLogsResult {
     pub content: String,
 }
 
+/// Detect user's preferred language based on system locale
+fn detect_language() -> String {
+    if let Some(locale) = sys_locale::get_locale() {
+        if locale.starts_with("zh") {
+            return "zh-CN".to_string();
+        }
+    }
+    "en".to_string()
+}
+
+/// Load a single role (builtin first, then user directory)
+fn load_single_role_for_mcp(name: &str, lang: &str) -> Option<Role> {
+    // Try builtin first
+    if let Ok(role) = get_builtin_role(name, lang) {
+        return Some(role);
+    }
+    // Try user roles
+    if let Ok(manager) = RoleManager::new() {
+        if let Ok(role) = manager.get_role(name) {
+            return Some(role);
+        }
+    }
+    None
+}
+
+/// Load multiple roles
+/// Returns: (valid_roles, invalid_names)
+fn load_roles_for_mcp(names: &[&str], lang: &str) -> (Vec<Role>, Vec<String>) {
+    let mut valid_roles = Vec::new();
+    let mut invalid_names = Vec::new();
+
+    for name in names {
+        if let Some(role) = load_single_role_for_mcp(name, lang) {
+            valid_roles.push(role);
+        } else {
+            invalid_names.push(name.to_string());
+        }
+    }
+
+    (valid_roles, invalid_names)
+}
+
 async fn wait_for_registry_entry(
     registry: &crate::registry_factory::McpRegistry,
     existing: &HashSet<u32>,
@@ -211,10 +253,37 @@ pub async fn start_task(params: StartTaskParams) -> Result<TaskLaunchInfo, Strin
 
     let mut prompt = params.task.clone();
 
-    if let Some(role_name) = &params.role {
-        let manager = RoleManager::new().map_err(|e| e.to_string())?;
-        let role = manager.get_role(role_name).map_err(|e| e.to_string())?;
-        prompt = format!("{}\n\n---\n\n{}", role.content, params.task);
+    if let Some(role_str) = &params.role {
+        // Parse and deduplicate role names (preserve order)
+        let mut seen = std::collections::HashSet::new();
+        let role_names: Vec<&str> = role_str
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .filter(|s| seen.insert(*s))
+            .collect();
+
+        if !role_names.is_empty() {
+            let lang = detect_language();
+            let (valid_roles, invalid_names) = load_roles_for_mcp(&role_names, &lang);
+
+            // Log warnings for invalid roles
+            for name in &invalid_names {
+                eprintln!("Warning: Role '{}' not found, skipping.", name);
+            }
+
+            // Combine valid roles or fallback to common
+            if valid_roles.is_empty() {
+                eprintln!("Warning: All specified roles not found, falling back to 'common' role.");
+                if let Some(fallback) = load_single_role_for_mcp("common", &lang) {
+                    prompt = format!("{}\n\n---\n\n{}", fallback.content, params.task);
+                }
+            } else {
+                let role_contents: Vec<&str> = valid_roles.iter().map(|r| r.content.as_str()).collect();
+                let combined = role_contents.join("\n\n---\n\n");
+                prompt = format!("{}\n\n---\n\n{}", combined, params.task);
+            }
+        }
     }
 
     let cli_type = parse_cli_type(&params.ai_type).ok_or_else(|| {
