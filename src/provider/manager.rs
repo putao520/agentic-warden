@@ -1,10 +1,11 @@
 //! Provider configuration manager
 
-use super::config::{Provider, ProvidersConfig};
+use super::config::{AiType, Provider, ProvidersConfig};
 use super::error::{ProviderError, ProviderResult};
 use crate::common::constants::files::PROVIDERS_JSON;
 use crate::config::AUTH_DIRECTORY;
 use anyhow::Result;
+use rand::seq::SliceRandom;
 use std::{fs, path::PathBuf};
 
 /// Provider configuration manager
@@ -23,7 +24,9 @@ impl ProviderManager {
     }
 
     fn ensure_mutable_id(&self, provider_id: &str) -> ProviderResult<()> {
-        if provider_id.eq_ignore_ascii_case("official") {
+        if provider_id.eq_ignore_ascii_case("official")
+            || provider_id.eq_ignore_ascii_case("auto")
+        {
             return Err(ProviderError::ReservedName(provider_id.to_string()));
         }
         Ok(())
@@ -316,6 +319,37 @@ impl ProviderManager {
         &self.providers_config.default_provider
     }
 
+    /// Get a random provider compatible with the given AI type
+    ///
+    /// Returns None if no compatible providers exist (excluding "official" which has no configuration).
+    /// When a compatible provider is found, returns the provider name and reference.
+    ///
+    /// # Arguments
+    /// * `ai_type` - The AI CLI type to find a compatible provider for
+    ///
+    /// # Returns
+    /// `Some((name, provider))` if a compatible provider is found, `None` otherwise
+    pub fn get_random_compatible_provider(&self, ai_type: &AiType) -> Option<(String, &Provider)> {
+        let compatible: Vec<_> = self
+            .providers_config
+            .providers
+            .iter()
+            .filter(|(name, provider)| {
+                // Exclude "official" as it's an empty placeholder provider
+                *name != "official" && provider.is_compatible_with(ai_type)
+            })
+            .collect();
+
+        if compatible.is_empty() {
+            return None;
+        }
+
+        let mut rng = rand::thread_rng();
+        compatible
+            .choose(&mut rng)
+            .map(|(name, provider)| ((*name).clone(), *provider))
+    }
+
     // ===== Token Management =====
     // Note: Regional token support was removed in favor of simplified design
 
@@ -523,6 +557,7 @@ mod tests {
             token: None,
             base_url: None,
             scenario: None,
+            compatible_with: None,
             env: HashMap::new(),
         };
 
@@ -530,5 +565,156 @@ mod tests {
             .add_provider("official".to_string(), provider)
             .is_err());
         assert!(manager.remove_provider("official").is_err());
+    }
+
+    #[test]
+    fn test_auto_is_reserved_name() {
+        let providers_config = ProvidersConfig::default();
+        let mut manager = ProviderManager {
+            config_path: PathBuf::new(),
+            providers_config,
+        };
+
+        let provider = Provider {
+            token: None,
+            base_url: None,
+            scenario: None,
+            compatible_with: None,
+            env: HashMap::new(),
+        };
+
+        // "auto" should be rejected as reserved name (case-insensitive)
+        assert!(manager
+            .add_provider("auto".to_string(), provider.clone())
+            .is_err());
+        assert!(manager
+            .add_provider("AUTO".to_string(), provider.clone())
+            .is_err());
+        assert!(manager
+            .add_provider("Auto".to_string(), provider)
+            .is_err());
+    }
+
+    #[test]
+    fn test_provider_compatibility() {
+        use crate::provider::config::AiType;
+
+        // Provider with no compatible_with (compatible with all)
+        let provider_all = Provider {
+            token: Some("test".to_string()),
+            base_url: None,
+            scenario: None,
+            compatible_with: None,
+            env: HashMap::new(),
+        };
+        assert!(provider_all.is_compatible_with(&AiType::Claude));
+        assert!(provider_all.is_compatible_with(&AiType::Codex));
+        assert!(provider_all.is_compatible_with(&AiType::Gemini));
+
+        // Provider with specific compatibility
+        let provider_claude = Provider {
+            token: Some("test".to_string()),
+            base_url: None,
+            scenario: None,
+            compatible_with: Some(vec![AiType::Claude]),
+            env: HashMap::new(),
+        };
+        assert!(provider_claude.is_compatible_with(&AiType::Claude));
+        assert!(!provider_claude.is_compatible_with(&AiType::Codex));
+        assert!(!provider_claude.is_compatible_with(&AiType::Gemini));
+
+        // Provider with multiple compatibility
+        let provider_multi = Provider {
+            token: Some("test".to_string()),
+            base_url: None,
+            scenario: None,
+            compatible_with: Some(vec![AiType::Claude, AiType::Codex]),
+            env: HashMap::new(),
+        };
+        assert!(provider_multi.is_compatible_with(&AiType::Claude));
+        assert!(provider_multi.is_compatible_with(&AiType::Codex));
+        assert!(!provider_multi.is_compatible_with(&AiType::Gemini));
+    }
+
+    #[test]
+    fn test_get_random_compatible_provider() {
+        use crate::provider::config::AiType;
+
+        let mut providers_config = ProvidersConfig::default();
+
+        // Add a provider compatible with Claude only
+        providers_config.providers.insert(
+            "claude-only".to_string(),
+            Provider {
+                token: Some("test-claude".to_string()),
+                base_url: None,
+                scenario: None,
+                compatible_with: Some(vec![AiType::Claude]),
+                env: HashMap::new(),
+            },
+        );
+
+        // Add a provider compatible with all
+        providers_config.providers.insert(
+            "all-types".to_string(),
+            Provider {
+                token: Some("test-all".to_string()),
+                base_url: None,
+                scenario: None,
+                compatible_with: None,
+                env: HashMap::new(),
+            },
+        );
+
+        let manager = ProviderManager {
+            config_path: PathBuf::new(),
+            providers_config,
+        };
+
+        // Should find compatible providers for Claude (both claude-only and all-types)
+        let result = manager.get_random_compatible_provider(&AiType::Claude);
+        assert!(result.is_some());
+        let (name, _) = result.unwrap();
+        assert!(name == "claude-only" || name == "all-types");
+
+        // Should find only all-types for Codex
+        let result = manager.get_random_compatible_provider(&AiType::Codex);
+        assert!(result.is_some());
+        let (name, _) = result.unwrap();
+        assert_eq!(name, "all-types");
+
+        // Should find only all-types for Gemini
+        let result = manager.get_random_compatible_provider(&AiType::Gemini);
+        assert!(result.is_some());
+        let (name, _) = result.unwrap();
+        assert_eq!(name, "all-types");
+    }
+
+    #[test]
+    fn test_get_random_compatible_provider_no_match() {
+        use crate::provider::config::AiType;
+
+        let mut providers_config = ProvidersConfig::default();
+
+        // Add a provider compatible with Claude only
+        providers_config.providers.insert(
+            "claude-only".to_string(),
+            Provider {
+                token: Some("test".to_string()),
+                base_url: None,
+                scenario: None,
+                compatible_with: Some(vec![AiType::Claude]),
+                env: HashMap::new(),
+            },
+        );
+
+        let manager = ProviderManager {
+            config_path: PathBuf::new(),
+            providers_config,
+        };
+
+        // Should not find compatible providers for Codex
+        let result = manager.get_random_compatible_provider(&AiType::Codex);
+        assert!(result.is_none());
     }
 }

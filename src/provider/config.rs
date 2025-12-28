@@ -36,6 +36,11 @@ pub struct Provider {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scenario: Option<String>,
 
+    /// Compatible AI CLI types (None = compatible with all types)
+    /// 兼容的 AI CLI 类型（None 表示兼容所有类型）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compatible_with: Option<Vec<AiType>>,
+
     /// All environment variables (includes token and base_url mappings)
     #[serde(default)]
     pub env: HashMap<String, String>,
@@ -93,6 +98,7 @@ impl ProvidersConfig {
                 token: None,
                 base_url: None,
                 scenario: None,
+                compatible_with: None,
                 env: HashMap::new(),
             },
         );
@@ -174,6 +180,15 @@ impl ProvidersConfig {
 }
 
 impl Provider {
+    /// Check if this provider is compatible with given AI type
+    /// Returns true if compatible_with is None (compatible with all) or contains the ai_type
+    pub fn is_compatible_with(&self, ai_type: &AiType) -> bool {
+        match &self.compatible_with {
+            None => true, // None means compatible with all types
+            Some(types) => types.contains(ai_type),
+        }
+    }
+
     /// Get all environment variables including token and base_url
     pub fn get_all_env_vars(&self) -> HashMap<String, String> {
         let mut env = self.env.clone();
@@ -202,6 +217,7 @@ impl Provider {
             token: None,
             base_url: None,
             scenario: None,
+            compatible_with: None,
             env,
         }
     }
@@ -239,6 +255,7 @@ mod tests {
             token: Some("sk-test-token".to_string()),
             base_url: Some("https://api.example.com".to_string()),
             scenario: None,
+            compatible_with: None,
             env: {
                 let mut map = HashMap::new();
                 map.insert("CUSTOM_VAR".to_string(), "value".to_string());
@@ -269,6 +286,7 @@ mod tests {
             token: Some("sk-test".to_string()),
             base_url: Some("https://api.example.com".to_string()),
             scenario: Some("Best for production workloads".to_string()),
+            compatible_with: None,
             env: HashMap::new(),
         };
 
@@ -302,6 +320,7 @@ mod tests {
                 token: Some("sk-test".to_string()),
                 base_url: Some("https://api.test.com".to_string()),
                 scenario: None,
+                compatible_with: None,
                 env: HashMap::new(),
             },
         );

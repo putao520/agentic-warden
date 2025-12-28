@@ -57,6 +57,7 @@ Agentic-Warden MUST provide unified management of third-party API providers (Ope
 - [x] Mask sensitive values (API keys) in display and logs
 - [x] Support optional `scenario` field for provider usage description (v0.2.0)
 - [x] Dynamic ENV injection via `get_all_env_vars()` auto-mapping token/base_url to standard env vars (v0.2.0)
+- [x] Support `auto` provider for automatic random selection from compatible providers (v0.6.x)
 
 **Technical Constraints**:
 - Configuration file format: JSON with schema validation
@@ -65,6 +66,7 @@ Agentic-Warden MUST provide unified management of third-party API providers (Ope
 - Provider configurations must support inheritance and overrides
 - Sensitive data must be masked in UI output
 - Compatibility validation required before provider injection
+- `auto` is a reserved keyword: users MUST NOT create a provider named `auto` in provider.json
 
 ---
 
@@ -320,12 +322,21 @@ Agentic-Warden MUST provide seamless AI CLI startup with dynamic provider select
 - `agentic-warden claude -p glm --model sonnet --debug api "Explain this code"` - Use GLM provider, forward `--model sonnet --debug api` to Claude CLI
 - `agentic-warden claude -p glm --print --output-format json "Get structured response"` - Provider selection with multiple CLI parameters forwarded to Claude CLI
 - `agentic-warden codex -p glm --temperature 0.7 --max-tokens 1000 "Generate text"` - Provider selection with CLI parameters forwarded to Codex CLI
+- `agentic-warden claude -p auto "Analyze this code"` - Randomly select a compatible provider for Claude CLI
+- `agentic-warden claude,codex -p auto "Multi-task"` - Each CLI independently selects a random compatible provider
+
+**`auto` Provider Behavior**:
+- When `-p auto` is specified, the system randomly selects one provider from those with `compatible_with` containing the target AI CLI type
+- If no compatible providers exist, falls back to default mode (no provider environment injection, AI CLI uses native configuration)
+- For multi-CLI execution (`claude,codex -p auto`), each CLI independently selects a random compatible provider
+- The actually selected provider name is logged for debugging and audit purposes
 
 **Key Implementation Notes**:
-- AIW's `-p/--provider` flag selects the API provider configuration (e.g., glm, openrouter)
+- AIW's `-p/--provider` flag selects the API provider configuration (e.g., glm, openrouter, auto)
 - Provider configuration is injected via environment variables, NOT command-line arguments
 - All other `-` prefixed parameters are transparently forwarded to the target AI CLI tool
 - AI CLI tools maintain their native parameter semantics (e.g., Claude's `-p` for print mode is unrelated to AIW's provider selection)
+- `auto` is a reserved provider name that triggers random selection logic
 
 ---
 
