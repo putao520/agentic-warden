@@ -506,42 +506,21 @@ async fn update_aiw() -> Result<bool> {
 
 /// Get current AIW version
 fn get_aiw_current_version() -> Result<String> {
-    // Try to get version from the binary
-    let output = Command::new("aiw")
-        .arg("--version")
-        .output();
-
-    match output {
-        Ok(output) if output.status.success() => {
-            let version_str = String::from_utf8_lossy(&output.stdout);
-            // Extract version number (e.g., "aiw 0.5.13" -> "0.5.13")
-            let version = version_str
-                .lines()
-                .next()
-                .unwrap_or(&version_str)
-                .split_whitespace()
-                .last()
-                .unwrap_or("unknown")
-                .to_string();
-            Ok(version)
-        }
-        _ => {
-            // Fallback to reading from package.json or VERSION file
-            // For now, return a default
-            Ok("0.5.13".to_string())
-        }
-    }
+    // Use compile-time version directly - no subprocess needed
+    Ok(env!("CARGO_PKG_VERSION").to_string())
 }
 
 /// Get latest AIW version from NPM
 async fn get_aiw_latest_version() -> Result<String> {
     println!("  📡 Fetching latest version from NPM...");
 
-    let output = Command::new("npm")
+    // Use tokio::process::Command for async-safe subprocess handling
+    let output = tokio::process::Command::new("npm")
         .arg("view")
         .arg("@putao520/aiw")
         .arg("version")
-        .output()?;
+        .output()
+        .await?;
 
     if output.status.success() {
         let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -555,28 +534,18 @@ async fn get_aiw_latest_version() -> Result<String> {
 async fn perform_aiw_update(version: &str) -> Result<()> {
     println!("  📦 Installing AIW v{} from NPM...", version);
 
-    // Use npm to update the package
-    let output = Command::new("npm")
+    // Use tokio::process::Command for async-safe subprocess handling
+    let output = tokio::process::Command::new("npm")
         .arg("install")
         .arg("-g")
         .arg(format!("@putao520/aiw@{}", version))
-        .output()?;
+        .output()
+        .await?;
 
     if output.status.success() {
         println!("  ✅ Installation completed successfully!");
-
-        // Verify the update
-        println!("  🔍 Verifying update...");
-        let verify_output = Command::new("aiw")
-            .arg("--version")
-            .output()?;
-
-        if verify_output.status.success() {
-            let installed_version = String::from_utf8_lossy(&verify_output.stdout).trim().to_string();
-            println!("  ✅ AIW v{} is now installed and ready!", installed_version);
-        } else {
-            println!("  ⚠️  Update completed but verification failed. Please restart your terminal.");
-        }
+        println!("  ✅ AIW v{} is now installed and ready!", version);
+        println!("  💡 Please restart your terminal to use the new version.");
     } else {
         let error_msg = String::from_utf8_lossy(&output.stderr);
         anyhow::bail!("Failed to update AIW: {}", error_msg)
