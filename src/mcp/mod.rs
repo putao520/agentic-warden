@@ -195,17 +195,17 @@ fn detect_language() -> String {
     "en".to_string()
 }
 
-/// Load a single role (builtin first, then user directory)
+/// Load a single role (user-defined first, then builtin)
 fn load_single_role_for_mcp(name: &str, lang: &str) -> Option<Role> {
-    // Try builtin first
-    if let Ok(role) = get_builtin_role(name, lang) {
-        return Some(role);
-    }
-    // Try user roles
+    // Try user-defined roles first (allows overriding built-in roles)
     if let Ok(manager) = RoleManager::new() {
         if let Ok(role) = manager.get_role(name) {
             return Some(role);
         }
+    }
+    // Fall back to built-in roles
+    if let Ok(role) = get_builtin_role(name, lang) {
+        return Some(role);
     }
     None
 }
