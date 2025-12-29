@@ -3,21 +3,39 @@
 //! 基于成熟TUI库的应用启动和管理
 
 use crate::tui::{App, ExternalScreen};
+use tokio::runtime::Handle;
 
 /// TUI应用启动器
 pub struct TuiApp;
 
 impl TuiApp {
+    /// 在当前 Tokio 运行时中执行异步函数
+    /// 使用 block_in_place 避免嵌套运行时问题
+    fn run_async<F, T>(future: F) -> Result<T, Box<dyn std::error::Error>>
+    where
+        F: std::future::Future<Output = Result<T, anyhow::Error>>,
+    {
+        // 检查是否在 Tokio 运行时中
+        match Handle::try_current() {
+            Ok(handle) => {
+                // 在现有运行时中，使用 block_in_place 安全阻塞
+                Ok(tokio::task::block_in_place(|| handle.block_on(future))?)
+            }
+            Err(_) => {
+                // 不在运行时中，创建新的运行时
+                Ok(tokio::runtime::Runtime::new()?.block_on(future)?)
+            }
+        }
+    }
+
     /// 启动TUI应用
     pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         let mut app = App::new();
         loop {
             match app.run()? {
                 Some(ExternalScreen::McpBrowse) => {
-                    // Launch MCP Browse TUI (async function, need to block on it)
-                    tokio::runtime::Runtime::new()
-                        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?
-                        .block_on(crate::commands::mcp::registry::browse::execute(None))?;
+                    // Launch MCP Browse TUI (async function)
+                    Self::run_async(crate::commands::mcp::registry::browse::execute(None))?;
                     // After MCP Browse exits, continue with our TUI
                     app = App::new();
                 }
@@ -38,10 +56,8 @@ impl TuiApp {
         loop {
             match app.run()? {
                 Some(ExternalScreen::McpBrowse) => {
-                    // Launch MCP Browse TUI (async function, need to block on it)
-                    tokio::runtime::Runtime::new()
-                        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?
-                        .block_on(crate::commands::mcp::registry::browse::execute(None))?;
+                    // Launch MCP Browse TUI (async function)
+                    Self::run_async(crate::commands::mcp::registry::browse::execute(None))?;
                     // After MCP Browse exits, recreate app with initial screen
                     app = App::new();
                     if let Some(screen) = initial_screen.clone() {
