@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const { spawnSync } = require('child_process');
+const { spawn } = require('child_process');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -48,9 +48,28 @@ if (!fs.existsSync(binaryPath)) {
   process.exit(1);
 }
 
-// Execute binary and pass all arguments
-const result = spawnSync(binaryPath, process.argv.slice(2), {
+// Execute binary with real-time stdio passthrough
+const child = spawn(binaryPath, process.argv.slice(2), {
   stdio: 'inherit',
+  // Ensure signals are passed through
+  detached: false,
 });
 
-process.exit(result.status || 0);
+// Forward signals to child process
+['SIGINT', 'SIGTERM', 'SIGHUP'].forEach((signal) => {
+  process.on(signal, () => {
+    if (!child.killed) {
+      child.kill(signal);
+    }
+  });
+});
+
+// Exit with child's exit code
+child.on('close', (code) => {
+  process.exit(code || 0);
+});
+
+child.on('error', (err) => {
+  console.error(`Failed to start aiw: ${err.message}`);
+  process.exit(1);
+});
