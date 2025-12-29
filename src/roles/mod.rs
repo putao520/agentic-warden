@@ -86,8 +86,19 @@ pub struct RoleManager {
 }
 
 impl RoleManager {
-    /// Create manager using the default `~/.aiw/role/` directory.
+    /// Create manager using the configured or default `~/.aiw/role/` directory.
+    ///
+    /// If `user_roles_dir` is set in `~/.aiw/config.json`, use that directory.
+    /// Otherwise, fall back to the default `~/.aiw/role/`.
     pub fn new() -> RoleResult<Self> {
+        // Try to load user config for custom roles directory
+        if let Ok(config_paths) = crate::utils::config_paths::ConfigPaths::new() {
+            if let Some(custom_dir) = config_paths.user_config.get_user_roles_dir() {
+                return Ok(Self { base_dir: custom_dir });
+            }
+        }
+
+        // Fall back to default directory
         let home_dir = dirs::home_dir().ok_or(RoleError::HomeDirectoryUnavailable)?;
         Ok(Self {
             base_dir: home_dir.join(".aiw").join("role"),

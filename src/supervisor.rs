@@ -15,7 +15,7 @@ use crate::unified_registry::Registry;
 use chrono::{DateTime, Utc};
 use std::collections::VecDeque;
 use std::ffi::OsString;
-use std::io;
+use std::io::{self, IsTerminal};
 use std::path::PathBuf;
 use std::process::{ExitStatus, Stdio};
 use std::sync::Arc;
@@ -54,8 +54,11 @@ fn get_cli_command(cli_type: &CliType) -> Result<String, ProcessError> {
 
 /// Output handling strategy for CLI execution
 enum OutputStrategy {
-    /// Mirror output to stdout/stderr
+    /// Mirror output to stdout/stderr (for interactive TTY)
     Mirror,
+    /// Tail-only mode: capture all output, only emit last N lines at end (for non-TTY/piped output)
+    /// This prevents flooding CC's context when stdout is captured by another program
+    TailOnly,
     /// Capture stdout to buffer with display control
     CaptureWithDisplay(Arc<Mutex<Vec<u8>>>, Arc<Mutex<ScrollingDisplay>>),
     /// Legacy capture mode (for backward compatibility)
@@ -69,13 +72,22 @@ pub async fn execute_cli<S: TaskStorage>(
     provider: Option<String>,
     cwd: Option<std::path::PathBuf>,
 ) -> Result<i32, ProcessError> {
+    // 检测 stdout 是否是 TTY
+    // 如果不是 TTY（被程序捕获，如 CC 的 Bash 工具），使用 TailOnly 模式
+    // 这样可以防止大量输出冲爆 CC 的上下文
+    let output_strategy = if std::io::stdout().is_terminal() {
+        OutputStrategy::Mirror
+    } else {
+        OutputStrategy::TailOnly
+    };
+
     execute_cli_internal(
         registry,
         cli_type,
         args,
         provider,
         None,
-        OutputStrategy::Mirror,
+        output_strategy,
         cwd,
     )
     .await
@@ -325,6 +337,14 @@ async fn execute_cli_internal<S: TaskStorage>(
                     scrolling_display.clone(),
                 )));
             }
+            OutputStrategy::TailOnly => {
+                // 静默收集输出，不实时写入终端，最后只输出最后 N 行
+                let writer_clone = log_writer.clone();
+                let display_clone = scrolling_display.clone();
+                copy_handles.push(tokio::spawn(async move {
+                    spawn_copy_silent(stdout, writer_clone, display_clone).await
+                }));
+            }
             OutputStrategy::CaptureWithDisplay(buffer, display) => {
                 let buffer_clone = buffer.clone();
                 let display_clone = display.clone();
@@ -344,12 +364,25 @@ async fn execute_cli_internal<S: TaskStorage>(
     }
 
     if let Some(stderr) = child.stderr.take() {
-        copy_handles.push(tokio::spawn(spawn_copy(
-            stderr,
-            log_writer.clone(),
-            StreamMirror::Stderr,
-            scrolling_display.clone(),
-        )));
+        match &output_strategy {
+            OutputStrategy::TailOnly => {
+                // TailOnly 模式：stderr 也静默收集
+                let writer_clone = log_writer.clone();
+                let display_clone = scrolling_display.clone();
+                copy_handles.push(tokio::spawn(async move {
+                    spawn_copy_silent(stderr, writer_clone, display_clone).await
+                }));
+            }
+            _ => {
+                // 其他模式：实时输出 stderr
+                copy_handles.push(tokio::spawn(spawn_copy(
+                    stderr,
+                    log_writer.clone(),
+                    StreamMirror::Stderr,
+                    scrolling_display.clone(),
+                )));
+            }
+        }
     }
 
     let registration_guard = {
@@ -419,17 +452,31 @@ async fn execute_cli_internal<S: TaskStorage>(
 
     // Only show completion info for non-interactive tasks (not capture mode)
     if !is_capture_mode {
-        // Only display completion info for actual tasks, not for CLI parameter forwarding
         let mut display = scrolling_display.lock().await;
         let final_flush = display.flush_remaining();
         if !final_flush.is_empty() {
             let _ = tokio::io::stderr().write_all(final_flush.as_bytes()).await;
         }
 
-        // 输出最后的50行（如果有的话）
-        let tail_output = display.redraw();
-        if !tail_output.is_empty() {
-            let _ = tokio::io::stderr().write_all(tail_output.as_bytes()).await;
+        // 输出最后的50行
+        match &output_strategy {
+            OutputStrategy::TailOnly => {
+                // 非 TTY 模式：输出纯文本（无 ANSI 转义码）
+                let tail_output = display.get_plain_tail();
+                if !tail_output.is_empty() {
+                    let _ = tokio::io::stdout().write_all(tail_output.as_bytes()).await;
+                }
+            }
+            OutputStrategy::Mirror => {
+                // TTY 模式：使用 ANSI 转义码重绘
+                let tail_output = display.redraw();
+                if !tail_output.is_empty() {
+                    let _ = tokio::io::stderr().write_all(tail_output.as_bytes()).await;
+                }
+            }
+            _ => {
+                // CaptureWithDisplay/Capture: 不在此处输出
+            }
         }
     }
 
@@ -612,6 +659,17 @@ impl ScrollingDisplay {
         format!("{}\n", line)
     }
 
+    /// 获取纯文本尾部输出（无 ANSI 转义码，用于非 TTY 模式）
+    /// 返回最后 N 行的纯文本，每行以换行符结尾
+    pub fn get_plain_tail(&self) -> String {
+        let mut output = String::new();
+        for line in &self.lines {
+            output.push_str(line);
+            output.push('\n');
+        }
+        output
+    }
+
     /// 验证当前显示是否严格符合50行限制
     pub fn validate_line_limit(&self) -> bool {
         self.lines.len() <= self.max_lines
@@ -697,6 +755,50 @@ where
     };
     if !remaining.is_empty() {
         mirror.write_str(&remaining).await?;
+    }
+
+    Ok(())
+}
+
+/// Copy stream to log file and scrolling display buffer, but do NOT mirror to stdout/stderr
+/// Used for TailOnly mode: captures everything, outputs only last N lines at the end
+async fn spawn_copy_silent<R>(
+    mut reader: R,
+    writer: Arc<Mutex<BufWriter<tokio::fs::File>>>,
+    scrolling_display: Arc<Mutex<ScrollingDisplay>>,
+) -> io::Result<()>
+where
+    R: AsyncRead + Unpin + Send + 'static,
+{
+    use tokio::io::AsyncReadExt;
+
+    let mut buffer = [0u8; 8192];
+    loop {
+        let read = reader.read(&mut buffer).await?;
+        if read == 0 {
+            break;
+        }
+        let chunk = &buffer[..read];
+
+        // 写入完整日志文件
+        {
+            let mut guard = writer.lock().await;
+            guard.write_all(chunk).await?;
+            guard.flush().await?;
+        }
+
+        // 收集到滚动缓冲区（但不输出到终端）
+        {
+            let mut display = scrolling_display.lock().await;
+            // 调用 process 但丢弃输出（不写入终端）
+            let _ = display.process(chunk);
+        }
+    }
+
+    // 刷新剩余未完成的行到缓冲区
+    {
+        let mut display = scrolling_display.lock().await;
+        let _ = display.flush_remaining();
     }
 
     Ok(())

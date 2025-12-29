@@ -7,7 +7,42 @@
 //! - 运行时数据（日志、临时文件）保存在 /tmp/.aiw/
 
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+
+/// 用户配置（从 config.json 读取）
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct UserConfig {
+    /// 用户角色目录（默认 ~/.aiw/role/）
+    #[serde(default)]
+    pub user_roles_dir: Option<String>,
+}
+
+impl UserConfig {
+    /// 从配置文件加载
+    pub fn load(config_file: &PathBuf) -> Self {
+        if config_file.exists() {
+            if let Ok(content) = std::fs::read_to_string(config_file) {
+                if let Ok(config) = serde_json::from_str(&content) {
+                    return config;
+                }
+            }
+        }
+        Self::default()
+    }
+
+    /// 获取用户角色目录（支持 ~ 展开）
+    pub fn get_user_roles_dir(&self) -> Option<PathBuf> {
+        self.user_roles_dir.as_ref().map(|dir| {
+            if dir.starts_with("~/") {
+                if let Some(home) = dirs::home_dir() {
+                    return home.join(&dir[2..]);
+                }
+            }
+            PathBuf::from(dir)
+        })
+    }
+}
 
 /// 配置文件路径集合
 pub struct ConfigPaths {
@@ -25,6 +60,8 @@ pub struct ConfigPaths {
     pub log_file: PathBuf,
     /// 临时文件目录（保存在运行时目录）
     pub temp_dir: PathBuf,
+    /// 用户配置
+    pub user_config: UserConfig,
 }
 
 impl ConfigPaths {
@@ -41,14 +78,18 @@ impl ConfigPaths {
         // Windows: %TEMP%\.aiw\
         let runtime_dir = std::env::temp_dir().join(".aiw");
 
+        let config_file = config_dir.join("config.json");
+        let user_config = UserConfig::load(&config_file);
+
         Ok(Self {
             provider_config: config_dir.join("provider.json"),
             auth_file: config_dir.join("auth.json"),
-            config_file: config_dir.join("config.json"),
+            config_file,
             log_file: runtime_dir.join("aiw.log"),
             temp_dir: runtime_dir.join("temp"),
             config_dir,
             runtime_dir,
+            user_config,
         })
     }
 
