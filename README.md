@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.5.35-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.5.38-blue?style=flat-square)
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange?style=flat-square&logo=rust)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 ![MCP](https://img.shields.io/badge/MCP-Supported-purple?style=flat-square)
@@ -218,11 +218,26 @@ aiw update
 
 | File | Purpose |
 |------|---------|
+| `~/.aiw/config.json` | AIW global configuration |
 | `~/.aiw/providers.json` | AI provider configurations |
 | `~/.aiw/mcp.json` | MCP server configurations |
 | `~/.aiw/role/*.md` | Custom role prompts |
 | `~/.aiw/settings.json` | Plugin marketplace settings |
 | `~/.aiw/plugins.json` | Installed plugin records |
+
+### Global Configuration (~/.aiw/config.json)
+
+```json
+{
+  "user_roles_dir": "~/.claude/roles"
+}
+```
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `user_roles_dir` | string | Custom directory for user roles (supports `~` expansion). If set, AIW will load user roles from this directory instead of `~/.aiw/role/` |
+
+This allows you to manage all your roles in a single location, such as `~/.claude/roles/`, and share them across different tools.
 
 ## Quick Reference
 
@@ -255,6 +270,6 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-**AIW** - Unified Gateway for AI CLI & MCP | v0.5.35
+**AIW** - Unified Gateway for AI CLI & MCP | v0.5.38
 
 [GitHub](https://github.com/putao520/agentic-warden) | [NPM](https://www.npmjs.com/package/@putao520/aiw)
