@@ -16,7 +16,7 @@ jobs:
     strategy:
       matrix:
         target:
-          - x86_64-unknown-linux-gnu
+          - x86_64-unknown-linux-musl
           - x86_64-pc-windows-gnu
     steps:
     - name: Checkout code
@@ -27,9 +27,7 @@ jobs:
 
     - name: Install Rust targets
       run: |
-        rustup target add x86_64-unknown-linux-gnu
-        rustup target add x86_64-apple-darwin
-        rustup target add aarch64-apple-darwin
+        rustup target add x86_64-unknown-linux-musl
         rustup target add x86_64-pc-windows-gnu
 
     - name: Build with Docker
@@ -85,8 +83,8 @@ jobs:
 
     - name: Prepare binaries for NPM
       run: |
-        # 复制二进制到bin/
-        cp binaries/aiw-binary-x86_64-unknown-linux-gnu/aiw bin/aiw-linux-x64
+        # 复制二进制到bin/ (musl静态编译，兼容所有Linux)
+        cp binaries/aiw-binary-x86_64-unknown-linux-musl/aiw bin/aiw-linux-x64
         cp binaries/aiw-binary-x86_64-pc-windows-gnu/aiw.exe bin/aiw-windows-x64.exe
 
         # 设置可执行权限
@@ -147,7 +145,8 @@ jobs:
     - name: Prepare release files
       run: |
         mkdir -p release-files
-        cp binaries/aiw-binary-x86_64-unknown-linux-gnu/aiw release-files/aiw-linux-x64
+        # 使用musl静态编译的Linux二进制
+        cp binaries/aiw-binary-x86_64-unknown-linux-musl/aiw release-files/aiw-linux-x64
         cp binaries/aiw-binary-x86_64-pc-windows-gnu/aiw.exe release-files/aiw-windows-x64.exe
 
         # 生成校验和
