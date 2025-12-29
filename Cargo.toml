@@ -33,14 +33,16 @@ uuid = { version = "1", features = ["v4"] }
 raw_sync = "0.1.5"
 
 # Google OAuth and Drive support - Modernized
-reqwest = { version = "0.12", features = ["json", "multipart", "cookies"] }
+# 使用 rustls-tls 替代 native-tls，支持 musl 静态编译
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "cookies", "rustls-tls"] }
 url = "2.4"
 base64 = "0.22"
 sha2 = "0.10"
 md5 = "0.7"
 tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "signal", "process", "sync", "time"] }
 urlencoding = "2.1"
-git2 = { version = "0.18", features = ["https", "ssh"] }
+# git2 使用 vendored-openssl 支持 musl 静态编译
+git2 = { version = "0.18", features = ["https", "ssh", "vendored-openssl"] }
 serde_yaml = "0.9"
 
 # Google Official APIs
@@ -87,8 +89,9 @@ tantivy = "0.19"
 # CLI UI and graphics - Modernized
 ratatui = { version = "0.26", features = ["all-widgets", "serde"] }
 crossterm = { version = "0.28", features = ["event-stream"] }
-plotters = "0.3"
-plotters-bitmap = "0.3"
+# plotters 禁用默认特性，避免 fontconfig 依赖（musl 静态编译）
+plotters = { version = "0.3", default-features = false, features = ["svg_backend", "line_series", "area_series"] }
+plotters-bitmap = { version = "0.3", default-features = false }
 color-eyre = "0.6"
 
 # Configuration and directories

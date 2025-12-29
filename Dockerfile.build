@@ -27,6 +27,11 @@ RUN set -ex && \
         musl-tools \
         musl-dev \
         \
+        # OpenSSL vendored 编译依赖
+        perl \
+        libclang-dev \
+        cmake \
+        \
         # MinGW 工具链（用于 Windows 交叉编译）
         gcc-mingw-w64-x86-64 \
         g++-mingw-w64-x86-64 \
