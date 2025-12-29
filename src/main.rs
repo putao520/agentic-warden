@@ -96,6 +96,7 @@ async fn handle_external_ai_cli(args: &[String]) -> Result<ExitCode, String> {
         ai_args.provider.clone(),
         ai_args.prompt_text(),
         ai_args.cli_args.clone(),
+        ai_args.cwd.clone(),
     );
 
     ai_command.execute().await.map_err(|e| e.to_string())
@@ -284,6 +285,7 @@ async fn handle_external_command(tokens: Vec<String>) -> Result<ExitCode, String
         ai_args.provider.clone(),
         ai_args.prompt_text(),
         ai_args.cli_args.clone(),
+        ai_args.cwd.clone(),
     );
 
     // 使用当前的异步运行时执行命令

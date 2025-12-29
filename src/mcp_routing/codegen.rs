@@ -160,7 +160,7 @@ impl AiCliCodeGenerator {
 
         // Execute CLI normally (no output capture)
         let exit_code =
-            supervisor::execute_cli(&registry, &self.cli_type, &os_args, self.provider.clone())
+            supervisor::execute_cli(&registry, &self.cli_type, &os_args, self.provider.clone(), None)
                 .await;
 
         eprintln!(

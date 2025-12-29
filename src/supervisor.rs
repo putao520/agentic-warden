@@ -67,6 +67,7 @@ pub async fn execute_cli<S: TaskStorage>(
     cli_type: &CliType,
     args: &[OsString],
     provider: Option<String>,
+    cwd: Option<std::path::PathBuf>,
 ) -> Result<i32, ProcessError> {
     execute_cli_internal(
         registry,
@@ -75,6 +76,7 @@ pub async fn execute_cli<S: TaskStorage>(
         provider,
         None,
         OutputStrategy::Mirror,
+        cwd,
     )
     .await
     .map(|(exit_code, _)| exit_code)
@@ -88,6 +90,7 @@ pub async fn execute_cli_with_output<S: TaskStorage>(
     args: &[OsString],
     provider: Option<String>,
     timeout: std::time::Duration,
+    cwd: Option<std::path::PathBuf>,
 ) -> Result<String, ProcessError> {
     let buffer = Arc::new(Mutex::new(Vec::new()));
     let scrolling_display = Arc::new(Mutex::new(ScrollingDisplay::new(DEFAULT_MAX_DISPLAY_LINES)));
@@ -99,6 +102,7 @@ pub async fn execute_cli_with_output<S: TaskStorage>(
         provider,
         Some(timeout),
         OutputStrategy::CaptureWithDisplay(buffer.clone(), scrolling_display.clone()),
+        cwd,
     )
     .await?;
 
@@ -129,7 +133,23 @@ async fn execute_cli_internal<S: TaskStorage>(
     provider: Option<String>,
     timeout: Option<std::time::Duration>,
     output_strategy: OutputStrategy,
+    cwd: Option<std::path::PathBuf>,
 ) -> Result<(i32, Option<String>), ProcessError> {
+    // Validate CWD if provided
+    if let Some(ref dir) = cwd {
+        if !dir.exists() {
+            return Err(ProcessError::Other(format!(
+                "Working directory does not exist: {}",
+                dir.display()
+            )));
+        }
+        if !dir.is_dir() {
+            return Err(ProcessError::Other(format!(
+                "Working directory is not a directory: {}",
+                dir.display()
+            )));
+        }
+    }
     let is_capture_mode = matches!(output_strategy, OutputStrategy::Capture(_) | OutputStrategy::CaptureWithDisplay(_, _));
 
     platform::init_platform();
@@ -206,6 +226,11 @@ async fn execute_cli_internal<S: TaskStorage>(
     command.stdin(Stdio::null());
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
+
+    // Set working directory if provided
+    if let Some(ref dir) = cwd {
+        command.current_dir(dir);
+    }
 
     // Platform-specific command preparation
     #[cfg(unix)]
@@ -802,7 +827,24 @@ pub async fn start_interactive_cli<S: TaskStorage>(
     cli_type: &CliType,
     provider: Option<String>,
     cli_args: &[String],
+    cwd: Option<std::path::PathBuf>,
 ) -> Result<i32, ProcessError> {
+    // Validate CWD if provided
+    if let Some(ref dir) = cwd {
+        if !dir.exists() {
+            return Err(ProcessError::Other(format!(
+                "Working directory does not exist: {}",
+                dir.display()
+            )));
+        }
+        if !dir.is_dir() {
+            return Err(ProcessError::Other(format!(
+                "Working directory is not a directory: {}",
+                dir.display()
+            )));
+        }
+    }
+
     platform::init_platform();
 
     let terminate_wrapper = |pid: u32| {
@@ -882,6 +924,11 @@ pub async fn start_interactive_cli<S: TaskStorage>(
     command.stdin(Stdio::inherit());
     command.stdout(Stdio::inherit());
     command.stderr(Stdio::inherit());
+
+    // Set working directory if provided
+    if let Some(ref dir) = cwd {
+        command.current_dir(dir);
+    }
 
     // Platform-specific command preparation (Unix: set process group and death signal)
     #[cfg(unix)]
@@ -974,6 +1021,7 @@ pub async fn execute_multiple_clis<S: TaskStorage>(
     task_prompt: &str,
     provider: Option<String>,
     cli_args: &[String],
+    cwd: Option<std::path::PathBuf>,
 ) -> Result<Vec<i32>, ProcessError> {
     let mut exit_codes = Vec::new();
 
@@ -981,7 +1029,7 @@ pub async fn execute_multiple_clis<S: TaskStorage>(
         let cli_args = cli_type.build_full_access_args_with_cli(task_prompt, cli_args);
         let os_args: Vec<OsString> = cli_args.into_iter().map(|s| s.into()).collect();
 
-        let exit_code = execute_cli(registry, cli_type, &os_args, provider.clone()).await?;
+        let exit_code = execute_cli(registry, cli_type, &os_args, provider.clone(), cwd.clone()).await?;
         exit_codes.push(exit_code);
     }
 

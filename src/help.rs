@@ -92,6 +92,10 @@ EXAMPLES:
     # AI CLI with role + provider
     aiw claude -r frontend -p glm "build a React component"
 
+    # AI CLI with working directory
+    aiw claude -C /path/to/project "implement feature"
+    aiw claude -r common -C ~/myproject "fix bug"
+
     # AI CLI with parameter forwarding
     aiw claude -r security -p glm --model sonnet --debug api "explain this"
 
@@ -152,8 +156,8 @@ fn print_ai_cli_help(agent: &str) -> io::Result<()> {
 {} AGENT
 
 USAGE:
-    aiw {} [-r ROLE] [-p PROVIDER] [CLI_OPTIONS] ["<TASK>"]
-    aiw {} [-r ROLE] [-p PROVIDER] [CLI_OPTIONS]
+    aiw {} [-r ROLE] [-p PROVIDER] [-C DIR] [CLI_OPTIONS] ["<TASK>"]
+    aiw {} [-r ROLE] [-p PROVIDER] [-C DIR] [CLI_OPTIONS]
 
 DESCRIPTION:
     Run the {} AI agent with role injection, provider management, and transparent parameter forwarding.
@@ -175,6 +179,14 @@ PROVIDER SELECTION:
     -p, --provider <PROVIDER>    Use specific provider (e.g., openrouter, glm)
 
     Without -p, uses the default provider configured in ~/.aiw/providers.json
+
+WORKING DIRECTORY (optional):
+    -C, --cwd <DIR>              Set working directory for AI CLI process
+
+    If specified, the AI CLI will start in the given directory.
+    If not specified, uses current working directory.
+    - Directory must exist (error if not found)
+    - Path must be a directory (error if it's a file)
 
 PARAMETER FORWARDING:
     All other parameters are forwarded directly to {} CLI.
@@ -213,6 +225,10 @@ EXAMPLES:
     # With role + provider
     aiw {} -r frontend -p glm "build a React component"
     aiw {} -r database -p openrouter "design a schema"
+
+    # With working directory
+    aiw {} -C /path/to/project "implement this feature"
+    aiw {} -r common -C ~/myproject "fix the bug in main.rs"
 
     # With parameter forwarding (note: prompt must be last)
     aiw {} -r security -p glm --model sonnet "explain this"
@@ -264,6 +280,8 @@ For more information:
         agent,
         agent,
         agent.to_uppercase(),
+        agent,
+        agent,
         agent,
         agent,
         agent,

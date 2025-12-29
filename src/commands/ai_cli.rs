@@ -17,6 +17,7 @@ pub struct AiCliCommand {
     pub provider: Option<String>,
     pub prompt: String,
     pub cli_args: Vec<String>,
+    pub cwd: Option<std::path::PathBuf>,
 }
 
 impl AiCliCommand {
@@ -27,6 +28,7 @@ impl AiCliCommand {
         provider: Option<String>,
         prompt: String,
         cli_args: Vec<String>,
+        cwd: Option<std::path::PathBuf>,
     ) -> Self {
         Self {
             ai_types,
@@ -34,6 +36,7 @@ impl AiCliCommand {
             provider,
             prompt,
             cli_args,
+            cwd,
         }
     }
 
@@ -173,6 +176,7 @@ impl AiCliCommand {
                     cli_type,
                     self.provider.clone(),
                     &self.cli_args,
+                    self.cwd.clone(),
                 )
                 .await?;
             Ok(ExitCode::from((exit_code & 0xFF) as u8))
@@ -186,7 +190,7 @@ impl AiCliCommand {
                 let os_args: Vec<OsString> = cli_args.into_iter().map(|s| s.into()).collect();
 
                 let exit_code =
-                    supervisor::execute_cli(&registry, cli_type, &os_args, self.provider.clone())
+                    supervisor::execute_cli(&registry, cli_type, &os_args, self.provider.clone(), self.cwd.clone())
                         .await?;
                 Ok(ExitCode::from((exit_code & 0xFF) as u8))
             } else {
@@ -210,6 +214,7 @@ impl AiCliCommand {
                     &final_prompt,
                     self.provider.clone(),
                     &self.cli_args,
+                    self.cwd.clone(),
                 )
                 .await?;
 

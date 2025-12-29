@@ -12,6 +12,7 @@ pub struct SeparatedArgs {
     pub provider: Option<String>,
     pub cli_args: Vec<String>,
     pub prompt: Vec<String>,
+    pub cwd: Option<std::path::PathBuf>,
 }
 
 impl SeparatedArgs {
@@ -351,6 +352,7 @@ pub struct AiCliArgs {
     pub provider: Option<String>,
     pub cli_args: Vec<String>,
     pub prompt: Vec<String>,
+    pub cwd: Option<std::path::PathBuf>,
 }
 
 impl AiCliArgs {
@@ -372,6 +374,7 @@ pub fn parse_external_as_ai_cli(tokens: &[String]) -> Result<AiCliArgs, String> 
         provider,
         cli_args,
         prompt,
+        cwd,
     } = separate_provider_and_cli_args(&tokens[1..])?;
 
     Ok(AiCliArgs {
@@ -380,6 +383,7 @@ pub fn parse_external_as_ai_cli(tokens: &[String]) -> Result<AiCliArgs, String> 
         provider,
         cli_args,
         prompt,
+        cwd,
     })
 }
 
@@ -390,6 +394,7 @@ pub fn separate_provider_and_cli_args(tokens: &[String]) -> Result<SeparatedArgs
 
     let mut role: Option<String> = None;
     let mut provider: Option<String> = None;
+    let mut cwd: Option<std::path::PathBuf> = None;
     let mut cli_args: Vec<String> = Vec::new();
     let mut prompt: Vec<String> = Vec::new();
 
@@ -435,6 +440,18 @@ pub fn separate_provider_and_cli_args(tokens: &[String]) -> Result<SeparatedArgs
                 }
                 provider = Some(value.clone());
             }
+            "-C" | "--cwd" => {
+                if cwd.is_some() {
+                    return Err("Error: working directory specified multiple times".to_string());
+                }
+                let (_, value) = iter
+                    .next()
+                    .ok_or_else(|| "Missing directory path after -C/--cwd flag".to_string())?;
+                if value.starts_with('-') || value.is_empty() || value == "--" {
+                    return Err("Missing directory path after -C/--cwd flag".to_string());
+                }
+                cwd = Some(std::path::PathBuf::from(value));
+            }
             _ => {
                 if token.starts_with('-') {
                     saw_cli_flag = true;
@@ -474,6 +491,7 @@ pub fn separate_provider_and_cli_args(tokens: &[String]) -> Result<SeparatedArgs
         provider,
         cli_args,
         prompt,
+        cwd,
     })
 }
 

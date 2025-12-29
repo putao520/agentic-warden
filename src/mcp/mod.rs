@@ -43,6 +43,9 @@ pub struct TaskSpec {
     /// Optional provider name (e.g., "openrouter", "anthropic").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
+    /// Optional working directory for the AI CLI process.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -105,6 +108,11 @@ pub struct StartTaskParams {
     /// Optional role name to inject from ~/.aiw/role directory.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
+    /// Optional working directory for the AI CLI process.
+    /// If specified, the AI CLI will be started in this directory.
+    /// The directory must exist and be a valid directory.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
@@ -307,6 +315,7 @@ pub async fn start_task(params: StartTaskParams) -> Result<TaskLaunchInfo, Strin
     let spawn_cli_type = cli_type.clone();
     let spawn_args = os_args.clone();
     let spawn_provider = params.provider.clone();
+    let spawn_cwd = params.cwd.clone().map(std::path::PathBuf::from);
 
     tokio::spawn(async move {
         if let Err(err) = supervisor::execute_cli(
@@ -314,6 +323,7 @@ pub async fn start_task(params: StartTaskParams) -> Result<TaskLaunchInfo, Strin
             &spawn_cli_type,
             &spawn_args,
             spawn_provider,
+            spawn_cwd,
         )
         .await
         {
@@ -661,7 +671,7 @@ impl AgenticWardenMcpServer {
 
     #[tool(
         name = "start_concurrent_tasks",
-        description = "Launch multiple AI CLI tasks concurrently. Returns process IDs and log file paths for each task."
+        description = "Launch multiple AI CLI tasks concurrently. Each task supports: ai_type, task, provider, cwd (working directory). Returns process IDs and log file paths."
     )]
     pub async fn start_concurrent_tasks_tool(
         &self,
@@ -692,12 +702,16 @@ impl AgenticWardenMcpServer {
                 let cli_args = cli_type.build_full_access_args(&task_spec.task);
                 let os_args: Vec<OsString> = cli_args.into_iter().map(|s| s.into()).collect();
 
+                // Convert cwd string to PathBuf
+                let cwd = task_spec.cwd.clone().map(std::path::PathBuf::from);
+
                 // Launch task via supervisor (this will wait for completion in background)
                 let _exit_code = supervisor::execute_cli(
                     &registry_clone,
                     &cli_type,
                     &os_args,
                     task_spec.provider.clone(),
+                    cwd,
                 )
                 .await
                 .map_err(|e| format!("Failed to launch {} task: {}", task_spec.ai_type, e))?;
@@ -782,7 +796,7 @@ impl AgenticWardenMcpServer {
 
     #[tool(
         name = "start_task",
-        description = "Launch an AI CLI task in background. Optionally inject a role prompt from ~/.aiw/role/ directory."
+        description = "Launch an AI CLI task in background. Options: role (inject prompt from ~/.aiw/role/), provider (select API provider), cwd (set working directory, must exist)."
     )]
     pub async fn start_task_tool(
         &self,

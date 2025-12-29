@@ -123,6 +123,7 @@ async fn start_task_launches_and_returns_pid() {
         task: "run-start-test".to_string(),
         provider: None,
         role: None,
+        cwd: None,
     };
 
     let launch = start_task(params).await.expect("task should launch");
@@ -152,6 +153,7 @@ async fn list_tasks_returns_running_tasks() {
         task: "list-task".to_string(),
         provider: None,
         role: None,
+        cwd: None,
     };
     let launch = start_task(params).await.expect("task should launch");
 
@@ -176,6 +178,7 @@ async fn stop_task_terminates_process() {
         task: "stop-me".to_string(),
         provider: None,
         role: None,
+        cwd: None,
     };
     let launch = start_task(params).await.expect("task should launch");
 
@@ -211,6 +214,7 @@ async fn get_task_logs_supports_full_and_tail_modes() {
         task: "log-test".to_string(),
         provider: None,
         role: None,
+        cwd: None,
     };
     let launch = start_task(params).await.expect("task should launch");
 
@@ -258,6 +262,7 @@ async fn start_task_injects_role_prompt() {
         task: "user-task".to_string(),
         provider: None,
         role: Some("test-role".to_string()),
+        cwd: None,
     };
 
     let launch = start_task(params).await.expect("task should launch");
