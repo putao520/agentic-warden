@@ -134,6 +134,56 @@ pub enum AgenticWardenError {
     },
 }
 
+#[derive(Error, Debug)]
+pub enum ConfigError {
+    #[error("Config file not found: {path}")]
+    FileNotFound { path: String },
+    #[error("Invalid JSON format in config file")]
+    InvalidFormat,
+    #[error("cli_execution_order must be an array")]
+    InvalidType,
+    #[error("cli_execution_order must contain exactly 3 AI CLIs")]
+    InvalidLength { expected: usize, actual: usize },
+    #[error("All elements in cli_execution_order must be strings")]
+    InvalidElementType,
+    #[error("Invalid CLI type: {value}. Allowed values: codex, claude, gemini")]
+    InvalidCliType { value: String },
+    #[error("cli_execution_order contains duplicate CLI types")]
+    DuplicateCliType,
+    #[error("cli_execution_order must contain all 3 CLIs: codex, claude, gemini")]
+    IncompleteSet,
+    #[error("Config file error: {message}")]
+    Io { message: String },
+}
+
+#[derive(Error, Debug)]
+pub enum JudgeError {
+    #[error("Ollama service is not running. Start Ollama and try again.")]
+    Unavailable,
+    #[error("LLM request timed out after {timeout_secs}s")]
+    Timeout { timeout_secs: u64 },
+    #[error("Invalid LLM response: {message}")]
+    InvalidResponse { message: String },
+    #[error("Ollama API error: {message}")]
+    Api { message: String },
+}
+
+#[derive(Error, Debug)]
+pub enum ExecutionError {
+    #[error("Configuration error: {0}")]
+    Config(#[from] ConfigError),
+    #[error("LLM judgment error: {0}")]
+    Judge(#[from] JudgeError),
+    #[error("Execution stopped: {reason}")]
+    Halt { reason: String },
+    #[error("All AI CLIs failed. Last error: {message}")]
+    AllFailed { message: String },
+    #[error("Prompt cannot be empty")]
+    EmptyPrompt,
+    #[error("Execution failed: {message}")]
+    ExecutionFailed { message: String },
+}
+
 /// High-level sync operation categories used for user messaging and recovery.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncOperation {

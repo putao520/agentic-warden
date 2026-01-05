@@ -153,6 +153,12 @@ impl AiCliCommand {
     pub async fn execute(&self) -> Result<ExitCode> {
         let registry = create_cli_registry()?;
 
+        if self.ai_types.iter().any(|cli_type| matches!(cli_type, CliType::Auto)) {
+            return Err(anyhow!(
+                "Auto CLI type is only supported via `aiw auto`"
+            ));
+        }
+
         // 应用角色到提示词
         let final_prompt = if !self.prompt.is_empty() {
             self.apply_role(&self.prompt)?

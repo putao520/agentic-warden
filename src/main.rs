@@ -3,7 +3,7 @@ mod help;
 
 use aiw::cli_type::parse_cli_selector_strict;
 use aiw::commands::ai_cli::AiCliCommand;
-use aiw::commands::{parse_external_as_ai_cli, parser::{McpAction, RolesAction}, Cli, Commands};
+use aiw::commands::{parse_external_as_ai_cli, parser::{ConfigAction, McpAction, RolesAction}, Cli, Commands};
 use aiw::error::ErrorCategory;
 use aiw::execute_enhanced_update;
 use aiw::mcp::AgenticWardenMcpServer;
@@ -34,7 +34,7 @@ async fn main() -> ExitCode {
     // 处理外部AI CLI命令 (codex, claude, gemini)
     if args.len() >= 2 {
         match args[1].as_str() {
-            "codex" | "claude" | "gemini" => {
+            "codex" | "claude" | "gemini" | "auto" => {
                 return match handle_external_ai_cli(&args).await {
                     Ok(code) => code,
                     Err(err) => {
@@ -61,6 +61,10 @@ async fn main() -> ExitCode {
 async fn handle_external_ai_cli(args: &[String]) -> Result<ExitCode, String> {
     if args.len() < 2 {
         return Err("Please specify AI CLI type".to_string());
+    }
+
+    if args[1].eq_ignore_ascii_case("auto") {
+        return Ok(aiw::commands::auto::handle_auto_command(&args[1..]).await);
     }
 
     let tokens = args[1..].to_vec();
@@ -194,6 +198,7 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
         Commands::Mcp(action) => handle_mcp_action(action).await,
         Commands::Plugin(action) => handle_plugin_action(action).await.map_err(|e| e.to_string()),
         Commands::Roles(action) => handle_roles_command(action).await,
+        Commands::Config(action) => handle_config_action(action),
         Commands::External(tokens) => handle_external_command(tokens).await,
     }
 }
@@ -302,6 +307,12 @@ fn handle_help_command(topic: Option<String>) -> Result<ExitCode, String> {
         }
     }
     Ok(ExitCode::from(0))
+}
+
+fn handle_config_action(action: ConfigAction) -> Result<ExitCode, String> {
+    match action {
+        ConfigAction::CliOrder => Ok(aiw::commands::auto::handle_cli_order_command()),
+    }
 }
 
 /// 处理MCP命令

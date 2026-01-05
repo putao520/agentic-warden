@@ -4,6 +4,7 @@
 
 pub mod cli_oauth;
 pub mod cli_type;
+pub mod auto_mode;
 pub mod commands;
 pub mod common;
 pub mod config;

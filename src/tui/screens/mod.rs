@@ -10,6 +10,7 @@ mod render_helpers;
 
 // Include the available screens
 pub mod dashboard;
+pub mod cli_order;
 pub mod installed_mcp;
 pub mod provider;
 pub mod status;

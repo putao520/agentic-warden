@@ -1,4 +1,4 @@
-use aiw::commands::parser::{Cli, MarketplaceAction, McpAction, PluginAction};
+use aiw::commands::parser::{Cli, ConfigAction, MarketplaceAction, McpAction, PluginAction};
 use aiw::commands::{parse_external_as_ai_cli, Commands, RolesAction};
 
 fn parse(args: &[&str]) -> Commands {
@@ -199,5 +199,13 @@ fn parses_plugin_install_command() {
             assert!(skip_env);
         }
         other => panic!("expected plugin install command, got {other:?}"),
+    }
+}
+
+#[test]
+fn parses_config_cli_order_command() {
+    match parse(&["config", "cli-order"]) {
+        Commands::Config(ConfigAction::CliOrder) => {}
+        other => panic!("expected config cli-order command, got {other:?}"),
     }
 }

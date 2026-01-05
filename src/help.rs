@@ -38,6 +38,8 @@ MANAGEMENT COMMANDS:
     dashboard                   Show Dashboard (default when no args)
     status [--tui]              Show task status
     provider                    Launch Provider Management TUI
+    auto <prompt>               Run auto failover mode
+    config cli-order            Manage AI CLI execution order (TUI)
     wait                        Wait for all AI CLI tasks to complete
     pwait <PID>                 Wait for specific process tasks
     examples / demo             Show usage examples
@@ -103,6 +105,12 @@ EXAMPLES:
     aiw all "review this code"
     aiw "claude|gemini" "compare approaches"
 
+    # Auto failover mode
+    aiw auto "Fix this bug"
+
+    # Configure auto execution order
+    aiw config cli-order
+
     # MCP management
     aiw mcp browse
     aiw mcp install @anthropic/filesystem
@@ -130,6 +138,7 @@ pub fn print_command_help(command: &str) -> io::Result<()> {
     match command.to_lowercase().as_str() {
         "claude" | "codex" | "gemini" => print_ai_cli_help(command),
         "all" => print_all_agents_help(),
+        "auto" => print_auto_help(),
         "wait" => print_wait_help(),
         "pwait" => print_pwait_help(),
         "status" => print_status_help(),
@@ -138,6 +147,7 @@ pub fn print_command_help(command: &str) -> io::Result<()> {
         "examples" | "demo" => print_examples_help(),
         "update" => print_update_help(),
         "mcp" => print_mcp_help(),
+        "config" => print_config_help(),
         "roles" => print_roles_help(),
         "plugin" | "plugins" | "market" => print_plugin_help(),
         "version" | "v" => print_version(),
@@ -301,6 +311,25 @@ For more information:
         agent,
         agent
     );
+    print!("{}", help_text);
+    io::stdout().flush()
+}
+
+fn print_auto_help() -> io::Result<()> {
+    let help_text = r#"
+AUTO MODE
+
+USAGE:
+    aiw auto "<TASK>"
+
+DESCRIPTION:
+    Run automatic failover across AI CLIs in the configured order.
+    Execution order is stored in ~/.aiw/config.json (cli_execution_order).
+
+EXAMPLES:
+    aiw auto "Fix this bug"
+    aiw config cli-order
+"#;
     print!("{}", help_text);
     io::stdout().flush()
 }
@@ -650,6 +679,25 @@ REGISTRIES:
 
 For information on using AIW as an MCP server:
     See project documentation at https://github.com/putao520/agentic-warden
+"#;
+    print!("{}", help_text);
+    io::stdout().flush()
+}
+
+fn print_config_help() -> io::Result<()> {
+    let help_text = r#"
+CONFIG COMMANDS
+
+USAGE:
+    aiw config cli-order
+
+DESCRIPTION:
+    Launch a TUI to configure the AI CLI execution order.
+
+TUI KEYS:
+    ↑ / ↓     Move selection
+    r         Reset to default order
+    q         Save and quit
 "#;
     print!("{}", help_text);
     io::stdout().flush()

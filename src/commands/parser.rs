@@ -28,6 +28,14 @@ pub enum RolesAction {
     List,
 }
 
+/// 配置管理动作
+#[derive(Subcommand, Debug, Clone)]
+pub enum ConfigAction {
+    /// 管理 AI CLI 执行顺序
+    #[command(name = "cli-order")]
+    CliOrder,
+}
+
 /// MCP服务器管理动作
 #[derive(Subcommand, Debug, Clone)]
 pub enum McpAction {
@@ -301,6 +309,10 @@ pub enum Commands {
     /// 插件市场管理
     #[command(subcommand)]
     Plugin(PluginAction),
+
+    /// 配置管理
+    #[command(subcommand)]
+    Config(ConfigAction),
 
     /// AI CLI 角色管理
     #[command(subcommand)]

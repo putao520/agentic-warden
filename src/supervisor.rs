@@ -63,6 +63,14 @@ enum OutputStrategy {
     CaptureWithDisplay(Arc<Mutex<Vec<u8>>>, Arc<Mutex<ScrollingDisplay>>),
     /// Legacy capture mode (for backward compatibility)
     Capture(Arc<Mutex<Vec<u8>>>),
+    /// Capture stdout and stderr without mirroring output
+    CaptureAll(Arc<Mutex<Vec<u8>>>, Arc<Mutex<Vec<u8>>>),
+}
+
+#[derive(Debug, Clone)]
+pub struct CapturedOutput {
+    pub stdout: String,
+    pub stderr: String,
 }
 
 pub async fn execute_cli<S: TaskStorage>(
@@ -119,22 +127,53 @@ pub async fn execute_cli_with_output<S: TaskStorage>(
     .await?;
 
     match output_opt {
-        Some(mut output) => {
+        Some(output) => {
+            let mut stdout = output.stdout;
             // 应用50行限制：只保留最后50行
-            let lines: Vec<_> = output.lines().collect();
+            let lines: Vec<_> = stdout.lines().collect();
             if lines.len() > 50 {
-                let limited_lines: Vec<_> = lines.iter().rev().take(50).map(|s| s.to_string()).rev().collect();
-                output = limited_lines.join("\n");
-                if !output.ends_with('\n') {
-                    output.push('\n');
+                let limited_lines: Vec<_> =
+                    lines.iter().rev().take(50).map(|s| s.to_string()).rev().collect();
+                stdout = limited_lines.join("\n");
+                if !stdout.ends_with('\n') {
+                    stdout.push('\n');
                 }
             }
-            Ok(output)
-        },
+            Ok(stdout)
+        }
         None => Err(ProcessError::Other(
             "Output capture failed unexpectedly".to_string(),
         )),
     }
+}
+
+pub async fn execute_cli_with_full_output<S: TaskStorage>(
+    registry: &Registry<S>,
+    cli_type: &CliType,
+    args: &[OsString],
+    provider: Option<String>,
+    timeout: std::time::Duration,
+    cwd: Option<std::path::PathBuf>,
+) -> Result<(i32, CapturedOutput), ProcessError> {
+    let stdout = Arc::new(Mutex::new(Vec::new()));
+    let stderr = Arc::new(Mutex::new(Vec::new()));
+
+    let (exit_code, output_opt) = execute_cli_internal(
+        registry,
+        cli_type,
+        args,
+        provider,
+        Some(timeout),
+        OutputStrategy::CaptureAll(stdout.clone(), stderr.clone()),
+        cwd,
+    )
+    .await?;
+
+    let output = output_opt.ok_or_else(|| {
+        ProcessError::Other("Output capture failed unexpectedly".to_string())
+    })?;
+
+    Ok((exit_code, output))
 }
 
 /// Internal CLI execution with configurable output handling
@@ -146,7 +185,7 @@ async fn execute_cli_internal<S: TaskStorage>(
     timeout: Option<std::time::Duration>,
     output_strategy: OutputStrategy,
     cwd: Option<std::path::PathBuf>,
-) -> Result<(i32, Option<String>), ProcessError> {
+) -> Result<(i32, Option<CapturedOutput>), ProcessError> {
     // Validate CWD if provided
     if let Some(ref dir) = cwd {
         if !dir.exists() {
@@ -162,7 +201,12 @@ async fn execute_cli_internal<S: TaskStorage>(
             )));
         }
     }
-    let is_capture_mode = matches!(output_strategy, OutputStrategy::Capture(_) | OutputStrategy::CaptureWithDisplay(_, _));
+    let is_capture_mode = matches!(
+        output_strategy,
+        OutputStrategy::Capture(_)
+            | OutputStrategy::CaptureWithDisplay(_, _)
+            | OutputStrategy::CaptureAll(_, _)
+    );
 
     platform::init_platform();
 
@@ -181,6 +225,11 @@ async fn execute_cli_internal<S: TaskStorage>(
         CliType::Claude => AiType::Claude,
         CliType::Codex => AiType::Codex,
         CliType::Gemini => AiType::Gemini,
+        CliType::Auto => {
+            return Err(ProcessError::Other(
+                "Auto CLI type is virtual and cannot be executed directly".to_string(),
+            ))
+        }
     };
 
     // Determine which provider to use
@@ -360,6 +409,13 @@ async fn execute_cli_internal<S: TaskStorage>(
                     spawn_copy_with_capture(stdout, writer_clone, buffer_clone).await
                 }));
             }
+            OutputStrategy::CaptureAll(buffer, _) => {
+                let buffer_clone = buffer.clone();
+                let writer_clone = log_writer.clone();
+                copy_handles.push(tokio::spawn(async move {
+                    spawn_copy_with_capture(stdout, writer_clone, buffer_clone).await
+                }));
+            }
         }
     }
 
@@ -371,6 +427,13 @@ async fn execute_cli_internal<S: TaskStorage>(
                 let display_clone = scrolling_display.clone();
                 copy_handles.push(tokio::spawn(async move {
                     spawn_copy_silent(stderr, writer_clone, display_clone).await
+                }));
+            }
+            OutputStrategy::CaptureAll(_, buffer) => {
+                let buffer_clone = buffer.clone();
+                let writer_clone = log_writer.clone();
+                copy_handles.push(tokio::spawn(async move {
+                    spawn_copy_with_capture(stderr, writer_clone, buffer_clone).await
                 }));
             }
             _ => {
@@ -502,22 +565,42 @@ async fn execute_cli_internal<S: TaskStorage>(
     }
 
     // Extract captured output if in capture mode
-    let captured_output = if let OutputStrategy::Capture(buffer) = output_strategy {
-        let output = buffer.lock().await.clone();
-        let output_str = String::from_utf8_lossy(&output).to_string();
+    let captured_output = match output_strategy {
+        OutputStrategy::Capture(buffer) => {
+            let output = buffer.lock().await.clone();
+            let output_str = String::from_utf8_lossy(&output).to_string();
 
-        if !status.success() {
-            return Err(ProcessError::Other(format!(
-                "{} CLI failed with exit code {}: {}",
-                cli_type.display_name(),
-                extract_exit_code(status),
-                output_str
-            )));
+            if !status.success() {
+                return Err(ProcessError::Other(format!(
+                    "{} CLI failed with exit code {}: {}",
+                    cli_type.display_name(),
+                    extract_exit_code(status),
+                    output_str
+                )));
+            }
+
+            Some(CapturedOutput {
+                stdout: output_str,
+                stderr: String::new(),
+            })
         }
-
-        Some(output_str)
-    } else {
-        None
+        OutputStrategy::CaptureWithDisplay(buffer, _) => {
+            let output = buffer.lock().await.clone();
+            let output_str = String::from_utf8_lossy(&output).to_string();
+            Some(CapturedOutput {
+                stdout: output_str,
+                stderr: String::new(),
+            })
+        }
+        OutputStrategy::CaptureAll(stdout_buffer, stderr_buffer) => {
+            let stdout_bytes = stdout_buffer.lock().await.clone();
+            let stderr_bytes = stderr_buffer.lock().await.clone();
+            Some(CapturedOutput {
+                stdout: String::from_utf8_lossy(&stdout_bytes).to_string(),
+                stderr: String::from_utf8_lossy(&stderr_bytes).to_string(),
+            })
+        }
+        _ => None,
     };
 
     Ok((extract_exit_code(status), captured_output))
@@ -964,6 +1047,11 @@ pub async fn start_interactive_cli<S: TaskStorage>(
         CliType::Claude => AiType::Claude,
         CliType::Codex => AiType::Codex,
         CliType::Gemini => AiType::Gemini,
+        CliType::Auto => {
+            return Err(ProcessError::Other(
+                "Auto CLI type is virtual and cannot be executed directly".to_string(),
+            ))
+        }
     };
 
     // Determine which provider to use

@@ -11,6 +11,7 @@ pub enum CliType {
     Claude,
     Codex,
     Gemini,
+    Auto,
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +43,7 @@ impl CliType {
             CliType::Claude => CLAUDE_BIN,
             CliType::Codex => CODEX_BIN,
             CliType::Gemini => GEMINI_BIN,
+            CliType::Auto => "auto",
         }
     }
 
@@ -50,6 +52,7 @@ impl CliType {
             CliType::Claude => "CLAUDE_BIN",
             CliType::Codex => "CODEX_BIN",
             CliType::Gemini => "GEMINI_BIN",
+            CliType::Auto => "AUTO_BIN",
         }
     }
 
@@ -58,6 +61,7 @@ impl CliType {
             CliType::Claude => "claude",
             CliType::Codex => "codex",
             CliType::Gemini => "gemini",
+            CliType::Auto => "auto",
         }
     }
 
@@ -88,6 +92,7 @@ impl CliType {
                     "yolo".to_string(),
                 ]
             }
+            CliType::Auto => Vec::new(),
         };
 
         
@@ -119,6 +124,7 @@ impl CliType {
             CliType::Gemini => {
                 vec!["--approval-mode".to_string(), "yolo".to_string()]
             }
+            CliType::Auto => Vec::new(),
         };
 
         
@@ -132,6 +138,7 @@ pub fn parse_cli_type(arg: &str) -> Option<CliType> {
         "claude" => Some(CliType::Claude),
         "codex" => Some(CliType::Codex),
         "gemini" => Some(CliType::Gemini),
+        "auto" => Some(CliType::Auto),
         _ => None,
     }
 }
@@ -243,7 +250,7 @@ fn forced_cli_types_from_env() -> AgenticResult<Option<Vec<CliType>>> {
 fn unsupported_selector(token: impl Into<String>) -> AgenticWardenError {
     let token = token.into();
     errors::validation_error(
-        format!("Unsupported agent type '{token}'. Supported types: claude, codex, gemini, all, or combinations like claude|gemini"),
+        format!("Unsupported agent type '{token}'. Supported types: claude, codex, gemini, auto, all, or combinations like claude|gemini"),
         Some("cli-selector".to_string()),
         Some(token),
     )
