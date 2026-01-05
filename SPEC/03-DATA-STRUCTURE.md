@@ -1160,3 +1160,257 @@ plugin.json格式（Claude Code标准）：
 2. Backward compatibility layer
 3. Automated migration scripts
 4. User notification for breaking changes
+---
+
+### DATA-021: AI CLI 执行顺序配置
+
+**Version**: v0.5.39+
+**Related**: REQ-021, ARCH-021, API-021
+**Type**: Update Config Structure
+**Storage Location**: `~/.aiw/config.json`
+
+---
+
+#### 配置字段定义
+
+| 字段路径 | 类型 | 必填 | 默认值 | 约束 | 说明 |
+|---------|------|-----|--------|------|------|
+| `cli_execution_order` | array of string | ✅ | `["codex", "gemini", "claude"]` | 长度=3<br>元素唯一<br>值在允许列表中 | AI CLI 执行顺序 |
+
+**完整配置示例**:
+```json
+{
+  "version": "1.0",
+  "default_provider": "openrouter",
+  "providers": {...},
+  "cli_execution_order": ["codex", "gemini", "claude"]
+}
+```
+
+**自定义顺序示例**:
+```json
+{
+  "cli_execution_order": ["claude", "gemini", "codex"]
+}
+```
+
+---
+
+#### 字段验证规则
+
+##### cli_execution_order 验证
+
+| 验证项 | 规则 | 错误消息 |
+|-------|------|---------|
+| 类型检查 | 必须是数组 | `cli_execution_order must be an array` |
+| 长度检查 | 长度必须等于 3 | `cli_execution_order must contain exactly 3 AI CLIs` |
+| 元素类型 | 每个元素必须是字符串 | `All elements in cli_execution_order must be strings` |
+| 值域检查 | 每个值必须在 `["codex", "claude", "gemini"]` 中 | `Invalid CLI type: {value}. Allowed values: codex, claude, gemini` |
+| 唯一性检查 | 不得包含重复元素 | `cli_execution_order contains duplicate CLI types` |
+| 完整性检查 | 必须包含所有 3 个 CLI | `cli_execution_order must contain all 3 CLIs: codex, claude, gemini` |
+
+**验证逻辑（伪代码）**:
+```
+function validate_cli_execution_order(config):
+    order = config.cli_execution_order
+    
+    # 类型检查
+    if not isinstance(order, array):
+        raise ValidationError("must be an array")
+    
+    # 长度检查
+    if order.length != 3:
+        raise ValidationError("must contain exactly 3 AI CLIs")
+    
+    # 元素类型检查
+    for item in order:
+        if not isinstance(item, string):
+            raise ValidationError("all elements must be strings")
+    
+    # 值域检查
+    allowed = ["codex", "claude", "gemini"]
+    for item in order:
+        if item not in allowed:
+            raise ValidationError(f"invalid CLI type: {item}")
+    
+    # 唯一性检查
+    if len(set(order)) != 3:
+        raise ValidationError("contains duplicate CLI types")
+    
+    # 完整性检查
+    required = {"codex", "claude", "gemini"}
+    if set(order) != required:
+        raise ValidationError("must contain all 3 CLIs")
+    
+    return true
+```
+
+---
+
+#### 默认值策略
+
+| 场景 | 使用的值 | 说明 |
+|-----|---------|------|
+| 配置文件不存在 | `["codex", "gemini", "claude"]` | 硬编码默认值 |
+| 字段缺失 | `["codex", "gemini", "claude"]` | 硬编码默认值 |
+| 字段格式错误 | 报错，拒绝启动 | 配置验证失败 |
+
+---
+
+#### 配置迁移
+
+**从旧版本升级**:
+- 旧版本无此字段 → 自动添加默认值
+- 字段格式不兼容 → 返回配置验证错误
+
+**配置兼容性**:
+```
+v0.5.38: 无 cli_execution_order 字段
+    ↓ 升级到 v0.5.39
+v0.5.39: 添加 cli_execution_order = ["codex", "gemini", "claude"]
+```
+
+---
+
+#### Rust 数据结构
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CliExecutionOrderConfig {
+    #[serde(default = "default_execution_order")]
+    pub cli_execution_order: Vec<String>,
+}
+
+fn default_execution_order() -> Vec<String> {
+    vec!["codex".to_string(), "gemini".to_string(), "claude".to_string()]
+}
+
+impl CliExecutionOrderConfig {
+    /// 验证配置合法性
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        let order = &self.cli_execution_order;
+        
+        // 长度检查
+        if order.len() != 3 {
+            return Err(ConfigError::InvalidLength {
+                expected: 3,
+                actual: order.len(),
+            });
+        }
+        
+        // 值域检查
+        let allowed = ["codex", "claude", "gemini"];
+        for cli_type in order {
+            if !allowed.contains(&cli_type.as_str()) {
+                return Err(ConfigError::InvalidCliType {
+                    value: cli_type.clone(),
+                    allowed: allowed.to_vec(),
+                });
+            }
+        }
+        
+        // 唯一性检查
+        let unique: std::collections::HashSet<_> = order.iter().collect();
+        if unique.len() != 3 {
+            return Err(ConfigError::DuplicateCliType);
+        }
+        
+        // 完整性检查
+        let required: std::collections::HashSet<_> = 
+            ["codex", "claude", "gemini"].iter().cloned().collect();
+        let current: std::collections::HashSet<_> = 
+            order.iter().map(|s| s.as_str()).collect();
+        if current != required {
+            return Err(ConfigError::IncompleteSet);
+        }
+        
+        Ok(())
+    }
+    
+    /// 获取执行顺序（解析为 CliType 枚举）
+    pub fn get_order(&self) -> Result<Vec<CliType>, ConfigError> {
+        self.validate()?;
+        self.cli_execution_order
+            .iter()
+            .map(|s| CliType::from_str(s))
+            .collect()
+    }
+}
+```
+
+---
+
+#### 配置文件示例
+
+**默认配置** (`~/.aiw/config.json`):
+```json
+{
+  "version": "1.0",
+  "cli_execution_order": ["codex", "gemini", "claude"]
+}
+```
+
+**自定义配置** (优先使用 claude):
+```json
+{
+  "version": "1.0",
+  "cli_execution_order": ["claude", "codex", "gemini"]
+}
+```
+
+**错误配置示例**:
+```json
+// ❌ 错误：长度不为 3
+{"cli_execution_order": ["codex", "claude"]}
+
+// ❌ 错误：包含无效值
+{"cli_execution_order": ["codex", "claude", "invalid"]}
+
+// ❌ 错误：包含重复值
+{"cli_execution_order": ["codex", "claude", "claude"]}
+```
+
+---
+
+#### 配置加载和保存
+
+**加载配置**:
+```
+1. 读取 ~/.aiw/config.json
+2. 解析 JSON
+3. 验证 cli_execution_order 字段
+4. 如果字段缺失，使用默认值
+5. 如果验证失败，返回错误
+```
+
+**保存配置**:
+```
+1. 读取现有配置文件
+2. 更新 cli_execution_order 字段
+3. 验证新配置
+4. 写回文件
+5. 设置文件权限为 0600
+```
+
+---
+
+#### 相关数据结构
+
+##### ExecutionResult (运行时数据)
+
+| 字段 | 类型 | 说明 |
+|-----|------|------|
+| `cli_type` | `CliType` | 执行的 CLI 类型 |
+| `exit_code` | `i32` | 进程退出码 |
+| `stdout` | `String` | 标准输出 |
+| `stderr` | `String` | 错误输出 |
+| `duration` | `Duration` | 执行时长 |
+
+##### Judgment (LLM 判断结果)
+
+| 字段 | 类型 | 说明 |
+|-----|------|------|
+| `success` | `boolean` | 执行是否成功 |
+| `should_retry` | `boolean` | 是否应该尝试下一个 CLI |
+| `reason` | `String` | 判断理由（用于日志） |
+

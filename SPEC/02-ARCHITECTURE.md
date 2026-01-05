@@ -2834,3 +2834,280 @@ EditEnvState (setup)
 ### Historical Decisions (Not applicable for v0)
 
 *Note: This is the initial architecture version. Future deprecated solutions will be documented here when architectural changes are made.*
+
+---
+
+## ARCH-021: Auto 模式架构设计
+
+**Version**: v0.5.39+
+**Related**: REQ-021, DATA-021, API-021
+**Status**: 🟡 Pending
+
+### 核心设计原则
+
+| 原则 | 说明 |
+|-----|------|
+| 极简配置 | 只存储执行顺序数组，无其他参数 |
+| LLM 必选 | 故障判断必须使用 LLM，无降级方案 |
+| 硬编码细节 | 超时、模型等技术细节硬编码，不可配置 |
+| 顺序保证 | 严格按配置数组顺序执行 |
+
+---
+
+### 执行流程
+
+#### 主流程图
+
+```
+用户命令: aiw auto "Fix this bug"
+    ↓
+CLI Parser 解析: ai_type = Auto
+    ↓
+AutoModeExecutor::execute(prompt)
+    ↓
+读取配置: config.cli_execution_order
+    ↓
+验证配置: 长度=3, 包含所有必需CLI
+    ↓
+for each cli_type in execution_order:
+    ↓
+    ├─ CliExecutor::execute(cli_type, prompt)
+    │   ├─ 启动 CLI 进程
+    │   ├─ 捕获: exit_code, stdout, stderr
+    │   └─ 等待进程结束（超时 30s）
+    ↓
+    ├─ AiJudge::evaluate(result)
+    │   ├─ 构建 LLM Prompt
+    │   ├─ 调用 Ollama API（硬编码模型）
+    │   ├─ 解析 LLM 返回: {success, should_retry, reason}
+    │   └─ 返回判断结果
+    ↓
+    ├─ if judgment.success == true:
+    │   └─ ✅ 返回 stdout，执行结束
+    ↓
+    ├─ if judgment.should_retry == false:
+    │   └─ ❌ 返回错误，执行结束
+    ↓
+    └─ 继续下一个 CLI
+    ↓
+所有 CLI 失败 → ❌ 返回错误
+```
+
+---
+
+### 组件设计
+
+#### 1. AutoModeExecutor
+
+**职责**: 协调 auto 模式的整体执行流程
+
+| 方法 | 输入 | 输出 | 说明 |
+|-----|------|------|------|
+| `execute(prompt: String)` | 任务描述 | `Result<String>` | 主入口，执行故障切换流程 |
+| `try_cli(cli_type: CliType, prompt: &str)` | CLI 类型, 任务 | `ExecutionResult` | 尝试单个 CLI |
+| `should_switch(judgment: &Judgment)` | LLM 判断结果 | `bool` | 决定是否切换到下一个 |
+
+**执行逻辑**:
+```
+1. 读取配置 → execution_order 数组
+2. for each cli_type:
+   a. 执行 CLI
+   b. 调用 LLM 判断
+   c. 成功 → 返回结果
+   d. 可重试 → 继续
+   e. 不可重试 → 报错
+3. 全部失败 → 报错
+```
+
+#### 2. AiJudge
+
+**职责**: 使用 LLM 判断 CLI 执行结果
+
+| 方法 | 输入 | 输出 | 说明 |
+|-----|------|------|------|
+| `evaluate(result: ExecutionResult)` | 执行结果 | `Judgment` | 调用 LLM 判断是否成功 |
+| `build_prompt(result: &ExecutionResult)` | 执行结果 | `String` | 构建 LLM Prompt |
+| `parse_llm_response(response: &str)` | LLM 响应 | `Judgment` | 解析 LLM 返回的 JSON |
+
+**LLM Prompt 模板**:
+```
+你是一个 AI CLI 执行结果分析器。请判断以下执行是否成功，是否应该尝试下一个 AI CLI。
+
+**AI CLI 类型**: {cli_type}
+**用户任务**: {prompt}
+**退出码**: {exit_code}
+**标准输出**: {stdout}
+**错误输出**: {stderr}
+
+请以 JSON 格式返回判断结果：
+{{
+  "success": true/false,
+  "should_retry": true/false,
+  "reason": "判断理由"
+}}
+
+判断规则：
+- 退出码 0 + 正常输出 → success=true
+- 网络错误、API 错误、连接失败 → should_retry=true
+- 用户中断、权限问题、非法参数 → should_retry=false
+```
+
+**技术约束**:
+- LLM 服务: Ollama (本地)
+- 模型名称: 硬编码（如 `llama3.1`）
+- 超时时间: 5 秒
+- 无降级方案（LLM 不可用时直接报错）
+
+#### 3. ExecutionOrderConfig
+
+**职责**: 管理执行顺序配置
+
+| 方法 | 输入 | 输出 | 说明 |
+|-----|------|------|------|
+| `get_order()` | - | `Vec<CliType>` | 读取配置数组 |
+| `validate_order(order: &[String])` | 配置数组 | `Result<()>` | 验证配置合法性 |
+| `reset_to_default()` | - | `Vec<CliType>` | 返回默认顺序 |
+
+**配置验证规则**:
+```
+验证规则:
+├─ 必须是数组类型
+├─ 数组长度必须等于 3
+├─ 每个元素必须是字符串
+├─ 元素值必须在 ["codex", "claude", "gemini"] 中
+├─ 不得包含重复元素
+└─ 必须包含所有 3 个 CLI（不得遗漏）
+```
+
+---
+
+### 数据流
+
+```
+config.json (cli_execution_order)
+    ↓
+AutoModeExecutor::execute()
+    ↓
+┌─────────────────────────────────────┐
+│ for each cli_type in order:        │
+│                                     │
+│  ┌───────────────────────────────┐ │
+│  │ CliExecutor::execute()        │ │
+│  │ → 启动进程                     │ │
+│  │ → 捕获输出                     │ │
+│  │ → 返回 ExecutionResult        │ │
+│  └───────────────────────────────┘ │
+│            ↓                         │
+│  ┌───────────────────────────────┐ │
+│  │ AiJudge::evaluate()           │ │
+│  │ → 构建 Prompt                 │ │
+│  │ → 调用 Ollama                 │ │
+│  │ → 解析 Judgment              │ │
+│  └───────────────────────────────┘ │
+│            ↓                         │
+│  决策: 成功/切换/停止               │
+└─────────────────────────────────────┘
+    ↓
+最终结果: 返回给用户
+```
+
+---
+
+### 技术约束
+
+| 约束项 | 值 | 说明 |
+|-------|-----|------|
+| 支持的 AI CLI | 硬编码 3 个 | `codex`, `claude`, `gemini` |
+| LLM 服务 | Ollama | 本地服务 |
+| 模型名称 | 硬编码 | 如 `llama3.1` |
+| CLI 超时 | 30 秒 | 硬编码，不可配置 |
+| LLM 判断超时 | 5 秒 | 硬编码，不可配置 |
+| 每个 CLI 尝试次数 | 1 次 | 硬编码，不可配置 |
+| 配置数组长度 | 必须为 3 | 不得禁用任何 CLI |
+
+---
+
+### 错误处理
+
+| 错误场景 | 错误类型 | 处理方式 |
+|---------|---------|---------|
+| 配置文件缺失 | `ConfigError::FileNotFound` | 使用默认顺序 |
+| 配置数组为空 | `ConfigError::InvalidFormat` | 返回配置错误 |
+| 配置数组长度不为 3 | `ConfigError::InvalidLength` | 返回配置错误 |
+| 配置包含无效 CLI | `ConfigError::InvalidCliType` | 返回配置错误 |
+| LLM 服务不可用 | `JudgeError::LlmUnavailable` | 返回错误，提示启动 Ollama |
+| 所有 CLI 失败 | `ExecutionError::AllFailed` | 返回最后一个 CLI 的错误 |
+| LLM 判断超时 | `JudgeError::Timeout` | 默认为 `should_retry=true` |
+| LLM 返回格式错误 | `JudgeError::InvalidResponse` | 默认为 `should_retry=true` |
+
+---
+
+### TUI 组件
+
+#### CliOrderScreen
+
+**职责**: 管理 CLI 执行顺序的 TUI 界面
+
+| 功能 | 操作 | 说明 |
+|-----|------|------|
+| 显示顺序 | 渲染列表 | 显示当前执行顺序（1, 2, 3） |
+| 移动位置 | `↑` / `↓` | 交换相邻元素位置 |
+| 重置 | `r` | 恢复默认顺序 |
+| 保存退出 | `q` | 自动保存并退出 |
+
+**界面布局**:
+```
+┌─────────────────────────────────────────────┐
+│  AI CLI Execution Order                     │
+├─────────────────────────────────────────────┤
+│                                             │
+│  Current Order:                             │
+│  ┌─────────────────────────────────────┐   │
+│  │ 1. {cli_type_1}                     │   │
+│  │ 2. {cli_type_2}                     │   │
+│  │ 3. {cli_type_3}                     │   │
+│  └─────────────────────────────────────┘   │
+│                                             │
+│  [↑/↓] Move    [r] Reset Default    [q] Quit│
+└─────────────────────────────────────────────┘
+```
+
+**交互逻辑**:
+- 箭头键移动焦点
+- 选中项高亮显示
+- 移动操作实时更新界面
+- 退出时自动保存到配置文件
+
+---
+
+### 性能要求
+
+| 指标 | 目标 | 说明 |
+|-----|------|------|
+| 配置读取 | < 100ms | 从文件系统读取 |
+| LLM 判断 | < 5 秒 | Ollama API 调用 |
+| CLI 执行 | 无限制（30 秒超时） | 按 CLI 实际执行时间 |
+| TUI 响应 | < 200ms | 用户交互反馈 |
+
+---
+
+### 安全要求
+
+| 要求 | 说明 |
+|-----|------|
+| 配置文件权限 | 0600（用户读写） |
+| LLM Prompt 脱敏 | 不包含 API key 等敏感信息 |
+| 错误信息脱敏 | 日志中不泄露敏感信息 |
+| CLI 进程隔离 | 每个进程独立执行，避免交叉污染 |
+
+---
+
+### 测试要点
+
+| 测试类型 | 测试内容 |
+|---------|---------|
+| 单元测试 | 配置验证逻辑、LLM Prompt 构建 |
+| 集成测试 | Auto 模式执行流程、LLM 判断准确性 |
+| E2E 测试 | 完整的故障切换场景、TUI 交互 |
+| 配置测试 | 无效配置拒绝、默认配置回退 |
+

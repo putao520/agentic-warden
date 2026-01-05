@@ -1877,3 +1877,328 @@ impl McpFilter for PluginMetadata {
 - Clear migration paths will be provided
 - Backward compatibility maintained when possible
 - Deprecation warnings in CLI output and logs
+
+---
+
+## API-021: Auto 模式 CLI 接口
+
+**Version**: v0.5.39+
+**Status**: 🟡 Pending
+**Related**: REQ-021, ARCH-021, DATA-021
+
+---
+
+### CLI Endpoints
+
+#### API-021-001: Auto 模式执行命令
+
+**Command**: `aiw auto <prompt>`
+
+**Request Parameters**:
+| Parameter | Type | Required | Validation | Description |
+|-----------|------|----------|------------|-------------|
+| `prompt` | string | ✓ | Non-empty | Task description for AI |
+
+**Usage Examples**:
+```bash
+# 基本执行
+aiw auto "Fix this bug"
+
+# 复杂任务
+aiw auto "Write a Rust function to parse JSON and handle errors"
+
+# 多行任务（引号内）
+aiw auto "Create a web server with:
+- REST API endpoints
+- Database integration
+- Error handling"
+```
+
+**Success Response**: `ExitCode 0`
+- Auto 模式执行成功
+- 返回第一个成功的 CLI 输出
+- 配置文件已更新（记录执行结果）
+
+**Error Responses**:
+| Exit Code | Category | Description | Recovery Action |
+|-----------|----------|-------------|-----------------|
+| 1 | Config Error | 配置文件格式错误 | 检查 `~/.aiw/config.json` |
+| 2 | CLI Error | 所有 CLI 都失败 | 查看具体错误信息 |
+| 3 | LLM Error | LLM 服务不可用 | 启动 Ollama 服务 |
+
+**执行流程**:
+```
+1. 解析命令: ai_type=Auto, prompt="..."
+2. 读取配置: config.cli_execution_order
+3. 验证配置: 长度=3, 包含所有必需CLI
+4. for each cli_type in order:
+   a. 执行 CLI
+   b. 捕获输出
+   c. LLM 判断
+   d. 成功 → 返回结果
+   e. 可重试 → 继续
+   f. 不可重试 → 报错
+5. 所有失败 → 返回错误
+```
+
+---
+
+#### API-021-002: 执行顺序管理命令
+
+**Command**: `aiw config cli-order`
+
+**Request Parameters**: None
+
+**Description**: 启动 TUI 界面管理 CLI 执行顺序
+
+**Success Response**: TUI 界面启动
+```
+┌─────────────────────────────────────────────┐
+│  AI CLI Execution Order                     │
+├─────────────────────────────────────────────┤
+│                                             │
+│  Current Order:                             │
+│  ┌─────────────────────────────────────┐   │
+│  │ 1. codex                            │   │
+│  │ 2. gemini                           │   │
+│  │ 3. claude                           │   │
+│  └─────────────────────────────────────┘   │
+│                                             │
+│  [↑/↓] Move    [r] Reset Default    [q] Quit│
+└─────────────────────────────────────────────┘
+```
+
+**TUI 操作**:
+| 按键 | 功能 | 说明 |
+|-----|------|------|
+| `↑` | 上移 | 将当前项向上移动一位 |
+| `↓` | 下移 | 将当前项向下移动一位 |
+| `r` | 重置 | 恢复默认顺序 `["codex", "gemini", "claude"]` |
+| `q` | 退出 | 保存并退出 |
+
+**Error Responses**:
+| Exit Code | Category | Description | Recovery Action |
+|-----------|----------|-------------|-----------------|
+| 1 | Config Error | 配置文件无法读取 | 检查 `~/.aiw/config.json` |
+| 2 | Permission Error | 配置文件不可写 | 检查文件权限 |
+| 3 | TUI Error | TUI 初始化失败 | 检查终端兼容性 |
+
+---
+
+### Internal Rust API
+
+#### API-021-003: AutoModeExecutor 接口
+
+**Trait Definition**:
+```rust
+pub trait AutoModeExecutor {
+    /// 执行 auto 模式
+    fn execute(prompt: &str) -> Result<String, ExecutionError>;
+    
+    /// 尝试单个 CLI
+    fn try_cli(cli_type: CliType, prompt: &str) -> Result<ExecutionResult, ExecutionError>;
+    
+    /// 判断是否应该切换到下一个 CLI
+    fn should_switch(judgment: &Judgment) -> bool;
+}
+```
+
+**Method Details**:
+
+| Method | Input | Output | Throws | Description |
+|--------|-------|--------|--------|-------------|
+| `execute` | `prompt: &str` | `Result<String>` | `ExecutionError` | 主入口，执行故障切换流程 |
+| `try_cli` | `cli_type: CliType`, `prompt: &str` | `Result<ExecutionResult>` | `ExecutionError` | 尝试执行单个 CLI |
+| `should_switch` | `judgment: &Judgment` | `bool` | - | 根据 LLM 判断决定是否切换 |
+
+---
+
+#### API-021-004: AiJudge 接口
+
+**Trait Definition**:
+```rust
+pub trait AiJudge {
+    /// 评估 CLI 执行结果
+    fn evaluate(result: &ExecutionResult) -> Result<Judgment, JudgeError>;
+    
+    /// 构建 LLM Prompt
+    fn build_prompt(result: &ExecutionResult) -> String;
+    
+    /// 解析 LLM 响应
+    fn parse_llm_response(response: &str) -> Result<Judgment, JudgeError>;
+}
+```
+
+**Method Details**:
+
+| Method | Input | Output | Throws | Description |
+|--------|-------|--------|--------|-------------|
+| `evaluate` | `result: &ExecutionResult` | `Result<Judgment>` | `JudgeError` | 调用 LLM 判断执行结果 |
+| `build_prompt` | `result: &ExecutionResult` | `String` | - | 构建发送给 LLM 的 Prompt |
+| `parse_llm_response` | `response: &str` | `Result<Judgment>` | `JudgeError` | 解析 LLM 返回的 JSON |
+
+**Judgment 结构**:
+| 字段 | 类型 | 说明 |
+|-----|------|------|
+| `success` | `boolean` | 执行是否成功 |
+| `should_retry` | `boolean` | 是否应该尝试下一个 CLI |
+| `reason` | `String` | 判断理由（用于日志和调试） |
+
+---
+
+#### API-021-005: ExecutionOrderConfig 接口
+
+**Trait Definition**:
+```rust
+pub trait ExecutionOrderConfig {
+    /// 获取执行顺序
+    fn get_order(&self) -> Result<Vec<CliType>, ConfigError>;
+    
+    /// 验证配置合法性
+    fn validate_order(&self, order: &[String]) -> Result<(), ConfigError>;
+    
+    /// 重置为默认顺序
+    fn reset_to_default(&self) -> Vec<CliType>;
+}
+```
+
+**Method Details**:
+
+| Method | Input | Output | Throws | Description |
+|--------|-------|--------|--------|-------------|
+| `get_order` | - | `Result<Vec<CliType>>` | `ConfigError` | 读取并解析配置数组 |
+| `validate_order` | `order: &[String]` | `Result<()>` | `ConfigError` | 验证配置格式和内容 |
+| `reset_to_default` | - | `Vec<CliType>` | - | 返回默认顺序 `["codex", "gemini", "claude"]` |
+
+**ConfigError 类型**:
+| 错误类型 | 触发条件 | 错误消息 |
+|---------|---------|---------|
+| `FileNotFound` | 配置文件不存在 | `Config file not found: ~/.aiw/config.json` |
+| `InvalidFormat` | JSON 解析失败 | `Invalid JSON format in config file` |
+| `InvalidLength` | 数组长度不为 3 | `cli_execution_order must contain exactly 3 AI CLIs` |
+| `InvalidCliType` | 包含无效 CLI 名称 | `Invalid CLI type: {value}. Allowed: codex, claude, gemini` |
+| `DuplicateCliType` | 包含重复元素 | `cli_execution_order contains duplicate CLI types` |
+| `IncompleteSet` | 缺少必需的 CLI | `cli_execution_order must contain all 3 CLIs: codex, claude, gemini` |
+
+---
+
+### TUI API
+
+#### API-021-006: CliOrderScreen 接口
+
+**Component**: `ratatui` TUI Screen
+
+**生命周期**:
+```
+启动
+    ↓
+初始化状态（加载当前顺序）
+    ↓
+渲染界面
+    ↓
+等待用户输入
+    ↓
+处理输入
+    ├─ ↑/↓: 交换相邻元素
+    ├─ r: 重置顺序
+    └─ q: 保存并退出
+    ↓
+保存配置
+    ↓
+退出
+```
+
+**状态管理**:
+| 状态 | 说明 | 持久化 |
+|-----|------|--------|
+| `current_order` | 当前显示的顺序 | 内存 |
+| `selected_index` | 当前选中的索引 | 内存 |
+| `modified` | 是否已修改 | 内存 |
+| `original_order` | 原始顺序（用于取消） | 内存 |
+
+**事件处理**:
+| 事件 | 处理逻辑 | 副作用 |
+|-----|---------|--------|
+| `KeyUp` | 选中项上移（如果不在第一项） | 更新 `current_order` |
+| `KeyDown` | 选中项下移（如果不在最后项） | 更新 `current_order` |
+| `KeyChar('r')` | 重置为默认顺序 | 更新 `current_order` |
+| `KeyChar('q')` | 保存并退出 | 写入 `config.json` |
+
+---
+
+### 输出格式
+
+#### Auto 模式执行输出
+
+**成功场景**:
+```
+$ aiw auto "Fix this bug"
+✓ Trying codex...
+✓ codex succeeded
+
+[codex output here]
+```
+
+**故障切换场景**:
+```
+$ aiw auto "Fix this bug"
+✓ Trying codex...
+⚠ codex failed: Connection refused
+  Trying next CLI...
+
+✓ Trying gemini...
+✓ gemini succeeded
+
+[gemini output here]
+```
+
+**全部失败场景**:
+```
+$ aiw auto "Fix this bug"
+✓ Trying codex...
+⚠ codex failed: Connection refused
+  Trying next CLI...
+
+✓ Trying gemini...
+⚠ gemini failed: API key invalid
+  Trying next CLI...
+
+✓ Trying claude...
+⚠ claude failed: Rate limit exceeded
+
+❌ All AI CLIs failed. Last error: Rate limit exceeded
+```
+
+---
+
+### 错误码定义
+
+| 错误码 | 错误类型 | 描述 | 用户提示 |
+|-------|---------|------|---------|
+| 1 | ConfigError | 配置文件错误 | `Check ~/.aiw/config.json: {error}` |
+| 2 | AllFailedError | 所有 CLI 失败 | `All AI CLIs failed. Last error: {error}` |
+| 3 | LlmUnavailableError | LLM 服务不可用 | `Ollama service is not running. Start Ollama and try again.` |
+| 4 | ConfigValidationError | 配置验证失败 | `Invalid cli_execution_order: {error}` |
+
+---
+
+### 性能要求
+
+| 操作 | 目标 | 测量方法 |
+|-----|------|---------|
+| 配置读取 | < 100ms | 文件系统读取时间 |
+| LLM 判断 | < 5 秒 | Ollama API 响应时间 |
+| TUI 渲染 | < 200ms | 用户交互响应时间 |
+| 保存配置 | < 100ms | 文件写入时间 |
+
+---
+
+### 安全考虑
+
+| 安全项 | 要求 | 实现方式 |
+|-------|------|---------|
+| 配置文件权限 | 0600 | `chmod 0600 ~/.aiw/config.json` |
+| LLM Prompt 脱敏 | 不包含敏感信息 | 过滤 API key、token 等 |
+| 错误日志脱敏 | 不泄露敏感信息 | 正则表达式替换 |
+| CLI 进程隔离 | 独立进程执行 | 使用 `Command::spawn()` |
+

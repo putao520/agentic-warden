@@ -1836,3 +1836,116 @@ git2 = "0.18"          # Git仓库克隆
 说明: Google Drive同步是通用基础设施，与CC会话系统无技术依赖，
 因此根据用户反馈恢复此功能。
 -->
+### REQ-021: AI CLI 自动故障切换系统
+**Status**: 🟡 Pending
+**Priority**: P1 (High)
+**Version**: v0.5.39+
+**Related**: ARCH-021, DATA-021, API-021
+
+**Description**:
+Agentic-Warden MUST provide automatic failover mechanism for AI CLI execution. When a user executes with the virtual `auto` type, the system MUST attempt AI CLIs in the configured order, automatically switching to the next CLI upon failure, until one succeeds or all fail.
+
+**核心特性**:
+- 新增虚拟 AI CLI 类型 `CliType::Auto`
+- 执行顺序由用户配置（在 `~/.aiw/config.json` 中）
+- 故障检测必须使用内置 LLM（基于 Ollama）判断
+- 无需配置超时、重试次数等参数
+- 配置极简：只存储执行顺序数组
+
+**Acceptance Criteria**:
+- [ ] 用户可通过 `aiw auto <prompt>` 命令执行自动故障切换模式
+- [ ] 执行顺序配置存储在 `~/.aiw/config.json` 的 `cli_execution_order` 字段
+- [ ] 配置数组必须包含所有 3 个 AI CLI：`["codex", "gemini", "claude"]`
+- [ ] 配置数组长度必须为 3，不得禁用任何 CLI
+- [ ] 系统按配置顺序依次尝试每个 CLI
+- [ ] 每个 CLI 执行失败后，使用 LLM 判断是否切换到下一个
+- [ ] LLM 判断为 `success=true` 时，返回结果并结束执行
+- [ ] LLM 判断为 `should_retry=false` 时，停止执行并报错
+- [ ] 所有 CLI 都失败时，返回错误信息
+- [ ] 提供 TUI 界面调整执行顺序（仅支持移动位置和重置）
+- [ ] 配置验证拒绝无效的 CLI 名称或不完整的数组
+
+**Technical Constraints**:
+- **配置约束**:
+  - 字段名称：`cli_execution_order`
+  - 数据类型：字符串数组
+  - 默认值：`["codex", "gemini", "claude"]`
+  - 允许的值：`"codex"`, `"claude"`, `"gemini"`
+  - 数组长度：必须为 3
+- **故障检测约束**:
+  - 必须使用 LLM 判断（无降级方案）
+  - LLM 调用基于本地 Ollama 服务
+  - 超时时间硬编码（30 秒），不可配置
+  - 模型名称硬编码（如 `llama3.1`），不可配置
+- **执行逻辑约束**:
+  - 每个 CLI 只尝试一次（无重试次数配置）
+  - 按 `cli_execution_order` 数组顺序执行
+  - 捕获每个 CLI 的退出码、标准输出、错误输出
+  - LLM 判断结果必须包含：`success`, `should_retry`, `reason`
+
+**使用场景**:
+```
+场景 1: 默认顺序执行
+用户执行: aiw auto "Fix this bug"
+执行顺序: codex → gemini → claude
+结果: 第一个成功的 CLI 返回结果
+
+场景 2: 自定义顺序
+配置: {"cli_execution_order": ["claude", "gemini", "codex"]}
+执行: claude → gemini → codex
+
+场景 3: 调整顺序
+用户执行: aiw config cli-order
+操作: 在 TUI 中用 ↑/↓ 调整顺序
+保存: 自动保存到 config.json
+```
+
+**性能要求**:
+- LLM 判断响应时间: < 5 秒
+- 配置文件读取: < 100ms
+- TUI 界面响应: < 200ms
+
+**错误处理**:
+- 配置文件缺失: 使用默认顺序 `["codex", "gemini", "claude"]`
+- 配置数组为空: 返回配置错误
+- 配置包含无效 CLI 名称: 返回配置验证错误
+- 配置数组长度不为 3: 返回配置验证错误
+- 所有 CLI 执行失败: 返回最后一个 CLI 的错误信息
+- LLM 服务不可用: 返回错误，提示用户启动 Ollama
+
+**数据验证规则**:
+```
+cli_execution_order 验证:
+├─ 必须是数组类型
+├─ 数组长度必须等于 3
+├─ 每个元素必须是字符串
+├─ 元素值必须在 ["codex", "claude", "gemini"] 中
+├─ 数组不得包含重复元素
+└─ 不得包含其他值
+```
+
+**安全要求**:
+- 配置文件权限: 0600（用户读写）
+- LLM 判断不泄露敏感信息（如 API key）
+- CLI 执行时的环境变量注入遵循现有安全规则
+
+**CLI 命令**:
+| 命令 | 参数 | 说明 |
+|-----|------|------|
+| `aiw auto <prompt>` | prompt: 任务描述 | 使用故障切换模式执行 |
+| `aiw config cli-order` | - | 打开 TUI 管理执行顺序 |
+
+**TUI 操作**:
+| 按键 | 功能 |
+|-----|------|
+| `↑` / `↓` | 上下移动，调整执行优先级 |
+| `r` | 重置为默认顺序 `["codex", "gemini", "claude"]` |
+| `q` | 退出并自动保存 |
+
+**未来扩展** (Out of Scope):
+- 支持自定义 AI CLI 类型（当前硬编码 3 个）
+- 支持每个 CLI 的重试次数配置
+- 支持超时时间配置
+- 支持模型选择配置
+
+---
