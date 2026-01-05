@@ -10,7 +10,7 @@ pub mod judge;
 
 pub const DEFAULT_EXECUTION_ORDER: [&str; 3] = ["codex", "gemini", "claude"];
 pub const LLM_TIMEOUT: Duration = Duration::from_secs(5);
-pub const OLLAMA_MODEL: &str = "llama3.1";
+pub const OLLAMA_MODEL: &str = "qwen3:1.7b";  // 使用已有模型
 pub const OLLAMA_ENDPOINT: &str = "http://localhost:11434";
 
 #[derive(Debug, Clone)]
