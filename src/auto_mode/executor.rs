@@ -11,7 +11,7 @@ use crate::supervisor::{self, ProcessError};
 pub struct AutoModeExecutor;
 
 impl AutoModeExecutor {
-    pub fn execute(prompt: &str) -> Result<String, ExecutionError> {
+    pub fn execute(prompt: &str, provider: Option<String>) -> Result<String, ExecutionError> {
         if prompt.trim().is_empty() {
             return Err(ExecutionError::EmptyPrompt);
         }
@@ -25,7 +25,7 @@ impl AutoModeExecutor {
         for cli_type in order {
             println!("✓ Trying {}...", cli_type.display_name());
 
-            let result = Self::try_cli(&registry, cli_type.clone(), prompt);
+            let result = Self::try_cli(&registry, cli_type.clone(), prompt, provider.clone());
             let judgment = AiJudge::evaluate(&result)?;
 
             if judgment.success {
@@ -55,6 +55,7 @@ impl AutoModeExecutor {
         registry: &crate::registry_factory::CliRegistry,
         cli_type: CliType,
         prompt: &str,
+        provider: Option<String>,
     ) -> ExecutionResult {
         let start = Instant::now();
 
@@ -73,12 +74,13 @@ impl AutoModeExecutor {
         let os_args: Vec<OsString> = cli_args.into_iter().map(OsString::from).collect();
 
         // 不使用超时，让 AI CLI 自然执行
-        // 使用 provider=auto 自动选择兼容的 provider
+        // 使用指定的 provider，如果没有指定则使用 "auto"
+        let provider = provider.unwrap_or_else(|| "auto".to_string());
         let output = Self::run_async(supervisor::execute_cli_with_full_output(
             registry,
             &cli_type,
             &os_args,
-            Some("auto".to_string()),  // 自动选择兼容的 provider
+            Some(provider),
             std::time::Duration::MAX,  // 无超时限制
             None,
         ));

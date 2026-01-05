@@ -6,8 +6,8 @@ use crate::error::{ConfigError, ExecutionError};
 use crate::tui::screens::cli_order::run_cli_order_tui;
 
 pub async fn handle_auto_command(args: &[String]) -> ExitCode {
-    let prompt = match parse_prompt(args) {
-        Ok(prompt) => prompt,
+    let (prompt, provider) = match parse_prompt_and_provider(args) {
+        Ok(result) => result,
         Err(err) => {
             let (code, message) = format_auto_error(err);
             eprintln!("{}", message);
@@ -15,7 +15,7 @@ pub async fn handle_auto_command(args: &[String]) -> ExitCode {
         }
     };
 
-    match AutoModeExecutor::execute(&prompt) {
+    match AutoModeExecutor::execute(&prompt, provider) {
         Ok(output) => {
             if !output.is_empty() {
                 print!("{}", output);
@@ -47,17 +47,50 @@ pub fn handle_cli_order_command() -> ExitCode {
     }
 }
 
-fn parse_prompt(tokens: &[String]) -> Result<String, ExecutionError> {
+fn parse_prompt_and_provider(tokens: &[String]) -> Result<(String, Option<String>), ExecutionError> {
+    // 跳过第一个 "auto"
     let start = tokens
         .first()
         .filter(|value| value.eq_ignore_ascii_case("auto"))
         .map(|_| 1)
         .unwrap_or(0);
 
-    let prompt = tokens[start..].join(" ");
+    let mut provider = None;
+    let mut prompt_parts = Vec::new();
+    let mut i = start;
+
+    // 解析参数
+    while i < tokens.len() {
+        let token = &tokens[i];
+
+        // 检查 -p 或 --provider 参数
+        if token == "-p" || token == "--provider" {
+            if i + 1 < tokens.len() {
+                provider = Some(tokens[i + 1].clone());
+                i += 2; // 跳过参数和值
+                continue;
+            } else {
+                return Err(ExecutionError::ExecutionFailed {
+                    message: "Missing value for -p/--provider parameter".to_string(),
+                });
+            }
+        }
+
+        // 其他参数作为 prompt 的一部分
+        prompt_parts.push(token.clone());
+        i += 1;
+    }
+
+    let prompt = prompt_parts.join(" ");
     if prompt.trim().is_empty() {
         return Err(ExecutionError::EmptyPrompt);
     }
+
+    Ok((prompt, provider))
+}
+
+fn parse_prompt(tokens: &[String]) -> Result<String, ExecutionError> {
+    let (prompt, _) = parse_prompt_and_provider(tokens)?;
     Ok(prompt)
 }
 
