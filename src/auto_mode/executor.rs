@@ -73,11 +73,12 @@ impl AutoModeExecutor {
         let os_args: Vec<OsString> = cli_args.into_iter().map(OsString::from).collect();
 
         // 不使用超时，让 AI CLI 自然执行
+        // 使用 provider=auto 自动选择兼容的 provider
         let output = Self::run_async(supervisor::execute_cli_with_full_output(
             registry,
             &cli_type,
             &os_args,
-            None,
+            Some("auto".to_string()),  // 自动选择兼容的 provider
             std::time::Duration::MAX,  // 无超时限制
             None,
         ));
