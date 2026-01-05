@@ -9,7 +9,6 @@ pub mod executor;
 pub mod judge;
 
 pub const DEFAULT_EXECUTION_ORDER: [&str; 3] = ["codex", "gemini", "claude"];
-pub const CLI_TIMEOUT: Duration = Duration::from_secs(30);
 pub const LLM_TIMEOUT: Duration = Duration::from_secs(5);
 pub const OLLAMA_MODEL: &str = "llama3.1";
 pub const OLLAMA_ENDPOINT: &str = "http://localhost:11434";

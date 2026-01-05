@@ -2,7 +2,7 @@ use std::ffi::OsString;
 use std::future::Future;
 use std::time::Instant;
 
-use crate::auto_mode::{config::ExecutionOrderConfig, judge::AiJudge, ExecutionResult, Judgment, CLI_TIMEOUT};
+use crate::auto_mode::{config::ExecutionOrderConfig, judge::AiJudge, ExecutionResult, Judgment};
 use crate::cli_type::CliType;
 use crate::error::ExecutionError;
 use crate::registry_factory::create_cli_registry;
@@ -72,12 +72,13 @@ impl AutoModeExecutor {
         let cli_args = cli_type.build_full_access_args(prompt);
         let os_args: Vec<OsString> = cli_args.into_iter().map(OsString::from).collect();
 
+        // 不使用超时，让 AI CLI 自然执行
         let output = Self::run_async(supervisor::execute_cli_with_full_output(
             registry,
             &cli_type,
             &os_args,
             None,
-            CLI_TIMEOUT,
+            std::time::Duration::MAX,  // 无超时限制
             None,
         ));
 
