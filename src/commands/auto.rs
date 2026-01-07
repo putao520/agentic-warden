@@ -97,7 +97,6 @@ fn parse_prompt(tokens: &[String]) -> Result<String, ExecutionError> {
 fn format_auto_error(err: ExecutionError) -> (u8, String) {
     match err {
         ExecutionError::Config(err) => format_auto_config_error(&err),
-        ExecutionError::Judge(err) => (3, err.to_string()),
         ExecutionError::AllFailed { .. } => (2, err.to_string()),
         ExecutionError::Halt { .. } => (2, err.to_string()),
         ExecutionError::EmptyPrompt => (1, err.to_string()),

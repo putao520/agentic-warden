@@ -2,7 +2,7 @@ use std::ffi::OsString;
 use std::future::Future;
 use std::time::Instant;
 
-use crate::auto_mode::{config::ExecutionOrderConfig, judge::AiJudge, ExecutionResult, Judgment};
+use crate::auto_mode::{config::ExecutionOrderConfig, ExecutionResult};
 use crate::cli_type::CliType;
 use crate::error::ExecutionError;
 use crate::registry_factory::create_cli_registry;
@@ -26,22 +26,16 @@ impl AutoModeExecutor {
             println!("✓ Trying {}...", cli_type.display_name());
 
             let result = Self::try_cli(&registry, cli_type.clone(), prompt, provider.clone());
-            let judgment = AiJudge::evaluate(&result)?;
 
-            if judgment.success {
+            // 简单判断：退出码为 0 表示成功
+            if result.exit_code == 0 {
                 println!("✓ {} succeeded", cli_type.display_name());
                 return Ok(result.stdout);
             }
 
-            let failure_message = Self::summarize_failure(&result, &judgment);
-            println!("⚠ {} failed: {}", cli_type.display_name(), failure_message);
+            let failure_message = Self::summarize_failure(&result);
+            println!("⚠ {} failed (exit code {}): {}", cli_type.display_name(), result.exit_code, failure_message);
             last_error = Some(failure_message);
-
-            if !Self::should_switch(&judgment) {
-                return Err(ExecutionError::Halt {
-                    reason: judgment.reason,
-                });
-            }
 
             println!("  Trying next CLI...");
         }
@@ -105,11 +99,7 @@ impl AutoModeExecutor {
         }
     }
 
-    pub fn should_switch(judgment: &Judgment) -> bool {
-        judgment.should_retry
-    }
-
-    fn summarize_failure(result: &ExecutionResult, judgment: &Judgment) -> String {
+    fn summarize_failure(result: &ExecutionResult) -> String {
         let stderr = result.stderr.trim();
         if !stderr.is_empty() {
             return stderr
@@ -130,7 +120,7 @@ impl AutoModeExecutor {
                 .to_string();
         }
 
-        judgment.reason.clone()
+        "Unknown error".to_string()
     }
 
     fn run_async<T, F>(future: F) -> Result<T, ProcessError>

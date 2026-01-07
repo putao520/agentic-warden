@@ -157,23 +157,9 @@ pub enum ConfigError {
 }
 
 #[derive(Error, Debug)]
-pub enum JudgeError {
-    #[error("Ollama service is not running. Start Ollama and try again.")]
-    Unavailable,
-    #[error("LLM request timed out after {timeout_secs}s")]
-    Timeout { timeout_secs: u64 },
-    #[error("Invalid LLM response: {message}")]
-    InvalidResponse { message: String },
-    #[error("Ollama API error: {message}")]
-    Api { message: String },
-}
-
-#[derive(Error, Debug)]
 pub enum ExecutionError {
     #[error("Configuration error: {0}")]
     Config(#[from] ConfigError),
-    #[error("LLM judgment error: {0}")]
-    Judge(#[from] JudgeError),
     #[error("Execution stopped: {reason}")]
     Halt { reason: String },
     #[error("All AI CLIs failed. Last error: {message}")]
