@@ -16,7 +16,7 @@ pub struct ParsedCliArgs {
     pub selector: Option<String>,
     /// 角色名称
     pub role: Option<String>,
-    /// Provider 名称
+    /// AIW Provider 名称（使用 -mp/--aiw-provider 参数设置）
     pub provider: Option<String>,
     /// 透传给底层 AI CLI 的参数
     pub cli_args: Vec<String>,
@@ -380,16 +380,16 @@ impl Cli {
 /// # 示例
 /// ```ignore
 /// // auto 命令
-/// let args = parse_cli_args(&["-r", "common", "echo test"]);
+/// let args = parse_cli_args(&["-mp", "glm", "echo test"]);
 /// // args.selector == None
 ///
 /// // claude 命令
-/// let args = parse_cli_args(&["claude", "-r", "common", "echo test"]);
+/// let args = parse_cli_args(&["claude", "-r", "common", "-mp", "glm", "echo test"]);
 /// // args.selector == Some("claude")
 /// ```
 pub fn parse_cli_args(tokens: &[String]) -> Result<ParsedCliArgs, String> {
-    const ROLE_ORDER_ERR: &str = "Error: -r/--role must be specified before -p/--provider.\nUsage: aiw claude -r role -p provider 'prompt'";
-    const PROVIDER_ORDER_ERR: &str = "Error: -p/--provider must be specified before other CLI parameters.\nUsage: aiw claude -r role -p provider --cli-param 'prompt'";
+    const ROLE_ORDER_ERR: &str = "Error: -r/--role must be specified before -mp/--aiw-provider.\nUsage: aiw claude -r role -mp provider 'prompt'";
+    const PROVIDER_ORDER_ERR: &str = "Error: -mp/--aiw-provider must be specified before other CLI parameters.\nUsage: aiw claude -r role -mp provider --cli-param 'prompt'";
 
     let mut role: Option<String> = None;
     let mut provider: Option<String> = None;
@@ -423,7 +423,7 @@ pub fn parse_cli_args(tokens: &[String]) -> Result<ParsedCliArgs, String> {
                 }
                 role = Some(value.clone());
             }
-            "-p" | "--provider" => {
+            "-mp" | "--aiw-provider" => {
                 if saw_cli_flag {
                     return Err(PROVIDER_ORDER_ERR.to_string());
                 }
@@ -433,9 +433,9 @@ pub fn parse_cli_args(tokens: &[String]) -> Result<ParsedCliArgs, String> {
                 saw_provider = true;
                 let (_, value) = iter
                     .next()
-                    .ok_or_else(|| "Missing provider name after -p/--provider flag".to_string())?;
+                    .ok_or_else(|| "Missing provider name after -mp/--aiw-provider flag".to_string())?;
                 if value.starts_with('-') || value.is_empty() || value == "--" {
-                    return Err("Missing provider name after -p/--provider flag".to_string());
+                    return Err("Missing provider name after -mp/--aiw-provider flag".to_string());
                 }
                 provider = Some(value.clone());
             }

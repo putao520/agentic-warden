@@ -2,7 +2,7 @@ use std::ffi::OsString;
 use std::future::Future;
 use std::time::Instant;
 
-use crate::auto_mode::{config::ExecutionOrderConfig, ExecutionResult};
+use crate::auto_mode::{CliCooldownManager, config::ExecutionOrderConfig, ExecutionResult};
 use crate::cli_type::CliType;
 use crate::error::ExecutionError;
 use crate::registry_factory::create_cli_registry;
@@ -20,9 +20,22 @@ impl AutoModeExecutor {
         let registry = create_cli_registry()
             .map_err(|err| ExecutionError::ExecutionFailed { message: err.to_string() })?;
 
+        let cooldown = CliCooldownManager::global();
         let mut last_error = None;
+        let mut skipped_count = 0;
+        let total_count = order.len();
 
         for cli_type in order {
+            // 检查是否在冷却期
+            if cooldown.is_in_cooldown(&cli_type) {
+                if let Some(remaining) = cooldown.remaining_cooldown_secs_ref(&cli_type) {
+                    println!("⏸️ {} is in cooldown ({}s remaining), skipping...",
+                             cli_type.display_name(), remaining);
+                    skipped_count += 1;
+                    continue;
+                }
+            }
+
             println!("✓ Trying {}...", cli_type.display_name());
 
             let result = Self::try_cli(&registry, cli_type.clone(), prompt, provider.clone());
@@ -33,11 +46,21 @@ impl AutoModeExecutor {
                 return Ok(result.stdout);
             }
 
+            // 标记进入冷却期
+            cooldown.mark_failure(&cli_type);
+
             let failure_message = Self::summarize_failure(&result);
             println!("⚠ {} failed (exit code {}): {}", cli_type.display_name(), result.exit_code, failure_message);
             last_error = Some(failure_message);
 
             println!("  Trying next CLI...");
+        }
+
+        // 如果所有 CLI 都被跳过，返回错误
+        if skipped_count == total_count {
+            return Err(ExecutionError::AllFailed {
+                message: "All AI CLIs are in cooldown period. Please wait 30 seconds and try again.".to_string(),
+            });
         }
 
         Err(ExecutionError::AllFailed {
