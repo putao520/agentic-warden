@@ -2,7 +2,7 @@ use std::io::Write;
 use std::process::ExitCode;
 
 use crate::auto_mode::executor::AutoModeExecutor;
-use crate::commands::parser::separate_provider_and_cli_args;
+use crate::commands::parser::parse_cli_args;
 use crate::error::{ConfigError, ExecutionError};
 use crate::tui::screens::cli_order::run_cli_order_tui;
 
@@ -44,16 +44,16 @@ fn parse_auto_args(tokens: &[String]) -> Result<(String, Option<String>), Execut
     let tokens = &tokens[start..];
 
     // 使用统一的参数解析逻辑
-    let separated = separate_provider_and_cli_args(tokens)
+    let parsed = parse_cli_args(tokens)
         .map_err(|msg| ExecutionError::ExecutionFailed { message: msg })?;
 
     // auto 命令只关心 prompt 和 provider，忽略其他参数
-    let prompt = separated.prompt.join(" ");
+    let prompt = parsed.prompt.join(" ");
     if prompt.trim().is_empty() {
         return Err(ExecutionError::EmptyPrompt);
     }
 
-    Ok((prompt, separated.provider))
+    Ok((prompt, parsed.provider))
 }
 
 pub fn handle_cli_order_command() -> ExitCode {

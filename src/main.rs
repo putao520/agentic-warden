@@ -3,7 +3,7 @@ mod help;
 
 use aiw::cli_type::parse_cli_selector_strict;
 use aiw::commands::ai_cli::AiCliCommand;
-use aiw::commands::{parse_external_as_ai_cli, parser::{ConfigAction, McpAction, RolesAction}, Cli, Commands};
+use aiw::commands::{parse_external_cli_args, parser::{ConfigAction, McpAction, RolesAction}, Cli, Commands};
 use aiw::error::ErrorCategory;
 use aiw::execute_enhanced_update;
 use aiw::mcp::AgenticWardenMcpServer;
@@ -68,8 +68,11 @@ async fn handle_external_ai_cli(args: &[String]) -> Result<ExitCode, String> {
     }
 
     let tokens = args[1..].to_vec();
-    let ai_args = parse_external_as_ai_cli(&tokens)?;
-    let selector = parse_cli_selector_strict(&ai_args.selector).map_err(|err| {
+    let ai_args = parse_external_cli_args(&tokens)?;
+
+    // selector 现在是 Option<String>，对于 claude/codex/gemini 命令一定是 Some
+    let selector_str = ai_args.selector.as_ref().expect("selector should be set for external CLI commands");
+    let selector = parse_cli_selector_strict(selector_str).map_err(|err| {
         if err.category() == ErrorCategory::Validation {
             format!(
                 "{}\n\nUse 'agentic-warden --help' for more information.",
@@ -83,12 +86,12 @@ async fn handle_external_ai_cli(args: &[String]) -> Result<ExitCode, String> {
     if ai_args.prompt.is_empty() {
         println!(
             "🚀 Starting {} in interactive mode (provider: {:?})",
-            ai_args.selector, ai_args.provider
+            selector_str, ai_args.provider
         );
     } else {
         println!(
             "🚀 Starting {} with task: {} (provider: {:?})",
-            ai_args.selector,
+            selector_str,
             ai_args.prompt_text(),
             ai_args.provider
         );
@@ -271,8 +274,11 @@ async fn handle_external_command(tokens: Vec<String>) -> Result<ExitCode, String
         return Ok(ExitCode::from(0));
     }
 
-    let ai_args = parse_external_as_ai_cli(&tokens)?;
-    let selector = parse_cli_selector_strict(&ai_args.selector).map_err(|err| {
+    let ai_args = parse_external_cli_args(&tokens)?;
+
+    // selector 现在是 Option<String>，对于 claude/codex/gemini 命令一定是 Some
+    let selector_str = ai_args.selector.as_ref().expect("selector should be set for external CLI commands");
+    let selector = parse_cli_selector_strict(selector_str).map_err(|err| {
         if err.category() == ErrorCategory::Validation {
             format!(
                 "{}\n\nUse 'agentic-warden --help' for more information.",

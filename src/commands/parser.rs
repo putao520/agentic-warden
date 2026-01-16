@@ -5,17 +5,29 @@
 use clap::{Parser, Subcommand};
 use std::ffi::OsString;
 
-/// Separated CLI arguments with role, provider and forwarded params
+/// 统一的 CLI 参数解析结果
+///
+/// 用于所有 AI CLI 命令（auto, claude, codex, gemini）的参数解析
+/// - auto 命令: selector = None
+/// - claude/codex/gemini 命令: selector = Some("claude"|"codex"|"gemini")
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SeparatedArgs {
+pub struct ParsedCliArgs {
+    /// CLI 选择器（auto 命令为 None）
+    pub selector: Option<String>,
+    /// 角色名称
     pub role: Option<String>,
+    /// Provider 名称
     pub provider: Option<String>,
+    /// 透传给底层 AI CLI 的参数
     pub cli_args: Vec<String>,
+    /// 用户提示词
     pub prompt: Vec<String>,
+    /// 工作目录
     pub cwd: Option<std::path::PathBuf>,
 }
 
-impl SeparatedArgs {
+impl ParsedCliArgs {
+    /// 构建提示词字符串
     pub fn prompt_text(&self) -> String {
         self.prompt.join(" ")
     }
@@ -356,51 +368,26 @@ impl Cli {
     }
 }
 
-/// AI CLI 命令解析结果
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AiCliArgs {
-    pub selector: String,
-    pub role: Option<String>,
-    pub provider: Option<String>,
-    pub cli_args: Vec<String>,
-    pub prompt: Vec<String>,
-    pub cwd: Option<std::path::PathBuf>,
-}
-
-impl AiCliArgs {
-    /// 构建提示词字符串
-    pub fn prompt_text(&self) -> String {
-        self.prompt.join(" ")
-    }
-}
-
-/// 将 external subcommand 解析为 AI CLI 参数
-pub fn parse_external_as_ai_cli(tokens: &[String]) -> Result<AiCliArgs, String> {
-    if tokens.is_empty() {
-        return Err("No command provided".to_string());
-    }
-
-    let selector = tokens[0].clone();
-    let SeparatedArgs {
-        role,
-        provider,
-        cli_args,
-        prompt,
-        cwd,
-    } = separate_provider_and_cli_args(&tokens[1..])?;
-
-    Ok(AiCliArgs {
-        selector,
-        role,
-        provider,
-        cli_args,
-        prompt,
-        cwd,
-    })
-}
-
-/// 分离 role、provider、CLI 参数和提示词，支持透明参数转发
-pub fn separate_provider_and_cli_args(tokens: &[String]) -> Result<SeparatedArgs, String> {
+/// 解析 AI CLI 命令参数（auto/claude/codex/gemini）
+///
+/// # 参数
+/// - `tokens`: 命令行参数数组（不包含命令名本身）
+///
+/// # 返回
+/// - `Ok(ParsedCliArgs)`: 解析后的参数
+/// - `Err(String)`: 解析错误信息
+///
+/// # 示例
+/// ```ignore
+/// // auto 命令
+/// let args = parse_cli_args(&["-r", "common", "echo test"]);
+/// // args.selector == None
+///
+/// // claude 命令
+/// let args = parse_cli_args(&["claude", "-r", "common", "echo test"]);
+/// // args.selector == Some("claude")
+/// ```
+pub fn parse_cli_args(tokens: &[String]) -> Result<ParsedCliArgs, String> {
     const ROLE_ORDER_ERR: &str = "Error: -r/--role must be specified before -p/--provider.\nUsage: aiw claude -r role -p provider 'prompt'";
     const PROVIDER_ORDER_ERR: &str = "Error: -p/--provider must be specified before other CLI parameters.\nUsage: aiw claude -r role -p provider --cli-param 'prompt'";
 
@@ -498,13 +485,35 @@ pub fn separate_provider_and_cli_args(tokens: &[String]) -> Result<SeparatedArgs
         }
     }
 
-    Ok(SeparatedArgs {
+    Ok(ParsedCliArgs {
+        selector: None,  // 默认为 None，由调用方决定是否需要 selector
         role,
         provider,
         cli_args,
         prompt,
         cwd,
     })
+}
+
+/// 解析 external AI CLI 命令（claude/codex/gemini）
+///
+/// 与 `parse_cli_args` 的区别是会自动从第一个 token 提取 selector
+///
+/// # 参数
+/// - `tokens`: 命令行参数数组，第一个元素应该是 CLI 类型（claude/codex/gemini）
+///
+/// # 返回
+/// - `Ok(ParsedCliArgs)`: 解析后的参数，selector 为第一个 token
+/// - `Err(String)`: 解析错误信息
+pub fn parse_external_cli_args(tokens: &[String]) -> Result<ParsedCliArgs, String> {
+    if tokens.is_empty() {
+        return Err("No command provided".to_string());
+    }
+
+    let selector = tokens[0].clone();
+    let mut args = parse_cli_args(&tokens[1..])?;
+    args.selector = Some(selector);
+    Ok(args)
 }
 
 fn is_valueless_flag(flag: &str) -> bool {
