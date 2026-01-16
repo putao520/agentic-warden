@@ -15,22 +15,22 @@ USAGE:
     aiw [OPTIONS] <AI_CLI> [AI_OPTIONS] "<TASK>"
 
 AI CLI COMMANDS:
-    aiw <agent> [-r ROLE] [-p PROVIDER] [CLI_OPTIONS] ["TASK"]
+    aiw <agent> [-r ROLE] [-mp PROVIDER] [CLI_OPTIONS] ["TASK"]
 
     Agents:     claude | codex | gemini | all | "agent1|agent2"
     -r ROLE     Inject role prompt (run 'aiw roles list' to see all)
-    -p PROVIDER Use specific provider (e.g., openrouter, glm)
+    -mp PROVIDER Use specific provider (e.g., openrouter, glm)
     [CLI_OPTIONS] Forwarded to AI CLI (run 'aiw claude --help' to see all)
     "TASK"      Task description (omit for interactive mode)
 
-    ⚠️  Parameter order: -r and -p must come BEFORE CLI options!
+    ⚠️  Parameter order: -r and -mp must come BEFORE CLI options!
 
     Quick start:
         aiw claude "explain this code"           # Simple task
         aiw claude                               # Interactive mode
         aiw claude -r common "write a function"  # With role
-        aiw claude -p glm "help me debug"        # With provider
-        aiw claude -r common -p glm "full example"  # Role + provider
+        aiw claude -mp glm "help me debug"        # With provider
+        aiw claude -r common -mp glm "full example"  # Role + provider
 
     For detailed AI CLI help:  aiw help claude
 
@@ -83,23 +83,23 @@ OPTIONS:
 EXAMPLES:
     # AI CLI with role injection
     aiw claude -r common "explain this code"
-    aiw claude -r debugger -p glm "debug this issue"
+    aiw claude -r debugger -mp glm "debug this issue"
     aiw codex -r security "review this code"
 
     # AI CLI with provider selection
     aiw claude "explain this code"
-    aiw claude -p openrouter "explain this code"
-    aiw codex -p glm "write tests"
+    aiw claude -mp openrouter "explain this code"
+    aiw codex -mp glm "write tests"
 
     # AI CLI with role + provider
-    aiw claude -r frontend -p glm "build a React component"
+    aiw claude -r frontend -mp glm "build a React component"
 
     # AI CLI with working directory
     aiw claude -C /path/to/project "implement feature"
     aiw claude -r common -C ~/myproject "fix bug"
 
     # AI CLI with parameter forwarding
-    aiw claude -r security -p glm --model sonnet --debug api "explain this"
+    aiw claude -r security -mp glm --model sonnet --debug api "explain this"
 
     # Multiple AI agents
     aiw all "review this code"
@@ -166,8 +166,8 @@ fn print_ai_cli_help(agent: &str) -> io::Result<()> {
 {} AGENT
 
 USAGE:
-    aiw {} [-r ROLE] [-p PROVIDER] [-C DIR] [CLI_OPTIONS] ["<TASK>"]
-    aiw {} [-r ROLE] [-p PROVIDER] [-C DIR] [CLI_OPTIONS]
+    aiw {} [-r ROLE] [-mp PROVIDER] [-C DIR] [CLI_OPTIONS] ["<TASK>"]
+    aiw {} [-r ROLE] [-mp PROVIDER] [-C DIR] [CLI_OPTIONS]
 
 DESCRIPTION:
     Run the {} AI agent with role injection, provider management, and transparent parameter forwarding.
@@ -186,9 +186,9 @@ ROLE INJECTION:
     - All other locales (en_*, ja_*, ko_*, etc.) use English versions
 
 PROVIDER SELECTION:
-    -p, --provider <PROVIDER>    Use specific provider (e.g., openrouter, glm)
+    -mp, --aiw-provider <PROVIDER>    Use specific provider (e.g., openrouter, glm)
 
-    Without -p, uses the default provider configured in ~/.aiw/providers.json
+    Without -mp, uses the default provider configured in ~/.aiw/providers.json
 
 WORKING DIRECTORY (optional):
     -C, --cwd <DIR>              Set working directory for AI CLI process
@@ -204,16 +204,16 @@ PARAMETER FORWARDING:
     To see all {} CLI parameters:
         aiw {} --help
 
-    Parameter order: AIW options (-r, -p) must come BEFORE {} CLI options.
+    Parameter order: AIW options (-r, -mp) must come BEFORE {} CLI options.
 
 INTERACTIVE MODE:
-    aiw {} [-r ROLE] [-p PROVIDER] [CLI_OPTIONS]
+    aiw {} [-r ROLE] [-mp PROVIDER] [CLI_OPTIONS]
 
     Start {} in interactive mode (no task specified).
     Useful for extended conversations with the AI.
 
 TASK MODE:
-    aiw {} [-r ROLE] [-p PROVIDER] [CLI_OPTIONS] "your task here"
+    aiw {} [-r ROLE] [-mp PROVIDER] [CLI_OPTIONS] "your task here"
 
     Run a single task and exit.
 
@@ -226,26 +226,26 @@ EXAMPLES:
     # With role injection
     aiw {} -r common "write a function following coding standards"
     aiw {} -r debugger "help me fix this bug"
-    aiw {} -r security -p glm "review this code for vulnerabilities"
+    aiw {} -r security -mp glm "review this code for vulnerabilities"
 
     # With provider selection
-    aiw {} -p openrouter "write python code"
-    aiw {} -p glm "write tests"
+    aiw {} -mp openrouter "write python code"
+    aiw {} -mp glm "write tests"
 
     # With role + provider
-    aiw {} -r frontend -p glm "build a React component"
-    aiw {} -r database -p openrouter "design a schema"
+    aiw {} -r frontend -mp glm "build a React component"
+    aiw {} -r database -mp openrouter "design a schema"
 
     # With working directory
     aiw {} -C /path/to/project "implement this feature"
     aiw {} -r common -C ~/myproject "fix the bug in main.rs"
 
     # With parameter forwarding (note: prompt must be last)
-    aiw {} -r security -p glm --model sonnet "explain this"
-    aiw {} -r ml -p glm --output-format json "analyze this data"
+    aiw {} -r security -mp glm --model sonnet "explain this"
+    aiw {} -r ml -mp glm --output-format json "analyze this data"
 
     # Interactive mode with role (no task = interactive)
-    aiw {} -r code-reviewer -p glm
+    aiw {} -r code-reviewer -mp glm
 
     # Multi-agent selection
     aiw all "review this code"
@@ -340,7 +340,7 @@ fn print_all_agents_help() -> io::Result<()> {
 ALL AGENTS
 
 USAGE:
-    aiw all [-r ROLE] [-p PROVIDER] [CLI_OPTIONS] "<TASK>"
+    aiw all [-r ROLE] [-mp PROVIDER] [CLI_OPTIONS] "<TASK>"
 
 DESCRIPTION:
     Send the same task to all available AI agents (claude, codex, gemini).
@@ -350,7 +350,7 @@ DESCRIPTION:
 EXAMPLES:
     aiw all "review this code and suggest improvements"
     aiw all -r common "explain this algorithm in detail"
-    aiw all -p glm "write comprehensive documentation"
+    aiw all -mp glm "write comprehensive documentation"
 
 Each agent will process the task independently and provide their
 unique perspective and approach to the solution.
@@ -534,7 +534,7 @@ EXAMPLES:
 
     AI CLI Basics:
         aiw claude "write a hello world in Rust"
-        aiw codex -p glm "explain this function"
+        aiw codex -mp glm "explain this function"
         aiw gemini "refactor this code"
 
     Role Injection:
@@ -543,13 +543,13 @@ EXAMPLES:
         aiw codex -r security "review for vulnerabilities"
 
     Provider Management:
-        aiw claude -p openrouter "write tests"
-        aiw codex -p glm --temperature 0.7 "generate code"
+        aiw claude -mp openrouter "write tests"
+        aiw codex -mp glm --temperature 0.7 "generate code"
 
     Parameter Forwarding:
-        aiw claude -p glm --model sonnet "explain this code"
-        aiw claude -p glm --output-format json "summarize this"
-        aiw claude -p glm --allowed-tools Bash,Edit "modify file"
+        aiw claude -mp glm --model sonnet "explain this code"
+        aiw claude -mp glm --output-format json "summarize this"
+        aiw claude -mp glm --allowed-tools Bash,Edit "modify file"
 
     Multi-Agent:
         aiw all "review this PR"
@@ -778,7 +778,7 @@ ROLE INJECTION:
 
     Examples:
         aiw claude -r common "write code following standards"
-        aiw claude -r debugger -p glm "help debug this issue"
+        aiw claude -r debugger -mp glm "help debug this issue"
         aiw codex -r security "review for vulnerabilities"
 
     Role content is prepended to your prompt with a separator:
@@ -796,10 +796,10 @@ ROLE PRIORITY:
 
 ADVANCED USAGE:
     # Use role with provider and custom parameters
-    aiw claude -r security -p glm --model sonnet "audit this code"
+    aiw claude -r security -mp glm --model sonnet "audit this code"
 
     # Use role in interactive mode
-    aiw claude -r code-reviewer -p glm
+    aiw claude -r code-reviewer -mp glm
     # Then interact with the AI in the review context
 
     # Use role with multi-agent
@@ -928,12 +928,12 @@ QUICK START EXAMPLES:
    aiw codex -r security "Review for vulnerabilities"
 
 4. Provider selection:
-   aiw claude -p openrouter "write code"
-   aiw codex -p glm "explain this"
+   aiw claude -mp openrouter "write code"
+   aiw codex -mp glm "explain this"
 
 5. Parameter forwarding:
-   aiw claude -p glm --model sonnet "explain this code"
-   aiw claude -p glm --output-format json "summarize this"
+   aiw claude -mp glm --model sonnet "explain this code"
+   aiw claude -mp glm --output-format json "summarize this"
 
 6. Multiple AI agents:
    aiw all "Review this code"
