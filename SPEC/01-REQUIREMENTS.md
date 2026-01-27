@@ -1837,7 +1837,7 @@ git2 = "0.18"          # Git仓库克隆
 因此根据用户反馈恢复此功能。
 -->
 ### REQ-021: AI CLI 自动故障切换系统
-**Status**: 🟡 Pending
+**Status**: 🟢 Completed (v0.5.47)
 **Priority**: P1 (High)
 **Version**: v0.5.39+
 **Related**: ARCH-021, DATA-021, API-021
@@ -1848,22 +1848,21 @@ Agentic-Warden MUST provide automatic failover mechanism for AI CLI execution. W
 **核心特性**:
 - 新增虚拟 AI CLI 类型 `CliType::Auto`
 - 执行顺序由用户配置（在 `~/.aiw/config.json` 中）
-- 故障检测必须使用内置 LLM（基于 Ollama）判断
-- 无需配置超时、重试次数等参数
+- 基于退出码判断故障（exit_code == 0 为成功）
+- 失败的 CLI 进入 30 秒冷却期
 - 配置极简：只存储执行顺序数组
 
 **Acceptance Criteria**:
-- [ ] 用户可通过 `aiw auto <prompt>` 命令执行自动故障切换模式
-- [ ] 执行顺序配置存储在 `~/.aiw/config.json` 的 `cli_execution_order` 字段
-- [ ] 配置数组必须包含所有 3 个 AI CLI：`["codex", "gemini", "claude"]`
-- [ ] 配置数组长度必须为 3，不得禁用任何 CLI
-- [ ] 系统按配置顺序依次尝试每个 CLI
-- [ ] 每个 CLI 执行失败后，使用 LLM 判断是否切换到下一个
-- [ ] LLM 判断为 `success=true` 时，返回结果并结束执行
-- [ ] LLM 判断为 `should_retry=false` 时，停止执行并报错
-- [ ] 所有 CLI 都失败时，返回错误信息
-- [ ] 提供 TUI 界面调整执行顺序（仅支持移动位置和重置）
-- [ ] 配置验证拒绝无效的 CLI 名称或不完整的数组
+- [x] 用户可通过 `aiw auto <prompt>` 命令执行自动故障切换模式
+- [x] 执行顺序配置存储在 `~/.aiw/config.json` 的 `cli_execution_order` 字段
+- [x] 配置数组必须包含所有 3 个 AI CLI：`["codex", "gemini", "claude"]`
+- [x] 配置数组长度必须为 3，不得禁用任何 CLI
+- [x] 系统按配置顺序依次尝试每个 CLI
+- [x] 基于退出码判断成功（exit_code == 0）
+- [x] 失败的 CLI 进入 30 秒冷却期，期间跳过
+- [x] 所有 CLI 都失败或都在冷却期时，返回错误信息
+- [x] 提供 TUI 界面调整执行顺序（仅支持移动位置和重置）
+- [x] 配置验证拒绝无效的 CLI 名称或不完整的数组
 
 **Technical Constraints**:
 - **配置约束**:
@@ -1873,15 +1872,17 @@ Agentic-Warden MUST provide automatic failover mechanism for AI CLI execution. W
   - 允许的值：`"codex"`, `"claude"`, `"gemini"`
   - 数组长度：必须为 3
 - **故障检测约束**:
-  - 必须使用 LLM 判断（无降级方案）
-  - LLM 调用基于本地 Ollama 服务
-  - 超时时间硬编码（30 秒），不可配置
-  - 模型名称硬编码（如 `llama3.1`），不可配置
+  - 基于退出码判断：exit_code == 0 表示成功
+  - 失败判定：exit_code != 0
+- **冷却机制约束**:
+  - 冷却时长：30 秒（硬编码）
+  - 冷却粒度：基于 `CliType`（不区分 Provider）
+  - 冷却状态：内存存储（跨进程不共享）
 - **执行逻辑约束**:
   - 每个 CLI 只尝试一次（无重试次数配置）
   - 按 `cli_execution_order` 数组顺序执行
   - 捕获每个 CLI 的退出码、标准输出、错误输出
-  - LLM 判断结果必须包含：`success`, `should_retry`, `reason`
+  - 跳过冷却期内的 CLI
 
 **使用场景**:
 ```
@@ -1947,5 +1948,93 @@ cli_execution_order 验证:
 - 支持每个 CLI 的重试次数配置
 - 支持超时时间配置
 - 支持模型选择配置
+
+---
+
+### REQ-022: Auto 模式 CLI+Provider 组合轮转
+**Status**: 🟡 Pending
+**Priority**: P1 (High)
+**Version**: v0.5.48+
+**Related**: REQ-021, ARCH-021, DATA-022, DATA-023
+
+**Description**:
+扩展 REQ-021 的自动故障切换机制，支持同一 CLI 配置多个不同的 Provider 进行轮转。例如：claude+glm → claude+local → claude+official，而不仅仅是不同 CLI 之间轮转。
+
+**核心特性**:
+- 新增 `auto_execution_order` 配置字段（取代 `cli_execution_order`）
+- 执行顺序为 CLI+Provider 组合数组
+- 冷却机制粒度从 `CliType` 改为 `(CliType, Provider)` 组合
+- 同一 CLI 可配置多个不同 Provider
+- 不需要向后兼容旧配置格式
+
+**Acceptance Criteria**:
+- [ ] 新配置字段 `auto_execution_order` 存储 CLI+Provider 组合数组
+- [ ] 每个组合为对象：`{"cli": "claude", "provider": "glm"}`
+- [ ] 系统按数组顺序依次尝试每个 CLI+Provider 组合
+- [ ] 冷却机制基于 (CLI, Provider) 组合，而非仅 CLI
+- [ ] 同一 CLI 不同 Provider 可独立进入冷却期
+- [ ] Provider 值 "auto" 表示使用 default_provider
+- [ ] 移除旧的 `cli_execution_order` 字段支持
+- [ ] TUI 界面支持管理 CLI+Provider 组合顺序
+
+**Technical Constraints**:
+- **配置约束**:
+  - 字段名称：`auto_execution_order`
+  - 数据类型：对象数组
+  - 对象结构：`{"cli": string, "provider": string}`
+  - cli 允许值：`"codex"`, `"claude"`, `"gemini"`
+  - provider 允许值：providers.json 中定义的 provider 名称，或 `"auto"`
+  - 数组长度：≥1，无上限
+  - 允许同一 CLI 出现多次（配不同 Provider）
+- **冷却机制约束**:
+  - 冷却键：`(CliType, Provider)` 组合
+  - 冷却时长：30 秒（不变）
+  - 冷却状态：内存存储
+- **执行逻辑约束**:
+  - 按 `auto_execution_order` 数组顺序执行
+  - 检查 (CLI, Provider) 组合是否在冷却期
+  - 失败时标记 (CLI, Provider) 组合进入冷却期
+
+**使用场景**:
+```
+场景 1: 同一 CLI 多 Provider 轮转
+配置: [
+  {"cli": "claude", "provider": "glm"},
+  {"cli": "claude", "provider": "local"},
+  {"cli": "claude", "provider": "official"}
+]
+执行: claude+glm → 失败 → claude+local → 失败 → claude+official → 成功
+
+场景 2: 混合 CLI 和 Provider 轮转
+配置: [
+  {"cli": "claude", "provider": "glm"},
+  {"cli": "codex", "provider": "auto"},
+  {"cli": "gemini", "provider": "official"}
+]
+执行: claude+glm → codex+auto → gemini+official
+
+场景 3: 冷却期跳过
+状态: (claude, glm) 在冷却期
+配置: [{"cli": "claude", "provider": "glm"}, {"cli": "claude", "provider": "local"}]
+执行: 跳过 claude+glm → claude+local
+```
+
+**默认配置**:
+```json
+{
+  "auto_execution_order": [
+    {"cli": "codex", "provider": "auto"},
+    {"cli": "gemini", "provider": "auto"},
+    {"cli": "claude", "provider": "auto"}
+  ]
+}
+```
+
+**错误处理**:
+- 配置字段缺失：使用默认配置
+- 无效 CLI 名称：返回配置验证错误
+- 无效 Provider 名称：返回配置验证错误（Provider 必须在 providers.json 中定义或为 "auto"）
+- 空数组：返回配置验证错误
+- 所有组合都失败或都在冷却期：返回错误信息
 
 ---

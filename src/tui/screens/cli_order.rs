@@ -16,13 +16,13 @@ use ratatui::{
 };
 
 use crate::auto_mode::config::ExecutionOrderConfig;
-use crate::cli_type::CliType;
+use crate::auto_mode::ExecutionEntry;
 use crate::error::ConfigError;
 
 #[derive(Debug)]
 pub struct CliOrderScreen {
-    current_order: Vec<CliType>,
-    original_order: Vec<CliType>,
+    current_order: Vec<ExecutionEntry>,
+    original_order: Vec<ExecutionEntry>,
     selected_index: usize,
     modified: bool,
     message: Option<String>,
@@ -31,7 +31,7 @@ pub struct CliOrderScreen {
 
 impl CliOrderScreen {
     pub fn new() -> Result<Self, ConfigError> {
-        let current_order = ExecutionOrderConfig::get_order()?;
+        let current_order = ExecutionOrderConfig::get_execution_entries()?;
         let mut list_state = ListState::default();
         let selected_index = 0;
         list_state.select(Some(selected_index));
@@ -56,7 +56,7 @@ impl CliOrderScreen {
             ])
             .split(area);
 
-        let header = Paragraph::new("AI CLI Execution Order")
+        let header = Paragraph::new("AI CLI+Provider Execution Order")
             .block(Block::default().borders(Borders::ALL))
             .style(
                 Style::default()
@@ -69,15 +69,23 @@ impl CliOrderScreen {
             .current_order
             .iter()
             .enumerate()
-            .map(|(index, cli_type)| {
+            .map(|(index, entry)| {
                 let line = Line::from(vec![
                     Span::styled(
                         format!("{}. ", index + 1),
                         Style::default().fg(Color::Gray),
                     ),
                     Span::styled(
-                        cli_type.display_name(),
+                        &entry.cli,
                         Style::default().fg(Color::Yellow),
+                    ),
+                    Span::styled(
+                        " + ",
+                        Style::default().fg(Color::Gray),
+                    ),
+                    Span::styled(
+                        &entry.provider,
+                        Style::default().fg(Color::Green),
                     ),
                 ]);
                 ListItem::new(line)
@@ -85,7 +93,7 @@ impl CliOrderScreen {
             .collect();
 
         let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title("Current Order"))
+            .block(Block::default().borders(Borders::ALL).title("Current Order (CLI+Provider)"))
             .highlight_style(Style::default().bg(Color::DarkGray))
             .highlight_symbol(">> ");
 
@@ -129,7 +137,7 @@ impl CliOrderScreen {
                 self.modified = true;
             }
             KeyCode::Char('q') => {
-                if let Err(err) = ExecutionOrderConfig::save_order(&self.current_order) {
+                if let Err(err) = ExecutionOrderConfig::save_entries(&self.current_order) {
                     self.message = Some(format!("Failed to save: {}", err));
                     return Ok(false);
                 }
@@ -143,7 +151,7 @@ impl CliOrderScreen {
     }
 
     pub fn is_modified(&self) -> bool {
-        self.modified || self.current_order != self.original_order
+        self.modified
     }
 }
 

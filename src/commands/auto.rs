@@ -8,8 +8,8 @@ use crate::tui::screens::cli_order::run_cli_order_tui;
 
 pub async fn handle_auto_command(args: &[String]) -> ExitCode {
     match parse_auto_args(args) {
-        Ok((prompt, provider)) => {
-            match AutoModeExecutor::execute(&prompt, provider) {
+        Ok(prompt) => {
+            match AutoModeExecutor::execute(&prompt) {
                 Ok(output) => {
                     if !output.is_empty() {
                         print!("{}", output);
@@ -32,8 +32,9 @@ pub async fn handle_auto_command(args: &[String]) -> ExitCode {
     }
 }
 
-/// 解析 auto 命令的参数，返回 (prompt, provider)
-fn parse_auto_args(tokens: &[String]) -> Result<(String, Option<String>), ExecutionError> {
+/// 解析 auto 命令的参数，返回 prompt
+/// 注意：provider 现在由 auto_execution_order 配置决定，不再从命令行读取
+fn parse_auto_args(tokens: &[String]) -> Result<String, ExecutionError> {
     // 跳过第一个 "auto"
     let start = tokens
         .first()
@@ -47,13 +48,13 @@ fn parse_auto_args(tokens: &[String]) -> Result<(String, Option<String>), Execut
     let parsed = parse_cli_args(tokens)
         .map_err(|msg| ExecutionError::ExecutionFailed { message: msg })?;
 
-    // auto 命令只关心 prompt 和 provider，忽略其他参数
+    // auto 命令只关心 prompt，provider 由配置决定
     let prompt = parsed.prompt.join(" ");
     if prompt.trim().is_empty() {
         return Err(ExecutionError::EmptyPrompt);
     }
 
-    Ok((prompt, parsed.provider))
+    Ok(prompt)
 }
 
 pub fn handle_cli_order_command() -> ExitCode {
@@ -85,7 +86,7 @@ fn format_auto_error(err: ExecutionError) -> (u8, String) {
 fn format_auto_config_error(err: &ConfigError) -> (u8, String) {
     let message = err.to_string();
     if is_validation_error(err) {
-        (4, format!("Invalid cli_execution_order: {}", message))
+        (4, format!("Invalid auto_execution_order: {}", message))
     } else {
         (1, format!("Check ~/.aiw/config.json: {}", message))
     }

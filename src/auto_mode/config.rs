@@ -1,10 +1,9 @@
-use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 
-use crate::auto_mode::DEFAULT_EXECUTION_ORDER;
+use crate::auto_mode::{default_execution_entries, ExecutionEntry};
 use crate::cli_type::CliType;
 use crate::error::ConfigError;
 use crate::utils::config_paths::ConfigPaths;
@@ -14,106 +13,113 @@ const ALLOWED_CLI_TYPES: [&str; 3] = ["codex", "claude", "gemini"];
 pub struct ExecutionOrderConfig;
 
 impl ExecutionOrderConfig {
-    pub fn get_order() -> Result<Vec<CliType>, ConfigError> {
-        let order = Self::load_order_strings()?;
-        Self::order_to_types(&order)
+    /// 获取 CLI+Provider 执行顺序（新格式）
+    pub fn get_execution_entries() -> Result<Vec<ExecutionEntry>, ConfigError> {
+        Self::load_execution_entries()
     }
 
-    pub fn validate_order(order: &[String]) -> Result<(), ConfigError> {
-        if order.len() != ALLOWED_CLI_TYPES.len() {
+    /// 验证执行条目
+    pub fn validate_entries(entries: &[ExecutionEntry]) -> Result<(), ConfigError> {
+        if entries.is_empty() {
             return Err(ConfigError::InvalidLength {
-                expected: ALLOWED_CLI_TYPES.len(),
-                actual: order.len(),
+                expected: 1,
+                actual: 0,
             });
         }
 
-        for value in order {
-            if !ALLOWED_CLI_TYPES.contains(&value.as_str()) {
+        for entry in entries {
+            if !ALLOWED_CLI_TYPES.contains(&entry.cli.to_lowercase().as_str()) {
                 return Err(ConfigError::InvalidCliType {
-                    value: value.clone(),
+                    value: entry.cli.clone(),
                 });
             }
-        }
-
-        let unique: HashSet<_> = order.iter().collect();
-        if unique.len() != ALLOWED_CLI_TYPES.len() {
-            return Err(ConfigError::DuplicateCliType);
-        }
-
-        let required: HashSet<_> = ALLOWED_CLI_TYPES.iter().copied().collect();
-        let current: HashSet<_> = order.iter().map(|s| s.as_str()).collect();
-        if current != required {
-            return Err(ConfigError::IncompleteSet);
+            // Provider 验证：允许 "auto" 或任何非空字符串
+            if entry.provider.trim().is_empty() {
+                return Err(ConfigError::InvalidCliType {
+                    value: format!("empty provider for cli '{}'", entry.cli),
+                });
+            }
         }
 
         Ok(())
     }
 
-    pub fn reset_to_default() -> Vec<CliType> {
-        vec![CliType::Codex, CliType::Gemini, CliType::Claude]
+    /// 重置为默认配置
+    pub fn reset_to_default() -> Vec<ExecutionEntry> {
+        default_execution_entries()
     }
 
-    pub fn save_order(order: &[CliType]) -> Result<(), ConfigError> {
-        let order_strings = order
-            .iter()
-            .map(|cli_type| cli_type.display_name().to_string())
-            .collect::<Vec<_>>();
-        Self::validate_order(&order_strings)?;
+    /// 保存执行顺序
+    pub fn save_entries(entries: &[ExecutionEntry]) -> Result<(), ConfigError> {
+        Self::validate_entries(entries)?;
 
         let path = Self::config_path()?;
         let mut config = Self::load_config_object(&path)?;
+
+        let entries_json: Vec<Value> = entries
+            .iter()
+            .map(|e| {
+                let mut obj = Map::new();
+                obj.insert("cli".to_string(), Value::String(e.cli.clone()));
+                obj.insert("provider".to_string(), Value::String(e.provider.clone()));
+                Value::Object(obj)
+            })
+            .collect();
+
         config.insert(
-            "cli_execution_order".to_string(),
-            Value::Array(order_strings.into_iter().map(Value::String).collect()),
+            "auto_execution_order".to_string(),
+            Value::Array(entries_json),
         );
 
         Self::write_config(&path, Value::Object(config))?;
         Ok(())
     }
 
-    fn order_to_types(order: &[String]) -> Result<Vec<CliType>, ConfigError> {
-        order
-            .iter()
-            .map(|value| match value.as_str() {
-                "codex" => Ok(CliType::Codex),
-                "claude" => Ok(CliType::Claude),
-                "gemini" => Ok(CliType::Gemini),
-                _ => Err(ConfigError::InvalidCliType {
-                    value: value.clone(),
-                }),
-            })
-            .collect()
-    }
-
-    fn load_order_strings() -> Result<Vec<String>, ConfigError> {
+    fn load_execution_entries() -> Result<Vec<ExecutionEntry>, ConfigError> {
         let path = Self::config_path()?;
         if !path.exists() {
-            return Ok(Self::default_order_strings());
+            return Ok(default_execution_entries());
         }
 
         let config = Self::load_config_value(&path)?;
         let order_value = match &config {
-            Value::Object(map) => map.get("cli_execution_order"),
+            Value::Object(map) => map.get("auto_execution_order"),
             _ => return Err(ConfigError::InvalidFormat),
         };
+
         let order_value = match order_value {
             Some(value) => value,
-            None => return Ok(Self::default_order_strings()),
+            None => return Ok(default_execution_entries()),
         };
 
-        let order = Self::parse_order_value(order_value)?;
-        Self::validate_order(&order)?;
-        Ok(order)
+        let entries = Self::parse_entries_value(order_value)?;
+        Self::validate_entries(&entries)?;
+        Ok(entries)
     }
 
-    fn parse_order_value(value: &Value) -> Result<Vec<String>, ConfigError> {
+    fn parse_entries_value(value: &Value) -> Result<Vec<ExecutionEntry>, ConfigError> {
         let array = value.as_array().ok_or(ConfigError::InvalidType)?;
-        let mut order = Vec::with_capacity(array.len());
+        let mut entries = Vec::with_capacity(array.len());
+
         for item in array {
-            let value = item.as_str().ok_or(ConfigError::InvalidElementType)?;
-            order.push(value.to_string());
+            let obj = item.as_object().ok_or(ConfigError::InvalidElementType)?;
+
+            let cli = obj
+                .get("cli")
+                .and_then(|v| v.as_str())
+                .ok_or(ConfigError::InvalidElementType)?
+                .to_string();
+
+            let provider = obj
+                .get("provider")
+                .and_then(|v| v.as_str())
+                .ok_or(ConfigError::InvalidElementType)?
+                .to_string();
+
+            entries.push(ExecutionEntry { cli, provider });
         }
-        Ok(order)
+
+        Ok(entries)
     }
 
     fn load_config_value(path: &Path) -> Result<Value, ConfigError> {
@@ -166,12 +172,5 @@ impl ExecutionOrderConfig {
         let paths =
             ConfigPaths::new().map_err(|err| ConfigError::Io { message: err.to_string() })?;
         Ok(paths.config_file)
-    }
-
-    fn default_order_strings() -> Vec<String> {
-        DEFAULT_EXECUTION_ORDER
-            .iter()
-            .map(|value| value.to_string())
-            .collect()
     }
 }

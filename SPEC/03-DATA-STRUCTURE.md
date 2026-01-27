@@ -1414,3 +1414,121 @@ impl CliExecutionOrderConfig {
 | `should_retry` | `boolean` | 是否应该尝试下一个 CLI |
 | `reason` | `String` | 判断理由（用于日志） |
 
+---
+
+### DATA-022: Auto 执行顺序配置（CLI+Provider 组合）
+
+**Version**: v0.5.48+
+**Related**: REQ-022, ARCH-021
+**Type**: New Config Structure
+**Storage Location**: `~/.aiw/config.json`
+
+---
+
+#### 配置字段定义
+
+| 字段路径 | 类型 | 必填 | 默认值 | 约束 | 说明 |
+|---------|------|-----|--------|------|------|
+| `auto_execution_order` | array of object | ✅ | 见下方 | 长度≥1 | CLI+Provider 执行顺序 |
+| `auto_execution_order[].cli` | string | ✅ | - | codex/claude/gemini | CLI 类型 |
+| `auto_execution_order[].provider` | string | ✅ | - | providers.json 中的名称或 "auto" | Provider 名称 |
+
+**默认配置**:
+```json
+{
+  "auto_execution_order": [
+    {"cli": "codex", "provider": "auto"},
+    {"cli": "gemini", "provider": "auto"},
+    {"cli": "claude", "provider": "auto"}
+  ]
+}
+```
+
+**自定义顺序示例**（同一 CLI 多 Provider）:
+```json
+{
+  "auto_execution_order": [
+    {"cli": "claude", "provider": "glm"},
+    {"cli": "claude", "provider": "local"},
+    {"cli": "claude", "provider": "official"},
+    {"cli": "codex", "provider": "auto"}
+  ]
+}
+```
+
+---
+
+#### 字段验证规则
+
+##### auto_execution_order 验证
+
+| 验证项 | 规则 | 错误消息 |
+|-------|------|---------|
+| 类型检查 | 必须是数组 | `auto_execution_order must be an array` |
+| 长度检查 | 长度必须 ≥ 1 | `auto_execution_order must contain at least 1 entry` |
+| 元素类型 | 每个元素必须是对象 | `Each entry in auto_execution_order must be an object` |
+| cli 字段存在 | 每个对象必须有 cli 字段 | `Missing 'cli' field in auto_execution_order entry` |
+| provider 字段存在 | 每个对象必须有 provider 字段 | `Missing 'provider' field in auto_execution_order entry` |
+| cli 值域检查 | cli 必须在 `["codex", "claude", "gemini"]` 中 | `Invalid CLI type: {value}` |
+| provider 值域检查 | provider 必须在 providers.json 中定义或为 "auto" | `Unknown provider: {value}` |
+
+---
+
+#### 与旧配置的关系
+
+| 旧字段 | 新字段 | 迁移策略 |
+|-------|-------|---------|
+| `cli_execution_order` | `auto_execution_order` | 不向后兼容，直接移除旧字段支持 |
+
+---
+
+### DATA-023: CLI 冷却机制数据结构
+
+**Version**: v0.5.48+
+**Related**: REQ-022, ARCH-021
+**Type**: Runtime Data Structure
+**Storage**: 内存（不持久化）
+
+---
+
+#### 冷却状态数据结构
+
+| 字段 | 类型 | 说明 |
+|-----|------|------|
+| 冷却键 | `(CliType, String)` | CLI 类型 + Provider 名称的组合 |
+| 冷却开始时间 | `Instant` | 进入冷却期的时间戳 |
+| 冷却时长 | `Duration` | 30 秒（常量） |
+
+**冷却状态存储**:
+```
+HashMap<(CliType, String), Instant>
+```
+
+**示例状态**:
+```
+{
+  (Claude, "glm"): 2024-01-01T12:00:00,
+  (Claude, "local"): 2024-01-01T12:00:15,
+  (Codex, "auto"): 2024-01-01T12:00:20
+}
+```
+
+---
+
+#### 冷却机制常量
+
+| 常量名 | 值 | 说明 |
+|-------|-----|------|
+| `COOLDOWN_DURATION` | 30 秒 | 冷却期时长 |
+
+---
+
+#### 冷却状态操作
+
+| 操作 | 输入 | 输出 | 说明 |
+|------|------|------|------|
+| `mark_failure` | (CliType, Provider) | - | 标记组合进入冷却期 |
+| `is_in_cooldown` | (CliType, Provider) | bool | 检查组合是否在冷却期 |
+| `remaining_cooldown_secs` | (CliType, Provider) | Option<u64> | 获取剩余冷却时间 |
+| `clear_all` | - | - | 清除所有冷却状态 |
+

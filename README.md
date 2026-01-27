@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.5.39-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.5.48-blue?style=flat-square)
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange?style=flat-square&logo=rust)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 ![MCP](https://img.shields.io/badge/MCP-Supported-purple?style=flat-square)
@@ -89,36 +89,38 @@ aiw auto -p auto "implement feature"  # Auto CLI + auto provider
 ### Auto Mode (Automatic Failover)
 
 ```bash
-# Auto mode tries AI CLIs in configured order, switches on failure
+# Auto mode tries CLI+Provider combinations in configured order, switches on failure
 aiw auto "fix this bug"
 
-# With specific provider
-aiw auto -p openrouter "implement feature"
-
-# With auto provider (max compatibility)
-aiw auto -p auto "write tests"
-
-# Configure CLI execution order
+# Configure CLI+Provider execution order
 aiw config cli-order  # TUI to manage order (↑/↓ move, r reset, q save)
 ```
 
 **How it works**:
-1. Reads `cli_execution_order` from `~/.aiw/config.json`
-2. Tries each CLI in order (e.g., codex → gemini → claude)
-3. Uses built-in LLM (Ollama) to judge success/failure
-4. Switches to next CLI if current fails (or halts if error is non-retryable)
+1. Reads `auto_execution_order` from `~/.aiw/config.json`
+2. Tries each CLI+Provider combination in order (e.g., codex+auto → gemini+auto → claude+auto)
+3. Judges success/failure by exit code (0 = success)
+4. Switches to next combination if current fails
+5. Failed combinations enter 30-second cooldown period
 
 **Configuration** (`~/.aiw/config.json`):
 ```json
 {
-  "cli_execution_order": ["codex", "gemini", "claude"]
+  "auto_execution_order": [
+    {"cli": "codex", "provider": "auto"},
+    {"cli": "gemini", "provider": "auto"},
+    {"cli": "claude", "provider": "glm"},
+    {"cli": "claude", "provider": "local"},
+    {"cli": "claude", "provider": "official"}
+  ]
 }
 ```
 
-**Constraints**:
-- Must include all 3 CLIs (codex, gemini, claude)
-- Order can be changed but cannot remove/disable CLIs
-- LLM judgment is mandatory (no timeout-based fallback)
+**Features**:
+- Same CLI can be configured with multiple providers (e.g., claude+glm → claude+local → claude+official)
+- Each CLI+Provider combination has independent cooldown (30 seconds after failure)
+- Provider "auto" means use the CLI's default provider selection
+- Order can be fully customized via TUI or direct config editing
 
 ### Role Injection (-r)
 
@@ -272,14 +274,18 @@ aiw update
 ```json
 {
   "user_roles_dir": "~/.claude/roles",
-  "cli_execution_order": ["codex", "gemini", "claude"]
+  "auto_execution_order": [
+    {"cli": "codex", "provider": "auto"},
+    {"cli": "gemini", "provider": "auto"},
+    {"cli": "claude", "provider": "auto"}
+  ]
 }
 ```
 
 | Option | Type | Description |
 |--------|------|-------------|
 | `user_roles_dir` | string | Custom directory for user roles (supports `~` expansion). If set, AIW will load user roles from this directory instead of `~/.aiw/role/` |
-| `cli_execution_order` | array | Execution order for auto mode (must include all 3: codex, gemini, claude). Use `aiw config cli-order` TUI to manage |
+| `auto_execution_order` | array | CLI+Provider combinations for auto mode. Each entry has `cli` (codex/gemini/claude) and `provider` (provider name or "auto"). Use `aiw config cli-order` TUI to manage |
 
 This allows you to manage all your roles in a single location, such as `~/.claude/roles/`, and share them across different tools.
 
@@ -318,6 +324,6 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-**AIW** - Unified Gateway for AI CLI & MCP | v0.5.39
+**AIW** - Unified Gateway for AI CLI & MCP | v0.5.48
 
 [GitHub](https://github.com/putao520/agentic-warden) | [NPM](https://www.npmjs.com/package/@putao520/aiw)
