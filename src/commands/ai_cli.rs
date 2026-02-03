@@ -8,7 +8,16 @@ use crate::roles::{builtin::get_builtin_role, RoleManager, Role};
 use crate::supervisor;
 use anyhow::{anyhow, Result};
 use std::ffi::OsString;
+use std::path::PathBuf;
 use std::process::ExitCode;
+
+/// Worktree 信息（用于任务完成后输出）
+#[derive(Debug, Clone)]
+pub struct WorktreeInfo {
+    pub path: PathBuf,
+    pub branch: String,
+    pub commit: String,
+}
 
 /// AI CLI 启动参数
 pub struct AiCliCommand {
@@ -57,6 +66,97 @@ impl AiCliCommand {
 
     /// Default fallback role when specified role is not found
     const DEFAULT_ROLE: &'static str = "common";
+
+    /// 检查指定路径是否是 git 仓库
+    fn check_git_repository(work_dir: &std::path::PathBuf) -> Result<()> {
+        // 使用 git2 检查是否是 git 仓库
+        match git2::Repository::discover(work_dir) {
+            Ok(_) => Ok(()),
+            Err(e) if e.class() == git2::ErrorClass::Repository => {
+                Err(anyhow!(
+                    "Error: Not a git repository. Please initialize git first:\n  cd {} && git init",
+                    work_dir.display()
+                ))
+            }
+            Err(e) => {
+                // 其他 git 错误也视为检查失败
+                Err(anyhow!(
+                    "Error: Unable to access git repository: {}",
+                    e.message()
+                ))
+            }
+        }
+    }
+
+    /// 生成 8 位随机小写 hex 字符串用于 worktree 命名
+    fn generate_worktree_id() -> String {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64;
+        // 使用时间戳的低位生成 8 字节 hex
+        format!("{:08x}", timestamp % 0x100000000)
+    }
+
+    /// 创建 git worktree
+    /// 返回: (worktree_path, branch_name, commit_hash)
+    fn create_worktree(repo_path: &PathBuf) -> Result<(PathBuf, String, String)> {
+        let repo = git2::Repository::open(repo_path)
+            .map_err(|e| anyhow!("Failed to open git repository: {}", e.message()))?;
+
+        // 获取当前 HEAD 的 commit
+        let head = repo.head()
+            .map_err(|e| anyhow!("Failed to get HEAD: {}", e.message()))?;
+        let commit = head.peel_to_commit()
+            .map_err(|e| anyhow!("Failed to peel to commit: {}", e.message()))?;
+        let commit_hash = commit.id().to_string();
+
+        // 获取当前分支名
+        let branch_name = head.shorthand()
+            .unwrap_or("HEAD")
+            .to_string();
+
+        // 创建 worktree 目录：/tmp/aiw-worktree-<8位hex>
+        let worktree_id = Self::generate_worktree_id();
+        let worktree_path = std::path::PathBuf::from("/tmp")
+            .join(format!("aiw-worktree-{}", worktree_id));
+
+        // 检查 worktree 是否已存在
+        if worktree_path.exists() {
+            return Err(anyhow!(
+                "Worktree directory already exists: {}. Please remove it manually.",
+                worktree_path.display()
+            ));
+        }
+
+        // 使用 git command 创建 worktree（git2 库的 worktree API 不可用）
+        // 格式: git worktree add <path> <commit-ish>
+        let status = std::process::Command::new("git")
+            .args(["worktree", "add", "-b"])
+            .arg(&format!("aiw-worktree-{}", worktree_id))
+            .arg(&worktree_path)
+            .arg(&commit_hash)
+            .current_dir(repo_path)
+            .output()
+            .map_err(|e| anyhow!("Failed to execute git worktree command: {}", e))?;
+
+        if !status.status.success() {
+            let stderr = String::from_utf8_lossy(&status.stderr);
+            return Err(anyhow!("Failed to create worktree: {}", stderr));
+        }
+
+        Ok((worktree_path, branch_name, commit_hash))
+    }
+
+    /// 输出 worktree 信息到 stdout
+    fn output_worktree_info(info: &WorktreeInfo) {
+        println!();
+        println!("=== AIW WORKTREE END ===");
+        println!("Worktree: {}", info.path.display());
+        println!("Branch: {}", info.branch);
+        println!("Commit: {}", info.commit);
+    }
 
     /// 解析逗号分隔的角色字符串（去重，保持顺序）
     fn parse_role_names(role_str: &str) -> Vec<&str> {
@@ -151,6 +251,30 @@ impl AiCliCommand {
 
     /// 执行 AI CLI 命令
     pub async fn execute(&self) -> Result<ExitCode> {
+        // 确定工作目录
+        let original_dir = self.cwd.clone().unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| ".".into())
+        });
+
+        // 检查是否是 git 仓库
+        Self::check_git_repository(&original_dir)?;
+
+        // 创建 worktree 作为隔离工作目录
+        let (worktree_path, branch_name, commit_hash) = Self::create_worktree(&original_dir)?;
+
+        // worktree 信息用于任务完成后输出
+        let worktree_info = WorktreeInfo {
+            path: worktree_path.clone(),
+            branch: branch_name.clone(),
+            commit: commit_hash.clone(),
+        };
+
+        eprintln!("Created worktree at: {}", worktree_path.display());
+        eprintln!("Branch: {}, Commit: {}", branch_name, commit_hash);
+
+        // 使用 worktree 作为工作目录
+        let work_dir = Some(worktree_path);
+
         let registry = create_cli_registry()?;
 
         if self.ai_types.iter().any(|cli_type| matches!(cli_type, CliType::Auto)) {
@@ -182,9 +306,12 @@ impl AiCliCommand {
                     cli_type,
                     self.provider.clone(),
                     &self.cli_args,
-                    self.cwd.clone(),
+                    work_dir.clone(),
                 )
                 .await?;
+
+            // 交互模式完成后输出 worktree 信息
+            Self::output_worktree_info(&worktree_info);
             Ok(ExitCode::from((exit_code & 0xFF) as u8))
         } else {
             // 任务模式
@@ -196,8 +323,11 @@ impl AiCliCommand {
                 let os_args: Vec<OsString> = cli_args.into_iter().map(|s| s.into()).collect();
 
                 let exit_code =
-                    supervisor::execute_cli(&registry, cli_type, &os_args, self.provider.clone(), self.cwd.clone())
+                    supervisor::execute_cli(&registry, cli_type, &os_args, self.provider.clone(), work_dir.clone())
                         .await?;
+
+                // 任务完成后输出 worktree 信息
+                Self::output_worktree_info(&worktree_info);
                 Ok(ExitCode::from((exit_code & 0xFF) as u8))
             } else {
                 // 多个 CLI 批量执行
@@ -220,7 +350,7 @@ impl AiCliCommand {
                     &final_prompt,
                     self.provider.clone(),
                     &self.cli_args,
-                    self.cwd.clone(),
+                    work_dir.clone(),
                 )
                 .await?;
 
@@ -231,6 +361,8 @@ impl AiCliCommand {
                     .copied()
                     .unwrap_or(0);
 
+                // 任务完成后输出 worktree 信息
+                Self::output_worktree_info(&worktree_info);
                 Ok(ExitCode::from((final_exit_code & 0xFF) as u8))
             }
         }
@@ -241,4 +373,86 @@ impl AiCliCommand {
 pub fn parse_ai_types(input: &str) -> Result<Vec<CliType>> {
     let selector = parse_cli_selector_strict(input).map_err(|err| anyhow!(err.to_string()))?;
     Ok(selector.types)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_worktree_id_format() {
+        // 多次调用验证格式一致性
+        for _ in 0..10 {
+            let id = AiCliCommand::test_generate_worktree_id();
+            assert_eq!(id.len(), 8, "worktree_id should be 8 characters");
+            assert!(id.chars().all(|c| c.is_ascii_hexdigit()),
+                    "worktree_id should be hex digits");
+            assert!(id.chars().all(|c| !c.is_ascii_uppercase()),
+                    "worktree_id should not contain uppercase letters");
+        }
+    }
+
+    #[test]
+    fn test_worktree_info_output_format() {
+        let info = WorktreeInfo {
+            path: PathBuf::from("/tmp/aiw-worktree-a1b2c3d4"),
+            branch: "main".to_string(),
+            commit: "abc123def456".to_string(),
+        };
+
+        // 模拟输出并验证格式
+        let output = format!(
+            "\n=== AIW WORKTREE END ===\nWorktree: {}\nBranch: {}\nCommit: {}",
+            info.path.display(),
+            info.branch,
+            info.commit
+        );
+
+        assert!(output.contains("=== AIW WORKTREE END ==="));
+        assert!(output.contains("/tmp/aiw-worktree-a1b2c3d4"));
+        assert!(output.contains("Branch: main"));
+        assert!(output.contains("Commit: abc123def456"));
+    }
+
+    #[test]
+    fn test_check_git_repository_non_git_dir() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let temp_path = temp_dir.path().to_path_buf();
+
+        // 非 git 目录应该返回错误
+        let result = AiCliCommand::test_check_git_repository(&temp_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Not a git repository"));
+    }
+
+    #[test]
+    fn test_check_git_repository_valid_repo() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let temp_path = temp_dir.path().to_path_buf();
+
+        // 创建 git 仓库
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(&temp_path)
+            .output()
+            .unwrap();
+
+        // 有效的 git 仓库应该成功
+        let result = AiCliCommand::test_check_git_repository(&temp_path);
+        assert!(result.is_ok());
+    }
+}
+
+// 暴露给测试的辅助方法
+impl AiCliCommand {
+    #[cfg(test)]
+    pub fn test_generate_worktree_id() -> String {
+        Self::generate_worktree_id()
+    }
+
+    #[cfg(test)]
+    pub fn test_check_git_repository(path: &PathBuf) -> Result<()> {
+        Self::check_git_repository(path)
+    }
 }

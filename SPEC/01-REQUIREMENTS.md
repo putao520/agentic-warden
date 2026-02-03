@@ -1341,10 +1341,12 @@ Agentic-Warden MUST meet performance criteria for process tracking and task mana
 | REQ-014 | AI CLI任务生命周期管理和角色系统 | P1 | ✅ Done | v0.2.0→v0.6.x | ARCH-014 | Phase 1-4 全部完成 [commit: a2cc2e2] |
 | REQ-015 | 简化的Google Drive OAuth授权流程 | P0 | 🟢 Done | v0.5.18 | ARCH-003, DATA-003 | Simplified OAuth authorization with built-in public client |
 | REQ-016 | MCP仓库CLI - 多源聚合搜索与安装 | P1 | ✅ Done | v0.6.0 | ARCH-016, API-016 | MCP Registry CLI implementation |
+| REQ-022 | Auto 模式 CLI+Provider 组合轮转 | P1 | 🟢 Done | v0.5.48+ | REQ-021, ARCH-021, DATA-022, DATA-023 | CLI+Provider rotation in auto mode |
+| REQ-023 | Git 仓库检查和 Worktree 管理 | P0 | 🟢 Done | v0.5.48+ | ARCH-023 | Git repository check and worktree management |
 | REQ-018 | MCP Browse 环境变量快速跳过 | P1 | 🟡 Design | v0.6.1 | ARCH-018 | Skip optional env vars feature |
 | REQ-019 | MCP Browse - 已安装MCP服务器查看 | P1 | 🟡 Design | v0.6.1 | ARCH-019, DATA-019 | View installed MCPs feature |
 | REQ-020 | MCP Browse - 已安装MCP环境变量编辑 | P1 | 🟡 Design | v0.6.1 | ARCH-020, DATA-020 | Edit env vars for installed MCPs |
-| REQ-017 | AIW插件市场系统 | P1 | 🟡 Design | v0.7.0 | ARCH-017, DATA-017, API-017 | Plugin marketplace system |
+| REQ-017 | AIW插件市场系统 | P1 | 🟡 Partial Implementation | v0.7.0 | ARCH-017, DATA-017, API-017 | Plugin marketplace system |
 
 ---
 
@@ -1675,7 +1677,7 @@ impl EditEnvState {
 ---
 
 ### REQ-017: AIW插件市场系统
-**Status**: 🟡 Design
+**Status**: 🟡 Partial Implementation
 **Priority**: P1 (High)
 **Version**: v0.7.0
 **Related**: ARCH-017, DATA-017, API-017
@@ -1951,8 +1953,87 @@ cli_execution_order 验证:
 
 ---
 
+### REQ-023: Git 仓库检查和 Worktree 管理
+
+**Status**: 🟢 Done (v0.5.48+)
+**Priority**: P0 (Critical)
+**Version**: v0.5.48+
+**Related**: ARCH-023
+
+**Description**:
+在启动 AI CODE 任务前，aiw MUST 检查工作目录（由 `-C` 参数指定或当前目录）是否是 git 仓库。如果检查通过，aiw MUST 创建 git worktree 作为 AI CODE 的隔离工作目录。
+
+**Acceptance Criteria**:
+- [x] 执行 AI CLI 任务前检查工作目录是否是 git 仓库
+- [x] 非 git 仓库时返回清晰的错误信息，包含 `git init` 命令提示
+- [x] 检查逻辑在 `AiCliCommand::execute()` 方法开始时执行
+- [x] 支持通过 `-C` 参数指定的工作目录检查
+- [ ] 检查通过后，使用 git worktree add 创建临时工作目录
+- [ ] Worktree 创建位置：`/tmp/aiw-worktree-<8位随机hex>`
+- [ ] AI CODE 在 worktree 目录中执行任务
+- [ ] 任务完成后在 stdout 输出 worktree 信息
+
+**Technical Constraints**:
+- 使用 git 库进行 git 仓库检测和 worktree 操作
+- 检查和 worktree 创建 MUST 在 AI CLI 进程启动前完成
+- 错误信息格式：`Error: Not a git repository. Please initialize git first:\n  cd <path> && git init`
+- Worktree 命名格式：`aiw-worktree-<8位随机小写hex>`
+- Worktree 创建失败 MUST 阻止 AI CLI 任务执行
+- Worktree 已存在时 MUST 返回错误或使用现有 worktree
+
+**错误处理**:
+| 场景 | 错误消息 | 行为 |
+|------|----------|------|
+| 非 git 仓库 | 提示运行 `git init` | 返回错误码 1 |
+| 权限不足 | 无法访问 git 仓库信息 | 返回错误码 1 |
+| Worktree 创建失败 | 显示具体 git 错误 | 返回错误码 1 |
+| Worktree 已存在 | 提示使用现有或手动清理 | 返回错误码 1 或使用现有 |
+| 其他 git 错误 | 显示具体错误信息 | 返回错误码 1 |
+
+**输出格式**:
+- AI CODE 输出 → stdout（透传）
+- aiw 调试信息 → stderr
+- Worktree 信息 → stdout（任务完成后）
+- 分隔符：`=== AIW WORKTREE END ===`
+
+**使用流程**:
+```bash
+# 场景 1: 非 git 仓库
+$ aiw codex -r common -C /tmp/not-a-repo "task"
+Error: Not a git repository. Please initialize git first:
+  cd /tmp/not-a-repo && git init
+
+# 场景 2: git 仓库 - 创建 worktree 并执行
+$ aiw codex -r common -C /path/to/repo "task"
+Creating worktree: /tmp/aiw-worktree-a1b2c3d4
+🚀 Starting codex with task: task ...
+[AI CODE 输出...]
+=== AIW WORKTREE END ===
+Worktree: /tmp/aiw-worktree-a1b2c3d4
+Branch: feature-branch
+Commit: abc123def456
+```
+
+**职责划分**:
+
+| 步骤 | 职责方 | 操作 | 输出 |
+|------|--------|------|------|
+| 1. Git 仓库检查 | aiw | 检查是否是 git 仓库 | - |
+| 2. Worktree 创建 | aiw | 创建临时 worktree | worktree_path |
+| 3. 指定工作目录 | aiw | 设置 cwd 为 worktree 路径 | - |
+| 4. 任务执行 | AI CODE | 在 worktree 中执行任务 | 执行结果 |
+| 5. 输出路径 | aiw | 在 stdout 输出 worktree 信息 | 格式化信息 |
+| 6. 审查更改 | 主会话 | 查看代码变更 | - |
+| 7. 决定合并 | 主会话 | 选择合并方式 | - |
+| 8. 清理 worktree | 主会话 | 手动执行 git worktree remove | - |
+
+**相关设计**:
+- 架构设计：ARCH-023
+
+---
+
 ### REQ-022: Auto 模式 CLI+Provider 组合轮转
-**Status**: 🟡 Pending
+**Status**: 🟢 Done (v0.5.48)
 **Priority**: P1 (High)
 **Version**: v0.5.48+
 **Related**: REQ-021, ARCH-021, DATA-022, DATA-023

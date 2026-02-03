@@ -3111,3 +3111,147 @@ AutoModeExecutor::execute()
 | E2E 测试 | 完整的故障切换场景、TUI 交互 |
 | 配置测试 | 无效配置拒绝、默认配置回退 |
 
+---
+
+## ARCH-023: Git 仓库检查和 Worktree 管理架构
+
+**Version**: v0.5.48+
+**Related**: REQ-023
+**Status**: 🟢 Done
+
+### 核心设计原则
+
+| 原则 | 说明 |
+|-----|------|
+| 早期验证 | 在 AI CLI 进程启动前执行检查 |
+| 隔离执行 | AI CODE 在独立的 worktree 中工作 |
+| 清晰错误 | 错误信息包含可执行的解决方案 |
+| 最小侵入 | 使用现有 `git2` 依赖，无新增外部依赖 |
+
+### 执行流程
+
+```
+用户命令: aiw codex -r common -C /path/to/repo "task"
+    ↓
+Parser 解析: cwd = /path/to/repo
+    ↓
+AiCliCommand::new(cwd)
+    ↓
+AiCliCommand::execute()
+    ↓
+check_git_repository(work_dir)
+    ↓
+    ├─ git2::Repository::discover(work_dir)
+    │   ├─ Ok(repo) → ✅ 继续
+    │   └─ Err(e) → ❌ 返回错误
+    ↓
+create_worktree(repo)
+    ↓
+    ├─ 生成随机 ID: aiw-worktree-<8位hex>
+    ├─ 路径: /tmp/aiw-worktree-xxxxxxxx
+    ├─ repo.worktree(path, branch)?
+    ├─ 创建成功 → worktree_path
+    └─ 创建失败 → ❌ 返回错误
+    ↓
+使用 worktree_path 作为 cwd
+    ↓
+启动 AI CLI 进程（在 worktree 中执行）
+    ↓
+任务完成 → 输出 worktree 路径
+```
+
+### 组件设计
+
+#### 1. Git Repository Checker
+
+**职责**: 验证工作目录是否是 git 仓库
+
+| 能力 | 输入 | 输出 | 说明 |
+|-----|------|------|------|
+| 仓库检测 | 目录路径 | 仓库引用或错误 | 检测是否是 git 仓库 |
+| 路径验证 | 文件系统路径 | 验证结果 | 验证路径可访问性 |
+
+#### 2. Worktree Creator
+
+**职责**: 创建临时 git worktree 作为 AI CODE 工作目录
+
+| 能力 | 输入 | 输出 | 说明 |
+|-----|------|------|------|
+| Worktree 创建 | git 仓库 | worktree 路径 | 创建并返回 worktree 路径 |
+| ID 生成 | - | 唯一标识符 | 生成 8 位随机 hex ID |
+| 路径构造 | 基础目录 + ID | 完整路径 | 构造 worktree 目录路径 |
+
+### 职责划分
+
+| 步骤 | 职责方 | 操作 | 输出 |
+|------|--------|------|------|
+| 1 | aiw | Git 仓库检查 | - |
+| 2 | aiw | 创建 worktree | worktree_path |
+| 3 | aiw | 设置 cwd = worktree_path | - |
+| 4 | aiw | 启动 AI CODE 进程 | exit_code |
+| 5 | aiw | 输出 worktree 路径 | `Worktree: /tmp/...` |
+| 6 | 主会话 | 审查代码变更 | - |
+| 7 | 主会话 | 决定合并方式 | - |
+| 8 | 主会话 | 手动清理 worktree | - |
+
+### 错误处理
+
+| 场景 | 错误类型 | 用户消息 |
+|------|----------|----------|
+| 非 git 仓库 | `git2::ErrorClass::Repository` | 提示运行 `git init` |
+| Worktree 创建失败 | git2 错误 | 显示具体错误信息 |
+| 权限不足 | IO 错误 | 显示具体错误信息 |
+
+### Worktree 规范
+
+| 属性 | 值 | 说明 |
+|------|---|------|
+| 位置 | `/tmp/aiw-worktree-<8位hex>` | 临时目录 |
+| 命名 | `aiw-worktree-xxxxxxxx` | 8位随机小写hex |
+| 分支 | 默认为当前分支 | 可通过参数指定 |
+| 清理 | 主会话手动清理 | aiw 不自动删除 |
+
+### 与主会话的交互
+
+**aiw 完整输出格式**（stdout）:
+```
+[AI CODE 的原始输出...]
+=== AIW WORKTREE END ===
+Worktree: /tmp/aiw-worktree-a1b2c3d4
+Branch: feature-branch
+Commit: abc123def456
+```
+
+**主会话解析规则**:
+- 从 stdout 读取全部输出
+- 查找 `=== AIW WORKTREE END ===` 分隔符
+- 分隔符之前的 → AI CODE 输出
+- 分隔符之后的 3 行 → aiw 附加信息
+  - `Worktree:` 行 - worktree 路径
+  - `Branch:` 行 - 当前分支名
+  - `Commit:` 行 - 当前 commit hash
+
+### 输出格式规范
+
+| 内容 | 输出流 | 格式 |
+|------|--------|------|
+| AIW 启动信息 | stderr | `Creating worktree: <path>` |
+| AI CODE 输出 | stdout | 透传，不修改 |
+| 分隔符 | stdout | `=== AIW WORKTREE END ===` |
+| Worktree 信息 | stdout | 固定格式的 3 行 |
+
+**Worktree 信息格式**:
+```
+=== AIW WORKTREE END ===
+Worktree: <worktree_path>
+Branch: <branch_name>
+Commit: <commit_hash>
+```
+
+### 性能要求
+
+| 指标 | 目标 | 说明 |
+|-----|------|------|
+| 仓库检查 | < 100ms | git2 库检测 |
+| Worktree 创建 | < 500ms | git worktree add |
+
