@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.5.48-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.5.49-blue?style=flat-square)
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange?style=flat-square&logo=rust)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 ![MCP](https://img.shields.io/badge/MCP-Supported-purple?style=flat-square)
@@ -141,6 +141,36 @@ aiw roles list
 aiw claude -C /path/to/project "implement feature"
 aiw claude -r common -C ~/myproject "fix the bug"
 ```
+
+### Git Worktree (Isolated Execution)
+
+**New in v0.5.49**: AIW automatically creates a git worktree for isolated AI CLI execution.
+
+When you run AIW in a git repository, it:
+1. Validates the directory is a git repository
+2. Creates a worktree at `/tmp/aiw-worktree-<8hex>`
+3. Executes the AI CLI in the isolated worktree
+4. Outputs worktree information after task completion
+
+```bash
+# AIW automatically creates worktree for git repositories
+aiw codex -C /path/to/repo "implement feature"
+
+# After completion, AIW outputs:
+# === AIW WORKTREE END ===
+# Worktree: /tmp/aiw-worktree-a1b2c3d4
+# Branch: main
+# Commit: abc123def456
+```
+
+**Benefits**:
+- 🛡️ **Isolation**: AI CLI works in a temporary worktree, keeping your working directory clean
+- 🔍 **Traceability**: Worktree path, branch, and commit are logged for review
+- 🧹 **No Cleanup**: Worktree remains for manual review; you can merge changes or delete it
+
+**Error Handling**:
+- Non-git directory → AIW refuses to run with clear error message
+- Worktree already exists → AIW reports the conflict and exits
 
 ### Transparent Parameter Forwarding
 
