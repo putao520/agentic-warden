@@ -1,6 +1,6 @@
 {
   "name": "@putao520/aiw",
-  "version": "0.5.49",
+  "version": "0.5.50",
   "description": "Universal AI CLI management platform with intelligent MCP routing, process tracking, and configuration synchronization",
   "keywords": [
     "ai",
