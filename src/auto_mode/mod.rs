@@ -43,12 +43,13 @@ impl ExecutionEntry {
     }
 }
 
-/// 默认执行顺序
+/// 默认执行顺序（最小后备，仅当配置文件缺失时使用）
+///
+/// 实际配置应存储在 `~/.aiw/config.json` 的 `auto_execution_order` 字段中
 pub fn default_execution_entries() -> Vec<ExecutionEntry> {
     vec![
+        // 仅保留一个最小后备，完整配置应在 config.json 中
         ExecutionEntry::new("codex", "auto"),
-        ExecutionEntry::new("gemini", "auto"),
-        ExecutionEntry::new("claude", "auto"),
     ]
 }
 
