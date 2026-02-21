@@ -57,6 +57,7 @@ pub fn get_env_vars_for_ai_type(ai_type: AiType) -> Vec<EnvVarMapping> {
                 required: false,
             },
         ],
+        AiType::Auto => vec![],
     }
 }
 

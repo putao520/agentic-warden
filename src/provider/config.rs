@@ -1,6 +1,7 @@
 //! Provider configuration data structures
 
 use anyhow::{anyhow, Result};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -40,12 +41,13 @@ pub struct Provider {
 }
 
 /// AI type enumeration
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, std::hash::Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, std::hash::Hash, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum AiType {
     Codex,
     Claude,
     Gemini,
+    Auto,
 }
 
 impl std::fmt::Display for AiType {
@@ -54,6 +56,7 @@ impl std::fmt::Display for AiType {
             AiType::Codex => write!(f, "codex"),
             AiType::Claude => write!(f, "claude"),
             AiType::Gemini => write!(f, "gemini"),
+            AiType::Auto => write!(f, "auto"),
         }
     }
 }
@@ -66,6 +69,7 @@ impl std::str::FromStr for AiType {
             "codex" => Ok(AiType::Codex),
             "claude" => Ok(AiType::Claude),
             "gemini" => Ok(AiType::Gemini),
+            "auto" => Ok(AiType::Auto),
             _ => Err(format!("Unknown AI type: {}", s)),
         }
     }

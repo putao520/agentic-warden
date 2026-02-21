@@ -17,13 +17,23 @@ use std::process::ExitCode;
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    // 初始化日志系统
-    tracing_subscriber::fmt()
-        .with_target(false)
-        .with_max_level(tracing::Level::INFO)
-        .init();
-
     let args: Vec<String> = std::env::args().collect();
+
+    // 初始化日志系统
+    // MCP serve 模式必须把 tracing 写到 stderr，因为 stdout 是 JSON-RPC 协议通道
+    let is_mcp_serve = args.len() >= 3 && args[1] == "mcp" && args[2] == "serve";
+    if is_mcp_serve {
+        tracing_subscriber::fmt()
+            .with_target(false)
+            .with_max_level(tracing::Level::WARN)
+            .with_writer(std::io::stderr)
+            .init();
+    } else {
+        tracing_subscriber::fmt()
+            .with_target(false)
+            .with_max_level(tracing::Level::INFO)
+            .init();
+    }
 
     // 处理版本标志 - 在解析CLI之前检查
     if args.len() == 2 && (args[1] == "--version" || args[1] == "-V") {

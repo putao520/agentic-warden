@@ -1,8 +1,10 @@
 pub mod capability_detector;
 mod js_executor;
+mod table_format;
 pub use js_executor::{JsExecutionReport, JsToolExecutor};
 
 use crate::platform;
+use crate::provider::config::AiType;
 use crate::registry_factory::RegistryFactory;
 use crate::task_record::{TaskStatus, WorktreeInfo};
 use anyhow::Error;
@@ -17,10 +19,16 @@ use crate::mcp_routing::{
 use crate::roles::{builtin::get_builtin_role, builtin::list_builtin_roles, RoleManager, Role, RoleInfo};
 use capability_detector::ClientCapabilities;
 use rmcp::{
+    handler::server::prompt::PromptContext,
+    handler::server::router::prompt::PromptRouter,
     handler::server::tool::{ToolCallContext, ToolRouter},
     handler::server::wrapper::Parameters,
     handler::server::ServerHandler,
-    model::{Implementation, InitializeRequestParam, InitializeResult, ServerCapabilities, Tool},
+    model::{
+        GetPromptRequestParam, GetPromptResult, Implementation, InitializeRequestParam,
+        InitializeResult, ListPromptsResult, PaginatedRequestParam, PromptMessage,
+        PromptMessageRole, ServerCapabilities, Tool,
+    },
     service::{RequestContext, RoleServer},
     tool, Json, ServiceExt,
 };
@@ -34,10 +42,14 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{Duration, Instant};
 
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, Default)]
+pub struct EmptyParams {}
+
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
 pub struct StartTaskParams {
-    /// AI CLI type (claude, codex, or gemini).
-    pub ai_type: String,
+    /// Which AI CLI to use. If not specified, auto-selects based on provider compatibility.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_type: Option<AiType>,
     /// Task description/prompt for the AI.
     pub task: String,
     /// Optional provider name to use for this task.
@@ -123,73 +135,74 @@ pub struct TaskInfo {
     pub worktree_info: Option<WorktreeInfo>,
 }
 
+/// Action to perform on a managed task.
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
-pub struct StopTaskParams {
-    /// UUID task identifier of the task to stop.
-    pub task_id: String,
+#[serde(rename_all = "lowercase")]
+pub enum ManageAction {
+    /// Get current task state including status, process_alive, exit_code, started_at, completed_at.
+    Status,
+    /// Get task log content. Use tail_lines to limit output.
+    Logs,
+    /// Terminate the running task.
+    Stop,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
-pub struct StopTaskResult {
-    /// Whether stop succeeded.
-    pub success: bool,
-    /// Human-readable status message.
-    pub message: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
-pub struct GetTaskLogsParams {
-    /// UUID task identifier whose logs should be retrieved.
+pub struct ManageTaskParams {
+    /// UUID task identifier.
     pub task_id: String,
-    /// Optional number of lines to tail from the end of the log.
+    /// Action to perform on the task.
+    pub action: ManageAction,
+    /// (logs only) Number of tail lines. Default: all.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tail_lines: Option<usize>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
-pub struct TaskLogsResult {
+pub struct ManageTaskResult {
     /// UUID task identifier.
     pub task_id: String,
-    /// PID associated with the log file.
+    /// Process ID of the task.
     pub pid: u32,
-    /// Log file path.
-    pub log_file: String,
-    /// Content of the log (entire file or tail).
-    pub content: String,
-}
+    /// The action that was performed.
+    pub action: ManageAction,
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
-pub struct GetTaskStatusParams {
-    /// UUID task identifier to query.
-    pub task_id: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
-pub struct TaskStatusResult {
-    /// UUID task identifier.
-    pub task_id: String,
-    /// Process ID.
-    pub pid: u32,
-    /// Registry task status.
-    pub status: TaskStatus,
-    /// Whether the process is currently alive.
-    pub process_alive: bool,
-    /// Exit code if available.
+    /// Task status in registry. Returned by: status, stop.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<TaskStatus>,
+    /// Whether the OS process is still alive. Returned by: status, stop.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub process_alive: Option<bool>,
+    /// Process exit code if available. Returned by: status, stop.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,
-    /// Task result string (if completed).
+    /// Task result string if completed. Returned by: status, stop.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<String>,
-    /// Worktree isolation info.
+    /// Task start time. Returned by: status, stop.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub worktree_info: Option<WorktreeInfo>,
-    /// Task start time.
-    pub started_at: DateTime<Utc>,
-    /// Optional completion time.
+    pub started_at: Option<DateTime<Utc>>,
+    /// Task completion time if finished. Returned by: status, stop.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<DateTime<Utc>>,
-    /// Log file path.
-    pub log_file: String,
+
+    /// Path to the log file. Returned by: status (always), logs (always).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub log_file: Option<String>,
+    /// Log file content (full or tailed). Returned by: logs only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub log_content: Option<String>,
+
+    /// Whether the stop operation succeeded. Returned by: stop only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub success: Option<bool>,
+    /// Human-readable message about the stop result. Returned by: stop only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+
+    /// Git worktree isolation info if the task was launched with worktree=true. Returned by: status, stop.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worktree_info: Option<WorktreeInfo>,
 }
 
 /// Detect user's preferred language based on system locale
@@ -294,10 +307,12 @@ pub async fn start_task(params: StartTaskParams) -> Result<TaskLaunchInfo, Strin
         }
     }
 
-    let cli_type = parse_cli_type(&params.ai_type).ok_or_else(|| {
+    let ai_type = params.ai_type.clone().unwrap_or(AiType::Auto);
+    let ai_type_str = ai_type.to_string();
+    let cli_type = parse_cli_type(&ai_type_str).ok_or_else(|| {
         format!(
             "Invalid AI type: {}. Must be claude, codex, or gemini",
-            params.ai_type
+            ai_type_str
         )
     })?;
 
@@ -370,7 +385,7 @@ pub async fn start_task(params: StartTaskParams) -> Result<TaskLaunchInfo, Strin
         log_file: entry.record.log_path.clone(),
         status: entry.record.status.clone(),
         started_at: entry.record.started_at,
-        ai_type: params.ai_type,
+        ai_type: ai_type.to_string(),
         task: params.task,
         provider: params.provider,
         worktree_info,
@@ -413,99 +428,160 @@ pub async fn list_tasks() -> Result<Vec<TaskInfo>, String> {
         .collect())
 }
 
-pub async fn stop_task(params: StopTaskParams) -> Result<StopTaskResult, String> {
-    let (pid, _record) = resolve_task_id(&params.task_id)?;
-    let registry = RegistryFactory::instance().get_mcp_registry();
+pub async fn manage_task(params: ManageTaskParams) -> Result<ManageTaskResult, String> {
+    let task_id = params.task_id;
+    let (pid, record) = resolve_task_id(&task_id)?;
 
-    #[cfg(unix)]
-    {
-        use nix::sys::signal::{kill, Signal};
-        use nix::unistd::Pid;
-
-        kill(Pid::from_raw(pid as i32), Signal::SIGTERM).map_err(|e| e.to_string())?;
-    }
-
-    #[cfg(not(unix))]
-    {
-        platform::terminate_process(pid);
-    }
-
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while Instant::now() < deadline {
-        if !platform::process_alive(pid) {
-            break;
+    match params.action {
+        ManageAction::Status => {
+            Ok(ManageTaskResult {
+                task_id,
+                pid,
+                action: ManageAction::Status,
+                status: Some(record.status.clone()),
+                process_alive: Some(platform::process_alive(pid)),
+                exit_code: record.exit_code,
+                result: record.result.clone(),
+                started_at: Some(record.started_at),
+                completed_at: record.completed_at,
+                log_file: Some(record.log_path.clone()),
+                log_content: None,
+                success: None,
+                message: None,
+                worktree_info: record.worktree_info.clone(),
+            })
         }
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
+        ManageAction::Logs => {
+            let log_path = PathBuf::from(record.log_path.clone());
+            let content = if let Some(lines) = params.tail_lines {
+                let data = fs::read_to_string(&log_path)
+                    .map_err(|e| format!("Failed to read log file {}: {}", log_path.display(), e))?;
+                let all_lines: Vec<&str> = data.lines().collect();
+                let start = all_lines.len().saturating_sub(lines);
+                all_lines[start..].join("\n")
+            } else {
+                fs::read_to_string(&log_path)
+                    .map_err(|e| format!("Failed to read log file {}: {}", log_path.display(), e))?
+            };
 
-    if platform::process_alive(pid) {
-        #[cfg(unix)]
-        {
-            use nix::sys::signal::{kill, Signal};
-            use nix::unistd::Pid;
-
-            kill(Pid::from_raw(pid as i32), Signal::SIGKILL).map_err(|e| e.to_string())?;
+            Ok(ManageTaskResult {
+                task_id,
+                pid,
+                action: ManageAction::Logs,
+                status: None,
+                process_alive: None,
+                exit_code: None,
+                result: None,
+                started_at: None,
+                completed_at: None,
+                log_file: Some(record.log_path),
+                log_content: Some(content),
+                success: None,
+                message: None,
+                worktree_info: None,
+            })
         }
+        ManageAction::Stop => {
+            let registry = RegistryFactory::instance().get_mcp_registry();
 
-        #[cfg(not(unix))]
-        {
-            platform::terminate_process(pid);
+            // If process already exited, just mark completed and return success
+            if !platform::process_alive(pid) {
+                registry
+                    .mark_completed(
+                        pid,
+                        Some("already_exited".to_string()),
+                        None,
+                        Utc::now(),
+                    )
+                    .map_err(|e| e.to_string())?;
+
+                // Re-read record after marking completed
+                let (_, updated_record) = resolve_task_id(&task_id)?;
+                let msg = format!("Task {} (pid {}) already exited", &task_id, pid);
+                return Ok(ManageTaskResult {
+                    task_id,
+                    pid,
+                    action: ManageAction::Stop,
+                    status: Some(updated_record.status.clone()),
+                    process_alive: Some(false),
+                    exit_code: updated_record.exit_code,
+                    result: updated_record.result.clone(),
+                    started_at: Some(updated_record.started_at),
+                    completed_at: updated_record.completed_at,
+                    log_file: None,
+                    log_content: None,
+                    success: Some(true),
+                    message: Some(msg),
+                    worktree_info: updated_record.worktree_info.clone(),
+                });
+            }
+
+            #[cfg(unix)]
+            {
+                use nix::sys::signal::{kill, Signal};
+                use nix::unistd::Pid;
+
+                kill(Pid::from_raw(pid as i32), Signal::SIGTERM).map_err(|e| e.to_string())?;
+            }
+
+            #[cfg(not(unix))]
+            {
+                platform::terminate_process(pid);
+            }
+
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while Instant::now() < deadline {
+                if !platform::process_alive(pid) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+
+            if platform::process_alive(pid) {
+                #[cfg(unix)]
+                {
+                    use nix::sys::signal::{kill, Signal};
+                    use nix::unistd::Pid;
+
+                    kill(Pid::from_raw(pid as i32), Signal::SIGKILL).map_err(|e| e.to_string())?;
+                }
+
+                #[cfg(not(unix))]
+                {
+                    platform::terminate_process(pid);
+                }
+            }
+
+            registry
+                .mark_completed(
+                    pid,
+                    Some("stopped_by_user".to_string()),
+                    None,
+                    Utc::now(),
+                )
+                .map_err(|e| e.to_string())?;
+
+            // Re-read record after marking completed
+            let (_, updated_record) = resolve_task_id(&task_id)?;
+            let msg = format!("Task {} (pid {}) stopped", &task_id, pid);
+            Ok(ManageTaskResult {
+                task_id,
+                pid,
+                action: ManageAction::Stop,
+                status: Some(updated_record.status.clone()),
+                process_alive: Some(false),
+                exit_code: updated_record.exit_code,
+                result: updated_record.result.clone(),
+                started_at: Some(updated_record.started_at),
+                completed_at: updated_record.completed_at,
+                log_file: None,
+                log_content: None,
+                success: Some(true),
+                message: Some(msg),
+                worktree_info: updated_record.worktree_info.clone(),
+            })
         }
     }
-
-    registry
-        .mark_completed(
-            pid,
-            Some("stopped_by_user".to_string()),
-            None,
-            Utc::now(),
-        )
-        .map_err(|e| e.to_string())?;
-
-    Ok(StopTaskResult {
-        success: true,
-        message: format!("Task {} (pid {}) stopped", params.task_id, pid),
-    })
-}
-
-pub async fn get_task_logs(params: GetTaskLogsParams) -> Result<TaskLogsResult, String> {
-    let (pid, record) = resolve_task_id(&params.task_id)?;
-
-    let log_path = PathBuf::from(record.log_path.clone());
-    let content = if let Some(lines) = params.tail_lines {
-        let data = fs::read_to_string(&log_path)
-            .map_err(|e| format!("Failed to read log file {}: {}", log_path.display(), e))?;
-        let all_lines: Vec<&str> = data.lines().collect();
-        let start = all_lines.len().saturating_sub(lines);
-        all_lines[start..].join("\n")
-    } else {
-        fs::read_to_string(&log_path)
-            .map_err(|e| format!("Failed to read log file {}: {}", log_path.display(), e))?
-    };
-
-    Ok(TaskLogsResult {
-        task_id: params.task_id,
-        pid,
-        log_file: record.log_path,
-        content,
-    })
-}
-
-pub async fn get_task_status(params: GetTaskStatusParams) -> Result<TaskStatusResult, String> {
-    let (pid, record) = resolve_task_id(&params.task_id)?;
-
-    Ok(TaskStatusResult {
-        task_id: params.task_id,
-        pid,
-        status: record.status.clone(),
-        process_alive: platform::process_alive(pid),
-        exit_code: record.exit_code,
-        result: record.result.clone(),
-        worktree_info: record.worktree_info.clone(),
-        started_at: record.started_at,
-        completed_at: record.completed_at,
-        log_file: record.log_path.clone(),
-    })
 }
 
 // ===== list_roles / list_providers =====
@@ -575,6 +651,7 @@ pub async fn list_providers() -> Result<ListProvidersResult, String> {
 pub struct AgenticWardenMcpServer {
     router: Arc<IntelligentRouter>,
     tool_router: ToolRouter<Self>,
+    prompt_router: PromptRouter<Self>,
     // Client capability detection
     client_capabilities: Arc<RwLock<Option<ClientCapabilities>>>,
     // Dynamic tool registry (SSOT for MCP tools)
@@ -626,9 +703,12 @@ impl AgenticWardenMcpServer {
             }
         }
 
+        let prompt_router = Self::prompt_router();
+
         Ok(Self {
             router: Arc::new(router),
             tool_router,
+            prompt_router,
             client_capabilities: Arc::new(RwLock::new(None)),
             tool_registry: registry,
             peer: Arc::new(RwLock::new(None)),
@@ -791,42 +871,21 @@ impl AgenticWardenMcpServer {
     )]
     pub async fn list_tasks_tool(
         &self,
-        _params: Parameters<()>,
-    ) -> Result<Json<Vec<TaskInfo>>, String> {
-        list_tasks().await.map(Json)
+        _params: Parameters<EmptyParams>,
+    ) -> Result<String, String> {
+        let tasks = list_tasks().await?;
+        Ok(table_format::format_tasks_table(&tasks))
     }
 
     #[tool(
-        name = "stop_task",
-        description = "Stop a running MCP task by task_id. Sends SIGTERM, waits 5s, then SIGKILL if needed."
+        name = "manage_task",
+        description = "Manage a tracked task by task_id. Actions: 'status' (get task state), 'logs' (get log content, optional tail_lines), 'stop' (terminate the task)."
     )]
-    pub async fn stop_task_tool(
+    pub async fn manage_task_tool(
         &self,
-        params: Parameters<StopTaskParams>,
-    ) -> Result<Json<StopTaskResult>, String> {
-        stop_task(params.0).await.map(Json)
-    }
-
-    #[tool(
-        name = "get_task_logs",
-        description = "Retrieve log content of a tracked task by task_id. Supports tail mode to get last N lines."
-    )]
-    pub async fn get_task_logs_tool(
-        &self,
-        params: Parameters<GetTaskLogsParams>,
-    ) -> Result<Json<TaskLogsResult>, String> {
-        get_task_logs(params.0).await.map(Json)
-    }
-
-    #[tool(
-        name = "get_task_status",
-        description = "Get detailed status of a task by task_id. Returns status, process_alive, exit_code, result, worktree_info, timing info."
-    )]
-    pub async fn get_task_status_tool(
-        &self,
-        params: Parameters<GetTaskStatusParams>,
-    ) -> Result<Json<TaskStatusResult>, String> {
-        get_task_status(params.0).await.map(Json)
+        params: Parameters<ManageTaskParams>,
+    ) -> Result<Json<ManageTaskResult>, String> {
+        manage_task(params.0).await.map(Json)
     }
 
     #[tool(
@@ -835,9 +894,10 @@ impl AgenticWardenMcpServer {
     )]
     pub async fn list_roles_tool(
         &self,
-        _params: Parameters<()>,
-    ) -> Result<Json<ListRolesResult>, String> {
-        list_roles().await.map(Json)
+        _params: Parameters<EmptyParams>,
+    ) -> Result<String, String> {
+        let result = list_roles().await?;
+        Ok(table_format::format_roles_table(&result))
     }
 
     #[tool(
@@ -846,9 +906,10 @@ impl AgenticWardenMcpServer {
     )]
     pub async fn list_providers_tool(
         &self,
-        _params: Parameters<()>,
-    ) -> Result<Json<ListProvidersResult>, String> {
-        list_providers().await.map(Json)
+        _params: Parameters<EmptyParams>,
+    ) -> Result<String, String> {
+        let result = list_providers().await?;
+        Ok(table_format::format_providers_table(&result))
     }
 
     pub async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
@@ -856,6 +917,45 @@ impl AgenticWardenMcpServer {
         let transport = (tokio::io::stdin(), tokio::io::stdout());
         self.serve(transport).await?.waiting().await?;
         Ok(())
+    }
+}
+
+#[rmcp::prompt_router]
+impl AgenticWardenMcpServer {
+    #[rmcp::prompt(name = "tasks", description = "List all tracked async tasks with status and timing")]
+    async fn prompt_tasks(&self) -> GetPromptResult {
+        let tasks = list_tasks().await.unwrap_or_default();
+        let table = table_format::format_tasks_table(&tasks);
+        GetPromptResult {
+            description: Some("Active tasks".into()),
+            messages: vec![PromptMessage::new_text(PromptMessageRole::User, table)],
+        }
+    }
+
+    #[rmcp::prompt(name = "roles", description = "List available AI roles (builtin + user-defined)")]
+    async fn prompt_roles(&self) -> GetPromptResult {
+        let result = list_roles().await.unwrap_or_else(|_| ListRolesResult {
+            builtin_roles: vec![],
+            user_roles: vec![],
+        });
+        let table = table_format::format_roles_table(&result);
+        GetPromptResult {
+            description: Some("Available roles".into()),
+            messages: vec![PromptMessage::new_text(PromptMessageRole::User, table)],
+        }
+    }
+
+    #[rmcp::prompt(name = "providers", description = "List configured AI providers with scenarios and compatibility")]
+    async fn prompt_providers(&self) -> GetPromptResult {
+        let result = list_providers().await.unwrap_or_else(|_| ListProvidersResult {
+            default_provider: String::new(),
+            providers: vec![],
+        });
+        let table = table_format::format_providers_table(&result);
+        GetPromptResult {
+            description: Some("Configured providers".into()),
+            messages: vec![PromptMessage::new_text(PromptMessageRole::User, table)],
+        }
     }
 }
 
@@ -872,6 +972,26 @@ impl ServerHandler for AgenticWardenMcpServer {
             tools,
             next_cursor: None,
         })
+    }
+
+    async fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParam>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListPromptsResult, rmcp::ErrorData> {
+        Ok(ListPromptsResult {
+            prompts: self.prompt_router.list_all(),
+            next_cursor: None,
+        })
+    }
+
+    async fn get_prompt(
+        &self,
+        request: GetPromptRequestParam,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<GetPromptResult, rmcp::ErrorData> {
+        let ctx = PromptContext::new(self, request.name, request.arguments, _context);
+        self.prompt_router.get_prompt(ctx).await
     }
 
     async fn call_tool(
@@ -1013,6 +1133,7 @@ impl ServerHandler for AgenticWardenMcpServer {
             capabilities: ServerCapabilities::builder()
                 .enable_tools()
                 .enable_tool_list_changed()
+                .enable_prompts()
                 .build(),
             server_info: Implementation {
                 name: "agentic-warden".to_string(),

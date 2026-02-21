@@ -23,10 +23,8 @@ mod tests {
         let expected_base_tools = vec![
             "intelligent_route",
             "start_task",
-            "stop_task",
+            "manage_task",
             "list_tasks",
-            "get_task_logs",
-            "get_task_status",
             "list_roles",
             "list_providers",
         ];

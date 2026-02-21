@@ -288,6 +288,11 @@ async fn execute_cli_internal<S: TaskStorage>(
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
 
+    // Remove nesting-detection env vars so child CLI processes don't think
+    // they are running inside another session (e.g. Claude Code's CLAUDECODE check).
+    command.env_remove("CLAUDECODE");
+    command.env_remove("CLAUDE_CODE_ENTRYPOINT");
+
     // Set working directory if provided
     if let Some(ref dir) = cwd {
         command.current_dir(dir);
@@ -1166,6 +1171,11 @@ pub async fn start_interactive_cli<S: TaskStorage>(
     command.stdin(Stdio::inherit());
     command.stdout(Stdio::inherit());
     command.stderr(Stdio::inherit());
+
+    // Remove nesting-detection env vars so child CLI processes don't think
+    // they are running inside another session (e.g. Claude Code's CLAUDECODE check).
+    command.env_remove("CLAUDECODE");
+    command.env_remove("CLAUDE_CODE_ENTRYPOINT");
 
     // Set working directory if provided
     if let Some(ref dir) = cwd {
