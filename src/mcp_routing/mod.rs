@@ -110,6 +110,8 @@ impl IntelligentRouter {
             output_schema: None,
             icons: None,
             annotations: None,
+            execution: None,
+            meta: None,
         }];
 
         // Create dynamic registry with max 5 dynamic tools (REQ-013: FIFO eviction)
@@ -124,41 +126,50 @@ impl IntelligentRouter {
         ));
         let _cleanup_task = dynamic_registry.start_cleanup_task();
 
-        let code_generator = codegen::CodeGeneratorFactory::from_env(
-            decision_endpoint.clone(),
-            decision_model.clone(),
-        );
+        // Check if external LLM API is available for orchestration
+        let has_external_api = std::env::var("OPENAI_TOKEN").is_ok()
+            || std::env::var("OPENAI_ENDPOINT")
+                .ok()
+                .map(|v| v != "http://localhost:11434")
+                .unwrap_or(false);
 
-        let (decision_engine, js_orchestrator) = match code_generator {
-            Ok(generator) => {
-                // Create decision engine for routing (separate from code generation)
-                // Timeout: 120 seconds to handle slow LLM responses
-                let decision_engine = Arc::new(DecisionEngine::new(
-                    &decision_endpoint,
-                    &decision_model, // BUG FIX: Use env var instead of hardcoded model
-                    120,
-                )?);
-
-                let orchestrator = Some(Arc::new(
-                    js_orchestrator::WorkflowOrchestrator::with_planner(generator),
-                ));
-
-                (decision_engine, orchestrator)
+        let (decision_engine, js_orchestrator) = if has_external_api {
+            // External API available: try to create js_orchestrator
+            match codegen::CodeGeneratorFactory::from_env(
+                decision_endpoint.clone(),
+                decision_model.clone(),
+            ) {
+                Ok(generator) => {
+                    let decision_engine = Arc::new(DecisionEngine::new(
+                        &decision_endpoint,
+                        &decision_model,
+                        120,
+                    )?);
+                    let orchestrator = Some(Arc::new(
+                        js_orchestrator::WorkflowOrchestrator::with_planner(generator),
+                    ));
+                    (decision_engine, orchestrator)
+                }
+                Err(e) => {
+                    eprintln!("⚠️  Code generator initialization failed: {}", e);
+                    eprintln!("🔍 Falling back to vector-only mode");
+                    let decision_engine = Arc::new(DecisionEngine::new(
+                        &decision_endpoint,
+                        &decision_model,
+                        120,
+                    )?);
+                    (decision_engine, None)
+                }
             }
-            Err(e) => {
-                eprintln!("⚠️  Code generator initialization failed: {}", e);
-                eprintln!("🔍 Falling back to vector-only mode");
-
-                // Create fallback decision engine
-                // Timeout: 120 seconds to handle slow LLM responses
-                let decision_engine = Arc::new(DecisionEngine::new(
-                    &decision_endpoint,
-                    &decision_model, // BUG FIX: Use env var instead of hardcoded model
-                    120,
-                )?);
-
-                (decision_engine, None)
-            }
+        } else {
+            // No external API: skip js_orchestrator, use vector + single-step LLM decision
+            eprintln!("🔍 No external LLM API detected (set OPENAI_TOKEN or OPENAI_ENDPOINT to enable orchestration)");
+            let decision_engine = Arc::new(DecisionEngine::new(
+                &decision_endpoint,
+                &decision_model,
+                120,
+            )?);
+            (decision_engine, None)
         };
 
         let mut index = MemRoutingIndex::new(384)?; // all-MiniLM-L6-v2 dimension
@@ -205,6 +216,11 @@ impl IntelligentRouter {
         self.dynamic_registry.clone()
     }
 
+    /// Get read access to the downstream tool registry.
+    pub fn tool_registry(&self) -> &RwLock<HashMap<String, Tool>> {
+        &self.tool_registry
+    }
+
     pub async fn intelligent_route(
         &self,
         request: IntelligentRouteRequest,
@@ -237,13 +253,36 @@ impl IntelligentRouter {
             return self.vector_mode(&request, &embed).await;
         }
 
-        // Dynamic mode: try LLM orchestration first, fall back to vector search
+        // Dynamic mode: fast-path via vector search when top match is high-confidence,
+        // otherwise try full LLM orchestration (which can take minutes).
         match self.js_orchestrator.as_ref() {
             None => {
                 eprintln!("🔍 LLM not configured, using vector search mode");
                 self.vector_mode(&request, &embed).await
             }
             Some(orchestrator) => {
+                // Fast-path: if vector search yields a high-confidence single-tool match,
+                // skip the heavy LLM orchestration pipeline (plan + codegen + schema fix).
+                let fast_threshold = 0.75_f32;
+                let top_score = {
+                    let index = self.index.lock();
+                    index
+                        .search_tools(&embed, 1)
+                        .ok()
+                        .and_then(|scores| scores.into_iter().next())
+                        .map(|st| st.score)
+                };
+
+                if let Some(score) = top_score {
+                    if score >= fast_threshold {
+                        eprintln!(
+                            "⚡ High-confidence vector match ({:.2}), using fast vector_mode (skipping LLM orchestration)",
+                            score
+                        );
+                        return self.vector_mode(&request, &embed).await;
+                    }
+                }
+
                 eprintln!("🤖 Trying LLM orchestration mode...");
                 match self
                     .try_orchestrate(orchestrator.as_ref(), &request, &embed)
@@ -451,6 +490,8 @@ impl IntelligentRouter {
                     output_schema: None,
                     icons: None,
                     annotations: None,
+                    execution: None,
+                    meta: None,
                 },
                 None => {
                     // Fallback: create tool with schema from plan
@@ -466,6 +507,8 @@ impl IntelligentRouter {
                         output_schema: None,
                         icons: None,
                         annotations: None,
+                        execution: None,
+                        meta: None,
                     }
                 }
             };

@@ -6,7 +6,7 @@ repository = "https://github.com/putao520/agentic-warden"
 readme = "README.md"
 keywords = ["ai", "cli", "llm", "claude", "gemini"]
 categories = ["command-line-utilities", "development-tools"]
-version = "0.5.55"
+version = "0.5.56"
 edition = "2021"
 exclude = [
     "bin/*",
@@ -124,7 +124,7 @@ tempfile = "3.0"
 
 # MCP Server support
 env_logger = "0.11"
-rmcp = { version = "0.8", features = ["client", "server", "transport-io", "transport-child-process", "macros"] }
+rmcp = { version = "0.16", features = ["client", "server", "transport-io", "transport-child-process", "macros"] }
 schemars = { version = "1.1", features = ["derive"] }
 
 # Memory integration dependencies
@@ -187,7 +187,7 @@ criterion = "0.5"  # For performance testing
 proptest = "1.0"  # For property-based testing
 pretty_assertions = "1.4"  # For better test output
 test-case = "3.3"  # For parameterized tests
-serial_test = "3.0"  # For serial test execution
+serial_test = { version = "3.0", features = ["file_locks"] }  # For serial test execution
 assert_cmd = "2.0"  # For CLI testing
 predicates = "3.1"  # For command output assertions
 mockito = "1.2"

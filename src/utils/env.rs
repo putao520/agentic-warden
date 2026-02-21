@@ -8,12 +8,13 @@
 ///
 /// # Examples
 /// ```
-/// // Linux/macOS
-/// assert_eq!(expand_env_var("${HOME}"), "/home/user");
-/// assert_eq!(expand_env_var("${UNDEFINED_VAR}"), "${UNDEFINED_VAR}");
+/// use aiw::utils::env::expand_env_var;
 ///
-/// // Windows
-/// // Expands case-insensitively
+/// // Undefined variables are returned as-is
+/// assert_eq!(expand_env_var("${UNDEFINED_VAR_12345}"), "${UNDEFINED_VAR_12345}");
+///
+/// // Non-placeholder strings are returned as-is
+/// assert_eq!(expand_env_var("plain_text"), "plain_text");
 /// ```
 pub fn expand_env_var(value: &str) -> String {
     if !value.starts_with("${") || !value.ends_with('}') {
