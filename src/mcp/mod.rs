@@ -856,7 +856,7 @@ impl AgenticWardenMcpServer {
 
     #[tool(
         name = "start_task",
-        description = "Launch an AI CLI task in background. Returns a UUID task_id for tracking. Options: role (inject prompt), provider (select API provider), cwd (working directory), cli_args (pass-through CLI arguments), worktree (git worktree isolation)."
+        description = "Launch an AI CLI task with the given task prompt in background. Returns a UUID task_id for tracking. Required: task (task description/prompt for the AI), ai_type (which AI CLI: codex/claude/gemini). Optional: provider (select API provider), role (inject prompt from ~/.aiw/role/), cwd (working directory), cli_args (pass-through CLI arguments), worktree (git worktree isolation, default: false)."
     )]
     pub async fn start_task_tool(
         &self,
@@ -879,7 +879,7 @@ impl AgenticWardenMcpServer {
 
     #[tool(
         name = "manage_task",
-        description = "Manage a tracked task by task_id. Actions: 'status' (get task state), 'logs' (get log content, optional tail_lines), 'stop' (terminate the task)."
+        description = "Manage a tracked task. Required: task_id (UUID from start_task), action (status/logs/stop). Optional: tail_lines (only for 'logs' action, limit output lines)."
     )]
     pub async fn manage_task_tool(
         &self,
