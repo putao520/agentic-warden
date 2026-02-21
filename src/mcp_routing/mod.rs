@@ -26,7 +26,7 @@ use self::{
     pool::DiscoveredTool,
 };
 use anyhow::{anyhow, Result};
-use gllm::Client;
+use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use memvdb::normalize;
 use parking_lot::Mutex;
 use rmcp::model::Tool;
@@ -37,7 +37,7 @@ use tokio::sync::RwLock;
 const METHOD_VECTOR_PREFIX: &str = "method";
 
 pub struct IntelligentRouter {
-    embedder: Arc<Mutex<gllm::Client>>,
+    embedder: Arc<Mutex<TextEmbedding>>,
     index: Mutex<MemRoutingIndex>,
     decision_engine: Arc<DecisionEngine>,
     connection_pool: Arc<McpConnectionPool>,
@@ -51,18 +51,13 @@ impl IntelligentRouter {
         let config_manager = McpConfigManager::load()?;
         let config_arc = Arc::new(config_manager.config().clone());
 
-        // Initialize embedder with all-MiniLM-L6-v2 (multilingual, out-of-the-box)
-        // Force CPU mode for MUSL compatibility and performance
+        // Initialize embedder with all-MiniLM-L6-v2 via fastembed (ONNX Runtime)
         let embedder = Arc::new(Mutex::new(
-            gllm::Client::with_config("all-MiniLM-L6-v2",
-                gllm::ClientConfig {
-                    device: gllm::Device::Cpu,
-                    models_dir: dirs::home_dir()
-                        .ok_or_else(|| anyhow!("Failed to get home directory for models"))?
-                        .join(".gllm/models"),
-                }
+            TextEmbedding::try_new(
+                InitOptions::new(EmbeddingModel::AllMiniLML6V2)
+                    .with_show_download_progress(true)
             )
-            .map_err(|e| anyhow!("Failed to initialize gllm client: {}", e))?
+            .map_err(|e| anyhow!("Failed to initialize fastembed: {}", e))?
         ));
 
         // Initialize code generator using factory pattern
@@ -186,7 +181,7 @@ impl IntelligentRouter {
 
     /// Build a router from explicit dependencies (used for deterministic testing).
     pub fn new_with_components(
-        embedder: Arc<Mutex<Client>>,
+        embedder: Arc<Mutex<TextEmbedding>>,
         index: MemRoutingIndex,
         decision_engine: Arc<DecisionEngine>,
         connection_pool: Arc<McpConnectionPool>,
@@ -229,14 +224,12 @@ impl IntelligentRouter {
 
         let embed = self.embedder
             .lock()
-            .embeddings(&[request.user_request.clone()])
-            .generate()
+            .embed(vec![request.user_request.clone()], None)
             .map_err(|e| anyhow!("Embedding generation failed: {}", e))?
-            .embeddings
             .into_iter()
             .next()
             .ok_or_else(|| anyhow!("No embedding generated"))?;
-        let embed = normalize(&embed.embedding);
+        let embed = normalize(&embed);
 
         // Query mode: skip LLM orchestration, use vector search only (no tool registration)
         if matches!(request.execution_mode, models::ExecutionMode::Query) {
@@ -300,40 +293,63 @@ impl IntelligentRouter {
         }
 
         let candidate_infos = build_candidates(&tool_scores, &method_scores);
-        if request.session_id.is_some() {}
 
-        let decision = self
+        // Try LLM decision first, fall back to pure vector top-1 if LLM unavailable
+        let (server, tool, arguments, rationale, confidence) = match self
             .decision_engine
             .decide(DecisionInput {
                 user_request: request.user_request.clone(),
                 candidates: candidate_infos.clone(),
             })
-            .await?;
+            .await
+        {
+            Ok(decision) => {
+                eprintln!("✅ Vector mode: LLM decision succeeded");
+                (
+                    decision.server,
+                    decision.tool,
+                    decision.arguments,
+                    decision.rationale,
+                    decision.confidence,
+                )
+            }
+            Err(e) => {
+                eprintln!("⚠️  Vector mode: LLM unavailable ({}), using top vector match", e);
+                let top = &candidate_infos[0];
+                (
+                    top.server.clone(),
+                    top.tool.clone(),
+                    Value::Object(Default::default()),
+                    "Best vector match (LLM unavailable)".to_string(),
+                    0.6, // reasonable default confidence for top vector match
+                )
+            }
+        };
 
         let execute_message = match request.execution_mode {
             models::ExecutionMode::Dynamic => {
                 format!(
                     "Selected tool: {}::{} (will be dynamically registered)",
-                    decision.server, decision.tool
+                    server, tool
                 )
             }
             models::ExecutionMode::Query => {
                 format!(
                     "Suggested tool: {}::{} (review and call execute_tool)",
-                    decision.server, decision.tool
+                    server, tool
                 )
             }
         };
 
         Ok(IntelligentRouteResponse {
             success: true,
-            confidence: decision.confidence,
+            confidence,
             message: execute_message,
             selected_tool: Some(SelectedRoute {
-                mcp_server: decision.server.clone(),
-                tool_name: decision.tool.clone(),
-                arguments: decision.arguments,
-                rationale: decision.rationale.clone(),
+                mcp_server: server,
+                tool_name: tool,
+                arguments,
+                rationale,
             }),
             result: None,
             alternatives: candidate_infos
@@ -585,16 +601,16 @@ struct PreparedEmbeddings {
 }
 
 fn build_embeddings(
-    embedder: &Arc<Mutex<Client>>,
+    embedder: &Arc<Mutex<TextEmbedding>>,
     tools: &[DiscoveredTool],
     _config: &config::McpConfig,
 ) -> Result<PreparedEmbeddings> {
-    let mut tool_embeddings = Vec::new();
-    let mut method_embeddings = Vec::new();
+    // Collect all docs for batch embedding (much faster than one-by-one)
+    let mut docs = Vec::with_capacity(tools.len());
+    let mut metas: Vec<(String, String, String, HashMap<String, String>)> = Vec::with_capacity(tools.len());
 
     for tool in tools {
         let category = "uncategorized".to_string();
-
         let description = tool
             .definition
             .description
@@ -605,35 +621,38 @@ fn build_embeddings(
         let schema_string = schema_value.to_string();
 
         let doc = format!(
-            "{server}::{tool}\nCategory: {category}\nDescription: {description}\nInput Schema: {schema}",
-            server = tool.server,
+            "{tool}\nDescription: {description}",
             tool = tool.definition.name,
-            category = category,
             description = description,
-            schema = schema_string
         );
-        let vector = embedder
-            .lock()
-            .embeddings(&[doc])
-            .generate()
-            .map_err(|e| anyhow!("Embedding generation failed: {}", e))?
-            .embeddings
-            .into_iter()
-            .next()
-            .ok_or_else(|| anyhow!("No embedding generated"))?;
-        let vector = normalize(&vector.embedding);
+        docs.push(doc);
+
         let mut metadata = HashMap::new();
         metadata.insert("server".into(), tool.server.clone());
         metadata.insert("tool".into(), tool.definition.name.to_string());
         metadata.insert("description".into(), description.clone());
         metadata.insert("category".into(), category);
-        metadata.insert("schema".into(), schema_string.clone());
+        metadata.insert("schema".into(), schema_string);
+        metas.push((tool.server.clone(), tool.definition.name.to_string(), description, metadata));
+    }
+
+    // Batch embed all documents at once
+    let vectors = embedder
+        .lock()
+        .embed(docs, None)
+        .map_err(|e| anyhow!("Batch embedding failed: {}", e))?;
+
+    let mut tool_embeddings = Vec::with_capacity(vectors.len());
+    let mut method_embeddings = Vec::with_capacity(vectors.len());
+
+    for (vector, (server, tool_name, description, metadata)) in vectors.into_iter().zip(metas) {
+        let vector = normalize(&vector);
 
         tool_embeddings.push(ToolEmbedding {
             record: ToolVectorRecord {
-                id: format!("{}::{}", tool.server, tool.definition.name),
-                server: tool.server.clone(),
-                tool_name: tool.definition.name.to_string(),
+                id: format!("{}::{}", server, tool_name),
+                server: server.clone(),
+                tool_name: tool_name.clone(),
                 description: description.clone(),
                 metadata: metadata.clone(),
             },
@@ -642,13 +661,10 @@ fn build_embeddings(
 
         method_embeddings.push(MethodEmbedding {
             record: crate::mcp_routing::models::MethodVectorRecord {
-                id: format!(
-                    "{METHOD_VECTOR_PREFIX}::{}::{}",
-                    tool.server, tool.definition.name
-                ),
-                server: tool.server.clone(),
-                tool_name: tool.definition.name.to_string(),
-                description: description,
+                id: format!("{METHOD_VECTOR_PREFIX}::{server}::{tool_name}"),
+                server,
+                tool_name,
+                description,
                 metadata,
             },
             vector,

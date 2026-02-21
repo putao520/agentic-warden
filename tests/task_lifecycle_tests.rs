@@ -124,10 +124,13 @@ async fn start_task_launches_and_returns_pid() {
         provider: None,
         role: None,
         cwd: None,
+        cli_args: None,
+        worktree: None,
     };
 
     let launch = start_task(params).await.expect("task should launch");
     assert!(launch.pid > 0, "pid should be positive");
+    assert!(!launch.task_id.is_empty(), "task_id should be populated");
     assert_eq!(launch.status, TaskStatus::Running);
     assert!(!launch.log_file.is_empty(), "log file should be populated");
     assert!(
@@ -154,6 +157,8 @@ async fn list_tasks_returns_running_tasks() {
         provider: None,
         role: None,
         cwd: None,
+        cli_args: None,
+        worktree: None,
     };
     let launch = start_task(params).await.expect("task should launch");
 
@@ -179,10 +184,12 @@ async fn stop_task_terminates_process() {
         provider: None,
         role: None,
         cwd: None,
+        cli_args: None,
+        worktree: None,
     };
     let launch = start_task(params).await.expect("task should launch");
 
-    let result = stop_task(StopTaskParams { pid: launch.pid })
+    let result = stop_task(StopTaskParams { task_id: launch.task_id })
         .await
         .expect("stop_task should succeed");
     assert!(result.success, "stop_task should report success");
@@ -215,6 +222,8 @@ async fn get_task_logs_supports_full_and_tail_modes() {
         provider: None,
         role: None,
         cwd: None,
+        cli_args: None,
+        worktree: None,
     };
     let launch = start_task(params).await.expect("task should launch");
 
@@ -222,7 +231,7 @@ async fn get_task_logs_supports_full_and_tail_modes() {
     sleep(Duration::from_millis(400)).await;
 
     let full = get_task_logs(GetTaskLogsParams {
-        pid: launch.pid,
+        task_id: launch.task_id.clone(),
         tail_lines: None,
     })
     .await
@@ -234,7 +243,7 @@ async fn get_task_logs_supports_full_and_tail_modes() {
     );
 
     let tail = get_task_logs(GetTaskLogsParams {
-        pid: launch.pid,
+        task_id: launch.task_id.clone(),
         tail_lines: Some(1),
     })
     .await
@@ -263,13 +272,15 @@ async fn start_task_injects_role_prompt() {
         provider: None,
         role: Some("test-role".to_string()),
         cwd: None,
+        cli_args: None,
+        worktree: None,
     };
 
     let launch = start_task(params).await.expect("task should launch");
     sleep(Duration::from_millis(300)).await;
 
     let logs = get_task_logs(GetTaskLogsParams {
-        pid: launch.pid,
+        task_id: launch.task_id.clone(),
         tail_lines: None,
     })
     .await

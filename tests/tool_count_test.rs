@@ -25,9 +25,10 @@ mod tests {
             "start_task",
             "stop_task",
             "list_tasks",
-            "start_concurrent_tasks",
-            "get_task_command",
             "get_task_logs",
+            "get_task_status",
+            "list_roles",
+            "list_providers",
         ];
 
         // Find base tools (static ones we know about)

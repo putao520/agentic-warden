@@ -4,7 +4,7 @@ use crate::{
     core::shared_map::open_or_create,
     error::RegistryError,
     logging::warn,
-    task_record::{TaskRecord, TaskStatus},
+    task_record::{TaskRecord, TaskStatus, WorktreeInfo},
 };
 use chrono::{DateTime, Duration, Utc};
 use dashmap::DashMap;
@@ -78,13 +78,46 @@ pub trait TaskStorage: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct InProcessStorage {
     tasks: Arc<DashMap<u32, TaskRecord>>,
+    /// Reverse index: task_id (UUID) → PID
+    task_id_index: Arc<DashMap<String, u32>>,
 }
 
 impl InProcessStorage {
     pub fn new() -> Self {
         Self {
             tasks: Arc::new(DashMap::new()),
+            task_id_index: Arc::new(DashMap::new()),
         }
+    }
+
+    /// Look up PID by task_id.
+    pub fn get_pid_by_task_id(&self, task_id: &str) -> Option<u32> {
+        self.task_id_index.get(task_id).map(|r| *r.value())
+    }
+
+    /// Look up (PID, TaskRecord) by task_id.
+    pub fn get_by_task_id(&self, task_id: &str) -> Option<(u32, TaskRecord)> {
+        let pid = self.get_pid_by_task_id(task_id)?;
+        self.tasks.get(&pid).map(|r| (pid, r.value().clone()))
+    }
+
+    /// Non-consuming read of a single task by PID.
+    pub fn get_task(&self, pid: u32) -> Option<TaskRecord> {
+        self.tasks.get(&pid).map(|r| r.value().clone())
+    }
+
+    /// Bind a task_id (and optional worktree info) to an existing PID entry.
+    pub fn update_task_metadata(
+        &self,
+        pid: u32,
+        task_id: String,
+        worktree: Option<WorktreeInfo>,
+    ) {
+        if let Some(mut record) = self.tasks.get_mut(&pid) {
+            record.task_id = Some(task_id.clone());
+            record.worktree_info = worktree;
+        }
+        self.task_id_index.insert(task_id, pid);
     }
 }
 
@@ -96,6 +129,9 @@ impl Default for InProcessStorage {
 
 impl TaskStorage for InProcessStorage {
     fn register(&self, pid: u32, record: &TaskRecord) -> Result<(), RegistryError> {
+        if let Some(ref task_id) = record.task_id {
+            self.task_id_index.insert(task_id.clone(), pid);
+        }
         self.tasks.insert(pid, record.clone());
         Ok(())
     }

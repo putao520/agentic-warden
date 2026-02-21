@@ -520,19 +520,9 @@ async fn handle_mcp_action(action: McpAction) -> Result<ExitCode, String> {
 }
 
 async fn handle_mcp_serve(transport: String, log_level: String) -> Result<ExitCode, String> {
-    // 初始化日志
-    let log_level_filter = match log_level.to_lowercase().as_str() {
-        "debug" => tracing::Level::DEBUG,
-        "info" => tracing::Level::INFO,
-        "warn" => tracing::Level::WARN,
-        "error" => tracing::Level::ERROR,
-        _ => tracing::Level::INFO,
-    };
-
-    tracing_subscriber::fmt()
-        .with_max_level(log_level_filter)
-        .with_target(false)
-        .init();
+    // NOTE: global tracing subscriber is already set in main(), so we just
+    // log a debug message here instead of re-initialising.
+    tracing::debug!("MCP serve starting with log_level={}", log_level);
 
     // Note: Claude Code hooks were removed in v6.0.0 (CC session history deleted)
     // No hooks installation/uninstallation needed

@@ -314,10 +314,8 @@ fn is_lock_stale(path: &Path) -> Result<bool> {
 
 impl McpConfig {
     fn validate(&self) -> Result<()> {
-        if self.mcp_servers.is_empty() {
-            return Err(anyhow!("No MCP servers configured in mcp.json"));
-        }
-
+        // Empty mcp_servers is valid — AIW itself can serve as an MCP server
+        // without any external MCP backends configured.
         for (name, server) in &self.mcp_servers {
             if server.command.trim().is_empty() {
                 return Err(anyhow!("Server '{}' is missing a command", name));

@@ -125,9 +125,20 @@ impl McpConnectionPool {
                 continue;
             }
 
-            let handle = self.ensure_handle(name.clone(), server.clone()).await?;
-            let mut tools = handle.list_tools().await?;
-            all.append(&mut tools);
+            match self.ensure_handle(name.clone(), server.clone()).await {
+                Ok(handle) => match handle.list_tools().await {
+                    Ok(mut tools) => {
+                        eprintln!("✅ Connected to MCP server '{}': {} tools", name, tools.len());
+                        all.append(&mut tools);
+                    }
+                    Err(e) => {
+                        eprintln!("⚠️  Failed to list tools from '{}': {}", name, e);
+                    }
+                },
+                Err(e) => {
+                    eprintln!("⚠️  Failed to connect to MCP server '{}': {}", name, e);
+                }
+            }
         }
         Ok(all)
     }

@@ -3,6 +3,17 @@ use crate::error::AgenticResult;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+/// Worktree information for isolated task execution.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct WorktreeInfo {
+    /// Worktree directory path.
+    pub path: String,
+    /// Branch name at worktree creation time.
+    pub branch: String,
+    /// Commit hash at worktree creation time.
+    pub commit: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
@@ -39,6 +50,12 @@ pub struct TaskRecord {
     pub process_tree: Option<ProcessTreeInfo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai_cli_process: Option<AiCliProcessInfo>,
+    /// MCP-layer UUID identifier for external consumers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+    /// Worktree isolation info (if task was launched with worktree=true).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_info: Option<WorktreeInfo>,
 }
 
 impl TaskRecord {
@@ -63,6 +80,8 @@ impl TaskRecord {
             process_tree_depth: 0,
             process_tree: None,
             ai_cli_process: None,
+            task_id: None,
+            worktree_info: None,
         }
     }
 

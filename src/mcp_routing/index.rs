@@ -79,8 +79,15 @@ impl MemRoutingIndex {
             .db
             .get_collection(TOOLS_COLLECTION)
             .ok_or_else(|| anyhow!("Tool collection not initialised"))?;
-        Ok(tools
-            .get_similarity(&adapt_query(vector), limit)
+        let results = tools.get_similarity(&adapt_query(vector), limit);
+        for r in &results {
+            let tool_name = r.embedding.metadata.as_ref()
+                .and_then(|m| m.get("tool"))
+                .map(|s| s.as_str())
+                .unwrap_or("?");
+            eprintln!("   📊 score={:.4} tool={}", r.score, tool_name);
+        }
+        Ok(results
             .into_iter()
             .filter_map(scored_tool_from_result)
             .collect())
@@ -156,5 +163,5 @@ fn scored_method_from_result(result: SimilarityResult) -> Option<ScoredMethod> {
 }
 
 fn adapt_query(vector: &[f32]) -> Vec<f32> {
-    vector.iter().map(|v| -v).collect()
+    vector.to_vec()
 }

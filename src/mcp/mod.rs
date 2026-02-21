@@ -4,7 +4,7 @@ pub use js_executor::{JsExecutionReport, JsToolExecutor};
 
 use crate::platform;
 use crate::registry_factory::RegistryFactory;
-use crate::task_record::TaskStatus;
+use crate::task_record::{TaskStatus, WorktreeInfo};
 use anyhow::Error;
 use chrono::{DateTime, Utc};
 
@@ -14,7 +14,7 @@ use crate::mcp_routing::{
     models::{IntelligentRouteRequest, IntelligentRouteResponse},
     IntelligentRouter,
 };
-use crate::roles::{builtin::get_builtin_role, RoleManager, Role};
+use crate::roles::{builtin::get_builtin_role, builtin::list_builtin_roles, RoleManager, Role, RoleInfo};
 use capability_detector::ClientCapabilities;
 use rmcp::{
     handler::server::tool::{ToolCallContext, ToolRouter},
@@ -33,63 +33,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{Duration, Instant};
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct TaskSpec {
-    /// AI CLI type (claude, codex, or gemini).
-    pub ai_type: String,
-    /// Task description/prompt for the AI.
-    pub task: String,
-    /// Optional provider name (e.g., "openrouter", "anthropic").
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub provider: Option<String>,
-    /// Optional working directory for the AI CLI process.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cwd: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct StartConcurrentTasksParams {
-    /// Array of tasks to launch concurrently.
-    pub tasks: Vec<TaskSpec>,
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct TaskLaunchResult {
-    /// Process ID of the launched task.
-    pub pid: u32,
-    /// AI CLI type used.
-    pub ai_type: String,
-    /// Task description.
-    pub task: String,
-    /// Provider used (if any).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub provider: Option<String>,
-    /// Log file path.
-    pub log_file: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct GetTaskCommandParams {
-    /// AI CLI type (claude, codex, or gemini).
-    pub ai_type: String,
-    /// Task description/prompt for the AI.
-    pub task: String,
-    /// Optional provider name.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub provider: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct TaskCommandResult {
-    /// Full command string to execute.
-    pub command: String,
-    /// AI CLI type.
-    pub ai_type: String,
-    /// Optional provider.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub provider: Option<String>,
-}
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
 pub struct StartTaskParams {
@@ -113,10 +56,18 @@ pub struct StartTaskParams {
     /// The directory must exist and be a valid directory.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
+    /// Extra CLI arguments to pass through to the underlying AI CLI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cli_args: Option<Vec<String>>,
+    /// Whether to create a git worktree for isolated execution (default: false).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
 pub struct TaskLaunchInfo {
+    /// UUID task identifier for external consumers.
+    pub task_id: String,
     /// Process ID of the launched task.
     pub pid: u32,
     /// Path to the task log file.
@@ -132,10 +83,16 @@ pub struct TaskLaunchInfo {
     /// Provider used (if any).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
+    /// Worktree isolation info (if worktree=true was requested).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worktree_info: Option<WorktreeInfo>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
 pub struct TaskInfo {
+    /// UUID task identifier.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
     /// Process ID.
     pub pid: u32,
     /// Log file path.
@@ -158,12 +115,18 @@ pub struct TaskInfo {
     pub exit_code: Option<i32>,
     /// Log identifier stored in registry.
     pub log_id: String,
+    /// Task result string (if completed).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<String>,
+    /// Worktree isolation info.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worktree_info: Option<WorktreeInfo>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
 pub struct StopTaskParams {
-    /// PID of the task to stop.
-    pub pid: u32,
+    /// UUID task identifier of the task to stop.
+    pub task_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
@@ -176,8 +139,8 @@ pub struct StopTaskResult {
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
 pub struct GetTaskLogsParams {
-    /// Target PID whose logs should be retrieved.
-    pub pid: u32,
+    /// UUID task identifier whose logs should be retrieved.
+    pub task_id: String,
     /// Optional number of lines to tail from the end of the log.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tail_lines: Option<usize>,
@@ -185,12 +148,48 @@ pub struct GetTaskLogsParams {
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
 pub struct TaskLogsResult {
+    /// UUID task identifier.
+    pub task_id: String,
     /// PID associated with the log file.
     pub pid: u32,
     /// Log file path.
     pub log_file: String,
     /// Content of the log (entire file or tail).
     pub content: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
+pub struct GetTaskStatusParams {
+    /// UUID task identifier to query.
+    pub task_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
+pub struct TaskStatusResult {
+    /// UUID task identifier.
+    pub task_id: String,
+    /// Process ID.
+    pub pid: u32,
+    /// Registry task status.
+    pub status: TaskStatus,
+    /// Whether the process is currently alive.
+    pub process_alive: bool,
+    /// Exit code if available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    /// Task result string (if completed).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<String>,
+    /// Worktree isolation info.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worktree_info: Option<WorktreeInfo>,
+    /// Task start time.
+    pub started_at: DateTime<Utc>,
+    /// Optional completion time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<DateTime<Utc>>,
+    /// Log file path.
+    pub log_file: String,
 }
 
 /// Detect user's preferred language based on system locale
@@ -257,6 +256,7 @@ pub async fn start_task(params: StartTaskParams) -> Result<TaskLaunchInfo, Strin
     use crate::cli_type::parse_cli_type;
     use crate::supervisor;
 
+    let task_id = uuid::Uuid::new_v4().to_string();
     let registry = RegistryFactory::instance().get_mcp_registry();
 
     let mut prompt = params.task.clone();
@@ -301,6 +301,27 @@ pub async fn start_task(params: StartTaskParams) -> Result<TaskLaunchInfo, Strin
         )
     })?;
 
+    // Handle worktree creation if requested
+    let mut cwd = params.cwd.clone();
+    let mut worktree_info: Option<WorktreeInfo> = None;
+    if params.worktree == Some(true) {
+        let work_dir = cwd
+            .as_ref()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
+        crate::worktree::check_git_repository(&work_dir)
+            .map_err(|e| e.to_string())?;
+        let (wt_path, branch, commit) = crate::worktree::create_worktree(&work_dir)
+            .map_err(|e| e.to_string())?;
+        let info = WorktreeInfo {
+            path: wt_path.display().to_string(),
+            branch,
+            commit,
+        };
+        cwd = Some(wt_path.display().to_string());
+        worktree_info = Some(info);
+    }
+
     let existing: HashSet<u32> = registry
         .entries()
         .map_err(|e| e.to_string())?
@@ -308,14 +329,16 @@ pub async fn start_task(params: StartTaskParams) -> Result<TaskLaunchInfo, Strin
         .map(|entry| entry.pid)
         .collect();
 
-    let args = cli_type.build_full_access_args(&prompt);
+    // Build args with cli_args passthrough
+    let cli_args_ref: Vec<String> = params.cli_args.clone().unwrap_or_default();
+    let args = cli_type.build_full_access_args_with_cli(&prompt, &cli_args_ref);
     let os_args: Vec<OsString> = args.into_iter().map(OsString::from).collect();
 
     let spawn_registry = registry.clone();
     let spawn_cli_type = cli_type.clone();
     let spawn_args = os_args.clone();
     let spawn_provider = params.provider.clone();
-    let spawn_cwd = params.cwd.clone().map(std::path::PathBuf::from);
+    let spawn_cwd = cwd.clone().map(PathBuf::from);
 
     tokio::spawn(async move {
         if let Err(err) = supervisor::execute_cli(
@@ -338,7 +361,11 @@ pub async fn start_task(params: StartTaskParams) -> Result<TaskLaunchInfo, Strin
     let new_entry = wait_for_registry_entry(&registry, &existing).await?;
     let entry = new_entry.ok_or_else(|| "Failed to register task in MCP registry".to_string())?;
 
+    // Bind UUID and worktree info to the registry entry
+    registry.update_task_metadata(entry.pid, task_id.clone(), worktree_info.clone());
+
     Ok(TaskLaunchInfo {
+        task_id,
         pid: entry.pid,
         log_file: entry.record.log_path.clone(),
         status: entry.record.status.clone(),
@@ -346,11 +373,13 @@ pub async fn start_task(params: StartTaskParams) -> Result<TaskLaunchInfo, Strin
         ai_type: params.ai_type,
         task: params.task,
         provider: params.provider,
+        worktree_info,
     })
 }
 
 fn registry_entry_to_task_info(entry: crate::storage::RegistryEntry) -> TaskInfo {
     TaskInfo {
+        task_id: entry.record.task_id.clone(),
         pid: entry.pid,
         log_file: entry.record.log_path.clone(),
         status: entry.record.status.clone(),
@@ -360,72 +389,73 @@ fn registry_entry_to_task_info(entry: crate::storage::RegistryEntry) -> TaskInfo
         manager_pid: entry.record.manager_pid,
         exit_code: entry.record.exit_code,
         log_id: entry.record.log_id.clone(),
+        result: entry.record.result.clone(),
+        worktree_info: entry.record.worktree_info.clone(),
     }
+}
+
+/// Resolve a task_id to (pid, TaskRecord). Shared by stop/logs/status handlers.
+fn resolve_task_id(task_id: &str) -> Result<(u32, crate::task_record::TaskRecord), String> {
+    let registry = RegistryFactory::instance().get_mcp_registry();
+    registry
+        .get_by_task_id(task_id)
+        .ok_or_else(|| format!("task_id '{}' not found in MCP registry", task_id))
 }
 
 pub async fn list_tasks() -> Result<Vec<TaskInfo>, String> {
     let registry = RegistryFactory::instance().get_mcp_registry();
     let entries = registry.entries().map_err(|e| e.to_string())?;
 
-    let active_entries: Vec<_> = entries
-        .into_iter()
-        .filter(|entry| platform::process_alive(entry.pid))
-        .collect();
-
-    Ok(active_entries
+    // Include all tasks (running + completed), not just alive processes
+    Ok(entries
         .into_iter()
         .map(registry_entry_to_task_info)
         .collect())
 }
 
 pub async fn stop_task(params: StopTaskParams) -> Result<StopTaskResult, String> {
+    let (pid, _record) = resolve_task_id(&params.task_id)?;
     let registry = RegistryFactory::instance().get_mcp_registry();
-    let entries = registry.entries().map_err(|e| e.to_string())?;
-
-    let target = entries
-        .into_iter()
-        .find(|entry| entry.pid == params.pid)
-        .ok_or_else(|| format!("PID {} not found in MCP registry", params.pid))?;
 
     #[cfg(unix)]
     {
         use nix::sys::signal::{kill, Signal};
         use nix::unistd::Pid;
 
-        kill(Pid::from_raw(params.pid as i32), Signal::SIGTERM).map_err(|e| e.to_string())?;
+        kill(Pid::from_raw(pid as i32), Signal::SIGTERM).map_err(|e| e.to_string())?;
     }
 
     #[cfg(not(unix))]
     {
-        platform::terminate_process(params.pid);
+        platform::terminate_process(pid);
     }
 
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
-        if !platform::process_alive(params.pid) {
+        if !platform::process_alive(pid) {
             break;
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
 
-    if platform::process_alive(params.pid) {
+    if platform::process_alive(pid) {
         #[cfg(unix)]
         {
             use nix::sys::signal::{kill, Signal};
             use nix::unistd::Pid;
 
-            kill(Pid::from_raw(params.pid as i32), Signal::SIGKILL).map_err(|e| e.to_string())?;
+            kill(Pid::from_raw(pid as i32), Signal::SIGKILL).map_err(|e| e.to_string())?;
         }
 
         #[cfg(not(unix))]
         {
-            platform::terminate_process(params.pid);
+            platform::terminate_process(pid);
         }
     }
 
     registry
         .mark_completed(
-            target.pid,
+            pid,
             Some("stopped_by_user".to_string()),
             None,
             Utc::now(),
@@ -434,20 +464,14 @@ pub async fn stop_task(params: StopTaskParams) -> Result<StopTaskResult, String>
 
     Ok(StopTaskResult {
         success: true,
-        message: format!("Task {} stopped", params.pid),
+        message: format!("Task {} (pid {}) stopped", params.task_id, pid),
     })
 }
 
 pub async fn get_task_logs(params: GetTaskLogsParams) -> Result<TaskLogsResult, String> {
-    let registry = RegistryFactory::instance().get_mcp_registry();
-    let entries = registry.entries().map_err(|e| e.to_string())?;
+    let (pid, record) = resolve_task_id(&params.task_id)?;
 
-    let entry = entries
-        .into_iter()
-        .find(|entry| entry.pid == params.pid)
-        .ok_or_else(|| format!("PID {} not found in MCP registry", params.pid))?;
-
-    let log_path = PathBuf::from(entry.record.log_path.clone());
+    let log_path = PathBuf::from(record.log_path.clone());
     let content = if let Some(lines) = params.tail_lines {
         let data = fs::read_to_string(&log_path)
             .map_err(|e| format!("Failed to read log file {}: {}", log_path.display(), e))?;
@@ -460,9 +484,90 @@ pub async fn get_task_logs(params: GetTaskLogsParams) -> Result<TaskLogsResult, 
     };
 
     Ok(TaskLogsResult {
-        pid: entry.pid,
-        log_file: entry.record.log_path,
+        task_id: params.task_id,
+        pid,
+        log_file: record.log_path,
         content,
+    })
+}
+
+pub async fn get_task_status(params: GetTaskStatusParams) -> Result<TaskStatusResult, String> {
+    let (pid, record) = resolve_task_id(&params.task_id)?;
+
+    Ok(TaskStatusResult {
+        task_id: params.task_id,
+        pid,
+        status: record.status.clone(),
+        process_alive: platform::process_alive(pid),
+        exit_code: record.exit_code,
+        result: record.result.clone(),
+        worktree_info: record.worktree_info.clone(),
+        started_at: record.started_at,
+        completed_at: record.completed_at,
+        log_file: record.log_path.clone(),
+    })
+}
+
+// ===== list_roles / list_providers =====
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
+pub struct ListRolesResult {
+    pub builtin_roles: Vec<String>,
+    pub user_roles: Vec<RoleInfo>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
+pub struct ListProvidersResult {
+    pub default_provider: String,
+    pub providers: Vec<ProviderSummary>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
+pub struct ProviderSummary {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scenario: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compatible_with: Option<Vec<String>>,
+}
+
+pub async fn list_roles() -> Result<ListRolesResult, String> {
+    let builtin_roles = list_builtin_roles();
+    let manager = RoleManager::new().map_err(|e| e.to_string())?;
+    let user_roles = manager
+        .list_all_roles()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|r| r.as_info())
+        .collect();
+    Ok(ListRolesResult {
+        builtin_roles,
+        user_roles,
+    })
+}
+
+pub async fn list_providers() -> Result<ListProvidersResult, String> {
+    let manager =
+        crate::provider::manager::ProviderManager::new().map_err(|e| e.to_string())?;
+    let default_name = manager
+        .get_default_provider()
+        .map(|(name, _)| name)
+        .unwrap_or_default();
+    let providers = manager
+        .list_providers()
+        .into_iter()
+        .map(|(name, p)| ProviderSummary {
+            name: name.clone(),
+            scenario: p.scenario.clone(),
+            compatible_with: p
+                .compatible_with
+                .as_ref()
+                .map(|v| v.iter().map(|t| t.to_string()).collect()),
+        })
+        .collect();
+    Ok(ListProvidersResult {
+        default_provider: default_name,
+        providers,
     })
 }
 
@@ -670,133 +775,8 @@ impl AgenticWardenMcpServer {
     }
 
     #[tool(
-        name = "start_concurrent_tasks",
-        description = "Launch multiple AI CLI tasks concurrently. Each task supports: ai_type, task, provider, cwd (working directory). Returns process IDs and log file paths."
-    )]
-    pub async fn start_concurrent_tasks_tool(
-        &self,
-        params: Parameters<StartConcurrentTasksParams>,
-    ) -> Result<Json<Vec<TaskLaunchResult>>, String> {
-        use crate::cli_type::parse_cli_type;
-        use crate::registry_factory::create_mcp_registry;
-        use crate::supervisor;
-        use std::ffi::OsString;
-
-        let registry = create_mcp_registry();
-
-        let mut handles = Vec::new();
-
-        // Launch all tasks concurrently using tokio::spawn
-        for task_spec in params.0.tasks {
-            let registry_clone = registry.clone();
-            let handle = tokio::spawn(async move {
-                // Parse AI CLI type
-                let cli_type = parse_cli_type(&task_spec.ai_type).ok_or_else(|| {
-                    format!(
-                        "Invalid AI type: {}. Must be claude, codex, or gemini",
-                        task_spec.ai_type
-                    )
-                })?;
-
-                // Build command arguments
-                let cli_args = cli_type.build_full_access_args(&task_spec.task);
-                let os_args: Vec<OsString> = cli_args.into_iter().map(|s| s.into()).collect();
-
-                // Convert cwd string to PathBuf
-                let cwd = task_spec.cwd.clone().map(std::path::PathBuf::from);
-
-                // Launch task via supervisor (this will wait for completion in background)
-                let _exit_code = supervisor::execute_cli(
-                    &registry_clone,
-                    &cli_type,
-                    &os_args,
-                    task_spec.provider.clone(),
-                    cwd,
-                )
-                .await
-                .map_err(|e| format!("Failed to launch {} task: {}", task_spec.ai_type, e))?;
-
-                // ⚠️ PLACEHOLDER: PID tracking limitation
-                //
-                // **Issue**: supervisor::execute_cli() doesn't return the actual child process PID.
-                // The function spawns an AI CLI process but only returns a Result<ExitCode>.
-                //
-                // **Why**: The supervisor design prioritizes async/await ergonomics and uses
-                // tokio::process::Command, which doesn't expose the PID before spawning.
-                //
-                // **Current workaround**:
-                // - Return pid: 0 as a placeholder
-                // - Actual PIDs are tracked internally by the unified registry via shared memory
-                // - Clients can query task status via the registry, not via this PID
-                //
-                // **Future fix**: Refactor supervisor::execute_cli() to return a struct containing
-                // both the PID and a JoinHandle to the process future.
-                Ok::<TaskLaunchResult, String>(TaskLaunchResult {
-                    pid: 0, // Placeholder - real PID tracked in shared memory registry
-                    ai_type: task_spec.ai_type.clone(),
-                    task: task_spec.task.clone(),
-                    provider: task_spec.provider.clone(),
-                    log_file: format!("/tmp/mcp-task-{}.log", task_spec.ai_type),
-                })
-            });
-            handles.push(handle);
-        }
-
-        // Wait for all tasks to start (but not complete)
-        // Note: This is still blocking on task spawn, but tasks run in background
-        let mut results = Vec::new();
-        for handle in handles {
-            let result = handle
-                .await
-                .map_err(|e| format!("Task spawn failed: {}", e))??;
-            results.push(result);
-        }
-
-        Ok(Json(results))
-    }
-
-    #[tool(
-        name = "get_task_command",
-        description = "Get the command string to launch a single AI CLI task. Returns the full command without executing it."
-    )]
-    pub async fn get_task_command_tool(
-        &self,
-        params: Parameters<GetTaskCommandParams>,
-    ) -> Result<Json<TaskCommandResult>, String> {
-        use crate::cli_type::parse_cli_type;
-
-        // Validate AI CLI type
-        let _cli_type = parse_cli_type(&params.0.ai_type).ok_or_else(|| {
-            format!(
-                "Invalid AI type: {}. Must be claude, codex, or gemini",
-                params.0.ai_type
-            )
-        })?;
-
-        // Build command string
-        let mut command_parts = vec!["agentic-warden".to_string(), params.0.ai_type.clone()];
-
-        if let Some(ref provider) = params.0.provider {
-            command_parts.push("-p".to_string());
-            command_parts.push(provider.clone());
-        }
-
-        // Escape single quotes in task
-        let escaped_task = params.0.task.replace("'", "'\\''");
-        command_parts.push(format!("'{}'", escaped_task));
-
-        let command = command_parts.join(" ");
-
-        Ok(Json(TaskCommandResult {
-            command,
-            ai_type: params.0.ai_type,
-            provider: params.0.provider,
-        }))
-    }
-
-    #[tool(
         name = "start_task",
-        description = "Launch an AI CLI task in background. Options: role (inject prompt from ~/.aiw/role/), provider (select API provider), cwd (set working directory, must exist)."
+        description = "Launch an AI CLI task in background. Returns a UUID task_id for tracking. Options: role (inject prompt), provider (select API provider), cwd (working directory), cli_args (pass-through CLI arguments), worktree (git worktree isolation)."
     )]
     pub async fn start_task_tool(
         &self,
@@ -807,7 +787,7 @@ impl AgenticWardenMcpServer {
 
     #[tool(
         name = "list_tasks",
-        description = "List all tracked MCP tasks. Filters out zombie processes."
+        description = "List all tracked MCP tasks (running and completed). Returns task_id, status, worktree_info for each task."
     )]
     pub async fn list_tasks_tool(
         &self,
@@ -818,7 +798,7 @@ impl AgenticWardenMcpServer {
 
     #[tool(
         name = "stop_task",
-        description = "Stop a running MCP task by PID. Sends SIGTERM, waits 5s, then SIGKILL if needed."
+        description = "Stop a running MCP task by task_id. Sends SIGTERM, waits 5s, then SIGKILL if needed."
     )]
     pub async fn stop_task_tool(
         &self,
@@ -829,13 +809,46 @@ impl AgenticWardenMcpServer {
 
     #[tool(
         name = "get_task_logs",
-        description = "Retrieve log content of a tracked task. Supports tail mode to get last N lines."
+        description = "Retrieve log content of a tracked task by task_id. Supports tail mode to get last N lines."
     )]
     pub async fn get_task_logs_tool(
         &self,
         params: Parameters<GetTaskLogsParams>,
     ) -> Result<Json<TaskLogsResult>, String> {
         get_task_logs(params.0).await.map(Json)
+    }
+
+    #[tool(
+        name = "get_task_status",
+        description = "Get detailed status of a task by task_id. Returns status, process_alive, exit_code, result, worktree_info, timing info."
+    )]
+    pub async fn get_task_status_tool(
+        &self,
+        params: Parameters<GetTaskStatusParams>,
+    ) -> Result<Json<TaskStatusResult>, String> {
+        get_task_status(params.0).await.map(Json)
+    }
+
+    #[tool(
+        name = "list_roles",
+        description = "List all available roles (builtin + user-defined from ~/.aiw/role/). Roles inject system prompts into AI CLI tasks."
+    )]
+    pub async fn list_roles_tool(
+        &self,
+        _params: Parameters<()>,
+    ) -> Result<Json<ListRolesResult>, String> {
+        list_roles().await.map(Json)
+    }
+
+    #[tool(
+        name = "list_providers",
+        description = "List all configured AI providers with their scenarios and compatibility. Shows default provider and which AI types each provider supports."
+    )]
+    pub async fn list_providers_tool(
+        &self,
+        _params: Parameters<()>,
+    ) -> Result<Json<ListProvidersResult>, String> {
+        list_providers().await.map(Json)
     }
 
     pub async fn run(self) -> Result<(), Box<dyn std::error::Error>> {

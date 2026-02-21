@@ -118,6 +118,24 @@ pub type InProcessRegistry = Registry<InProcessStorage>;
 /// 跨进程注册表类型别名
 pub type SharedMemoryRegistry = Registry<SharedMemoryStorage>;
 
+// InProcessStorage-specific helpers (task_id index, worktree metadata)
+impl Registry<InProcessStorage> {
+    /// Look up (PID, TaskRecord) by task_id UUID.
+    pub fn get_by_task_id(&self, task_id: &str) -> Option<(u32, crate::task_record::TaskRecord)> {
+        self.storage.get_by_task_id(task_id)
+    }
+
+    /// Bind a task_id and optional worktree info to an existing PID entry.
+    pub fn update_task_metadata(
+        &self,
+        pid: u32,
+        task_id: String,
+        worktree: Option<crate::task_record::WorktreeInfo>,
+    ) {
+        self.storage.update_task_metadata(pid, task_id, worktree);
+    }
+}
+
 /// 便捷构造函数
 impl Registry<InProcessStorage> {
     /// 创建新的进程内注册表

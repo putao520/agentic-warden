@@ -28,6 +28,7 @@ pub mod tui;
 pub mod unified_registry;
 pub mod utils;
 pub mod wait_mode;
+pub mod worktree;
 
 pub mod cli_manager;
 

@@ -11,13 +11,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-/// Worktree 信息（用于任务完成后输出）
-#[derive(Debug, Clone)]
-pub struct WorktreeInfo {
-    pub path: PathBuf,
-    pub branch: String,
-    pub commit: String,
-}
+use crate::task_record::WorktreeInfo;
 
 /// AI CLI 启动参数
 pub struct AiCliCommand {
@@ -69,91 +63,25 @@ impl AiCliCommand {
 
     /// 检查指定路径是否是 git 仓库
     fn check_git_repository(work_dir: &std::path::PathBuf) -> Result<()> {
-        // 使用 git2 检查是否是 git 仓库
-        match git2::Repository::discover(work_dir) {
-            Ok(_) => Ok(()),
-            Err(e) if e.class() == git2::ErrorClass::Repository => {
-                Err(anyhow!(
-                    "Error: Not a git repository. Please initialize git first:\n  cd {} && git init",
-                    work_dir.display()
-                ))
-            }
-            Err(e) => {
-                // 其他 git 错误也视为检查失败
-                Err(anyhow!(
-                    "Error: Unable to access git repository: {}",
-                    e.message()
-                ))
-            }
-        }
+        crate::worktree::check_git_repository(work_dir)
     }
 
     /// 生成 8 位随机小写 hex 字符串用于 worktree 命名
     fn generate_worktree_id() -> String {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos() as u64;
-        // 使用时间戳的低位生成 8 字节 hex
-        format!("{:08x}", timestamp % 0x100000000)
+        crate::worktree::generate_worktree_id()
     }
 
     /// 创建 git worktree
     /// 返回: (worktree_path, branch_name, commit_hash)
     fn create_worktree(repo_path: &PathBuf) -> Result<(PathBuf, String, String)> {
-        let repo = git2::Repository::open(repo_path)
-            .map_err(|e| anyhow!("Failed to open git repository: {}", e.message()))?;
-
-        // 获取当前 HEAD 的 commit
-        let head = repo.head()
-            .map_err(|e| anyhow!("Failed to get HEAD: {}", e.message()))?;
-        let commit = head.peel_to_commit()
-            .map_err(|e| anyhow!("Failed to peel to commit: {}", e.message()))?;
-        let commit_hash = commit.id().to_string();
-
-        // 获取当前分支名
-        let branch_name = head.shorthand()
-            .unwrap_or("HEAD")
-            .to_string();
-
-        // 创建 worktree 目录：/tmp/aiw-worktree-<8位hex>
-        let worktree_id = Self::generate_worktree_id();
-        let worktree_path = std::path::PathBuf::from("/tmp")
-            .join(format!("aiw-worktree-{}", worktree_id));
-
-        // 检查 worktree 是否已存在
-        if worktree_path.exists() {
-            return Err(anyhow!(
-                "Worktree directory already exists: {}. Please remove it manually.",
-                worktree_path.display()
-            ));
-        }
-
-        // 使用 git command 创建 worktree（git2 库的 worktree API 不可用）
-        // 格式: git worktree add <path> <commit-ish>
-        let status = std::process::Command::new("git")
-            .args(["worktree", "add", "-b"])
-            .arg(&format!("aiw-worktree-{}", worktree_id))
-            .arg(&worktree_path)
-            .arg(&commit_hash)
-            .current_dir(repo_path)
-            .output()
-            .map_err(|e| anyhow!("Failed to execute git worktree command: {}", e))?;
-
-        if !status.status.success() {
-            let stderr = String::from_utf8_lossy(&status.stderr);
-            return Err(anyhow!("Failed to create worktree: {}", stderr));
-        }
-
-        Ok((worktree_path, branch_name, commit_hash))
+        crate::worktree::create_worktree(repo_path)
     }
 
     /// 输出 worktree 信息到 stdout
     fn output_worktree_info(info: &WorktreeInfo) {
         println!();
         println!("=== AIW WORKTREE END ===");
-        println!("Worktree: {}", info.path.display());
+        println!("Worktree: {}", info.path);
         println!("Branch: {}", info.branch);
         println!("Commit: {}", info.commit);
     }
@@ -264,7 +192,7 @@ impl AiCliCommand {
 
         // worktree 信息用于任务完成后输出
         let worktree_info = WorktreeInfo {
-            path: worktree_path.clone(),
+            path: worktree_path.display().to_string(),
             branch: branch_name.clone(),
             commit: commit_hash.clone(),
         };
@@ -395,7 +323,7 @@ mod tests {
     #[test]
     fn test_worktree_info_output_format() {
         let info = WorktreeInfo {
-            path: PathBuf::from("/tmp/aiw-worktree-a1b2c3d4"),
+            path: "/tmp/aiw-worktree-a1b2c3d4".to_string(),
             branch: "main".to_string(),
             commit: "abc123def456".to_string(),
         };
@@ -403,7 +331,7 @@ mod tests {
         // 模拟输出并验证格式
         let output = format!(
             "\n=== AIW WORKTREE END ===\nWorktree: {}\nBranch: {}\nCommit: {}",
-            info.path.display(),
+            info.path,
             info.branch,
             info.commit
         );
