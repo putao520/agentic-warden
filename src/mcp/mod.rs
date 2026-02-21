@@ -26,8 +26,8 @@ use rmcp::{
     handler::server::ServerHandler,
     model::{
         GetPromptRequestParam, GetPromptResult, Implementation, InitializeRequestParam,
-        InitializeResult, ListPromptsResult, PaginatedRequestParam, PromptMessage,
-        PromptMessageRole, ServerCapabilities, Tool,
+        InitializeResult, ListPromptsResult, LoggingLevel, LoggingMessageNotificationParam,
+        PaginatedRequestParam, PromptMessage, PromptMessageRole, ServerCapabilities, Tool,
     },
     service::{RequestContext, RoleServer},
     tool, Json, ServiceExt,
@@ -265,7 +265,10 @@ async fn wait_for_registry_entry(
     Ok(None)
 }
 
-pub async fn start_task(params: StartTaskParams) -> Result<TaskLaunchInfo, String> {
+pub async fn start_task(
+    params: StartTaskParams,
+    peer: Arc<RwLock<Option<rmcp::service::Peer<RoleServer>>>>,
+) -> Result<TaskLaunchInfo, String> {
     use crate::cli_type::parse_cli_type;
     use crate::supervisor;
 
@@ -355,16 +358,42 @@ pub async fn start_task(params: StartTaskParams) -> Result<TaskLaunchInfo, Strin
     let spawn_provider = params.provider.clone();
     let spawn_cwd = cwd.clone().map(PathBuf::from);
 
+    let notify_peer = peer.clone();
+    let notify_task_id = task_id.clone();
+    let notify_task_desc = params.task.clone();
+
     tokio::spawn(async move {
-        if let Err(err) = supervisor::execute_cli(
+        let result = supervisor::execute_cli(
             &spawn_registry,
             &spawn_cli_type,
             &spawn_args,
             spawn_provider,
             spawn_cwd,
         )
-        .await
-        {
+        .await;
+
+        // Notify client when task completes
+        let (level, status_str) = match &result {
+            Ok(_) => (LoggingLevel::Info, "completed"),
+            Err(_) => (LoggingLevel::Error, "failed"),
+        };
+        if let Some(p) = notify_peer.read().await.as_ref() {
+            let _ = p
+                .notify_logging_message(LoggingMessageNotificationParam {
+                    level,
+                    logger: Some("aiw-task".into()),
+                    data: serde_json::json!({
+                        "event": "task_completed",
+                        "task_id": notify_task_id,
+                        "status": status_str,
+                        "task": notify_task_desc,
+                        "message": format!("Task '{}' {}", notify_task_desc, status_str),
+                    }),
+                })
+                .await;
+        }
+
+        if let Err(err) = result {
             eprintln!(
                 "start_task: failed to launch {} task: {}",
                 spawn_cli_type.display_name(),
@@ -856,13 +885,13 @@ impl AgenticWardenMcpServer {
 
     #[tool(
         name = "start_task",
-        description = "Launch an AI CLI task with the given task prompt in background. Returns a UUID task_id for tracking. Required: task (task description/prompt for the AI), ai_type (which AI CLI: codex/claude/gemini). Optional: provider (select API provider), role (inject prompt from ~/.aiw/role/), cwd (working directory), cli_args (pass-through CLI arguments), worktree (git worktree isolation, default: false)."
+        description = "Launch an AI CLI task in background. Returns a UUID task_id for tracking. The server sends a logging notification (notifications/message) when the task completes. Required: task (task description/prompt for the AI), ai_type (which AI CLI: codex/claude/gemini). Optional: provider (select API provider), role (inject prompt from ~/.aiw/role/), cwd (working directory), cli_args (pass-through CLI arguments), worktree (git worktree isolation, default: false)."
     )]
     pub async fn start_task_tool(
         &self,
         params: Parameters<StartTaskParams>,
     ) -> Result<Json<TaskLaunchInfo>, String> {
-        start_task(params.0).await.map(Json)
+        start_task(params.0, self.peer.clone()).await.map(Json)
     }
 
     #[tool(

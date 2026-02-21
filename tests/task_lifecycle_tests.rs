@@ -6,13 +6,20 @@ use aiw::mcp::{
 use aiw::platform;
 use aiw::provider::config::AiType;
 use aiw::task_record::TaskStatus;
+use rmcp::service::RoleServer;
 use serial_test::serial;
 use std::env;
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
+use tokio::sync::RwLock;
 use tokio::time::sleep;
+
+fn mock_peer() -> Arc<RwLock<Option<rmcp::service::Peer<RoleServer>>>> {
+    Arc::new(RwLock::new(None))
+}
 
 struct EnvGuard {
     key: String,
@@ -102,7 +109,7 @@ async fn start_task_launches_and_returns_pid() {
         worktree: None,
     };
 
-    let launch = start_task(params).await.expect("task should launch");
+    let launch = start_task(params, mock_peer()).await.expect("task should launch");
     assert!(launch.pid > 0, "pid should be positive");
     assert!(!launch.task_id.is_empty(), "task_id should be populated");
     assert_eq!(launch.status, TaskStatus::Running);
@@ -131,7 +138,7 @@ async fn list_tasks_returns_running_tasks() {
         cli_args: None,
         worktree: None,
     };
-    let launch = start_task(params).await.expect("task should launch");
+    let launch = start_task(params, mock_peer()).await.expect("task should launch");
 
     let tasks = list_tasks().await.expect("list_tasks should succeed");
     let found = tasks.iter().any(|task| task.pid == launch.pid);
@@ -155,7 +162,7 @@ async fn stop_task_terminates_process() {
         cli_args: None,
         worktree: None,
     };
-    let launch = start_task(params).await.expect("task should launch");
+    let launch = start_task(params, mock_peer()).await.expect("task should launch");
 
     let result = manage_task(ManageTaskParams {
         task_id: launch.task_id,
@@ -189,7 +196,7 @@ async fn get_task_logs_produces_log_file() {
         cli_args: None,
         worktree: None,
     };
-    let launch = start_task(params).await.expect("task should launch");
+    let launch = start_task(params, mock_peer()).await.expect("task should launch");
 
     // wait for codex to produce some output
     sleep(Duration::from_millis(3000)).await;
@@ -245,7 +252,7 @@ async fn start_task_injects_role_prompt() {
         worktree: None,
     };
 
-    let launch = start_task(params).await.expect("task should launch");
+    let launch = start_task(params, mock_peer()).await.expect("task should launch");
     sleep(Duration::from_millis(3000)).await;
 
     let logs = manage_task(ManageTaskParams {
