@@ -10,12 +10,14 @@ use aiw::tui::Screen;
 use anyhow::Result;
 use crossterm::event::KeyCode;
 
+use serial_test::file_serial;
 use support::*;
 
 // TEST-INT-MCP-EDIT-001
 // Covers REQ-020
 // Category: Happy path
 #[test]
+#[file_serial]
 fn edit_env_preloads_modifies_and_saves() -> Result<()> {
     let home = TempHome::new();
     let server_name = fake_server_name();
@@ -85,6 +87,7 @@ fn edit_env_preloads_modifies_and_saves() -> Result<()> {
 // Covers REQ-020
 // Category: Negative
 #[test]
+#[file_serial]
 fn edit_env_save_failure_surfaces_error() -> Result<()> {
     let home = TempHome::new();
     let server_name = fake_server_name();
@@ -141,6 +144,7 @@ fn edit_env_save_failure_surfaces_error() -> Result<()> {
 // Covers REQ-020
 // Category: Boundary
 #[test]
+#[file_serial]
 fn edit_env_with_no_variables_shows_empty_state() -> Result<()> {
     let home = TempHome::new();
     let server_name = fake_server_name();
@@ -173,6 +177,7 @@ fn edit_env_with_no_variables_shows_empty_state() -> Result<()> {
 // Covers REQ-020
 // Category: Security
 #[test]
+#[file_serial]
 fn edit_env_persists_literal_security_payload() -> Result<()> {
     let home = TempHome::new();
     let server_name = fake_server_name();

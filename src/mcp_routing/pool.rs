@@ -3,7 +3,7 @@ use crate::utils::env;
 use anyhow::{anyhow, Context, Result};
 use parking_lot::Mutex;
 use rmcp::{
-    model::{CallToolRequestParam, ClientInfo, Tool},
+    model::{CallToolRequestParams, ClientInfo, Tool},
     service::{RoleClient, RunningService, ServiceExt},
     transport::{ConfigureCommandExt, TokioChildProcess},
 };
@@ -13,7 +13,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::{process::Command, sync::RwLock};
+use tokio::{process::Command, sync::RwLock, time::timeout};
 
 #[derive(Debug, Clone)]
 pub struct DiscoveredTool {
@@ -182,7 +182,9 @@ impl McpConnectionPool {
 impl McpServerHandle {
     async fn spawn(name: String, config: McpServerConfig) -> Result<Self> {
         let running = spawn_client(&config).await?;
-        let tools = running.peer().list_all_tools().await?;
+        let tools = timeout(Duration::from_secs(15), running.peer().list_all_tools())
+            .await
+            .map_err(|_| anyhow!("MCP server '{}' tool discovery timed out (15s)", name))??;
 
         Ok(Self {
             name,
@@ -204,7 +206,9 @@ impl McpServerHandle {
                 let state = self.state.lock();
                 state.running.peer().clone()
             };
-            let refreshed = peer.list_all_tools().await?;
+            let refreshed = timeout(Duration::from_secs(15), peer.list_all_tools())
+                .await
+                .map_err(|_| anyhow!("MCP server '{}' tool refresh timed out (15s)", self.name))??;
             let state = &mut *self.state.lock();
             state.tools = refreshed;
             state.last_refresh = Instant::now();
@@ -237,11 +241,15 @@ impl McpServerHandle {
                 ))
             }
         };
-        let param = CallToolRequestParam {
+        let param = CallToolRequestParams {
             name: tool_name.to_string().into(),
             arguments,
+            meta: None,
+            task: None,
         };
-        let result = peer.call_tool(param).await?;
+        let result = timeout(Duration::from_secs(60), peer.call_tool(param))
+            .await
+            .map_err(|_| anyhow!("MCP tool '{}' execution timed out (60s)", tool_name))??;
         if let Some(structured) = result.structured_content {
             return Ok(structured);
         }
@@ -279,5 +287,8 @@ async fn spawn_client(config: &McpServerConfig) -> Result<RunningService<RoleCli
     let mut info = ClientInfo::default();
     info.client_info.name = "agentic-warden-router".into();
 
-    info.serve(transport).await.map_err(|err| anyhow!(err))
+    timeout(Duration::from_secs(30), info.serve(transport))
+        .await
+        .map_err(|_| anyhow!("MCP server initialization timed out (30s)"))?
+        .map_err(|err| anyhow!(err))
 }

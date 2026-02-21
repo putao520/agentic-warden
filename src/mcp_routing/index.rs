@@ -21,6 +21,7 @@ pub struct ScoredTool {
     pub server: String,
     pub tool: String,
     pub description: Option<String>,
+    pub score: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -138,6 +139,7 @@ fn embedding_from_method(entry: &MethodEmbedding) -> Result<Embedding> {
 }
 
 fn scored_tool_from_result(result: SimilarityResult) -> Option<ScoredTool> {
+    let score = result.score;
     let embedding = result.embedding;
     let metadata = embedding.metadata?;
     let server = metadata.get("server")?.clone();
@@ -147,6 +149,7 @@ fn scored_tool_from_result(result: SimilarityResult) -> Option<ScoredTool> {
         server,
         tool,
         description,
+        score,
     })
 }
 

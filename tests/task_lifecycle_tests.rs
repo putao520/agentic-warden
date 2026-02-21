@@ -5,7 +5,6 @@ use aiw::mcp::{
 };
 use aiw::platform;
 use aiw::provider::config::AiType;
-use aiw::task_record::TaskStatus;
 use rmcp::service::RoleServer;
 use serial_test::serial;
 use std::env;
@@ -112,12 +111,6 @@ async fn start_task_launches_and_returns_pid() {
     let launch = start_task(params, mock_peer()).await.expect("task should launch");
     assert!(launch.pid > 0, "pid should be positive");
     assert!(!launch.task_id.is_empty(), "task_id should be populated");
-    assert_eq!(launch.status, TaskStatus::Running);
-    assert!(!launch.log_file.is_empty(), "log file should be populated");
-    assert!(
-        Path::new(&launch.log_file).exists(),
-        "log file path should exist"
-    );
 
     // Allow the CLI to exit
     sleep(Duration::from_millis(3000)).await;

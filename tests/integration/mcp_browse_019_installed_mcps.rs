@@ -9,12 +9,14 @@ use aiw::tui::Screen;
 use anyhow::Result;
 use crossterm::event::KeyCode;
 
+use serial_test::file_serial;
 use support::*;
 
 // TEST-INT-MCP-INSTALLED-001
 // Covers REQ-019
 // Category: Happy path
 #[test]
+#[file_serial]
 fn installed_list_supports_navigation_and_details() -> Result<()> {
     let home = TempHome::new();
     let name_a = format!("alpha-{}", fake_word());
@@ -75,6 +77,7 @@ fn installed_list_supports_navigation_and_details() -> Result<()> {
 // Covers REQ-019
 // Category: Negative
 #[test]
+#[file_serial]
 fn search_filters_to_empty_results_for_unknown_query() -> Result<()> {
     let home = TempHome::new();
     let name_a = format!("alpha-{}", fake_word());
@@ -122,6 +125,7 @@ fn search_filters_to_empty_results_for_unknown_query() -> Result<()> {
 // Covers REQ-019
 // Category: Boundary
 #[test]
+#[file_serial]
 fn empty_config_shows_no_installed_message() -> Result<()> {
     let _home = TempHome::new();
 
@@ -138,6 +142,7 @@ fn empty_config_shows_no_installed_message() -> Result<()> {
 // Covers REQ-019
 // Category: Security
 #[test]
+#[file_serial]
 fn search_input_with_script_payload_is_treated_as_literal() -> Result<()> {
     let home = TempHome::new();
     let name = format!("mcp-{}", fake_word());

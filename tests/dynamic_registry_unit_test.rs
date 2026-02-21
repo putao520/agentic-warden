@@ -26,6 +26,8 @@ async fn test_dynamic_registry_base_tools() {
         output_schema: None,
         icons: None,
         annotations: None,
+        execution: None,
+        meta: None,
     }];
 
     let config = RegistryConfig {
@@ -104,6 +106,8 @@ async fn test_dynamic_registry_mixed_tools() {
         output_schema: None,
         icons: None,
         annotations: None,
+        execution: None,
+        meta: None,
     }];
 
     let registry = DynamicToolRegistry::with_config(
@@ -166,6 +170,8 @@ async fn test_tool_registry_has_tool() {
         output_schema: None,
         icons: None,
         annotations: None,
+        execution: None,
+        meta: None,
     }];
 
     let registry = DynamicToolRegistry::new(base_tools);

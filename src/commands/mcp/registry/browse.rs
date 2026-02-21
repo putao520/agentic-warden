@@ -58,6 +58,7 @@ pub(crate) struct EnvInputState {
     current_index: usize,
     values: HashMap<String, String>,
     input_buffer: String,
+    user_edited: bool,
 }
 
 impl EnvInputState {
@@ -67,6 +68,7 @@ impl EnvInputState {
             current_index: 0,
             values: HashMap::new(),
             input_buffer: String::new(),
+            user_edited: false,
         }
     }
 
@@ -129,12 +131,18 @@ impl EnvInputState {
         &self.input_buffer
     }
 
+    pub(crate) fn user_has_edited(&self) -> bool {
+        self.user_edited
+    }
+
     pub(crate) fn push_char(&mut self, c: char) {
         self.input_buffer.push(c);
+        self.user_edited = true;
     }
 
     pub(crate) fn pop_char(&mut self) {
         self.input_buffer.pop();
+        self.user_edited = true;
     }
 
     pub(crate) fn current_index(&self) -> usize {
@@ -154,6 +162,7 @@ impl EnvInputState {
             .current_spec()
             .and_then(|spec| self.values.get(&spec.name).cloned())
             .unwrap_or_default();
+        self.user_edited = false;
     }
 }
 
@@ -408,7 +417,7 @@ async fn run_event_loop(
                     KeyCode::Backspace => {
                         env_input.pop_char();
                     }
-                    KeyCode::Char(c) if c == 'a' || c == 'A' => {
+                    KeyCode::Char(c) if (c == 'a' || c == 'A') && !env_input.user_has_edited() => {
                         let should_skip = env_input
                             .current_spec()
                             .map(|spec| !spec.required)

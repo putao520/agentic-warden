@@ -609,7 +609,7 @@ impl InstalledMcpScreen {
                     KeyCode::Backspace => {
                         edit_state.env_input.pop_char();
                     }
-                    KeyCode::Char(c) if c == 'a' || c == 'A' => {
+                    KeyCode::Char(c) if (c == 'a' || c == 'A') && !edit_state.env_input.user_has_edited() => {
                         let should_skip = edit_state
                             .env_input
                             .current_spec()

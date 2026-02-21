@@ -10,12 +10,14 @@ use aiw::tui::Screen;
 use anyhow::Result;
 use crossterm::event::KeyCode;
 
+use serial_test::file_serial;
 use support::*;
 
 // TEST-E2E-AIW-001
 // Covers REQ-018, REQ-019, REQ-020
 // Category: Happy path
 #[test]
+#[file_serial]
 fn complete_browse_search_edit_skip_save_flow() -> Result<()> {
     let home = TempHome::new();
     let name_a = format!("alpha-{}", fake_word());
@@ -114,6 +116,7 @@ fn complete_browse_search_edit_skip_save_flow() -> Result<()> {
 // Covers REQ-019, REQ-020
 // Category: Security
 #[test]
+#[file_serial]
 fn search_then_cancel_edit_keeps_original_values() -> Result<()> {
     let home = TempHome::new();
     let server_name = format!("mcp-{}", fake_word());

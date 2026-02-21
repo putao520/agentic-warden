@@ -20,6 +20,8 @@ fn build_tool(name: &str, description: &str) -> Tool {
         output_schema: None,
         icons: None,
         annotations: None,
+        execution: None,
+        meta: None,
     }
 }
 

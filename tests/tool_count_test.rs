@@ -22,9 +22,6 @@ mod tests {
         // Expected base tools (current API)
         let expected_base_tools = vec![
             "intelligent_route",
-            "start_task",
-            "manage_task",
-            "list_tasks",
             "list_roles",
             "list_providers",
         ];

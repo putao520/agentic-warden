@@ -9,12 +9,14 @@ use aiw::tui::{Screen, ScreenAction};
 use anyhow::Result;
 use crossterm::event::KeyCode;
 
+use serial_test::file_serial;
 use support::*;
 
 // TEST-INT-MCP-BROWSE-001
 // Covers REQ-018
 // Category: Happy path
 #[test]
+#[file_serial]
 fn skip_optional_shortcut_clears_values_and_prompts_save() -> Result<()> {
     let home = TempHome::new();
     let server_name = fake_server_name();
@@ -84,6 +86,7 @@ fn skip_optional_shortcut_clears_values_and_prompts_save() -> Result<()> {
 // Covers REQ-018
 // Category: Security
 #[test]
+#[file_serial]
 fn skip_optional_does_not_persist_without_confirmation() -> Result<()> {
     let home = TempHome::new();
     let server_name = fake_server_name();
@@ -133,6 +136,7 @@ fn skip_optional_does_not_persist_without_confirmation() -> Result<()> {
 // Covers REQ-018
 // Category: Negative
 #[test]
+#[file_serial]
 fn skip_optional_noop_outside_edit_mode() -> Result<()> {
     let home = TempHome::new();
     let server_name = fake_server_name();
@@ -166,6 +170,7 @@ fn skip_optional_noop_outside_edit_mode() -> Result<()> {
 // Covers REQ-018
 // Category: Boundary
 #[test]
+#[file_serial]
 fn skip_optional_handles_empty_env_list() -> Result<()> {
     let home = TempHome::new();
     let server_name = fake_server_name();

@@ -267,6 +267,8 @@ impl DynamicToolRegistry {
             output_schema: None,
             icons: None,
             annotations: None,
+            execution: None,
+            meta: None,
         };
 
         let mut tools = self.dynamic_tools.write().await;
@@ -444,6 +446,8 @@ mod tests {
             output_schema: None,
             icons: None,
             annotations: None,
+            execution: None,
+            meta: None,
         }
     }
 

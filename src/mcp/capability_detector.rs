@@ -3,7 +3,7 @@
 //! Tests whether the connected MCP client supports dynamic tool registration
 //! (notifications/tools/list_changed) by actually sending a test notification.
 
-use rmcp::model::InitializeRequestParam;
+use rmcp::model::InitializeRequestParams;
 use rmcp::service::{Peer, RoleServer};
 
 #[derive(Debug, Clone)]
@@ -18,7 +18,7 @@ pub struct ClientCapabilities {
 
 impl ClientCapabilities {
     /// Create initial capabilities from initialize request (before testing)
-    pub fn from_init_request(request: &InitializeRequestParam) -> Self {
+    pub fn from_init_request(request: &InitializeRequestParams) -> Self {
         Self {
             supports_dynamic_tools: false, // Will be tested later
             client_name: request.client_info.name.clone(),

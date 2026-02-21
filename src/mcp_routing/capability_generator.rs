@@ -221,6 +221,8 @@ mod tests {
                 output_schema: None,
                 icons: None,
                 annotations: None,
+                execution: None,
+                meta: None,
             },
         }
     }

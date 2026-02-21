@@ -25,9 +25,13 @@ use rmcp::{
     handler::server::wrapper::Parameters,
     handler::server::ServerHandler,
     model::{
-        GetPromptRequestParam, GetPromptResult, Implementation, InitializeRequestParam,
-        InitializeResult, ListPromptsResult, LoggingLevel, LoggingMessageNotificationParam,
-        PaginatedRequestParam, PromptMessage, PromptMessageRole, ServerCapabilities, Tool,
+        CancelTaskParams, CancelTaskResult, CallToolRequestParams, CreateTaskResult,
+        GetPromptRequestParams, GetPromptResult, GetTaskInfoParams, GetTaskPayloadResult,
+        GetTaskResult, GetTaskResultParams, Implementation, InitializeRequestParams,
+        InitializeResult, ListPromptsResult, ListTasksResult, LoggingLevel,
+        LoggingMessageNotificationParam, Meta, PaginatedRequestParams, PromptMessage,
+        PromptMessageRole, ServerCapabilities, TaskStatus as RmcpTaskStatus,
+        TasksCapability, TaskSupport, Tool, ToolExecution,
     },
     service::{RequestContext, RoleServer},
     tool, Json, ServiceExt,
@@ -76,27 +80,12 @@ pub struct StartTaskParams {
     pub worktree: Option<bool>,
 }
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
-pub struct TaskLaunchInfo {
-    /// UUID task identifier for external consumers.
+/// Internal result from start_task (not exposed as MCP tool).
+#[derive(Debug, Clone)]
+pub struct TaskLaunchResult {
     pub task_id: String,
-    /// Process ID of the launched task.
     pub pid: u32,
-    /// Path to the task log file.
-    pub log_file: String,
-    /// Task status in registry.
-    pub status: TaskStatus,
-    /// Task start time.
     pub started_at: DateTime<Utc>,
-    /// AI CLI type used.
-    pub ai_type: String,
-    /// Original task prompt (without role prefix).
-    pub task: String,
-    /// Provider used (if any).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub provider: Option<String>,
-    /// Worktree isolation info (if worktree=true was requested).
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub worktree_info: Option<WorktreeInfo>,
 }
 
@@ -268,7 +257,7 @@ async fn wait_for_registry_entry(
 pub async fn start_task(
     params: StartTaskParams,
     peer: Arc<RwLock<Option<rmcp::service::Peer<RoleServer>>>>,
-) -> Result<TaskLaunchInfo, String> {
+) -> Result<TaskLaunchResult, String> {
     use crate::cli_type::parse_cli_type;
     use crate::supervisor;
 
@@ -378,7 +367,8 @@ pub async fn start_task(
             Err(_) => (LoggingLevel::Error, "failed"),
         };
         if let Some(p) = notify_peer.read().await.as_ref() {
-            let _ = p
+            eprintln!("[aiw] Sending task completion notification for task_id={}", notify_task_id);
+            match p
                 .notify_logging_message(LoggingMessageNotificationParam {
                     level,
                     logger: Some("aiw-task".into()),
@@ -390,7 +380,13 @@ pub async fn start_task(
                         "message": format!("Task '{}' {}", notify_task_desc, status_str),
                     }),
                 })
-                .await;
+                .await
+            {
+                Ok(_) => eprintln!("[aiw] Notification sent successfully"),
+                Err(e) => eprintln!("[aiw] Failed to send notification: {:?}", e),
+            }
+        } else {
+            eprintln!("[aiw] No peer available for notification");
         }
 
         if let Err(err) = result {
@@ -408,15 +404,10 @@ pub async fn start_task(
     // Bind UUID and worktree info to the registry entry
     registry.update_task_metadata(entry.pid, task_id.clone(), worktree_info.clone());
 
-    Ok(TaskLaunchInfo {
+    Ok(TaskLaunchResult {
         task_id,
         pid: entry.pid,
-        log_file: entry.record.log_path.clone(),
-        status: entry.record.status.clone(),
         started_at: entry.record.started_at,
-        ai_type: ai_type.to_string(),
-        task: params.task,
-        provider: params.provider,
         worktree_info,
     })
 }
@@ -788,6 +779,8 @@ impl AgenticWardenMcpServer {
             output_schema: None,
             icons: None,
             annotations: None,
+            execution: None,
+            meta: None,
         }
     }
 
@@ -884,40 +877,6 @@ impl AgenticWardenMcpServer {
     }
 
     #[tool(
-        name = "start_task",
-        description = "Launch an AI CLI task in background. Returns a UUID task_id for tracking. The server sends a logging notification (notifications/message) when the task completes. Required: task (task description/prompt for the AI), ai_type (which AI CLI: codex/claude/gemini). Optional: provider (select API provider), role (inject prompt from ~/.aiw/role/), cwd (working directory), cli_args (pass-through CLI arguments), worktree (git worktree isolation, default: false)."
-    )]
-    pub async fn start_task_tool(
-        &self,
-        params: Parameters<StartTaskParams>,
-    ) -> Result<Json<TaskLaunchInfo>, String> {
-        start_task(params.0, self.peer.clone()).await.map(Json)
-    }
-
-    #[tool(
-        name = "list_tasks",
-        description = "List all tracked MCP tasks (running and completed). Returns task_id, status, worktree_info for each task."
-    )]
-    pub async fn list_tasks_tool(
-        &self,
-        _params: Parameters<EmptyParams>,
-    ) -> Result<String, String> {
-        let tasks = list_tasks().await?;
-        Ok(table_format::format_tasks_table(&tasks))
-    }
-
-    #[tool(
-        name = "manage_task",
-        description = "Manage a tracked task. Required: task_id (UUID from start_task), action (status/logs/stop). Optional: tail_lines (only for 'logs' action, limit output lines)."
-    )]
-    pub async fn manage_task_tool(
-        &self,
-        params: Parameters<ManageTaskParams>,
-    ) -> Result<Json<ManageTaskResult>, String> {
-        manage_task(params.0).await.map(Json)
-    }
-
-    #[tool(
         name = "list_roles",
         description = "List all available roles (builtin + user-defined from ~/.aiw/role/). Roles inject system prompts into AI CLI tasks."
     )]
@@ -991,7 +950,7 @@ impl AgenticWardenMcpServer {
 impl ServerHandler for AgenticWardenMcpServer {
     async fn list_tools(
         &self,
-        _request: Option<rmcp::model::PaginatedRequestParam>,
+        _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<rmcp::model::ListToolsResult, rmcp::ErrorData> {
         let tools_snapshot = self.tool_registry.get_all_tool_definitions().await;
@@ -1000,23 +959,25 @@ impl ServerHandler for AgenticWardenMcpServer {
         Ok(rmcp::model::ListToolsResult {
             tools,
             next_cursor: None,
+            meta: None,
         })
     }
 
     async fn list_prompts(
         &self,
-        _request: Option<PaginatedRequestParam>,
+        _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListPromptsResult, rmcp::ErrorData> {
         Ok(ListPromptsResult {
             prompts: self.prompt_router.list_all(),
             next_cursor: None,
+            meta: None,
         })
     }
 
     async fn get_prompt(
         &self,
-        request: GetPromptRequestParam,
+        request: GetPromptRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<GetPromptResult, rmcp::ErrorData> {
         let ctx = PromptContext::new(self, request.name, request.arguments, _context);
@@ -1025,7 +986,7 @@ impl ServerHandler for AgenticWardenMcpServer {
 
     async fn call_tool(
         &self,
-        request: rmcp::model::CallToolRequestParam,
+        request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<rmcp::model::CallToolResult, rmcp::ErrorData> {
         // First, try to call base tools via tool_router
@@ -1102,16 +1063,70 @@ impl ServerHandler for AgenticWardenMcpServer {
                 }
             }
         } else {
-            // Tool not found in either base or dynamic tools
-            Err(rmcp::ErrorData::method_not_found::<
-                rmcp::model::CallToolRequestMethod,
-            >())
+            // Fallback: try to proxy directly to a downstream MCP server.
+            // Supports "server::tool_name" format or looks up the tool in the
+            // full tool_registry by scanning all registered downstream tools.
+            let resolved = if let Some((s, t)) = request.name.split_once("::") {
+                Some((s.to_string(), t.to_string()))
+            } else {
+                // Search tool_registry for a matching tool name across all servers
+                let registry = self.router.tool_registry().read().await;
+                registry
+                    .keys()
+                    .find(|key| key.split("::").nth(1) == Some(request.name.as_ref()))
+                    .map(|key| {
+                        let parts: Vec<&str> = key.split("::").collect();
+                        (parts[0].to_string(), parts[1].to_string())
+                    })
+            };
+
+            let Some((server, tool_name)) = resolved else {
+                return Err(rmcp::ErrorData::method_not_found::<
+                    rmcp::model::CallToolRequestMethod,
+                >());
+            };
+
+            let result = self
+                .router
+                .execute_tool(crate::mcp_routing::models::ExecuteToolRequest {
+                    mcp_server: server,
+                    tool_name,
+                    arguments: serde_json::Value::Object(
+                        request.arguments.unwrap_or_default(),
+                    ),
+                    session_id: None,
+                })
+                .await
+                .map_err(|e| {
+                    rmcp::ErrorData::internal_error(
+                        format!("Direct proxy execution failed: {}", e),
+                        None,
+                    )
+                })?;
+
+            if result.success {
+                let content_str = result
+                    .result
+                    .as_ref()
+                    .map(|r| serde_json::to_string_pretty(&r.output).unwrap_or_default())
+                    .unwrap_or_default();
+                let structured = result.result.map(|r| r.output);
+
+                Ok(rmcp::model::CallToolResult {
+                    content: vec![rmcp::model::Content::text(content_str)],
+                    structured_content: structured,
+                    is_error: None,
+                    meta: None,
+                })
+            } else {
+                Err(rmcp::ErrorData::internal_error(result.message, None))
+            }
         }
     }
 
     async fn initialize(
         &self,
-        request: InitializeRequestParam,
+        request: InitializeRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<InitializeResult, rmcp::ErrorData> {
         // Create initial capabilities (before testing)
@@ -1163,16 +1178,241 @@ impl ServerHandler for AgenticWardenMcpServer {
                 .enable_tools()
                 .enable_tool_list_changed()
                 .enable_prompts()
+                .enable_tasks_with(TasksCapability::server_default())
                 .build(),
             server_info: Implementation {
                 name: "agentic-warden".to_string(),
                 version: env!("CARGO_PKG_VERSION").to_string(),
                 title: Some("Agentic Warden MCP Server".to_string()),
+                description: None,
                 icons: None,
                 website_url: Some("https://github.com/putao520/agentic-warden".to_string()),
             },
-            instructions: None,
+            instructions: Some(concat!(
+                "You are connected to the Agentic Warden (aiw) MCP server, which launches and manages background AI CLI tasks. ",
+                "IMPORTANT BEHAVIORAL GUIDELINES:\n",
+                "1. After calling start_task, record the task_id and continue working on other tasks. Do NOT block-wait or poll in a loop.\n",
+                "2. Use manage_task with action='status' to check task completion only when needed (e.g., before reporting results or when the user asks).\n",
+                "3. Use manage_task with action='logs' to retrieve task output after confirming completion.\n",
+                "4. You are a long-running orchestrator. Starting a background task is the BEGINNING of your work, not the end. Do NOT summarize and stop.\n",
+                "5. If you launched multiple tasks, track all task_ids and check/report results as needed.\n",
+                "6. Never assume a task is done without checking its status via manage_task.\n",
+                "7. If the user asked you to do something that involves background tasks, your job is not done until ALL tasks have completed and you have reported the results."
+            ).to_string().into()),
         })
+    }
+
+    // =========================================================================
+    // MCP Tasks API (SEP-1686)
+    // =========================================================================
+
+    async fn enqueue_task(
+        &self,
+        request: CallToolRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<CreateTaskResult, rmcp::ErrorData> {
+        // Extract start_task params from the tool call arguments
+        let args_value = serde_json::Value::Object(request.arguments.unwrap_or_default());
+        let params: StartTaskParams = serde_json::from_value(args_value).map_err(|e| {
+            rmcp::ErrorData::invalid_params(format!("Invalid start_task params: {}", e), None)
+        })?;
+
+        let peer = Arc::clone(&self.peer);
+        let result = start_task(params, peer).await.map_err(|e| {
+            rmcp::ErrorData::internal_error(format!("Failed to enqueue task: {}", e), None)
+        })?;
+
+        let now = Utc::now().to_rfc3339();
+        Ok(CreateTaskResult {
+            task: rmcp::model::Task {
+                task_id: result.task_id,
+                status: RmcpTaskStatus::Working,
+                status_message: Some("Task launched".into()),
+                created_at: result.started_at.to_rfc3339(),
+                last_updated_at: now,
+                ttl: None,
+                poll_interval: Some(2000),
+            },
+        })
+    }
+
+    async fn list_tasks(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListTasksResult, rmcp::ErrorData> {
+        let tasks = list_tasks().await.map_err(|e| {
+            rmcp::ErrorData::internal_error(format!("Failed to list tasks: {}", e), None)
+        })?;
+
+        let mcp_tasks: Vec<rmcp::model::Task> = tasks
+            .into_iter()
+            .map(|t| {
+                let (status, msg) = task_info_to_mcp_status(&t);
+                rmcp::model::Task {
+                    task_id: t.task_id.unwrap_or_else(|| format!("pid-{}", t.pid)),
+                    status,
+                    status_message: Some(msg),
+                    created_at: t.started_at.to_rfc3339(),
+                    last_updated_at: t
+                        .completed_at
+                        .unwrap_or(t.started_at)
+                        .to_rfc3339(),
+                    ttl: None,
+                    poll_interval: None,
+                }
+            })
+            .collect();
+
+        Ok(ListTasksResult {
+            total: Some(mcp_tasks.len() as u64),
+            tasks: mcp_tasks,
+            next_cursor: None,
+        })
+    }
+
+    async fn get_task_info(
+        &self,
+        request: GetTaskInfoParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<GetTaskResult, rmcp::ErrorData> {
+        let (pid, record) = resolve_task_id(&request.task_id).map_err(|e| {
+            rmcp::ErrorData::invalid_params(e, None)
+        })?;
+
+        let alive = platform::process_alive(pid);
+        let (status, msg) = record_to_mcp_status(&record, alive);
+
+        Ok(GetTaskResult {
+            meta: None,
+            task: rmcp::model::Task {
+                task_id: request.task_id,
+                status,
+                status_message: Some(msg),
+                created_at: record.started_at.to_rfc3339(),
+                last_updated_at: record
+                    .completed_at
+                    .unwrap_or(record.started_at)
+                    .to_rfc3339(),
+                ttl: None,
+                poll_interval: if alive { Some(2000) } else { None },
+            },
+        })
+    }
+
+    async fn get_task_result(
+        &self,
+        request: GetTaskResultParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<GetTaskPayloadResult, rmcp::ErrorData> {
+        let (pid, record) = resolve_task_id(&request.task_id).map_err(|e| {
+            rmcp::ErrorData::invalid_params(e, None)
+        })?;
+
+        let alive = platform::process_alive(pid);
+        if alive {
+            return Err(rmcp::ErrorData::internal_error(
+                "Task is still running; result not yet available",
+                None,
+            ));
+        }
+
+        // Read log content as the task result
+        let log_content = fs::read_to_string(&record.log_path).unwrap_or_default();
+        let payload = serde_json::json!({
+            "task_id": request.task_id,
+            "pid": pid,
+            "status": format!("{:?}", record.status),
+            "exit_code": record.exit_code,
+            "started_at": record.started_at.to_rfc3339(),
+            "completed_at": record.completed_at.map(|t| t.to_rfc3339()),
+            "result": record.result,
+            "log_content": log_content,
+        });
+
+        Ok(GetTaskPayloadResult(payload))
+    }
+
+    async fn cancel_task(
+        &self,
+        request: CancelTaskParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<CancelTaskResult, rmcp::ErrorData> {
+        let manage_params = ManageTaskParams {
+            task_id: request.task_id.clone(),
+            action: ManageAction::Stop,
+            tail_lines: None,
+        };
+
+        manage_task(manage_params).await.map_err(|e| {
+            rmcp::ErrorData::internal_error(format!("Failed to cancel task: {}", e), None)
+        })?;
+
+        // Re-read the record after cancellation
+        let (pid, record) = resolve_task_id(&request.task_id).map_err(|e| {
+            rmcp::ErrorData::internal_error(e, None)
+        })?;
+
+        let alive = platform::process_alive(pid);
+        let (status, msg) = record_to_mcp_status(&record, alive);
+
+        Ok(CancelTaskResult {
+            meta: None,
+            task: rmcp::model::Task {
+                task_id: request.task_id,
+                status: if matches!(status, RmcpTaskStatus::Working) {
+                    RmcpTaskStatus::Cancelled
+                } else {
+                    status
+                },
+                status_message: Some(msg),
+                created_at: record.started_at.to_rfc3339(),
+                last_updated_at: Utc::now().to_rfc3339(),
+                ttl: None,
+                poll_interval: None,
+            },
+        })
+    }
+}
+
+/// Map our internal TaskInfo to MCP TaskStatus.
+fn task_info_to_mcp_status(info: &TaskInfo) -> (RmcpTaskStatus, String) {
+    match &info.status {
+        TaskStatus::Running => {
+            if info.completed_at.is_some() || !platform::process_alive(info.pid) {
+                // Process finished but status not yet updated
+                match info.exit_code {
+                    Some(0) => (RmcpTaskStatus::Completed, "Completed successfully".into()),
+                    Some(code) => (RmcpTaskStatus::Failed, format!("Exited with code {}", code)),
+                    None => (RmcpTaskStatus::Completed, "Process exited".into()),
+                }
+            } else {
+                (RmcpTaskStatus::Working, "Running".into())
+            }
+        }
+        TaskStatus::CompletedButUnread => match info.exit_code {
+            Some(0) | None => (RmcpTaskStatus::Completed, "Completed".into()),
+            Some(code) => (RmcpTaskStatus::Failed, format!("Failed with exit code {}", code)),
+        },
+    }
+}
+
+/// Map our internal TaskRecord + alive flag to MCP TaskStatus.
+fn record_to_mcp_status(
+    record: &crate::task_record::TaskRecord,
+    alive: bool,
+) -> (RmcpTaskStatus, String) {
+    match &record.status {
+        TaskStatus::Running if alive => (RmcpTaskStatus::Working, "Running".into()),
+        TaskStatus::Running => match record.exit_code {
+            Some(0) => (RmcpTaskStatus::Completed, "Completed successfully".into()),
+            Some(code) => (RmcpTaskStatus::Failed, format!("Exited with code {}", code)),
+            None => (RmcpTaskStatus::Completed, "Process exited".into()),
+        },
+        TaskStatus::CompletedButUnread => match record.exit_code {
+            Some(0) | None => (RmcpTaskStatus::Completed, "Completed".into()),
+            Some(code) => (RmcpTaskStatus::Failed, format!("Failed with exit code {}", code)),
+        },
     }
 }
 
