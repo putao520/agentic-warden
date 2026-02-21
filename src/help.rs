@@ -19,7 +19,7 @@ AI CLI COMMANDS:
 
     Agents:     claude | codex | gemini | all | "agent1|agent2"
     -r ROLE     Inject role prompt (run 'aiw roles list' to see all)
-    -mp PROVIDER Use specific provider (e.g., openrouter, glm)
+    -mp PROVIDER Use specific provider (e.g., cdx, glm)
     [CLI_OPTIONS] Forwarded to AI CLI (run 'aiw claude --help' to see all)
     "TASK"      Task description (omit for interactive mode)
 
@@ -88,8 +88,8 @@ EXAMPLES:
 
     # AI CLI with provider selection
     aiw claude "explain this code"
-    aiw claude -mp openrouter "explain this code"
-    aiw codex -mp glm "write tests"
+    aiw claude -mp glm "explain this code"
+    aiw codex -mp cdx "write tests"
 
     # AI CLI with role + provider
     aiw claude -r frontend -mp glm "build a React component"
@@ -186,7 +186,7 @@ ROLE INJECTION:
     - All other locales (en_*, ja_*, ko_*, etc.) use English versions
 
 PROVIDER SELECTION:
-    -mp, --aiw-provider <PROVIDER>    Use specific provider (e.g., openrouter, glm)
+    -mp, --aiw-provider <PROVIDER>    Use specific provider (e.g., cdx, glm)
 
     Without -mp, uses the default provider configured in ~/.aiw/providers.json
 
@@ -229,12 +229,12 @@ EXAMPLES:
     aiw {} -r security -mp glm "review this code for vulnerabilities"
 
     # With provider selection
-    aiw {} -mp openrouter "write python code"
+    aiw {} -mp glm "write python code"
     aiw {} -mp glm "write tests"
 
     # With role + provider
     aiw {} -r frontend -mp glm "build a React component"
-    aiw {} -r database -mp openrouter "design a schema"
+    aiw {} -r database -mp glm "design a schema"
 
     # With working directory
     aiw {} -C /path/to/project "implement this feature"
@@ -534,7 +534,7 @@ EXAMPLES:
 
     AI CLI Basics:
         aiw claude "write a hello world in Rust"
-        aiw codex -mp glm "explain this function"
+        aiw codex -mp cdx "explain this function"
         aiw gemini "refactor this code"
 
     Role Injection:
@@ -543,8 +543,8 @@ EXAMPLES:
         aiw codex -r security "review for vulnerabilities"
 
     Provider Management:
-        aiw claude -mp openrouter "write tests"
-        aiw codex -mp glm --temperature 0.7 "generate code"
+        aiw claude -mp glm "write tests"
+        aiw codex -mp cdx --temperature 0.7 "generate code"
 
     Parameter Forwarding:
         aiw claude -mp glm --model sonnet "explain this code"
@@ -928,8 +928,8 @@ QUICK START EXAMPLES:
    aiw codex -r security "Review for vulnerabilities"
 
 4. Provider selection:
-   aiw claude -mp openrouter "write code"
-   aiw codex -mp glm "explain this"
+   aiw claude -mp glm "write code"
+   aiw codex -mp cdx "explain this"
 
 5. Parameter forwarding:
    aiw claude -mp glm --model sonnet "explain this code"

@@ -75,26 +75,6 @@ impl ProviderManager {
             )));
         }
 
-        // Validate base_url format if present
-        if let Some(base_url) = &provider.base_url {
-            if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
-                return Err(ProviderError::InvalidConfig(format!(
-                    "Base URL for provider '{}' must start with http:// or https://",
-                    provider_id
-                )));
-            }
-            // Basic URL validation - check for suspicious patterns
-            if base_url.contains("..")
-                || base_url.contains("javascript:")
-                || base_url.contains("data:")
-            {
-                return Err(ProviderError::InvalidConfig(format!(
-                    "Base URL for provider '{}' contains suspicious patterns",
-                    provider_id
-                )));
-            }
-        }
-
         // Validate environment variable keys and values
         for (key, value) in &provider.env {
             // Check for valid environment variable names
@@ -128,6 +108,22 @@ impl ProviderManager {
                     "Environment variable '{}' for provider '{}' exceeds maximum length",
                     key, provider_id
                 )));
+            }
+
+            // Validate URL format for *_BASE_URL env vars
+            if key.ends_with("_BASE_URL") {
+                if !value.starts_with("http://") && !value.starts_with("https://") {
+                    return Err(ProviderError::InvalidConfig(format!(
+                        "Environment variable '{}' for provider '{}' must start with http:// or https://",
+                        key, provider_id
+                    )));
+                }
+                if value.contains("..") || value.contains("javascript:") || value.contains("data:") {
+                    return Err(ProviderError::InvalidConfig(format!(
+                        "Environment variable '{}' for provider '{}' contains suspicious patterns",
+                        key, provider_id
+                    )));
+                }
             }
         }
 
@@ -554,8 +550,6 @@ mod tests {
         };
 
         let provider = Provider {
-            token: None,
-            base_url: None,
             scenario: None,
             compatible_with: None,
             env: HashMap::new(),
@@ -576,8 +570,6 @@ mod tests {
         };
 
         let provider = Provider {
-            token: None,
-            base_url: None,
             scenario: None,
             compatible_with: None,
             env: HashMap::new(),
@@ -601,8 +593,6 @@ mod tests {
 
         // Provider with no compatible_with (compatible with all)
         let provider_all = Provider {
-            token: Some("test".to_string()),
-            base_url: None,
             scenario: None,
             compatible_with: None,
             env: HashMap::new(),
@@ -613,8 +603,6 @@ mod tests {
 
         // Provider with specific compatibility
         let provider_claude = Provider {
-            token: Some("test".to_string()),
-            base_url: None,
             scenario: None,
             compatible_with: Some(vec![AiType::Claude]),
             env: HashMap::new(),
@@ -625,8 +613,6 @@ mod tests {
 
         // Provider with multiple compatibility
         let provider_multi = Provider {
-            token: Some("test".to_string()),
-            base_url: None,
             scenario: None,
             compatible_with: Some(vec![AiType::Claude, AiType::Codex]),
             env: HashMap::new(),
@@ -646,11 +632,13 @@ mod tests {
         providers_config.providers.insert(
             "claude-only".to_string(),
             Provider {
-                token: Some("test-claude".to_string()),
-                base_url: None,
                 scenario: None,
                 compatible_with: Some(vec![AiType::Claude]),
-                env: HashMap::new(),
+                env: {
+                    let mut map = HashMap::new();
+                    map.insert("ANTHROPIC_API_KEY".to_string(), "test-claude".to_string());
+                    map
+                },
             },
         );
 
@@ -658,11 +646,13 @@ mod tests {
         providers_config.providers.insert(
             "all-types".to_string(),
             Provider {
-                token: Some("test-all".to_string()),
-                base_url: None,
                 scenario: None,
                 compatible_with: None,
-                env: HashMap::new(),
+                env: {
+                    let mut map = HashMap::new();
+                    map.insert("ANTHROPIC_API_KEY".to_string(), "test-all".to_string());
+                    map
+                },
             },
         );
 
@@ -700,11 +690,13 @@ mod tests {
         providers_config.providers.insert(
             "claude-only".to_string(),
             Provider {
-                token: Some("test".to_string()),
-                base_url: None,
                 scenario: None,
                 compatible_with: Some(vec![AiType::Claude]),
-                env: HashMap::new(),
+                env: {
+                    let mut map = HashMap::new();
+                    map.insert("ANTHROPIC_API_KEY".to_string(), "test".to_string());
+                    map
+                },
             },
         );
 

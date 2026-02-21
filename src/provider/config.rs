@@ -20,17 +20,10 @@ pub struct ProvidersConfig {
     pub default_provider: String,
 }
 
-/// Single Provider configuration - 最简化版本
+/// Single Provider configuration - env 是唯一数据源
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Provider {
-    /// API Token
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub token: Option<String>,
-
-    /// Base URL for API
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub base_url: Option<String>,
-
     /// Scenario description - when to use this provider
     /// 场景描述 - 何时使用此供应商
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -41,7 +34,7 @@ pub struct Provider {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub compatible_with: Option<Vec<AiType>>,
 
-    /// All environment variables (includes token and base_url mappings)
+    /// Environment variables to inject into CLI process (SSOT)
     #[serde(default)]
     pub env: HashMap<String, String>,
 }
@@ -95,8 +88,6 @@ impl ProvidersConfig {
         providers.insert(
             "official".to_string(),
             Provider {
-                token: None,
-                base_url: None,
                 scenario: None,
                 compatible_with: None,
                 env: HashMap::new(),
@@ -189,52 +180,26 @@ impl Provider {
         }
     }
 
-    /// Get all environment variables including token and base_url
-    pub fn get_all_env_vars(&self) -> HashMap<String, String> {
-        let mut env = self.env.clone();
-
-        // Add token if present
-        if let Some(token) = &self.token {
-            // Try to infer the token env var name, default to ANTHROPIC_API_KEY
-            if !env.contains_key("ANTHROPIC_API_KEY") && !env.contains_key("OPENAI_API_KEY") {
-                env.insert("ANTHROPIC_API_KEY".to_string(), token.clone());
-            }
-        }
-
-        // Add base_url if present
-        if let Some(base_url) = &self.base_url {
-            if !env.contains_key("ANTHROPIC_BASE_URL") && !env.contains_key("OPENAI_BASE_URL") {
-                env.insert("ANTHROPIC_BASE_URL".to_string(), base_url.clone());
-            }
-        }
-
-        env
-    }
-
-    /// Create a default provider with only env vars (for backward compatibility)
-    pub fn from_env(env: HashMap<String, String>) -> Self {
-        Self {
-            token: None,
-            base_url: None,
-            scenario: None,
-            compatible_with: None,
-            env,
-        }
-    }
-
     /// Get a summary string for display
     pub fn summary(&self) -> String {
         let mut parts = Vec::new();
         if let Some(scenario) = &self.scenario {
             parts.push(format!("scenario: {}", scenario));
         }
-        if self.token.is_some() {
-            parts.push("token: ✓".to_string());
+        // Show key env vars: API keys (masked) and base URLs
+        for (key, value) in &self.env {
+            if key.ends_with("_API_KEY") {
+                let masked = if value.len() > 8 {
+                    format!("{}...{}", &value[..4], &value[value.len()-4..])
+                } else {
+                    "****".to_string()
+                };
+                parts.push(format!("{}: {}", key, masked));
+            } else if key.ends_with("_BASE_URL") {
+                parts.push(format!("{}: {}", key, value));
+            }
         }
-        if let Some(url) = &self.base_url {
-            parts.push(format!("url: {}", url));
-        }
-        if !self.env.is_empty() {
+        if !self.env.is_empty() && parts.iter().all(|p| p.starts_with("scenario:")) {
             parts.push(format!("env: {} vars", self.env.len()));
         }
         if parts.is_empty() {
@@ -252,22 +217,21 @@ mod tests {
     #[test]
     fn test_provider_env_vars() {
         let provider = Provider {
-            token: Some("sk-test-token".to_string()),
-            base_url: Some("https://api.example.com".to_string()),
             scenario: None,
             compatible_with: None,
             env: {
                 let mut map = HashMap::new();
+                map.insert("ANTHROPIC_API_KEY".to_string(), "sk-test-token".to_string());
+                map.insert("ANTHROPIC_BASE_URL".to_string(), "https://api.example.com".to_string());
                 map.insert("CUSTOM_VAR".to_string(), "value".to_string());
                 map
             },
         };
 
-        let all_env = provider.get_all_env_vars();
-        assert!(all_env.contains_key("ANTHROPIC_API_KEY"));
-        assert!(all_env.contains_key("ANTHROPIC_BASE_URL"));
-        assert!(all_env.contains_key("CUSTOM_VAR"));
-        assert_eq!(all_env.get("ANTHROPIC_API_KEY").unwrap(), "sk-test-token");
+        assert!(provider.env.contains_key("ANTHROPIC_API_KEY"));
+        assert!(provider.env.contains_key("ANTHROPIC_BASE_URL"));
+        assert!(provider.env.contains_key("CUSTOM_VAR"));
+        assert_eq!(provider.env.get("ANTHROPIC_API_KEY").unwrap(), "sk-test-token");
     }
 
     #[test]
@@ -283,11 +247,14 @@ mod tests {
     #[test]
     fn test_provider_with_scenario() {
         let provider = Provider {
-            token: Some("sk-test".to_string()),
-            base_url: Some("https://api.example.com".to_string()),
             scenario: Some("Best for production workloads".to_string()),
             compatible_with: None,
-            env: HashMap::new(),
+            env: {
+                let mut map = HashMap::new();
+                map.insert("ANTHROPIC_API_KEY".to_string(), "sk-test-key".to_string());
+                map.insert("ANTHROPIC_BASE_URL".to_string(), "https://api.example.com".to_string());
+                map
+            },
         };
 
         let summary = provider.summary();
@@ -296,10 +263,19 @@ mod tests {
     }
 
     #[test]
-    fn test_provider_backward_compatibility() {
+    fn test_provider_deny_unknown_fields() {
+        // Old format with token/base_url must be rejected
         let json = r#"{"token":"sk-test","base_url":"https://api.test.com","env":{}}"#;
+        let result: Result<Provider, _> = serde_json::from_str(json);
+        assert!(result.is_err(), "should reject unknown fields like token/base_url");
+    }
+
+    #[test]
+    fn test_provider_new_format() {
+        let json = r#"{"scenario":"test","env":{"ANTHROPIC_API_KEY":"sk-test"}}"#;
         let provider: Provider = serde_json::from_str(json).expect("should deserialize");
-        assert!(provider.scenario.is_none());
+        assert_eq!(provider.scenario.as_deref(), Some("test"));
+        assert_eq!(provider.env.get("ANTHROPIC_API_KEY").unwrap(), "sk-test");
     }
 
     #[test]
@@ -317,11 +293,13 @@ mod tests {
         config.providers.insert(
             "test".to_string(),
             Provider {
-                token: Some("sk-test".to_string()),
-                base_url: Some("https://api.test.com".to_string()),
                 scenario: None,
                 compatible_with: None,
-                env: HashMap::new(),
+                env: {
+                    let mut map = HashMap::new();
+                    map.insert("ANTHROPIC_API_KEY".to_string(), "sk-test".to_string());
+                    map
+                },
             },
         );
 

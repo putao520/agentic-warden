@@ -7,22 +7,9 @@
 use crate::error::{AgenticResult, AgenticWardenError};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::SystemTime;
-
-/// AI CLI 类型
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub enum AiType {
-    #[serde(rename = "codex")]
-    Codex,
-    #[serde(rename = "claude")]
-    Claude,
-    #[serde(rename = "gemini")]
-    Gemini,
-    #[serde(rename = "all")]
-    All,
-}
 
 /// 任务唯一标识符
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -290,111 +277,10 @@ pub struct ProcessInfo {
     pub depth: u32,
 }
 
-/// Provider 配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Provider {
-    /// Provider 唯一标识符
-    pub name: String,
-    /// Provider 描述信息
-    pub description: String,
-    /// 兼容的 AI CLI 类型列表
-    pub compatible_with: Vec<AiType>,
-    /// 环境变量映射
-    pub env: HashMap<String, String>,
-    /// 是否为内置 Provider
-    #[serde(default)]
-    pub builtin: bool,
-    /// 创建时间
-    #[serde(default = "default_now")]
-    pub created_at: DateTime<Utc>,
-    /// 更新时间
-    #[serde(default = "default_now")]
-    pub updated_at: DateTime<Utc>,
-    /// 元数据
-    #[serde(default)]
-    pub metadata: HashMap<String, serde_json::Value>,
-}
-
 fn default_now() -> DateTime<Utc> {
     Utc::now()
 }
 
-/// Provider 配置文件
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ProviderConfig {
-    /// JSON Schema 版本
-    #[serde(rename = "$schema")]
-    pub schema: String,
-    /// Provider 映射表
-    pub providers: HashMap<String, Provider>,
-    /// 默认 Provider 名称
-    pub default_provider: String,
-    /// 配置文件版本
-    #[serde(default = "default_config_version")]
-    pub version: String,
-    /// 配置文件格式版本
-    #[serde(default = "default_format_version")]
-    pub format_version: u32,
-    /// 配置设置
-    #[serde(default)]
-    pub settings: ProviderSettings,
-}
-
-fn default_config_version() -> String {
-    "1.0.0".to_string()
-}
-
-fn default_format_version() -> u32 {
-    1
-}
-
-/// Provider 设置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProviderSettings {
-    /// 是否自动刷新
-    #[serde(default = "default_true")]
-    pub auto_refresh: bool,
-    /// 健康检查间隔（秒）
-    #[serde(default = "default_health_check_interval")]
-    pub health_check_interval: u64,
-    /// 连接超时（秒）
-    #[serde(default = "default_connection_timeout")]
-    pub connection_timeout: u64,
-    /// 最大重试次数
-    #[serde(default = "default_max_retries")]
-    pub max_retries: u32,
-    /// 启动时验证
-    #[serde(default = "default_true")]
-    pub validate_on_startup: bool,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-fn default_health_check_interval() -> u64 {
-    300
-}
-
-fn default_connection_timeout() -> u64 {
-    30
-}
-
-fn default_max_retries() -> u32 {
-    3
-}
-
-impl Default for ProviderSettings {
-    fn default() -> Self {
-        Self {
-            auto_refresh: true,
-            health_check_interval: 300,
-            connection_timeout: 30,
-            max_retries: 3,
-            validate_on_startup: true,
-        }
-    }
-}
 
 /// OAuth Token 信息
 #[derive(Debug, Clone, Serialize, Deserialize)]

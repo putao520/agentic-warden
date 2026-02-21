@@ -100,8 +100,8 @@ impl AutoModeExecutor {
         let cli_args = cli_type.build_full_access_args(prompt);
         let os_args: Vec<OsString> = cli_args.into_iter().map(OsString::from).collect();
 
-        // 使用指定的 provider
-        let provider_str = if provider == "auto" {
+        // 使用指定的 provider（"auto" 也传给 supervisor 走自动选择逻辑）
+        let provider_str = if provider.is_empty() {
             None // 使用 default_provider
         } else {
             Some(provider.to_string())

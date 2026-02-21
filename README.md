@@ -2,12 +2,14 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.5.49-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.5.51-blue?style=flat-square)
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange?style=flat-square&logo=rust)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 ![MCP](https://img.shields.io/badge/MCP-Supported-purple?style=flat-square)
 
 **Unified Router & Proxy for AI CLI Tools and MCP Servers**
+
+[English](#what-is-aiw) | [中文](#什么是-aiw)
 
 </div>
 

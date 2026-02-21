@@ -2,214 +2,26 @@
   "$schema": "https://agentic-warden.dev/schema/provider.json",
   "providers": {
     "openrouter": {
-      "name": "OpenRouter",
-      "description": "OpenRouter 统一 LLM 网关",
-      "icon": "🌐",
-      "official": false,
-      "protected": false,
-      "custom": false,
-      "support_modes": [
-        {
-          "mode_type": "openai_compatible",
-          "name": "OpenAI Compatible",
-          "description": "通过 OpenAI API 协议访问全球模型",
-          "priority": 90,
-          "config": {
-            "regional_urls": {
-              "international": {
-                "base_url": "https://openrouter.ai/api/v1",
-                "auth_env_var": "OPENAI_API_KEY",
-                "recommended_model": "gpt-4o-mini",
-                "features": [
-                  "global-routing",
-                  "multi-provider"
-                ]
-              }
-            },
-            "models": [
-              {
-                "id": "gpt-4o-mini",
-                "name": "GPT-4o Mini",
-                "description": "OpenRouter 默认快速模型",
-                "context_length": 128000,
-                "pricing": {
-                  "input_price_per_1k": 0.0006,
-                  "output_price_per_1k": 0.0024,
-                  "currency": "USD"
-                }
-              },
-              {
-                "id": "claude-3-sonnet",
-                "name": "Claude 3 Sonnet",
-                "description": "稳健的 Claude 通用模型",
-                "context_length": 200000,
-                "pricing": {
-                  "input_price_per_1k": 0.003,
-                  "output_price_per_1k": 0.015,
-                  "currency": "USD"
-                }
-              }
-            ],
-            "additional_env": {
-              "OPENAI_BASE_URL": "https://openrouter.ai/api/v1"
-            },
-            "rate_limit": {
-              "requests_per_minute": 60,
-              "tokens_per_minute": 90000,
-              "requests_per_day": 10000
-            }
-          }
-        }
-      ],
+      "scenario": "OpenRouter 统一 LLM 网关，通过 OpenAI 协议访问全球模型",
       "compatible_with": ["codex", "claude"],
-      "validation_endpoint": "https://openrouter.ai/api/v1/models",
-      "category": "gateway",
-      "website": "https://openrouter.ai",
-      "regions": ["international"],
       "env": {
         "OPENAI_API_KEY": "sk-or-v1-xxx",
         "OPENAI_BASE_URL": "https://openrouter.ai/api/v1"
       }
     },
     "litellm": {
-      "name": "LiteLLM",
-      "description": "LiteLLM 本地代理",
-      "icon": "🛠️",
-      "official": false,
-      "protected": false,
-      "custom": false,
-      "support_modes": [
-        {
-          "mode_type": "openai_compatible",
-          "name": "Local Gateway",
-          "description": "本地 LiteLLM 转发 OpenAI 协议",
-          "priority": 70,
-          "config": {
-            "regional_urls": {
-              "international": {
-                "base_url": "http://127.0.0.1:4000",
-                "auth_env_var": "ANTHROPIC_API_KEY",
-                "recommended_model": "claude-3-haiku",
-                "features": [
-                  "self-hosted",
-                  "low-latency"
-                ]
-              }
-            },
-            "models": [
-              {
-                "id": "claude-3-haiku",
-                "name": "Claude 3 Haiku",
-                "description": "高性价比离线推理模型",
-                "context_length": 200000
-              }
-            ],
-            "additional_env": {
-              "ANTHROPIC_BASE_URL": "http://127.0.0.1:4000"
-            }
-          }
-        }
-      ],
+      "scenario": "LiteLLM 本地代理，低延迟自托管网关",
       "compatible_with": ["codex", "claude", "gemini"],
-      "validation_endpoint": "http://127.0.0.1:4000/health",
-      "category": "self-hosted",
-      "website": "https://github.com/BerriAI/litellm",
-      "regions": ["local", "international"],
       "env": {
         "ANTHROPIC_API_KEY": "sk-ant-xxx",
         "ANTHROPIC_BASE_URL": "http://localhost:4000"
       }
     },
     "official": {
-      "name": "Official",
-      "description": "官方 API (默认)",
-      "icon": "⭐",
-      "official": true,
-      "protected": true,
-      "custom": false,
-      "support_modes": [
-        {
-          "mode_type": "claude_code_native",
-          "name": "Anthropic Claude",
-          "description": "官方 Claude API",
-          "priority": 100,
-          "config": {
-            "regional_urls": {
-              "international": {
-                "base_url": "https://api.anthropic.com/v1",
-                "auth_env_var": "ANTHROPIC_API_KEY",
-                "recommended_model": "claude-3.5-sonnet",
-                "features": [
-                  "official",
-                  "high-reliability"
-                ]
-              }
-            },
-            "models": [
-              {
-                "id": "claude-3.5-sonnet",
-                "name": "Claude 3.5 Sonnet",
-                "description": "旗舰 Claude 模型",
-                "context_length": 200000
-              }
-            ],
-            "additional_env": {
-              "ANTHROPIC_BASE_URL": "https://api.anthropic.com/v1"
-            }
-          }
-        },
-        {
-          "mode_type": "openai_compatible",
-          "name": "OpenAI Official",
-          "description": "官方 OpenAI API",
-          "priority": 85,
-          "config": {
-            "regional_urls": {
-              "international": {
-                "base_url": "https://api.openai.com/v1",
-                "auth_env_var": "OPENAI_API_KEY",
-                "recommended_model": "gpt-4o",
-                "features": [
-                  "official"
-                ]
-              }
-            },
-            "additional_env": {
-              "OPENAI_BASE_URL": "https://api.openai.com/v1"
-            }
-          }
-        },
-        {
-          "mode_type": "gemini_native",
-          "name": "Google Gemini",
-          "description": "官方 Gemini API",
-          "priority": 80,
-          "config": {
-            "regional_urls": {
-              "international": {
-                "base_url": "https://generativelanguage.googleapis.com/v1beta",
-                "auth_env_var": "GOOGLE_API_KEY",
-                "recommended_model": "gemini-1.5-pro",
-                "features": [
-                  "official",
-                  "native"
-                ]
-              }
-            },
-            "additional_env": {
-              "GOOGLE_API_KEY": "AIza-xxx"
-            }
-          }
-        }
-      ],
+      "scenario": "官方 API (默认)",
       "compatible_with": ["codex", "claude", "gemini"],
-      "validation_endpoint": "https://api.openai.com/v1/models",
-      "category": "official",
-      "website": null,
-      "regions": ["international"],
       "env": {}
     }
   },
-  "default_provider": "official",
-  "user_tokens": {}
+  "default_provider": "official"
 }

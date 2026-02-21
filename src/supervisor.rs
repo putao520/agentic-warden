@@ -319,6 +319,11 @@ async fn execute_cli_internal<S: TaskStorage>(
         for (key, value) in &provider_config.env {
             command.env(key, value);
         }
+        // For Codex with third-party providers, isolate CODEX_HOME to avoid
+        // OAuth token conflicts from ~/.codex/auth.json
+        if matches!(cli_type, CliType::Codex) && provider_name != "official" {
+            setup_codex_home_for_provider(&mut command, &provider_config);
+        }
     }
 
     let mut child = command.spawn()?;
@@ -612,6 +617,53 @@ async fn execute_cli_internal<S: TaskStorage>(
 /// - Uses system temp directory (cross-platform)
 /// - Creates directory with restrictive permissions (0700 on Unix)
 /// - Ensures logs are only accessible by the current user
+/// Set up an isolated CODEX_HOME for third-party providers.
+///
+/// Codex CLI prioritizes OAuth tokens from `~/.codex/auth.json` over the
+/// `OPENAI_API_KEY` environment variable. When using a third-party provider,
+/// the OAuth token is invalid, causing 401 errors. This function creates a
+/// temporary CODEX_HOME directory with a clean `auth.json` containing only
+/// the provider's API key, and copies the user's `config.toml` for settings.
+fn setup_codex_home_for_provider(
+    command: &mut Command,
+    provider_config: &crate::provider::config::Provider,
+) {
+    use std::fs;
+
+    // Create a unique temp directory for this codex session
+    let codex_home = std::env::temp_dir().join(format!(
+        "aiw-codex-home-{}",
+        std::process::id()
+    ));
+    if fs::create_dir_all(&codex_home).is_err() {
+        return;
+    }
+
+    // Copy config.toml from original CODEX_HOME
+    let original_home = dirs::home_dir()
+        .map(|h| h.join(".codex"))
+        .unwrap_or_default();
+    let original_config = original_home.join("config.toml");
+    if original_config.exists() {
+        let _ = fs::copy(&original_config, codex_home.join("config.toml"));
+    }
+
+    // Write a clean auth.json with only the API key from provider env
+    let api_key = provider_config
+        .env
+        .get("OPENAI_API_KEY")
+        .cloned()
+        .unwrap_or_default();
+    let auth_json = if api_key.is_empty() {
+        r#"{"OPENAI_API_KEY": null}"#.to_string()
+    } else {
+        format!(r#"{{"OPENAI_API_KEY": "{}"}}"#, api_key)
+    };
+    let _ = fs::write(codex_home.join("auth.json"), auth_json);
+
+    command.env("CODEX_HOME", &codex_home);
+}
+
 /// - Logs are automatically cleaned up on system reboot
 /// - Collision-resistant filename format: {PID}-{timestamp}-{random}.log
 ///   - PID: Process ID for process identification
@@ -1147,6 +1199,11 @@ pub async fn start_interactive_cli<S: TaskStorage>(
     if !is_fallback {
         for (key, value) in &provider_config.env {
             command.env(key, value);
+        }
+        // For Codex with third-party providers, isolate CODEX_HOME to avoid
+        // OAuth token conflicts from ~/.codex/auth.json
+        if matches!(cli_type, CliType::Codex) && provider_name != "official" {
+            setup_codex_home_for_provider(&mut command, &provider_config);
         }
     }
 
