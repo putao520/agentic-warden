@@ -19,7 +19,7 @@ use crate::provider::manager::ProviderManager;
 
 pub struct ProviderScreen {
     list_state: ListState,
-    providers: Vec<(String, String)>, // (id, summary)
+    providers: Vec<(String, String, bool)>, // (id, summary, enabled)
     default_provider: Option<String>,
     message: Option<String>,
 }
@@ -47,7 +47,7 @@ impl ProviderScreen {
         self.providers = config
             .providers
             .iter()
-            .map(|(id, provider)| (id.clone(), provider.summary()))
+            .map(|(id, provider)| (id.clone(), provider.summary(), provider.is_enabled()))
             .collect();
         self.providers.sort_by(|a, b| a.0.cmp(&b.0));
 
@@ -87,18 +87,25 @@ impl Screen for ProviderScreen {
         let items: Vec<ListItem> = self
             .providers
             .iter()
-            .map(|(id, summary)| {
+            .map(|(id, summary, enabled)| {
                 let is_default = self
                     .default_provider
                     .as_ref()
                     .map(|d| d == id)
                     .unwrap_or(false);
 
+                let status = if !enabled {
+                    Span::styled(" [disabled]", Style::default().fg(Color::Red))
+                } else {
+                    Span::raw("")
+                };
+
                 let line = vec![
                     Span::raw(if is_default { "✓ " } else { "  " }),
-                    Span::styled(id, Style::default().fg(Color::Yellow)),
+                    Span::styled(id, Style::default().fg(if *enabled { Color::Yellow } else { Color::DarkGray })),
                     Span::raw(": "),
-                    Span::styled(summary, Style::default().fg(Color::Gray)),
+                    Span::styled(summary, Style::default().fg(if *enabled { Color::Gray } else { Color::DarkGray })),
+                    status,
                 ];
 
                 ListItem::new(Line::from(line))
@@ -183,8 +190,8 @@ mod tests {
         let mut screen = ProviderScreen {
             list_state: ListState::default(),
             providers: vec![
-                ("test1".to_string(), "summary1".to_string()),
-                ("test2".to_string(), "summary2".to_string()),
+                ("test1".to_string(), "summary1".to_string(), true),
+                ("test2".to_string(), "summary2".to_string(), true),
             ],
             default_provider: Some("test1".to_string()),
             message: None,

@@ -621,6 +621,7 @@ pub struct ListProvidersResult {
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
 pub struct ProviderSummary {
     pub name: String,
+    pub enabled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scenario: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -654,6 +655,7 @@ pub async fn list_providers() -> Result<ListProvidersResult, String> {
         .into_iter()
         .map(|(name, p)| ProviderSummary {
             name: name.clone(),
+            enabled: p.is_enabled(),
             scenario: p.scenario.clone(),
             compatible_with: p
                 .compatible_with

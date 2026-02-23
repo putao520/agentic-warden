@@ -103,6 +103,7 @@ pub fn format_providers_table(result: &ListProvidersResult) -> String {
 
     table.add_row(Row::new(vec![
         Cell::new("NAME"),
+        Cell::new("ENABLED"),
         Cell::new("DEFAULT"),
         Cell::new("SCENARIO"),
         Cell::new("COMPATIBLE_WITH"),
@@ -114,6 +115,7 @@ pub fn format_providers_table(result: &ListProvidersResult) -> String {
         } else {
             ""
         };
+        let enabled = if p.enabled { "✓" } else { "✗" };
         let scenario = p.scenario.as_deref().unwrap_or("-");
         let compat = p
             .compatible_with
@@ -123,6 +125,7 @@ pub fn format_providers_table(result: &ListProvidersResult) -> String {
 
         table.add_row(Row::new(vec![
             Cell::new(&p.name),
+            Cell::new(enabled),
             Cell::new(is_default),
             Cell::new(scenario),
             Cell::new(&compat),

@@ -5,7 +5,6 @@ use super::error::{ProviderError, ProviderResult};
 use crate::common::constants::files::PROVIDERS_JSON;
 use crate::config::AUTH_DIRECTORY;
 use anyhow::Result;
-use rand::seq::SliceRandom;
 use std::{fs, path::PathBuf};
 
 /// Provider configuration manager
@@ -235,15 +234,23 @@ impl ProviderManager {
 
     /// Get provider by name
     pub fn get_provider(&self, name: &str) -> ProviderResult<&Provider> {
-        self.providers_config
+        let provider = self
+            .providers_config
             .get_provider(name)
-            .ok_or_else(|| ProviderError::ProviderNotFound(name.to_string()))
+            .ok_or_else(|| ProviderError::ProviderNotFound(name.to_string()))?;
+        if !provider.is_enabled() {
+            return Err(ProviderError::ProviderDisabled(name.to_string()));
+        }
+        Ok(provider)
     }
 
     /// Get default provider
     pub fn get_default_provider(&self) -> Option<(String, &Provider)> {
         let name = self.providers_config.default_provider.clone();
         let provider = self.providers_config.providers.get(&name)?;
+        if !provider.is_enabled() {
+            return None;
+        }
         Some((name, provider))
     }
 
@@ -315,24 +322,51 @@ impl ProviderManager {
         &self.providers_config.default_provider
     }
 
-    /// Get a random provider compatible with the given AI type
+    /// Temporarily disable a provider for 1 hour and persist to providers.json
+    pub fn disable_provider_temporarily(&mut self, name: &str) -> ProviderResult<()> {
+        if let Some(provider) = self.providers_config.providers.get_mut(name) {
+            provider.disable_temporarily();
+            self.save()?;
+        }
+        Ok(())
+    }
+
+    /// Scan all providers and restore any whose temporary disable has expired.
+    /// Returns the list of restored provider names.
+    pub fn restore_expired_providers(&mut self) -> ProviderResult<Vec<String>> {
+        let mut restored = Vec::new();
+        for (name, provider) in self.providers_config.providers.iter_mut() {
+            if provider.check_and_restore() {
+                restored.push(name.clone());
+            }
+        }
+        if !restored.is_empty() {
+            self.save()?;
+        }
+        Ok(restored)
+    }
+
+    /// Get the next compatible provider using round-robin selection
     ///
     /// Returns None if no compatible providers exist (excluding "official" which has no configuration).
-    /// When a compatible provider is found, returns the provider name and reference.
+    /// Persists the last used provider name in `~/.aiw/.provider_round_robin` to rotate across invocations.
     ///
     /// # Arguments
     /// * `ai_type` - The AI CLI type to find a compatible provider for
     ///
     /// # Returns
     /// `Some((name, provider))` if a compatible provider is found, `None` otherwise
-    pub fn get_random_compatible_provider(&self, ai_type: &AiType) -> Option<(String, &Provider)> {
-        let compatible: Vec<_> = self
+    pub fn get_random_compatible_provider(&mut self, ai_type: &AiType) -> Option<(String, &Provider)> {
+        // Restore any expired temporary disables before selecting
+        let _ = self.restore_expired_providers();
+
+        let mut compatible: Vec<_> = self
             .providers_config
             .providers
             .iter()
             .filter(|(name, provider)| {
                 // Exclude "official" as it's an empty placeholder provider
-                *name != "official" && provider.is_compatible_with(ai_type)
+                *name != "official" && provider.is_enabled() && provider.is_compatible_with(ai_type)
             })
             .collect();
 
@@ -340,10 +374,36 @@ impl ProviderManager {
             return None;
         }
 
-        let mut rng = rand::thread_rng();
-        compatible
-            .choose(&mut rng)
-            .map(|(name, provider)| ((*name).clone(), *provider))
+        // Sort by name for stable ordering
+        compatible.sort_by(|a, b| a.0.cmp(b.0));
+
+        let state_path = self.config_path.parent().map(|p| p.join(".provider_round_robin"));
+        let last_used = state_path
+            .as_ref()
+            .and_then(|p| fs::read_to_string(p).ok())
+            .unwrap_or_default();
+        let last_used = last_used.trim();
+
+        // Find the index after the last used provider, wrapping around
+        let idx = if last_used.is_empty() {
+            0
+        } else {
+            compatible
+                .iter()
+                .position(|(name, _)| name.as_str() == last_used)
+                .map(|pos| (pos + 1) % compatible.len())
+                .unwrap_or(0)
+        };
+
+        let (name, provider) = compatible[idx];
+        let selected_name = name.clone();
+
+        // Persist the selected provider name
+        if let Some(ref p) = state_path {
+            let _ = fs::write(p, &selected_name);
+        }
+
+        Some((selected_name, provider))
     }
 
     // ===== Token Management =====
@@ -550,9 +610,11 @@ mod tests {
         };
 
         let provider = Provider {
+            enabled: true,
             scenario: None,
             compatible_with: None,
             env: HashMap::new(),
+            disabled_until: None,
         };
 
         assert!(manager
@@ -570,9 +632,11 @@ mod tests {
         };
 
         let provider = Provider {
+            enabled: true,
             scenario: None,
             compatible_with: None,
             env: HashMap::new(),
+            disabled_until: None,
         };
 
         // "auto" should be rejected as reserved name (case-insensitive)
@@ -593,9 +657,11 @@ mod tests {
 
         // Provider with no compatible_with (compatible with all)
         let provider_all = Provider {
+            enabled: true,
             scenario: None,
             compatible_with: None,
             env: HashMap::new(),
+            disabled_until: None,
         };
         assert!(provider_all.is_compatible_with(&AiType::Claude));
         assert!(provider_all.is_compatible_with(&AiType::Codex));
@@ -603,9 +669,11 @@ mod tests {
 
         // Provider with specific compatibility
         let provider_claude = Provider {
+            enabled: true,
             scenario: None,
             compatible_with: Some(vec![AiType::Claude]),
             env: HashMap::new(),
+            disabled_until: None,
         };
         assert!(provider_claude.is_compatible_with(&AiType::Claude));
         assert!(!provider_claude.is_compatible_with(&AiType::Codex));
@@ -613,9 +681,11 @@ mod tests {
 
         // Provider with multiple compatibility
         let provider_multi = Provider {
+            enabled: true,
             scenario: None,
             compatible_with: Some(vec![AiType::Claude, AiType::Codex]),
             env: HashMap::new(),
+            disabled_until: None,
         };
         assert!(provider_multi.is_compatible_with(&AiType::Claude));
         assert!(provider_multi.is_compatible_with(&AiType::Codex));
@@ -632,6 +702,7 @@ mod tests {
         providers_config.providers.insert(
             "claude-only".to_string(),
             Provider {
+                enabled: true,
                 scenario: None,
                 compatible_with: Some(vec![AiType::Claude]),
                 env: {
@@ -639,6 +710,7 @@ mod tests {
                     map.insert("ANTHROPIC_API_KEY".to_string(), "test-claude".to_string());
                     map
                 },
+                disabled_until: None,
             },
         );
 
@@ -646,6 +718,7 @@ mod tests {
         providers_config.providers.insert(
             "all-types".to_string(),
             Provider {
+                enabled: true,
                 scenario: None,
                 compatible_with: None,
                 env: {
@@ -653,10 +726,11 @@ mod tests {
                     map.insert("ANTHROPIC_API_KEY".to_string(), "test-all".to_string());
                     map
                 },
+                disabled_until: None,
             },
         );
 
-        let manager = ProviderManager {
+        let mut manager = ProviderManager {
             config_path: PathBuf::new(),
             providers_config,
         };
@@ -690,6 +764,7 @@ mod tests {
         providers_config.providers.insert(
             "claude-only".to_string(),
             Provider {
+                enabled: true,
                 scenario: None,
                 compatible_with: Some(vec![AiType::Claude]),
                 env: {
@@ -697,10 +772,11 @@ mod tests {
                     map.insert("ANTHROPIC_API_KEY".to_string(), "test".to_string());
                     map
                 },
+                disabled_until: None,
             },
         );
 
-        let manager = ProviderManager {
+        let mut manager = ProviderManager {
             config_path: PathBuf::new(),
             providers_config,
         };

@@ -217,7 +217,7 @@ async fn execute_cli_internal<S: TaskStorage>(
     registry.sweep_stale_entries(Utc::now(), platform::process_alive, &terminate_wrapper)?;
 
     // Load provider configuration
-    let provider_manager = ProviderManager::new()
+    let mut provider_manager = ProviderManager::new()
         .map_err(|e| ProcessError::Other(format!("Failed to load provider: {}", e)))?;
 
     // Determine AI type for compatibility checking
@@ -243,7 +243,7 @@ async fn execute_cli_internal<S: TaskStorage>(
                     "Auto-selected provider: {} (for {})",
                     selected_name, ai_type
                 );
-                (selected_name, config, false)
+                (selected_name, config.clone(), false)
             } else {
                 // No compatible providers, fallback to no injection
                 eprintln!(
@@ -253,22 +253,37 @@ async fn execute_cli_internal<S: TaskStorage>(
                 // Use official provider as placeholder (empty config, no env injection)
                 let official = provider_manager
                     .get_provider("official")
-                    .map_err(|e| ProcessError::Other(e.to_string()))?;
+                    .map_err(|e| ProcessError::Other(e.to_string()))?
+                    .clone();
                 ("".to_string(), official, true)
             }
         } else {
             // Normal mode: use specified provider
             let config = provider_manager
                 .get_provider(name)
-                .map_err(|e| ProcessError::Other(e.to_string()))?;
+                .map_err(|e| ProcessError::Other(e.to_string()))?
+                .clone();
             (name.clone(), config, false)
         }
     } else {
-        // Default provider
-        let (name, config) = provider_manager
-            .get_default_provider()
-            .ok_or_else(|| ProcessError::Other("No default provider configured".to_string()))?;
-        (name, config, false)
+        // No -mp flag: try auto-selecting a compatible provider first, then fallback to default
+        if let Some((selected_name, config)) =
+            provider_manager.get_random_compatible_provider(&ai_type)
+        {
+            eprintln!(
+                "Auto-selected provider: {} (for {})",
+                selected_name, ai_type
+            );
+            (selected_name, config.clone(), false)
+        } else {
+            // No compatible providers, fallback to default provider
+            let (name, config) = provider_manager
+                .get_default_provider()
+                .ok_or_else(|| {
+                    ProcessError::Other("No default provider configured".to_string())
+                })?;
+            (name, config.clone(), false)
+        }
     };
 
     // Display provider info if not using official and not in fallback mode
@@ -572,6 +587,16 @@ async fn execute_cli_internal<S: TaskStorage>(
             )),
         };
         let _ = guard.mark_completed(result, exit_code, completed_at);
+    }
+
+    // Auto-disable provider on failure (non-zero exit code, non-fallback, non-empty provider)
+    if !status.success() && !is_fallback && !provider_name.is_empty() && provider_name != "official" {
+        eprintln!(
+            "Provider '{}' failed (exit {}), temporarily disabling for 1 hour",
+            provider_name,
+            status.code().unwrap_or(-1)
+        );
+        let _ = provider_manager.disable_provider_temporarily(&provider_name);
     }
 
     // Extract captured output if in capture mode
@@ -1096,7 +1121,7 @@ pub async fn start_interactive_cli<S: TaskStorage>(
     registry.sweep_stale_entries(Utc::now(), platform::process_alive, &terminate_wrapper)?;
 
     // Load provider configuration
-    let provider_manager = ProviderManager::new()
+    let mut provider_manager = ProviderManager::new()
         .map_err(|e| ProcessError::Other(format!("Failed to load provider: {}", e)))?;
 
     // Determine AI type for compatibility checking
@@ -1122,7 +1147,7 @@ pub async fn start_interactive_cli<S: TaskStorage>(
                     "Auto-selected provider: {} (for {})",
                     selected_name, ai_type
                 );
-                (selected_name, config, false)
+                (selected_name, config.clone(), false)
             } else {
                 // No compatible providers, fallback to no injection
                 eprintln!(
@@ -1132,22 +1157,37 @@ pub async fn start_interactive_cli<S: TaskStorage>(
                 // Use official provider as placeholder (empty config, no env injection)
                 let official = provider_manager
                     .get_provider("official")
-                    .map_err(|e| ProcessError::Other(e.to_string()))?;
+                    .map_err(|e| ProcessError::Other(e.to_string()))?
+                    .clone();
                 ("".to_string(), official, true)
             }
         } else {
             // Normal mode: use specified provider
             let config = provider_manager
                 .get_provider(name)
-                .map_err(|e| ProcessError::Other(e.to_string()))?;
+                .map_err(|e| ProcessError::Other(e.to_string()))?
+                .clone();
             (name.clone(), config, false)
         }
     } else {
-        // Default provider
-        let (name, config) = provider_manager
-            .get_default_provider()
-            .ok_or_else(|| ProcessError::Other("No default provider configured".to_string()))?;
-        (name, config, false)
+        // No -mp flag: try auto-selecting a compatible provider first, then fallback to default
+        if let Some((selected_name, config)) =
+            provider_manager.get_random_compatible_provider(&ai_type)
+        {
+            eprintln!(
+                "Auto-selected provider: {} (for {})",
+                selected_name, ai_type
+            );
+            (selected_name, config.clone(), false)
+        } else {
+            // No compatible providers, fallback to default provider
+            let (name, config) = provider_manager
+                .get_default_provider()
+                .ok_or_else(|| {
+                    ProcessError::Other("No default provider configured".to_string())
+                })?;
+            (name, config.clone(), false)
+        }
     };
 
     // Display provider info if not using official and not in fallback mode
@@ -1267,6 +1307,16 @@ pub async fn start_interactive_cli<S: TaskStorage>(
         (false, None) => Some("interactive_session_failed_without_exit_code".to_owned()),
     };
     let _ = registration_guard.mark_completed(result, exit_code, completed_at);
+
+    // Auto-disable provider on failure (non-zero exit code, non-fallback, non-empty provider)
+    if !status.success() && !is_fallback && !provider_name.is_empty() && provider_name != "official" {
+        eprintln!(
+            "Provider '{}' failed (exit {}), temporarily disabling for 1 hour",
+            provider_name,
+            status.code().unwrap_or(-1)
+        );
+        let _ = provider_manager.disable_provider_temporarily(&provider_name);
+    }
 
     Ok(extract_exit_code(status))
 }

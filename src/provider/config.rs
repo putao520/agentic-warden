@@ -25,6 +25,11 @@ pub struct ProvidersConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Provider {
+    /// Whether this provider is enabled (default: true)
+    /// 是否启用此供应商（默认：true）
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
     /// Scenario description - when to use this provider
     /// 场景描述 - 何时使用此供应商
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -38,6 +43,16 @@ pub struct Provider {
     /// Environment variables to inject into CLI process (SSOT)
     #[serde(default)]
     pub env: HashMap<String, String>,
+
+    /// 禁用到期时间（Unix 时间戳，秒）
+    /// - None 或 0 且 enabled=false → 永久禁用
+    /// - 有值且 > 0 → 临时禁用，超过此时间自动恢复
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disabled_until: Option<i64>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// AI type enumeration
@@ -92,9 +107,11 @@ impl ProvidersConfig {
         providers.insert(
             "official".to_string(),
             Provider {
+                enabled: true,
                 scenario: None,
                 compatible_with: None,
                 env: HashMap::new(),
+                disabled_until: None,
             },
         );
 
@@ -175,9 +192,51 @@ impl ProvidersConfig {
 }
 
 impl Provider {
+    /// Check if this provider is enabled
+    ///
+    /// - `enabled=true` → always enabled
+    /// - `enabled=false` + `disabled_until=Some(ts)` where ts > 0 → enabled if current time >= ts
+    /// - `enabled=false` + `disabled_until=None` or `Some(0)` → permanently disabled
+    pub fn is_enabled(&self) -> bool {
+        if self.enabled {
+            return true;
+        }
+        // enabled=false: check disabled_until for temporary disable
+        match self.disabled_until {
+            Some(ts) if ts > 0 => chrono::Utc::now().timestamp() >= ts,
+            _ => false, // None or 0 → permanently disabled
+        }
+    }
+
+    /// Temporarily disable this provider for 1 hour
+    pub fn disable_temporarily(&mut self) {
+        self.enabled = false;
+        self.disabled_until = Some(chrono::Utc::now().timestamp() + 3600);
+    }
+
+    /// Check and restore if temporary disable has expired.
+    /// Returns `true` if the provider was restored.
+    pub fn check_and_restore(&mut self) -> bool {
+        if self.enabled {
+            return false;
+        }
+        if let Some(ts) = self.disabled_until {
+            if ts > 0 && chrono::Utc::now().timestamp() >= ts {
+                self.enabled = true;
+                self.disabled_until = None;
+                return true;
+            }
+        }
+        false
+    }
+
     /// Check if this provider is compatible with given AI type
+    /// Returns false if provider is disabled.
     /// Returns true if compatible_with is None (compatible with all) or contains the ai_type
     pub fn is_compatible_with(&self, ai_type: &AiType) -> bool {
+        if !self.is_enabled() {
+            return false;
+        }
         match &self.compatible_with {
             None => true, // None means compatible with all types
             Some(types) => types.contains(ai_type),
@@ -221,6 +280,7 @@ mod tests {
     #[test]
     fn test_provider_env_vars() {
         let provider = Provider {
+            enabled: true,
             scenario: None,
             compatible_with: None,
             env: {
@@ -230,6 +290,7 @@ mod tests {
                 map.insert("CUSTOM_VAR".to_string(), "value".to_string());
                 map
             },
+            disabled_until: None,
         };
 
         assert!(provider.env.contains_key("ANTHROPIC_API_KEY"));
@@ -251,6 +312,7 @@ mod tests {
     #[test]
     fn test_provider_with_scenario() {
         let provider = Provider {
+            enabled: true,
             scenario: Some("Best for production workloads".to_string()),
             compatible_with: None,
             env: {
@@ -259,6 +321,7 @@ mod tests {
                 map.insert("ANTHROPIC_BASE_URL".to_string(), "https://api.example.com".to_string());
                 map
             },
+            disabled_until: None,
         };
 
         let summary = provider.summary();
@@ -297,6 +360,7 @@ mod tests {
         config.providers.insert(
             "test".to_string(),
             Provider {
+                enabled: true,
                 scenario: None,
                 compatible_with: None,
                 env: {
@@ -304,6 +368,7 @@ mod tests {
                     map.insert("ANTHROPIC_API_KEY".to_string(), "sk-test".to_string());
                     map
                 },
+                disabled_until: None,
             },
         );
 

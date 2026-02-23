@@ -7,6 +7,9 @@ pub enum ProviderError {
     #[error("Provider '{0}' not found in configuration")]
     ProviderNotFound(String),
 
+    #[error("Provider '{0}' is disabled")]
+    ProviderDisabled(String),
+
     #[error(
         "Provider '{provider}' is not compatible with {ai_type}. Compatible AI types: {compatible}"
     )]

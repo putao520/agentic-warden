@@ -5,16 +5,18 @@ use std::collections::HashMap;
 fn test_provider_env_var_generation() {
     let mut env = HashMap::new();
     env.insert("CUSTOM_KEY".to_string(), "value".to_string());
+    env.insert("ANTHROPIC_API_KEY".to_string(), "sk-test-123".to_string());
+    env.insert("ANTHROPIC_BASE_URL".to_string(), "https://api.example.com".to_string());
 
     let provider = Provider {
-        token: Some("sk-test-123".to_string()),
-        base_url: Some("https://api.example.com".to_string()),
+        enabled: true,
         scenario: None,
+        compatible_with: None,
         env,
+        disabled_until: None,
     };
 
-    let env_map = provider.get_all_env_vars();
-    assert_eq!(env_map.get("CUSTOM_KEY"), Some(&"value".to_string()));
-    assert!(env_map.contains_key("ANTHROPIC_API_KEY"));
-    assert!(env_map.contains_key("ANTHROPIC_BASE_URL"));
+    assert_eq!(provider.env.get("CUSTOM_KEY"), Some(&"value".to_string()));
+    assert!(provider.env.contains_key("ANTHROPIC_API_KEY"));
+    assert!(provider.env.contains_key("ANTHROPIC_BASE_URL"));
 }
