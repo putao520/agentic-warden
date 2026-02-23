@@ -73,6 +73,8 @@ test_special_chars.*
 claude*
 ai_*.log
 integration*.log
+.claude/
+.serena/
 
 # Schema and temporary config
 /schema/
