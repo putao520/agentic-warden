@@ -71,15 +71,10 @@ impl IntelligentRouter {
         let discovered = connection_pool.warm_up().await?;
 
         // REQ-013 Phase 1: Generate capability description
-        let capability_generator = capability_generator::CapabilityGenerator::with_llm(
-            &decision_endpoint,
-            &decision_model,
-        )
-        .unwrap_or_else(|_| capability_generator::CapabilityGenerator::fallback());
+        let capability_generator = capability_generator::CapabilityGenerator::new();
 
         let capability_description = capability_generator
-            .generate_capability_description(&discovered)
-            .await?;
+            .generate_capability_description(&discovered)?;
 
         eprintln!(
             "📝 Generated capability description: {}",
