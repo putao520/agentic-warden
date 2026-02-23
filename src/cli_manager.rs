@@ -354,7 +354,7 @@ impl CliToolDetector {
     /// Get installation hint for a tool based on OS
     pub fn get_install_hint(&self, command: &str) -> String {
         match command.to_lowercase().as_str() {
-            "claude" => "npm install -g @anthropic-ai/claude-code".to_string(),
+            "claude" => "curl -fsSL https://claude.ai/install.sh | sh".to_string(),
             "codex" => "npm install -g @openai/codex".to_string(),
             "gemini" => "npm install -g @google/gemini-cli".to_string(),
             _ => format!("Install {} via appropriate package manager", command),
@@ -556,14 +556,6 @@ async fn perform_aiw_update(version: &str) -> Result<()> {
 
 /// Original update function for AI CLI tools only
 pub async fn execute_update(tool_name: Option<&str>) -> Result<Vec<(String, bool, String)>> {
-    // Step 0: Ensure Node.js is installed (required for all AI CLI tools)
-    println!("🔍 Checking Node.js installation...");
-    if let Err(e) = CliToolDetector::auto_install_nodejs().await {
-        eprintln!("⚠️  Node.js auto-install failed: {}", e);
-        eprintln!("Please install Node.js manually from https://nodejs.org/");
-        anyhow::bail!("Node.js is required but not available");
-    }
-
     let mut detector = CliToolDetector::new();
     detector.detect_all_tools()?;
 
@@ -592,11 +584,29 @@ pub async fn execute_update(tool_name: Option<&str>) -> Result<Vec<(String, bool
         return Ok(results);
     }
 
+    // Check if any non-Claude tools need Node.js
+    let needs_nodejs = tools_to_process.iter().any(|t| t.command != "claude");
+    if needs_nodejs {
+        println!("🔍 Checking Node.js installation...");
+        if let Err(e) = CliToolDetector::auto_install_nodejs().await {
+            eprintln!("⚠️  Node.js auto-install failed: {}", e);
+            eprintln!("Please install Node.js manually from https://nodejs.org/");
+            // Don't bail - Claude can still be updated without Node.js
+        }
+    }
+
     // Process each tool
     for tool in tools_to_process {
         println!("\n🔧 Processing {}...", tool.name);
 
-        // All tools use npm for installation and updates
+        if tool.command == "claude" {
+            // Claude uses its own update mechanism, not npm
+            let result = update_claude_cli(tool).await;
+            results.push(result);
+            continue;
+        }
+
+        // Non-Claude tools use npm for installation and updates
         let npm_package = &tool.npm_package;
         let current_version = tool.version.clone();
 
@@ -664,7 +674,7 @@ pub async fn execute_update(tool_name: Option<&str>) -> Result<Vec<(String, bool
                 }
             }
             Err(e) => {
-                eprintln!("  ❌ Failed to execute npm: {}", e);
+                eprintln!("  ❌ Failed to execute command: {}", e);
                 results.push((tool.name.clone(), false, format!("Execution error: {}", e)));
             }
         }
@@ -680,6 +690,55 @@ pub async fn execute_update(tool_name: Option<&str>) -> Result<Vec<(String, bool
     println!("{}", "=".repeat(60));
 
     Ok(results)
+}
+
+/// Update/install Claude CLI using its native mechanism
+async fn update_claude_cli(tool: &CliTool) -> (String, bool, String) {
+    if tool.installed {
+        // Claude is installed - use `claude update`
+        if let Some(ref ver) = tool.version {
+            println!("  Current version: {}", ver);
+        }
+        println!("  Running claude update...");
+        match std::process::Command::new("claude")
+            .arg("update")
+            .status()
+        {
+            Ok(status) if status.success() => {
+                println!("  ✅ Claude updated successfully!");
+                (tool.name.clone(), true, "Success".to_string())
+            }
+            Ok(status) => {
+                eprintln!("  ❌ claude update failed with exit code: {:?}", status.code());
+                (tool.name.clone(), false, format!("Update failed: {:?}", status.code()))
+            }
+            Err(e) => {
+                eprintln!("  ❌ Failed to run claude update: {}", e);
+                (tool.name.clone(), false, format!("Execution error: {}", e))
+            }
+        }
+    } else {
+        // Claude not installed - use curl installer
+        println!("  Installing via curl...");
+        match std::process::Command::new("sh")
+            .arg("-c")
+            .arg("curl -fsSL https://claude.ai/install.sh | sh")
+            .status()
+        {
+            Ok(status) if status.success() => {
+                println!("  ✅ Claude installed successfully!");
+                (tool.name.clone(), true, "Success".to_string())
+            }
+            Ok(status) => {
+                eprintln!("  ❌ Installation failed with exit code: {:?}", status.code());
+                (tool.name.clone(), false, format!("Installation failed: {:?}", status.code()))
+            }
+            Err(e) => {
+                eprintln!("  ❌ Failed to execute curl installer: {}", e);
+                (tool.name.clone(), false, format!("Execution error: {}", e))
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -741,8 +800,8 @@ mod tests {
         let detector = CliToolDetector::new();
         let claude_hint = detector.get_install_hint("claude");
 
-        // Claude now uses npm like other tools
-        assert!(claude_hint.contains("npm install"));
-        assert!(claude_hint.contains("@anthropic-ai/claude-code"));
+        // Claude uses curl installer, not npm
+        assert!(claude_hint.contains("curl"));
+        assert!(claude_hint.contains("claude.ai/install.sh"));
     }
 }
