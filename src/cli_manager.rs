@@ -510,47 +510,113 @@ fn get_aiw_current_version() -> Result<String> {
     Ok(env!("CARGO_PKG_VERSION").to_string())
 }
 
-/// Get latest AIW version from NPM
+/// Get latest AIW version from GitHub Releases
 async fn get_aiw_latest_version() -> Result<String> {
-    println!("  📡 Fetching latest version from NPM...");
+    println!("  📡 Fetching latest version from GitHub Releases...");
 
-    // Use tokio::process::Command for async-safe subprocess handling
-    let output = tokio::process::Command::new("npm")
-        .arg("view")
-        .arg("@putao520/aiw")
-        .arg("version")
-        .output()
+    let client = reqwest::Client::new();
+    let response = client
+        .get("https://api.github.com/repos/putao520/agentic-warden/releases/latest")
+        .header("User-Agent", "aiw-updater")
+        .send()
         .await?;
 
-    if output.status.success() {
-        let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        Ok(version)
-    } else {
-        anyhow::bail!("Failed to fetch latest version from NPM: {}", String::from_utf8_lossy(&output.stderr))
+    if !response.status().is_success() {
+        anyhow::bail!(
+            "GitHub API returned status {}: {}",
+            response.status(),
+            response.text().await.unwrap_or_default()
+        );
     }
+
+    let json: serde_json::Value = response.json().await?;
+    let tag = json
+        .get("tag_name")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("Missing tag_name in GitHub release response"))?;
+
+    // Strip leading 'v' if present: "v0.5.59" -> "0.5.59"
+    let version = tag.strip_prefix('v').unwrap_or(tag).to_string();
+    Ok(version)
 }
 
-/// Perform AIW update
-async fn perform_aiw_update(version: &str) -> Result<()> {
-    println!("  📦 Installing AIW v{} from NPM...", version);
+/// Get platform-specific asset name for GitHub Release download
+fn get_platform_asset_name() -> Result<&'static str> {
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    return Ok("aiw-linux-x64");
 
-    // Use tokio::process::Command for async-safe subprocess handling
-    let output = tokio::process::Command::new("npm")
-        .arg("install")
-        .arg("-g")
-        .arg(format!("@putao520/aiw@{}", version))
-        .output()
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    return Ok("aiw-windows-x64.exe");
+
+    #[cfg(not(any(
+        all(target_os = "linux", target_arch = "x86_64"),
+        all(target_os = "windows", target_arch = "x86_64"),
+    )))]
+    anyhow::bail!(
+        "Unsupported platform ({}/{}). Please build from source: cargo install --path .",
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    );
+}
+
+/// Perform AIW update by downloading binary from GitHub Releases
+async fn perform_aiw_update(version: &str) -> Result<()> {
+    let asset = get_platform_asset_name()?;
+    let url = format!(
+        "https://github.com/putao520/agentic-warden/releases/download/v{}/{}",
+        version, asset
+    );
+
+    println!("  📦 Downloading AIW v{} from GitHub Releases...", version);
+    println!("  📥 {}", url);
+
+    let client = reqwest::Client::new();
+    let response = client
+        .get(&url)
+        .header("User-Agent", "aiw-updater")
+        .send()
         .await?;
 
-    if output.status.success() {
-        println!("  ✅ Installation completed successfully!");
-        println!("  ✅ AIW v{} is now installed and ready!", version);
-        println!("  💡 Please restart your terminal to use the new version.");
-    } else {
-        let error_msg = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("Failed to update AIW: {}", error_msg)
+    if !response.status().is_success() {
+        anyhow::bail!(
+            "Failed to download release asset: HTTP {}",
+            response.status()
+        );
     }
 
+    let bytes = response.bytes().await?;
+
+    // Get current executable path
+    let current_exe = std::env::current_exe()?;
+    let exe_dir = current_exe
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("Cannot determine executable directory"))?;
+
+    // Write to a temp file in the same directory (ensures atomic rename on same filesystem)
+    let tmp_path = exe_dir.join(format!(".aiw-update-{}.tmp", std::process::id()));
+
+    std::fs::write(&tmp_path, &bytes)?;
+
+    // Platform-specific replacement
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o755))?;
+        std::fs::rename(&tmp_path, &current_exe)?;
+    }
+
+    #[cfg(windows)]
+    {
+        // Windows can't overwrite a running exe directly; rename old first
+        let old_path = exe_dir.join(".aiw-old.exe");
+        let _ = std::fs::remove_file(&old_path); // clean up previous leftover
+        std::fs::rename(&current_exe, &old_path)?;
+        std::fs::rename(&tmp_path, &current_exe)?;
+        let _ = std::fs::remove_file(&old_path); // best-effort cleanup
+    }
+
+    println!("  ✅ AIW v{} installed successfully!", version);
+    println!("  💡 Please restart your terminal to use the new version.");
     Ok(())
 }
 
@@ -639,7 +705,7 @@ pub async fn execute_update(tool_name: Option<&str>) -> Result<Vec<(String, bool
             println!("  Not currently installed");
         }
 
-        // Execute npm install
+        // Execute npm install (with 60s timeout)
         println!("  Installing...");
         let install_cmd = detector.get_install_hint(&tool.command);
 
@@ -652,12 +718,12 @@ pub async fn execute_update(tool_name: Option<&str>) -> Result<Vec<(String, bool
             install_cmd
         };
 
-        match std::process::Command::new("sh")
+        let child = tokio::process::Command::new("sh")
             .arg("-c")
             .arg(&install_cmd)
-            .status()
-        {
-            Ok(status) => {
+            .status();
+        match tokio::time::timeout(tokio::time::Duration::from_secs(60), child).await {
+            Ok(Ok(status)) => {
                 if status.success() {
                     println!("  ✅ Successfully updated/installed!");
                     results.push((tool.name.clone(), true, "Success".to_string()));
@@ -673,9 +739,13 @@ pub async fn execute_update(tool_name: Option<&str>) -> Result<Vec<(String, bool
                     ));
                 }
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 eprintln!("  ❌ Failed to execute command: {}", e);
                 results.push((tool.name.clone(), false, format!("Execution error: {}", e)));
+            }
+            Err(_) => {
+                eprintln!("  ⚠️  Installation timed out after 60s, skipping");
+                results.push((tool.name.clone(), false, "Timed out after 60s".to_string()));
             }
         }
     }
@@ -692,50 +762,60 @@ pub async fn execute_update(tool_name: Option<&str>) -> Result<Vec<(String, bool
     Ok(results)
 }
 
-/// Update/install Claude CLI using its native mechanism
+/// Update/install Claude CLI using its native mechanism (with 60s timeout)
 async fn update_claude_cli(tool: &CliTool) -> (String, bool, String) {
+    const TIMEOUT_SECS: u64 = 60;
+
     if tool.installed {
         // Claude is installed - use `claude update`
         if let Some(ref ver) = tool.version {
             println!("  Current version: {}", ver);
         }
-        println!("  Running claude update...");
-        match std::process::Command::new("claude")
+        println!("  Running claude update (timeout {}s)...", TIMEOUT_SECS);
+        let child = tokio::process::Command::new("claude")
             .arg("update")
-            .status()
-        {
-            Ok(status) if status.success() => {
+            .status();
+        match tokio::time::timeout(tokio::time::Duration::from_secs(TIMEOUT_SECS), child).await {
+            Ok(Ok(status)) if status.success() => {
                 println!("  ✅ Claude updated successfully!");
                 (tool.name.clone(), true, "Success".to_string())
             }
-            Ok(status) => {
+            Ok(Ok(status)) => {
                 eprintln!("  ❌ claude update failed with exit code: {:?}", status.code());
                 (tool.name.clone(), false, format!("Update failed: {:?}", status.code()))
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 eprintln!("  ❌ Failed to run claude update: {}", e);
                 (tool.name.clone(), false, format!("Execution error: {}", e))
+            }
+            Err(_) => {
+                eprintln!("  ⚠️  claude update timed out after {}s, skipping", TIMEOUT_SECS);
+                (tool.name.clone(), false, format!("Timed out after {}s", TIMEOUT_SECS))
             }
         }
     } else {
         // Claude not installed - use curl installer
-        println!("  Installing via curl...");
-        match std::process::Command::new("sh")
+        println!("  Installing via curl (timeout {}s)...", TIMEOUT_SECS);
+        let child = tokio::process::Command::new("sh")
             .arg("-c")
             .arg("curl -fsSL https://claude.ai/install.sh | sh")
-            .status()
-        {
-            Ok(status) if status.success() => {
+            .status();
+        match tokio::time::timeout(tokio::time::Duration::from_secs(TIMEOUT_SECS), child).await {
+            Ok(Ok(status)) if status.success() => {
                 println!("  ✅ Claude installed successfully!");
                 (tool.name.clone(), true, "Success".to_string())
             }
-            Ok(status) => {
+            Ok(Ok(status)) => {
                 eprintln!("  ❌ Installation failed with exit code: {:?}", status.code());
                 (tool.name.clone(), false, format!("Installation failed: {:?}", status.code()))
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 eprintln!("  ❌ Failed to execute curl installer: {}", e);
                 (tool.name.clone(), false, format!("Execution error: {}", e))
+            }
+            Err(_) => {
+                eprintln!("  ⚠️  Claude install timed out after {}s, skipping", TIMEOUT_SECS);
+                (tool.name.clone(), false, format!("Timed out after {}s", TIMEOUT_SECS))
             }
         }
     }

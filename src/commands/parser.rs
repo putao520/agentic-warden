@@ -388,30 +388,28 @@ impl Cli {
 /// // args.selector == Some("claude")
 /// ```
 pub fn parse_cli_args(tokens: &[String]) -> Result<ParsedCliArgs, String> {
-    const ROLE_ORDER_ERR: &str = "Error: -r/--role must be specified before -mp/--aiw-provider.\nUsage: aiw claude -r role -mp provider 'prompt'";
-    const PROVIDER_ORDER_ERR: &str = "Error: -mp/--aiw-provider must be specified before other CLI parameters.\nUsage: aiw claude -r role -mp provider --cli-param 'prompt'";
-
     let mut role: Option<String> = None;
     let mut provider: Option<String> = None;
     let mut cwd: Option<std::path::PathBuf> = None;
     let mut cli_args: Vec<String> = Vec::new();
     let mut prompt: Vec<String> = Vec::new();
 
+    // Pass 1: extract AIW-owned flags (-r, -mp, -C) from tokens, leave the rest
+    let mut remaining: Vec<(usize, String)> = Vec::new();
     let mut iter = tokens.iter().enumerate().peekable();
-    let mut saw_provider = false;
-    let mut saw_cli_flag = false;
 
     while let Some((idx, token)) = iter.next() {
+        // Once we hit "--", everything after is prompt (preserve for pass 2)
         if token == "--" {
-            prompt.extend(iter.map(|(_, t)| t.clone()));
+            remaining.push((idx, token.clone()));
+            for (i, t) in iter.by_ref() {
+                remaining.push((i, t.clone()));
+            }
             break;
         }
 
-        match token.as_str() {
+        match token.to_lowercase().as_str() {
             "-r" | "--role" => {
-                if saw_provider || saw_cli_flag {
-                    return Err(ROLE_ORDER_ERR.to_string());
-                }
                 if role.is_some() {
                     return Err("Error: role specified multiple times".to_string());
                 }
@@ -424,13 +422,9 @@ pub fn parse_cli_args(tokens: &[String]) -> Result<ParsedCliArgs, String> {
                 role = Some(value.clone());
             }
             "-mp" | "--aiw-provider" => {
-                if saw_cli_flag {
-                    return Err(PROVIDER_ORDER_ERR.to_string());
-                }
                 if provider.is_some() {
                     return Err("Error: provider specified multiple times".to_string());
                 }
-                saw_provider = true;
                 let (_, value) = iter
                     .next()
                     .ok_or_else(|| "Missing provider name after -mp/--aiw-provider flag".to_string())?;
@@ -452,37 +446,43 @@ pub fn parse_cli_args(tokens: &[String]) -> Result<ParsedCliArgs, String> {
                 cwd = Some(std::path::PathBuf::from(value));
             }
             _ => {
-                if token.starts_with('-') {
-                    saw_cli_flag = true;
-
-                    // Check if this flag separates CLI args from prompt
-                    if is_prompt_separator_flag(token) {
-                        // Everything after this flag is the prompt
-                        prompt.extend(iter.map(|(_, t)| t.clone()));
-                        break;
-                    }
-
-                    cli_args.push(token.clone());
-
-                    if let Some((_, next)) = iter.peek() {
-                        if *next != "--" && !next.starts_with('-') && !is_valueless_flag(token) {
-                            // Treat the following token as the value for this flag
-                            let (_, value_token) = iter.next().expect("peeked token should exist");
-                            cli_args.push(value_token.clone());
-                        }
-                    }
-
-                    continue;
-                }
-
-                // First non-flag token becomes the start of the prompt
-                if idx < tokens.len() {
-                    prompt.push(token.clone());
-                    prompt.extend(iter.map(|(_, t)| t.clone()));
-                }
-                break;
+                remaining.push((idx, token.clone()));
             }
         }
+    }
+
+    // Pass 2: parse remaining tokens into cli_args and prompt
+    let mut iter2 = remaining.iter().peekable();
+
+    while let Some((idx, token)) = iter2.next() {
+        if token == "--" {
+            prompt.extend(iter2.map(|(_, t)| t.clone()));
+            break;
+        }
+
+        if token.starts_with('-') {
+            // Check if this flag separates CLI args from prompt
+            if is_prompt_separator_flag(token) {
+                prompt.extend(iter2.map(|(_, t)| t.clone()));
+                break;
+            }
+
+            cli_args.push(token.clone());
+
+            if let Some((_, next)) = iter2.peek() {
+                if *next != "--" && !next.starts_with('-') && !is_valueless_flag(token) {
+                    let (_, value_token) = iter2.next().expect("peeked token should exist");
+                    cli_args.push(value_token.clone());
+                }
+            }
+
+            continue;
+        }
+
+        // First non-flag token becomes the start of the prompt
+        prompt.push(token.clone());
+        prompt.extend(iter2.map(|(_, t)| t.clone()));
+        break;
     }
 
     Ok(ParsedCliArgs {
