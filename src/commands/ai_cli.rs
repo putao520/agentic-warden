@@ -187,6 +187,13 @@ impl AiCliCommand {
         // 检查是否是 git 仓库
         Self::check_git_repository(&original_dir)?;
 
+        // Auto 类型不支持直接 CLI 执行，提前拒绝避免白建 worktree
+        if self.ai_types.iter().any(|cli_type| matches!(cli_type, CliType::Auto)) {
+            return Err(anyhow!(
+                "Auto CLI type is only supported via `aiw auto`"
+            ));
+        }
+
         // 创建 worktree 作为隔离工作目录
         let (worktree_path, branch_name, commit_hash) = Self::create_worktree(&original_dir)?;
 
@@ -205,11 +212,6 @@ impl AiCliCommand {
 
         let registry = create_cli_registry()?;
 
-        if self.ai_types.iter().any(|cli_type| matches!(cli_type, CliType::Auto)) {
-            return Err(anyhow!(
-                "Auto CLI type is only supported via `aiw auto`"
-            ));
-        }
 
         // 应用角色到提示词
         let final_prompt = if !self.prompt.is_empty() {
