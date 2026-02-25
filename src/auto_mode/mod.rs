@@ -144,6 +144,24 @@ impl CliCooldownManager {
     }
 }
 
+/// 解析 Auto 类型为第一个可用的具体 CLI 类型
+///
+/// 按 auto_execution_order 配置顺序检测，返回第一个在 PATH 中可用的 (CliType, provider)。
+/// 用于在创建 worktree 等重操作之前快速确定实际 CLI。
+pub fn resolve_first_available_cli() -> Result<(CliType, String), crate::error::ExecutionError> {
+    let entries = config::ExecutionOrderConfig::get_execution_entries()?;
+    for entry in &entries {
+        if let Some(cli_type) = entry.to_cli_type() {
+            if which::which(cli_type.command_name()).is_ok() {
+                return Ok((cli_type, entry.provider.clone()));
+            }
+        }
+    }
+    Err(crate::error::ExecutionError::AllFailed {
+        message: "No available AI CLI found in auto_execution_order".to_string(),
+    })
+}
+
 /// 全局冷却管理器
 static COOLDOWN_MANAGER: std::sync::OnceLock<CliCooldownManager> = std::sync::OnceLock::new();
 

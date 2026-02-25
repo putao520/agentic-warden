@@ -258,7 +258,7 @@ pub async fn start_task(
     params: StartTaskParams,
     peer: Arc<RwLock<Option<rmcp::service::Peer<RoleServer>>>>,
 ) -> Result<TaskLaunchResult, String> {
-    use crate::cli_type::parse_cli_type;
+    use crate::cli_type::{parse_cli_type, CliType};
     use crate::supervisor;
 
     let task_id = uuid::Uuid::new_v4().to_string();
@@ -308,6 +308,15 @@ pub async fn start_task(
         )
     })?;
 
+    // Auto 类型需要先解析为具体 CLI，避免白建 worktree
+    let (cli_type, resolved_provider) = if matches!(cli_type, CliType::Auto) {
+        let (resolved, provider) = crate::auto_mode::resolve_first_available_cli()
+            .map_err(|e| e.to_string())?;
+        (resolved, Some(provider))
+    } else {
+        (cli_type, None)
+    };
+
     // Handle worktree creation if requested
     let mut cwd = params.cwd.clone();
     let mut worktree_info: Option<WorktreeInfo> = None;
@@ -344,7 +353,7 @@ pub async fn start_task(
     let spawn_registry = registry.clone();
     let spawn_cli_type = cli_type.clone();
     let spawn_args = os_args.clone();
-    let spawn_provider = params.provider.clone();
+    let spawn_provider = resolved_provider.or(params.provider.clone());
     let spawn_cwd = cwd.clone().map(PathBuf::from);
 
     let notify_peer = peer.clone();
