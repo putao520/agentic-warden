@@ -2,14 +2,12 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.5.51-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.5.60-blue?style=flat-square)
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange?style=flat-square&logo=rust)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 ![MCP](https://img.shields.io/badge/MCP-Supported-purple?style=flat-square)
 
 **Unified Router & Proxy for AI CLI Tools and MCP Servers**
-
-[English](#what-is-aiw) | [中文](#什么是-aiw)
 
 </div>
 
@@ -98,13 +96,6 @@ aiw auto "fix this bug"
 aiw config cli-order  # TUI to manage order (↑/↓ move, r reset, q save)
 ```
 
-**How it works**:
-1. Reads `auto_execution_order` from `~/.aiw/config.json`
-2. Tries each CLI+Provider combination in order (e.g., codex+auto → gemini+auto → claude+auto)
-3. Judges success/failure by exit code (0 = success)
-4. Switches to next combination if current fails
-5. Failed combinations enter 30-second cooldown period
-
 **Configuration** (`~/.aiw/config.json`):
 ```json
 {
@@ -118,9 +109,7 @@ aiw config cli-order  # TUI to manage order (↑/↓ move, r reset, q save)
 }
 ```
 
-**Features**:
 - Same CLI can be configured with multiple providers (e.g., claude+glm → claude+local → claude+official)
-- Each CLI+Provider combination has independent cooldown (30 seconds after failure)
 - Provider "auto" means use the CLI's default provider selection
 - Order can be fully customized via TUI or direct config editing
 
@@ -146,13 +135,7 @@ aiw claude -r common -C ~/myproject "fix the bug"
 
 ### Git Worktree (Isolated Execution)
 
-**New in v0.5.49**: AIW automatically creates a git worktree for isolated AI CLI execution.
-
-When you run AIW in a git repository, it:
-1. Validates the directory is a git repository
-2. Creates a worktree at `/tmp/aiw-worktree-<8hex>`
-3. Executes the AI CLI in the isolated worktree
-4. Outputs worktree information after task completion
+AIW automatically creates a git worktree for isolated AI CLI execution.
 
 ```bash
 # AIW automatically creates worktree for git repositories
@@ -165,14 +148,7 @@ aiw codex -C /path/to/repo "implement feature"
 # Commit: abc123def456
 ```
 
-**Benefits**:
-- 🛡️ **Isolation**: AI CLI works in a temporary worktree, keeping your working directory clean
-- 🔍 **Traceability**: Worktree path, branch, and commit are logged for review
-- 🧹 **No Cleanup**: Worktree remains for manual review; you can merge changes or delete it
-
-**Error Handling**:
-- Non-git directory → AIW refuses to run with clear error message
-- Worktree already exists → AIW reports the conflict and exits
+The AI CLI works in a temporary worktree at `/tmp/aiw-worktree-<hash>`, keeping your working directory clean. Worktree remains after completion for manual review — merge changes or delete as needed.
 
 ### Transparent Parameter Forwarding
 
@@ -321,34 +297,93 @@ aiw update
 
 This allows you to manage all your roles in a single location, such as `~/.claude/roles/`, and share them across different tools.
 
-## Quick Reference
+## Using AIW with Claude Code (CLAUDE.md Guide)
+
+When AIW runs as an MCP server inside Claude Code, it can launch background AI CLI tasks (e.g., `aiw codex`) and manage them via MCP tools. To get the best results, add the following instructions to your project's `CLAUDE.md` or `~/.claude/CLAUDE.md`:
+
+<details>
+<summary><strong>Recommended CLAUDE.md snippet (click to expand)</strong></summary>
+
+````markdown
+## AIW Background Task Guidelines
+
+AIW is configured as an MCP server and can launch background AI CLI tasks (codex, gemini, claude) via `start_task` / `manage_task` tools.
+
+### When to use AIW background tasks
+
+Use `aiw codex` (via Bash tool, `run_in_background: true`) for tasks that:
+- Require compilation, testing, or package installation
+- Involve iterative development (write → build → fix → repeat)
+- Create new modules with many files
+- Need external tools (database, Docker, API calls)
+- Can run independently in parallel
+
+### How to launch a task
 
 ```bash
-# AI CLI routing
-aiw <cli> [-r role] [-p provider] [-C cwd] [cli-args...] "prompt"
-aiw auto [-p provider] "prompt"  # Auto mode with failover
+# Basic: launch a coding task in the background
+aiw codex -r common "implement user authentication module"
 
-# Configuration
-aiw config cli-order        # Manage CLI execution order (TUI)
+# With specialized role
+aiw codex -r common,frontend-standards "build the landing page"
 
-# MCP commands
-aiw mcp serve              # Start MCP server
-aiw mcp list|add|remove    # Manage servers
-aiw mcp browse|search      # Registry
-aiw mcp install|info       # Install servers
-
-# Plugin commands
-aiw plugin browse|search   # Discover plugins
-aiw plugin install|remove  # Manage plugins
-aiw plugin list|enable|disable
-
-# Other commands
-aiw status                 # Task status
-aiw wait                   # Wait for tasks
-aiw update                 # Update tools
-aiw roles list             # List roles
-aiw help <command>         # Detailed help
+# Target a different project directory
+aiw codex -r common -C /path/to/project "implement feature X"
 ```
+
+Key flags:
+- `-r <roles>`: Inject role prompts (comma-separated). `common` is recommended as a base role. Run `aiw roles list` to see all available roles.
+- `-C <dir>`: Set working directory for the task (defaults to current directory).
+- `-p <provider>`: Override API provider (e.g., `openrouter`, `glm`, `auto`).
+
+### Parallel execution
+
+Independent tasks should be launched in parallel using multiple `Bash` calls with `run_in_background: true`:
+
+```
+Bash(command="aiw codex -r common 'implement user module'", run_in_background=true, timeout=43200000)
+Bash(command="aiw codex -r common 'implement payment module'", run_in_background=true, timeout=43200000)
+Bash(command="aiw codex -r common,frontend-standards 'implement frontend pages'", run_in_background=true, timeout=43200000)
+```
+
+Dependent tasks must run sequentially — do not parallelize tasks that depend on each other's output.
+
+### Worktree isolation
+
+AIW automatically creates a git worktree (at `/tmp/aiw-worktree-<hash>`) for each task when running inside a git repository. This keeps your working directory clean. After task completion, review the worktree output and merge changes as needed.
+
+### Task lifecycle
+
+1. **Launch**: Use Bash with `run_in_background: true` to start `aiw codex` tasks.
+2. **Continue working**: Do not block-wait. Move on to other work after launching.
+3. **Check status**: Use `aiw status` or check the background task output when needed.
+4. **Collect results**: After tasks complete, review outputs and merge worktree changes.
+5. **Fix issues in batch**: If multiple tasks have issues, collect all problems first, then fix them in one pass — do not fix one-by-one.
+````
+
+</details>
+
+### Quick Setup
+
+1. Configure AIW as MCP server (see [MCP Router & Proxy](#mcp-router--proxy))
+2. Copy the snippet above into your `CLAUDE.md`
+3. Customize roles and providers to match your workflow
+
+### Available Roles
+
+Run `aiw roles list` to see all built-in roles. Common ones:
+
+| Role | Use case |
+|------|----------|
+| `common` | General-purpose coding (recommended as base) |
+| `frontend-standards` | Frontend development |
+| `database-standards` | Backend / database work |
+| `testing-standards` | Test code |
+| `security` | Security review |
+| `debugger` | Debugging |
+| `devops` | DevOps / infrastructure |
+
+Combine roles with commas: `-r common,frontend-standards`
 
 ## License
 
@@ -356,6 +391,6 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-**AIW** - Unified Gateway for AI CLI & MCP | v0.5.48
+**AIW** - Unified Gateway for AI CLI & MCP | v0.5.60
 
 [GitHub](https://github.com/putao520/agentic-warden) | [NPM](https://www.npmjs.com/package/@putao520/aiw)
