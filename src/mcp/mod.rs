@@ -16,7 +16,7 @@ use crate::mcp_routing::{
     models::{IntelligentRouteRequest, IntelligentRouteResponse},
     IntelligentRouter,
 };
-use crate::roles::{builtin::get_builtin_role, builtin::list_builtin_roles, RoleManager, Role, RoleInfo};
+use crate::roles::{builtin::list_builtin_roles, RoleManager, RoleInfo};
 use capability_detector::ClientCapabilities;
 use rmcp::{
     handler::server::prompt::PromptContext,
@@ -39,7 +39,6 @@ use rmcp::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::ffi::OsString;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -87,6 +86,7 @@ pub struct TaskLaunchResult {
     pub pid: u32,
     pub started_at: DateTime<Utc>,
     pub worktree_info: Option<WorktreeInfo>,
+    pub log_file: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
@@ -194,48 +194,6 @@ pub struct ManageTaskResult {
     pub worktree_info: Option<WorktreeInfo>,
 }
 
-/// Detect user's preferred language based on system locale
-fn detect_language() -> String {
-    if let Some(locale) = sys_locale::get_locale() {
-        if locale.starts_with("zh") {
-            return "zh-CN".to_string();
-        }
-    }
-    "en".to_string()
-}
-
-/// Load a single role (user-defined first, then builtin)
-fn load_single_role_for_mcp(name: &str, lang: &str) -> Option<Role> {
-    // Try user-defined roles first (allows overriding built-in roles)
-    if let Ok(manager) = RoleManager::new() {
-        if let Ok(role) = manager.get_role(name) {
-            return Some(role);
-        }
-    }
-    // Fall back to built-in roles
-    if let Ok(role) = get_builtin_role(name, lang) {
-        return Some(role);
-    }
-    None
-}
-
-/// Load multiple roles
-/// Returns: (valid_roles, invalid_names)
-fn load_roles_for_mcp(names: &[&str], lang: &str) -> (Vec<Role>, Vec<String>) {
-    let mut valid_roles = Vec::new();
-    let mut invalid_names = Vec::new();
-
-    for name in names {
-        if let Some(role) = load_single_role_for_mcp(name, lang) {
-            valid_roles.push(role);
-        } else {
-            invalid_names.push(name.to_string());
-        }
-    }
-
-    (valid_roles, invalid_names)
-}
-
 async fn wait_for_registry_entry(
     registry: &crate::registry_factory::McpRegistry,
     existing: &HashSet<u32>,
@@ -254,50 +212,31 @@ async fn wait_for_registry_entry(
     Ok(None)
 }
 
+/// 从 registry 中查找任务的日志文件并读取最后 N 行作为摘要
+fn read_log_summary_from_registry<S: crate::storage::TaskStorage>(
+    registry: &crate::unified_registry::Registry<S>,
+    task_id: &str,
+    max_lines: usize,
+) -> Option<String> {
+    let entries = registry.entries().ok()?;
+    let entry = entries
+        .iter()
+        .find(|e| e.record.task_id.as_deref() == Some(task_id))?;
+
+    let log_path = std::path::PathBuf::from(&entry.record.log_path);
+    crate::supervisor::read_task_logs(&log_path, Some(max_lines)).ok()
+}
+
 pub async fn start_task(
     params: StartTaskParams,
     peer: Arc<RwLock<Option<rmcp::service::Peer<RoleServer>>>>,
 ) -> Result<TaskLaunchResult, String> {
-    use crate::cli_type::{parse_cli_type, CliType};
+    use crate::cli_type::parse_cli_type;
     use crate::supervisor;
+    use crate::task_prepare::{self, TaskParams};
 
     let task_id = uuid::Uuid::new_v4().to_string();
     let registry = RegistryFactory::instance().get_mcp_registry();
-
-    let mut prompt = params.task.clone();
-
-    if let Some(role_str) = &params.role {
-        // Parse and deduplicate role names (preserve order)
-        let mut seen = std::collections::HashSet::new();
-        let role_names: Vec<&str> = role_str
-            .split(',')
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .filter(|s| seen.insert(*s))
-            .collect();
-
-        if !role_names.is_empty() {
-            let lang = detect_language();
-            let (valid_roles, invalid_names) = load_roles_for_mcp(&role_names, &lang);
-
-            // Log warnings for invalid roles
-            for name in &invalid_names {
-                eprintln!("Warning: Role '{}' not found, skipping.", name);
-            }
-
-            // Combine valid roles or fallback to common
-            if valid_roles.is_empty() {
-                eprintln!("Warning: All specified roles not found, falling back to 'common' role.");
-                if let Some(fallback) = load_single_role_for_mcp("common", &lang) {
-                    prompt = format!("{}\n\n---\n\n{}", fallback.content, params.task);
-                }
-            } else {
-                let role_contents: Vec<&str> = valid_roles.iter().map(|r| r.content.as_str()).collect();
-                let combined = role_contents.join("\n\n---\n\n");
-                prompt = format!("{}\n\n---\n\n{}", combined, params.task);
-            }
-        }
-    }
 
     let ai_type = params.ai_type.clone().unwrap_or(AiType::Auto);
     let ai_type_str = ai_type.to_string();
@@ -308,35 +247,21 @@ pub async fn start_task(
         )
     })?;
 
-    // Auto 类型需要先解析为具体 CLI，避免白建 worktree
-    let (cli_type, resolved_provider) = if matches!(cli_type, CliType::Auto) {
-        let (resolved, provider) = crate::auto_mode::resolve_first_available_cli()
-            .map_err(|e| e.to_string())?;
-        (resolved, Some(provider))
-    } else {
-        (cli_type, None)
-    };
+    let is_auto = matches!(cli_type, crate::cli_type::CliType::Auto);
 
-    // Handle worktree creation if requested
-    let mut cwd = params.cwd.clone();
-    let mut worktree_info: Option<WorktreeInfo> = None;
-    if params.worktree == Some(true) {
-        let work_dir = cwd
-            .as_ref()
-            .map(PathBuf::from)
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
-        crate::worktree::check_git_repository(&work_dir)
-            .map_err(|e| e.to_string())?;
-        let (wt_path, branch, commit) = crate::worktree::create_worktree(&work_dir)
-            .map_err(|e| e.to_string())?;
-        let info = WorktreeInfo {
-            path: wt_path.display().to_string(),
-            branch,
-            commit,
-        };
-        cwd = Some(wt_path.display().to_string());
-        worktree_info = Some(info);
-    }
+    // 统一准备：角色处理 + worktree 创建
+    let base = task_prepare::prepare_task_base(TaskParams {
+        cli_type: cli_type.clone(),
+        prompt: params.task.clone(),
+        role: params.role.clone(),
+        provider: params.provider.clone(),
+        cli_args: params.cli_args.clone().unwrap_or_default(),
+        cwd: params.cwd.clone().map(PathBuf::from),
+        create_worktree: params.worktree.unwrap_or(false),
+    })
+    .map_err(|e| e.to_string())?;
+
+    let worktree_info = base.worktree_info.clone();
 
     let existing: HashSet<u32> = registry
         .entries()
@@ -345,67 +270,123 @@ pub async fn start_task(
         .map(|entry| entry.pid)
         .collect();
 
-    // Build args with cli_args passthrough
-    let cli_args_ref: Vec<String> = params.cli_args.clone().unwrap_or_default();
-    let args = cli_type.build_full_access_args_with_cli(&prompt, &cli_args_ref);
-    let os_args: Vec<OsString> = args.into_iter().map(OsString::from).collect();
-
-    let spawn_registry = registry.clone();
-    let spawn_cli_type = cli_type.clone();
-    let spawn_args = os_args.clone();
-    let spawn_provider = resolved_provider.or(params.provider.clone());
-    let spawn_cwd = cwd.clone().map(PathBuf::from);
-
     let notify_peer = peer.clone();
     let notify_task_id = task_id.clone();
     let notify_task_desc = params.task.clone();
 
-    tokio::spawn(async move {
-        let result = supervisor::execute_cli(
-            &spawn_registry,
-            &spawn_cli_type,
-            &spawn_args,
-            spawn_provider,
-            spawn_cwd,
-        )
-        .await;
+    if is_auto {
+        // Auto 模式：故障切换执行
+        let spawn_registry = registry.clone();
 
-        // Notify client when task completes
-        let (level, status_str) = match &result {
-            Ok(_) => (LoggingLevel::Info, "completed"),
-            Err(_) => (LoggingLevel::Error, "failed"),
-        };
-        if let Some(p) = notify_peer.read().await.as_ref() {
-            eprintln!("[aiw] Sending task completion notification for task_id={}", notify_task_id);
-            match p
-                .notify_logging_message(LoggingMessageNotificationParam {
-                    level,
-                    logger: Some("aiw-task".into()),
-                    data: serde_json::json!({
-                        "event": "task_completed",
-                        "task_id": notify_task_id,
-                        "status": status_str,
-                        "task": notify_task_desc,
-                        "message": format!("Task '{}' {}", notify_task_desc, status_str),
-                    }),
-                })
-                .await
-            {
-                Ok(_) => eprintln!("[aiw] Notification sent successfully"),
-                Err(e) => eprintln!("[aiw] Failed to send notification: {:?}", e),
+        tokio::spawn(async move {
+            let result = supervisor::execute_cli_with_failover(
+                &spawn_registry,
+                &base,
+            )
+            .await;
+
+            // 读取日志摘要
+            let log_summary = read_log_summary_from_registry(&spawn_registry, &notify_task_id, 20);
+
+            let (level, status_str) = match &result {
+                Ok(_) => (LoggingLevel::Info, "completed"),
+                Err(_) => (LoggingLevel::Error, "failed"),
+            };
+            if let Some(p) = notify_peer.read().await.as_ref() {
+                eprintln!("[aiw] Sending task completion notification for task_id={}", notify_task_id);
+                let mut data = serde_json::json!({
+                    "event": "task_completed",
+                    "task_id": notify_task_id,
+                    "status": status_str,
+                    "task": notify_task_desc,
+                    "message": format!("Task '{}' {}", notify_task_desc, status_str),
+                });
+                if let Some(summary) = log_summary {
+                    data["log_summary"] = serde_json::Value::String(summary);
+                }
+                match p
+                    .notify_logging_message(LoggingMessageNotificationParam {
+                        level,
+                        logger: Some("aiw-task".into()),
+                        data,
+                    })
+                    .await
+                {
+                    Ok(_) => eprintln!("[aiw] Notification sent successfully"),
+                    Err(e) => eprintln!("[aiw] Failed to send notification: {:?}", e),
+                }
+            } else {
+                eprintln!("[aiw] No peer available for notification");
             }
-        } else {
-            eprintln!("[aiw] No peer available for notification");
-        }
 
-        if let Err(err) = result {
-            eprintln!(
-                "start_task: failed to launch {} task: {}",
-                spawn_cli_type.display_name(),
-                err
-            );
-        }
-    });
+            if let Err(err) = result {
+                eprintln!("[aiw] start_task: auto failover failed: {}", err);
+            }
+        });
+    } else {
+        // 非 Auto 模式：直接执行指定 CLI
+        let resolved_provider = params.provider.clone();
+        let prepared = task_prepare::finalize_for_entry(&base, cli_type.clone(), resolved_provider.unwrap_or_default());
+
+        let spawn_registry = registry.clone();
+        let spawn_cli_type = prepared.cli_type.clone();
+        let spawn_args = prepared.args.clone();
+        let spawn_provider = prepared.provider.clone();
+        let spawn_cwd = prepared.cwd.clone();
+
+        tokio::spawn(async move {
+            let result = supervisor::execute_cli(
+                &spawn_registry,
+                &spawn_cli_type,
+                &spawn_args,
+                spawn_provider,
+                spawn_cwd,
+            )
+            .await;
+
+            // 读取日志摘要
+            let log_summary = read_log_summary_from_registry(&spawn_registry, &notify_task_id, 20);
+
+            let (level, status_str) = match &result {
+                Ok(_) => (LoggingLevel::Info, "completed"),
+                Err(_) => (LoggingLevel::Error, "failed"),
+            };
+            if let Some(p) = notify_peer.read().await.as_ref() {
+                eprintln!("[aiw] Sending task completion notification for task_id={}", notify_task_id);
+                let mut data = serde_json::json!({
+                    "event": "task_completed",
+                    "task_id": notify_task_id,
+                    "status": status_str,
+                    "task": notify_task_desc,
+                    "message": format!("Task '{}' {}", notify_task_desc, status_str),
+                });
+                if let Some(summary) = log_summary {
+                    data["log_summary"] = serde_json::Value::String(summary);
+                }
+                match p
+                    .notify_logging_message(LoggingMessageNotificationParam {
+                        level,
+                        logger: Some("aiw-task".into()),
+                        data,
+                    })
+                    .await
+                {
+                    Ok(_) => eprintln!("[aiw] Notification sent successfully"),
+                    Err(e) => eprintln!("[aiw] Failed to send notification: {:?}", e),
+                }
+            } else {
+                eprintln!("[aiw] No peer available for notification");
+            }
+
+            if let Err(err) = result {
+                eprintln!(
+                    "start_task: failed to launch {} task: {}",
+                    spawn_cli_type.display_name(),
+                    err
+                );
+            }
+        });
+    }
 
     let new_entry = wait_for_registry_entry(&registry, &existing).await?;
     let entry = new_entry.ok_or_else(|| "Failed to register task in MCP registry".to_string())?;
@@ -418,6 +399,7 @@ pub async fn start_task(
         pid: entry.pid,
         started_at: entry.record.started_at,
         worktree_info,
+        log_file: Some(entry.record.log_path.clone()),
     })
 }
 
@@ -482,16 +464,7 @@ pub async fn manage_task(params: ManageTaskParams) -> Result<ManageTaskResult, S
         }
         ManageAction::Logs => {
             let log_path = PathBuf::from(record.log_path.clone());
-            let content = if let Some(lines) = params.tail_lines {
-                let data = fs::read_to_string(&log_path)
-                    .map_err(|e| format!("Failed to read log file {}: {}", log_path.display(), e))?;
-                let all_lines: Vec<&str> = data.lines().collect();
-                let start = all_lines.len().saturating_sub(lines);
-                all_lines[start..].join("\n")
-            } else {
-                fs::read_to_string(&log_path)
-                    .map_err(|e| format!("Failed to read log file {}: {}", log_path.display(), e))?
-            };
+            let content = crate::supervisor::read_task_logs(&log_path, params.tail_lines)?;
 
             Ok(ManageTaskResult {
                 task_id,
@@ -513,86 +486,16 @@ pub async fn manage_task(params: ManageTaskParams) -> Result<ManageTaskResult, S
         ManageAction::Stop => {
             let registry = RegistryFactory::instance().get_mcp_registry();
 
-            // If process already exited, just mark completed and return success
-            if !platform::process_alive(pid) {
-                registry
-                    .mark_completed(
-                        pid,
-                        Some("already_exited".to_string()),
-                        None,
-                        Utc::now(),
-                    )
-                    .map_err(|e| e.to_string())?;
+            let (was_alive, _reason) =
+                crate::supervisor::stop_task_process(&registry, pid).await?;
 
-                // Re-read record after marking completed
-                let (_, updated_record) = resolve_task_id(&task_id)?;
-                let msg = format!("Task {} (pid {}) already exited", &task_id, pid);
-                return Ok(ManageTaskResult {
-                    task_id,
-                    pid,
-                    action: ManageAction::Stop,
-                    status: Some(updated_record.status.clone()),
-                    process_alive: Some(false),
-                    exit_code: updated_record.exit_code,
-                    result: updated_record.result.clone(),
-                    started_at: Some(updated_record.started_at),
-                    completed_at: updated_record.completed_at,
-                    log_file: None,
-                    log_content: None,
-                    success: Some(true),
-                    message: Some(msg),
-                    worktree_info: updated_record.worktree_info.clone(),
-                });
-            }
-
-            #[cfg(unix)]
-            {
-                use nix::sys::signal::{kill, Signal};
-                use nix::unistd::Pid;
-
-                kill(Pid::from_raw(pid as i32), Signal::SIGTERM).map_err(|e| e.to_string())?;
-            }
-
-            #[cfg(not(unix))]
-            {
-                platform::terminate_process(pid);
-            }
-
-            let deadline = Instant::now() + Duration::from_secs(5);
-            while Instant::now() < deadline {
-                if !platform::process_alive(pid) {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(200)).await;
-            }
-
-            if platform::process_alive(pid) {
-                #[cfg(unix)]
-                {
-                    use nix::sys::signal::{kill, Signal};
-                    use nix::unistd::Pid;
-
-                    kill(Pid::from_raw(pid as i32), Signal::SIGKILL).map_err(|e| e.to_string())?;
-                }
-
-                #[cfg(not(unix))]
-                {
-                    platform::terminate_process(pid);
-                }
-            }
-
-            registry
-                .mark_completed(
-                    pid,
-                    Some("stopped_by_user".to_string()),
-                    None,
-                    Utc::now(),
-                )
-                .map_err(|e| e.to_string())?;
-
-            // Re-read record after marking completed
             let (_, updated_record) = resolve_task_id(&task_id)?;
-            let msg = format!("Task {} (pid {}) stopped", &task_id, pid);
+            let msg = if was_alive {
+                format!("Task {} (pid {}) stopped", &task_id, pid)
+            } else {
+                format!("Task {} (pid {}) already exited", &task_id, pid)
+            };
+
             Ok(ManageTaskResult {
                 task_id,
                 pid,
@@ -1208,7 +1111,8 @@ impl ServerHandler for AgenticWardenMcpServer {
                 "4. You are a long-running orchestrator. Starting a background task is the BEGINNING of your work, not the end. Do NOT summarize and stop.\n",
                 "5. If you launched multiple tasks, track all task_ids and check/report results as needed.\n",
                 "6. Never assume a task is done without checking its status via manage_task.\n",
-                "7. If the user asked you to do something that involves background tasks, your job is not done until ALL tasks have completed and you have reported the results."
+                "7. If the user asked you to do something that involves background tasks, your job is not done until ALL tasks have completed and you have reported the results.\n",
+                "8. start_task returns log_file in status_message. Use manage_task with action='logs' to check real-time progress at any time."
             ).to_string().into()),
         })
     }
@@ -1238,7 +1142,10 @@ impl ServerHandler for AgenticWardenMcpServer {
             task: rmcp::model::Task {
                 task_id: result.task_id,
                 status: RmcpTaskStatus::Working,
-                status_message: Some("Task launched".into()),
+                status_message: Some(format!(
+                    "Task launched. log_file: {}",
+                    result.log_file.as_deref().unwrap_or("unknown")
+                )),
                 created_at: result.started_at.to_rfc3339(),
                 last_updated_at: now,
                 ttl: None,

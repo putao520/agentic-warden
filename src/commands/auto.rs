@@ -1,7 +1,5 @@
-use std::io::Write;
 use std::process::ExitCode;
 
-use crate::auto_mode::executor::AutoModeExecutor;
 use crate::commands::parser::parse_cli_args;
 use crate::error::{ConfigError, ExecutionError};
 use crate::tui::screens::cli_order::run_cli_order_tui;
@@ -9,18 +7,37 @@ use crate::tui::screens::cli_order::run_cli_order_tui;
 pub async fn handle_auto_command(args: &[String]) -> ExitCode {
     match parse_auto_args(args) {
         Ok(prompt) => {
-            match AutoModeExecutor::execute(&prompt) {
-                Ok(output) => {
-                    if !output.is_empty() {
-                        print!("{}", output);
-                        let _ = std::io::stdout().flush();
-                    }
-                    ExitCode::from(0)
+            let registry = match crate::registry_factory::create_cli_registry() {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("Failed to create registry: {}", e);
+                    return ExitCode::from(2);
                 }
-                Err(err) => {
-                    let (code, message) = format_auto_error(err);
-                    eprintln!("{}", message);
-                    ExitCode::from(code)
+            };
+
+            let base = match crate::task_prepare::prepare_task_base(
+                crate::task_prepare::TaskParams {
+                    cli_type: crate::cli_type::CliType::Auto,
+                    prompt,
+                    role: None,
+                    provider: None,
+                    cli_args: vec![],
+                    cwd: None,
+                    create_worktree: false,
+                },
+            ) {
+                Ok(b) => b,
+                Err(e) => {
+                    eprintln!("{}", e);
+                    return ExitCode::from(2);
+                }
+            };
+
+            match crate::supervisor::execute_cli_with_failover(&registry, &base).await {
+                Ok(exit_code) => ExitCode::from((exit_code & 0xFF) as u8),
+                Err(e) => {
+                    eprintln!("{}", e);
+                    ExitCode::from(2)
                 }
             }
         }

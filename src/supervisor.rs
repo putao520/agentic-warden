@@ -177,46 +177,13 @@ pub async fn execute_cli_with_full_output<S: TaskStorage>(
 }
 
 /// Internal CLI execution with configurable output handling
-async fn execute_cli_internal<S: TaskStorage>(
-    registry: &Registry<S>,
+/// 解析 Provider 配置：处理 auto/指定/默认三种模式
+///
+/// 返回 (provider_name, provider_config, is_fallback, provider_manager)
+fn resolve_provider(
     cli_type: &CliType,
-    args: &[OsString],
-    provider: Option<String>,
-    timeout: Option<std::time::Duration>,
-    output_strategy: OutputStrategy,
-    cwd: Option<std::path::PathBuf>,
-) -> Result<(i32, Option<CapturedOutput>), ProcessError> {
-    // Validate CWD if provided
-    if let Some(ref dir) = cwd {
-        if !dir.exists() {
-            return Err(ProcessError::Other(format!(
-                "Working directory does not exist: {}",
-                dir.display()
-            )));
-        }
-        if !dir.is_dir() {
-            return Err(ProcessError::Other(format!(
-                "Working directory is not a directory: {}",
-                dir.display()
-            )));
-        }
-    }
-    let is_capture_mode = matches!(
-        output_strategy,
-        OutputStrategy::Capture(_)
-            | OutputStrategy::CaptureWithDisplay(_, _)
-            | OutputStrategy::CaptureAll(_, _)
-    );
-
-    platform::init_platform();
-
-    let terminate_wrapper = |pid: u32| {
-        platform::terminate_process(pid);
-        Ok(())
-    };
-    registry.sweep_stale_entries(Utc::now(), platform::process_alive, &terminate_wrapper)?;
-
-    // Load provider configuration
+    provider: &Option<String>,
+) -> Result<(String, crate::provider::config::Provider, bool, ProviderManager), ProcessError> {
     let mut provider_manager = ProviderManager::new()
         .map_err(|e| ProcessError::Other(format!("Failed to load provider: {}", e)))?;
 
@@ -303,6 +270,51 @@ async fn execute_cli_internal<S: TaskStorage>(
             ));
         }
     };
+
+    Ok((provider_name, provider_config, is_fallback, provider_manager))
+}
+
+async fn execute_cli_internal<S: TaskStorage>(
+    registry: &Registry<S>,
+    cli_type: &CliType,
+    args: &[OsString],
+    provider: Option<String>,
+    timeout: Option<std::time::Duration>,
+    output_strategy: OutputStrategy,
+    cwd: Option<std::path::PathBuf>,
+) -> Result<(i32, Option<CapturedOutput>), ProcessError> {
+    // Validate CWD if provided
+    if let Some(ref dir) = cwd {
+        if !dir.exists() {
+            return Err(ProcessError::Other(format!(
+                "Working directory does not exist: {}",
+                dir.display()
+            )));
+        }
+        if !dir.is_dir() {
+            return Err(ProcessError::Other(format!(
+                "Working directory is not a directory: {}",
+                dir.display()
+            )));
+        }
+    }
+    let is_capture_mode = matches!(
+        output_strategy,
+        OutputStrategy::Capture(_)
+            | OutputStrategy::CaptureWithDisplay(_, _)
+            | OutputStrategy::CaptureAll(_, _)
+    );
+
+    platform::init_platform();
+
+    let terminate_wrapper = |pid: u32| {
+        platform::terminate_process(pid);
+        Ok(())
+    };
+    registry.sweep_stale_entries(Utc::now(), platform::process_alive, &terminate_wrapper)?;
+
+    let (provider_name, provider_config, is_fallback, mut provider_manager) =
+        resolve_provider(cli_type, &provider)?;
 
     // Display provider info only in debug/verbose scenarios (silent by default)
 
@@ -1131,93 +1143,8 @@ pub async fn start_interactive_cli<S: TaskStorage>(
     };
     registry.sweep_stale_entries(Utc::now(), platform::process_alive, &terminate_wrapper)?;
 
-    // Load provider configuration
-    let mut provider_manager = ProviderManager::new()
-        .map_err(|e| ProcessError::Other(format!("Failed to load provider: {}", e)))?;
-
-    // Determine AI type for compatibility checking
-    let ai_type = match cli_type {
-        CliType::Claude => AiType::Claude,
-        CliType::Codex => AiType::Codex,
-        CliType::Gemini => AiType::Gemini,
-        CliType::Auto => {
-            return Err(ProcessError::Other(
-                "Auto CLI type is virtual and cannot be executed directly".to_string(),
-            ))
-        }
-    };
-
-    // Determine which provider to use
-    let (provider_name, provider_config, is_fallback) = if let Some(ref name) = provider {
-        if name.eq_ignore_ascii_case("auto") {
-            // Auto mode: randomly select compatible provider
-            if let Some((selected_name, config)) =
-                provider_manager.get_random_compatible_provider(&ai_type)
-            {
-                debug(format!(
-                    "Auto-selected provider: {} (for {})",
-                    selected_name, ai_type
-                ));
-                (selected_name, config.clone(), false)
-            } else {
-                // No compatible providers, fallback to no injection
-                debug(format!(
-                    "No compatible providers for {}, using native configuration",
-                    ai_type
-                ));
-                // Use official provider as placeholder (empty config, no env injection)
-                let official = provider_manager
-                    .get_provider("official")
-                    .map_err(|e| ProcessError::Other(e.to_string()))?
-                    .clone();
-                ("".to_string(), official, true)
-            }
-        } else {
-            // Normal mode: use specified provider, silently fallback if disabled
-            match provider_manager.get_provider(name) {
-                Ok(config) => (name.clone(), config.clone(), false),
-                Err(_) => {
-                    // Silently fallback to default provider
-                    if let Some((default_name, default_config)) =
-                        provider_manager.get_default_provider()
-                    {
-                        (default_name, default_config.clone(), true)
-                    } else if let Ok(official) = provider_manager.get_provider("official") {
-                        ("".to_string(), official.clone(), true)
-                    } else {
-                        return Err(ProcessError::Other(format!(
-                            "Provider '{}' is disabled and no fallback available. All providers are unavailable.",
-                            name
-                        )));
-                    }
-                }
-            }
-        }
-    } else {
-        // No -mp flag: prefer default provider, fallback to round-robin compatible providers
-        let default = provider_manager
-            .get_default_provider()
-            .map(|(name, config)| (name, config.clone()));
-        if let Some((default_name, default_config)) = default {
-            if default_config.is_compatible_with(&ai_type) {
-                (default_name, default_config, false)
-            } else if let Some((selected_name, config)) =
-                provider_manager.get_random_compatible_provider(&ai_type)
-            {
-                (selected_name, config.clone(), false)
-            } else {
-                (default_name, default_config, false)
-            }
-        } else if let Some((selected_name, config)) =
-            provider_manager.get_random_compatible_provider(&ai_type)
-        {
-            (selected_name, config.clone(), false)
-        } else {
-            return Err(ProcessError::Other(
-                "No available providers. All providers are disabled or misconfigured.".to_string()
-            ));
-        }
-    };
+    let (provider_name, provider_config, is_fallback, mut provider_manager) =
+        resolve_provider(cli_type, &provider)?;
 
     // Display provider info only in debug/verbose scenarios (silent by default)
 
@@ -1363,4 +1290,181 @@ pub async fn execute_multiple_clis<S: TaskStorage>(
     }
 
     Ok(exit_codes)
+}
+
+/// Auto 模式故障切换：遍历所有 CLI+Provider 组合，失败自动切换到下一个
+///
+/// 与 `AutoModeExecutor::execute()` 不同，本函数是异步的且使用 Mirror/TailOnly 输出策略，
+/// 适用于 CLI 直接执行和 MCP 后台任务场景。
+pub async fn execute_cli_with_failover<S: TaskStorage>(
+    registry: &Registry<S>,
+    base: &crate::task_prepare::PreparedTaskBase,
+) -> Result<i32, ProcessError> {
+    use crate::auto_mode::config::ExecutionOrderConfig;
+    use crate::auto_mode::CliCooldownManager;
+    use crate::task_prepare::finalize_for_entry;
+
+    let entries = ExecutionOrderConfig::get_execution_entries()
+        .map_err(|e| ProcessError::Other(format!("Failed to load auto execution config: {}", e)))?;
+
+    let cooldown = CliCooldownManager::global();
+    let mut last_error: Option<String> = None;
+    let mut skipped_count = 0;
+    let total_count = entries.len();
+
+    for entry in &entries {
+        let cli_type = match entry.to_cli_type() {
+            Some(t) => t,
+            None => {
+                eprintln!("[aiw-auto] Invalid CLI type '{}', skipping...", entry.cli);
+                continue;
+            }
+        };
+
+        // 检查冷却期
+        if cooldown.is_in_cooldown(&cli_type, &entry.provider) {
+            if let Some(remaining) = cooldown.remaining_cooldown_secs(&cli_type, &entry.provider) {
+                eprintln!(
+                    "[aiw-auto] {} is in cooldown ({}s remaining), skipping...",
+                    entry.display_name(),
+                    remaining
+                );
+            }
+            skipped_count += 1;
+            continue;
+        }
+
+        eprintln!("[aiw-auto] Trying {}...", entry.display_name());
+
+        let prepared = finalize_for_entry(base, cli_type.clone(), entry.provider.clone());
+
+        let result = execute_cli(
+            registry,
+            &prepared.cli_type,
+            &prepared.args,
+            prepared.provider,
+            prepared.cwd,
+        )
+        .await;
+
+        match result {
+            Ok(0) => {
+                eprintln!("[aiw-auto] {} succeeded", entry.display_name());
+                return Ok(0);
+            }
+            Ok(exit_code) => {
+                cooldown.mark_failure(&cli_type, &entry.provider);
+                let msg = format!("{} exited with code {}", entry.display_name(), exit_code);
+                eprintln!("[aiw-auto] {} failed (exit code {})", entry.display_name(), exit_code);
+                last_error = Some(msg);
+            }
+            Err(e) => {
+                cooldown.mark_failure(&cli_type, &entry.provider);
+                let msg = format!("{}: {}", entry.display_name(), e);
+                eprintln!("[aiw-auto] {} error: {}", entry.display_name(), e);
+                last_error = Some(msg);
+            }
+        }
+
+        eprintln!("[aiw-auto] Trying next entry...");
+    }
+
+    if skipped_count == total_count {
+        return Err(ProcessError::Other(
+            "All CLI+Provider combinations are in cooldown period. Please wait and try again."
+                .to_string(),
+        ));
+    }
+
+    Err(ProcessError::Other(
+        last_error.unwrap_or_else(|| "All CLI+Provider combinations failed".to_string()),
+    ))
+}
+
+/// 读取任务日志文件，支持 tail 截取
+///
+/// - `tail_lines = Some(n)`: 只返回最后 n 行
+/// - `tail_lines = None`: 返回全部内容
+pub fn read_task_logs(log_path: &std::path::Path, tail_lines: Option<usize>) -> Result<String, String> {
+    let content = std::fs::read_to_string(log_path)
+        .map_err(|e| format!("Failed to read log file {}: {}", log_path.display(), e))?;
+
+    match tail_lines {
+        Some(n) => {
+            let all_lines: Vec<&str> = content.lines().collect();
+            let start = all_lines.len().saturating_sub(n);
+            Ok(all_lines[start..].join("\n"))
+        }
+        None => Ok(content),
+    }
+}
+
+/// 停止指定 PID 的任务进程
+///
+/// 流程：检查存活 → SIGTERM → 等待 5s → SIGKILL → 标记完成
+/// 返回 (process_was_alive, reason)：进程是否曾存活、停止原因
+pub async fn stop_task_process<S: TaskStorage>(
+    registry: &Registry<S>,
+    pid: u32,
+) -> Result<(bool, String), String> {
+    // 进程已退出
+    if !platform::process_alive(pid) {
+        registry
+            .mark_completed(
+                pid,
+                Some("already_exited".to_string()),
+                None,
+                Utc::now(),
+            )
+            .map_err(|e| e.to_string())?;
+        return Ok((false, "already_exited".to_string()));
+    }
+
+    // SIGTERM
+    #[cfg(unix)]
+    {
+        use nix::sys::signal::{kill, Signal};
+        use nix::unistd::Pid;
+        kill(Pid::from_raw(pid as i32), Signal::SIGTERM).map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(not(unix))]
+    {
+        platform::terminate_process(pid);
+    }
+
+    // 等待最多 5 秒
+    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(5);
+    while tokio::time::Instant::now() < deadline {
+        if !platform::process_alive(pid) {
+            break;
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+    }
+
+    // 仍然存活则 SIGKILL
+    if platform::process_alive(pid) {
+        #[cfg(unix)]
+        {
+            use nix::sys::signal::{kill, Signal};
+            use nix::unistd::Pid;
+            kill(Pid::from_raw(pid as i32), Signal::SIGKILL).map_err(|e| e.to_string())?;
+        }
+
+        #[cfg(not(unix))]
+        {
+            platform::terminate_process(pid);
+        }
+    }
+
+    registry
+        .mark_completed(
+            pid,
+            Some("stopped_by_user".to_string()),
+            None,
+            Utc::now(),
+        )
+        .map_err(|e| e.to_string())?;
+
+    Ok((true, "stopped_by_user".to_string()))
 }
