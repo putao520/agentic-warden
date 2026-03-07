@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.5.67-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.5.68-blue?style=flat-square)
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange?style=flat-square&logo=rust)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 
@@ -201,7 +201,7 @@ aiw update
 
 The `update` command checks and updates:
 - **AIW**: Updates via `cargo install aiw --force` if installed via cargo
-- **Claude CLI**: Updates via `npm update -g @anthropic-ai/claude-code`
+- **Claude CLI**: Uses native `claude update` (works for both npm and cargo installations)
 - **Codex CLI**: Updates via `npm update -g openai-codex`
 - **Gemini CLI**: Updates via `npm update -g gemini-cli`
 
@@ -264,6 +264,6 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-**AIW** - Unified Gateway for AI CLI | v0.5.67
+**AIW** - Unified Gateway for AI CLI | v0.5.68
 
 [GitHub](https://github.com/putao520/agentic-warden) | [crates.io](https://crates.io/crates/aiw)
