@@ -1,43 +1,36 @@
-# AIW - AI CLI & MCP Unified Gateway
+# AIW - AI CLI Unified Gateway
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.5.60-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.5.63-blue?style=flat-square)
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange?style=flat-square&logo=rust)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
-![MCP](https://img.shields.io/badge/MCP-Supported-purple?style=flat-square)
 
-**Unified Router & Proxy for AI CLI Tools and MCP Servers**
+**Unified Router & Proxy for AI CLI Tools**
 
 </div>
 
 ## What is AIW?
 
-AIW is a **unified gateway** that acts as:
-
-| Layer | Role | What it does |
-|-------|------|--------------|
-| **AI CLI Proxy** | Router + Proxy | Route requests to claude/codex/gemini with provider switching, role injection, and transparent parameter forwarding |
-| **MCP Proxy** | Router + Proxy | Route tool calls to multiple MCP servers with intelligent selection, plugin marketplace, and hot-reload |
+AIW is a **unified gateway** that acts as an AI CLI proxy router with provider switching, role injection, and transparent parameter forwarding.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                         AIW Gateway                          │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│  ┌─────────────────────┐    ┌─────────────────────────────┐ │
-│  │   AI CLI Router     │    │      MCP Router             │ │
-│  │                     │    │                             │ │
-│  │  aiw claude ...  ───┼───►│  Claude CLI                 │ │
-│  │  aiw codex ...   ───┼───►│  Codex CLI                  │ │
-│  │  aiw gemini ...  ───┼───►│  Gemini CLI                 │ │
-│  │                     │    │                             │ │
-│  │  + Provider Switch  │    │  aiw mcp serve ────────────►│ │
-│  │  + Role Injection   │    │    ├─► filesystem server    │ │
-│  │  + Param Forwarding │    │    ├─► git server           │ │
-│  │  + CWD Control      │    │    ├─► database server      │ │
-│  │                     │    │    └─► ... (plugin market)  │ │
-│  └─────────────────────┘    └─────────────────────────────┘ │
+│  ┌─────────────────────┐                                     │
+│  │   AI CLI Router     │                                     │
+│  │                     │                                     │
+│  │  aiw claude ...  ───┼───► Claude CLI                     │
+│  │  aiw codex ...   ───┼───► Codex CLI                      │
+│  │  aiw gemini ...  ───┼───► Gemini CLI                     │
+│  │                     │                                     │
+│  │  + Provider Switch  │                                     │
+│  │  + Role Injection   │                                     │
+│  │  + Param Forwarding │                                     │
+│  │  + CWD Control      │                                     │
+│  └─────────────────────┘                                     │
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -45,14 +38,14 @@ AIW is a **unified gateway** that acts as:
 ## Installation
 
 ```bash
-# Install from NPM
-npm install -g @putao520/aiw
+# Install from crates.io
+cargo install aiw
 
 # Verify installation
 aiw --version
 ```
 
-## AI CLI Router & Proxy
+## AI CLI Router
 
 ### Basic Usage
 
@@ -121,7 +114,7 @@ aiw claude -r common "write a function"
 aiw claude -r security "review this code"
 aiw claude -r debugger "fix this bug"
 
-# 22 built-in roles + custom roles in ~/.aiw/role/*.md
+# Built-in roles + custom roles in ~/.aiw/role/*.md
 aiw roles list
 ```
 
@@ -169,83 +162,6 @@ aiw claude -r common -p glm -C ~/project --model sonnet "implement REQ-001"
 #          role      provider  cwd        forwarded     prompt
 ```
 
-## MCP Router & Proxy
-
-### Start MCP Server
-
-```bash
-# Start AIW as MCP server
-aiw mcp serve
-
-# Configure in Claude Code (~/.claude/settings.json)
-{
-  "mcpServers": {
-    "aiw": {
-      "command": "aiw",
-      "args": ["mcp", "serve"]
-    }
-  }
-}
-```
-
-### MCP Server Management
-
-```bash
-# List configured MCP servers
-aiw mcp list
-
-# Add MCP server
-aiw mcp add filesystem npx -- -y @modelcontextprotocol/server-filesystem $HOME
-
-# Enable/disable servers (hot-reload)
-aiw mcp enable filesystem
-aiw mcp disable git
-
-# Edit config directly
-aiw mcp edit
-```
-
-### MCP Registry (Search & Install)
-
-```bash
-# Browse all available MCP servers (interactive TUI)
-aiw mcp browse
-
-# Search across registries (Official + Smithery)
-aiw mcp search "git"
-aiw mcp search "database" --source official
-
-# Get server info
-aiw mcp info @anthropic/filesystem
-
-# Install server
-aiw mcp install @anthropic/filesystem
-aiw mcp install @anthropic/filesystem --env API_KEY=xxx
-```
-
-### Plugin Marketplace
-
-```bash
-# Browse MCP plugins (interactive TUI)
-aiw plugin browse
-
-# Search plugins
-aiw plugin search "playwright"
-
-# Install plugin
-aiw plugin install playwright@claude-code-official
-
-# List/manage installed plugins
-aiw plugin list
-aiw plugin enable playwright
-aiw plugin disable serena
-aiw plugin remove playwright
-
-# Manage marketplace sources
-aiw plugin marketplace list
-aiw plugin marketplace add my-market https://github.com/user/plugins
-```
-
 ## Task Monitoring
 
 ```bash
@@ -272,10 +188,7 @@ aiw update
 |------|---------|
 | `~/.aiw/config.json` | AIW global configuration |
 | `~/.aiw/providers.json` | AI provider configurations |
-| `~/.aiw/mcp.json` | MCP server configurations |
 | `~/.aiw/role/*.md` | Custom role prompts |
-| `~/.aiw/settings.json` | Plugin marketplace settings |
-| `~/.aiw/plugins.json` | Installed plugin records |
 
 ### Global Configuration (~/.aiw/config.json)
 
@@ -297,79 +210,7 @@ aiw update
 
 This allows you to manage all your roles in a single location, such as `~/.claude/roles/`, and share them across different tools.
 
-## Using AIW with Claude Code (CLAUDE.md Guide)
-
-When AIW runs as an MCP server inside Claude Code, it can launch background AI CLI tasks (e.g., `aiw codex`) and manage them via MCP tools. To get the best results, add the following instructions to your project's `CLAUDE.md` or `~/.claude/CLAUDE.md`:
-
-<details>
-<summary><strong>Recommended CLAUDE.md snippet (click to expand)</strong></summary>
-
-````markdown
-## AIW Background Task Guidelines
-
-AIW is configured as an MCP server and can launch background AI CLI tasks (codex, gemini, claude) via `start_task` / `manage_task` tools.
-
-### When to use AIW background tasks
-
-Use `aiw codex` (via Bash tool, `run_in_background: true`) for tasks that:
-- Require compilation, testing, or package installation
-- Involve iterative development (write → build → fix → repeat)
-- Create new modules with many files
-- Need external tools (database, Docker, API calls)
-- Can run independently in parallel
-
-### How to launch a task
-
-```bash
-# Basic: launch a coding task in the background
-aiw codex -r common "implement user authentication module"
-
-# With specialized role
-aiw codex -r common,frontend-standards "build the landing page"
-
-# Target a different project directory
-aiw codex -r common -C /path/to/project "implement feature X"
-```
-
-Key flags:
-- `-r <roles>`: Inject role prompts (comma-separated). `common` is recommended as a base role. Run `aiw roles list` to see all available roles.
-- `-C <dir>`: Set working directory for the task (defaults to current directory).
-- `-p <provider>`: Override API provider (e.g., `openrouter`, `glm`, `auto`).
-
-### Parallel execution
-
-Independent tasks should be launched in parallel using multiple `Bash` calls with `run_in_background: true`:
-
-```
-Bash(command="aiw codex -r common 'implement user module'", run_in_background=true, timeout=43200000)
-Bash(command="aiw codex -r common 'implement payment module'", run_in_background=true, timeout=43200000)
-Bash(command="aiw codex -r common,frontend-standards 'implement frontend pages'", run_in_background=true, timeout=43200000)
-```
-
-Dependent tasks must run sequentially — do not parallelize tasks that depend on each other's output.
-
-### Worktree isolation
-
-AIW automatically creates a git worktree (at `/tmp/aiw-worktree-<hash>`) for each task when running inside a git repository. This keeps your working directory clean. After task completion, review the worktree output and merge changes as needed.
-
-### Task lifecycle
-
-1. **Launch**: Use Bash with `run_in_background: true` to start `aiw codex` tasks.
-2. **Continue working**: Do not block-wait. Move on to other work after launching.
-3. **Check status**: Use `aiw status` or check the background task output when needed.
-4. **Collect results**: After tasks complete, review outputs and merge worktree changes.
-5. **Fix issues in batch**: If multiple tasks have issues, collect all problems first, then fix them in one pass — do not fix one-by-one.
-````
-
-</details>
-
-### Quick Setup
-
-1. Configure AIW as MCP server (see [MCP Router & Proxy](#mcp-router--proxy))
-2. Copy the snippet above into your `CLAUDE.md`
-3. Customize roles and providers to match your workflow
-
-### Available Roles
+## Available Roles
 
 Run `aiw roles list` to see all built-in roles. Common ones:
 
@@ -391,6 +232,6 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-**AIW** - Unified Gateway for AI CLI & MCP | v0.5.60
+**AIW** - Unified Gateway for AI CLI | v0.5.63
 
-[GitHub](https://github.com/putao520/agentic-warden) | [NPM](https://www.npmjs.com/package/@putao520/aiw)
+[GitHub](https://github.com/putao520/agentic-warden) | [crates.io](https://crates.io/crates/aiw)
