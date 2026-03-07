@@ -82,13 +82,16 @@ fn apply_claude_toolsearch_patch(pid: u32) -> anyhow::Result<()> {
         }
 
         match patcher.apply_claude_toolsearch_patch() {
-            Ok(addr) => {
-                tracing::info!("✅ Claude ToolSearch patch applied at address 0x{:x} (attempt {}/{})",
-                              addr, i + 1, retries.len());
+            Ok(_addr) => {
+                tracing::info!(
+                    "✅ Claude ToolSearch patch applied (attempt {}/{})",
+                    i + 1,
+                    retries.len()
+                );
                 return Ok(());
             }
             Err(e) => {
-                tracing::debug!("Patch attempt {}/{} failed: {}", i + 1, retries.len(), e);
+                tracing::debug!("Attempt {}/{} failed", i + 1, retries.len());
                 last_error = Some(e);
             }
         }
