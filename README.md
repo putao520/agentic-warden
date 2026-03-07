@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.5.66-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.5.67-blue?style=flat-square)
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange?style=flat-square&logo=rust)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 
@@ -195,8 +195,23 @@ aiw pwait <PID>
 ## Update
 
 ```bash
-# Update AIW and all AI CLI tools
+# Update AIW itself and all installed AI CLI tools
 aiw update
+```
+
+The `update` command checks and updates:
+- **AIW**: Updates via `cargo install aiw --force` if installed via cargo
+- **Claude CLI**: Updates via `npm update -g @anthropic-ai/claude-code`
+- **Codex CLI**: Updates via `npm update -g openai-codex`
+- **Gemini CLI**: Updates via `npm update -g gemini-cli`
+
+**Output example:**
+```
+Checking for updates...
+✅ AIW updated successfully!
+✅ Claude CLI updated (2.1.71 → 2.1.72)
+✅ Codex CLI already up-to-date
+⚠️  Gemini CLI not installed
 ```
 
 ## Configuration Files
@@ -249,6 +264,6 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-**AIW** - Unified Gateway for AI CLI | v0.5.66
+**AIW** - Unified Gateway for AI CLI | v0.5.67
 
 [GitHub](https://github.com/putao520/agentic-warden) | [crates.io](https://crates.io/crates/aiw)
