@@ -30,7 +30,7 @@ async fn main() -> ExitCode {
     } else {
         tracing_subscriber::fmt()
             .with_target(false)
-            .with_max_level(tracing::Level::INFO)
+            .with_max_level(tracing::Level::WARN)
             .init();
     }
 

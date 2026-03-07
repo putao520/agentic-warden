@@ -236,7 +236,7 @@ impl AiCliCommand {
                 provider: inv.aiw_args.provider.clone(),
                 cli_args: inv.remaining_args.clone(),
                 cwd: Some(original_dir),
-                create_worktree: true,
+                create_worktree: false,
             })?;
 
             if let Some(ref info) = prepared.worktree_info {

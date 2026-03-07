@@ -208,10 +208,10 @@ impl RuntimePatcher {
         // 写入新字节
         self.inner.write_memory(address, &[new_byte])?;
 
-        info!(
-            "Patch applied at address {:x}: 0x{:02x} -> 0x{:02x}",
-            address, old_byte, new_byte
-        );
+        // info!(
+        //     "Patch applied at address {:x}: 0x{:02x} -> 0x{:02x}",
+        //     address, old_byte, new_byte
+        // );
 
         Ok(())
     }
@@ -233,7 +233,7 @@ impl RuntimePatcher {
             return Err(PatchError::ProcessNotFound { pid: 0 });
         }
 
-        info!("Searching for Claude ToolSearch bug pattern: O8()===\"firstParty\"&&!JB()");
+        // info!("Searching for Claude ToolSearch bug pattern: O8()===\"firstParty\"&&!JB()");
 
         let regions = self.inner.read_memory_maps()?;
         let readable_regions: Vec<_> = regions
@@ -247,26 +247,26 @@ impl RuntimePatcher {
         );
 
         // 策略 1: 搜索完整模式
-        info!("Trying strategy 1: Search for complete pattern O8()==\"firstParty\"&&!JB()");
+        // info!("Trying strategy 1: Search for complete pattern O8()==\"firstParty\"&&!JB()");
         match self.search_and_apply_patch(&readable_regions, PATTERN_CLAUDE_TOOLSEARCH_BUG) {
             Ok(addr) => {
-                info!("✅ Claude ToolSearch patch successfully applied (complete pattern) at address {:x}", addr);
+                // info!("✅ Claude ToolSearch patch successfully applied (complete pattern) at address {:x}", addr);
                 return Ok(addr);
             }
             Err(e) => {
-                info!("Complete pattern not found: {}, trying fallback strategy", e);
+                // info!("Complete pattern not found: {}, trying fallback strategy", e);
             }
         }
 
         // 策略 2: 搜索较短模式
-        info!("Trying strategy 2: Search for pattern O8()==\"firstParty\"");
+        // info!("Trying strategy 2: Search for pattern O8()==\"firstParty\"");
         match self.search_and_apply_patch(&readable_regions, PATTERN_O8_FIRST_PARTY) {
             Ok(addr) => {
-                info!("✅ Claude ToolSearch patch successfully applied (short pattern) at address {:x}", addr);
+                // info!("✅ Claude ToolSearch patch successfully applied (short pattern) at address {:x}", addr);
                 return Ok(addr);
             }
             Err(e) => {
-                warn!("Both patterns not found: {}", e);
+                // warn!("Both patterns not found: {}", e);
             }
         }
 
@@ -293,8 +293,8 @@ impl RuntimePatcher {
 
             match self.search_pattern_in_region(region, pattern) {
                 Ok(Some(pattern_addr)) => {
-                    info!("Found pattern at address {:x} in region {:x}-{:x}",
-                          pattern_addr, region.start, region.end);
+                    // info!("Found pattern at address {:x} in region {:x}-{:x}",
+                    //       pattern_addr, region.start, region.end);
 
                     // 计算第三个 `=` 的位置
                     // 模式是 `O8()==="firstParty"...`
@@ -316,7 +316,7 @@ impl RuntimePatcher {
                     // 显示上下文
                     if let Ok(context) = self.read_context(pattern_addr, 4, 40) {
                         let context_str = String::from_utf8_lossy(&context);
-                        info!("Context around patch: {}", context_str);
+                        // info!("Context around patch: {}", context_str);
                     }
 
                     // 应用补丁：将第三个 `=` 改为 `!`
@@ -360,7 +360,7 @@ impl RuntimePatcher {
                 Ok(Some(addr)) => return Ok(Some(addr)),
                 Ok(None) => continue,
                 Err(e) => {
-                    warn!("Error searching region {:x}-{:x}: {}", region.start, region.end, e);
+                    // warn!("Error searching region {:x}-{:x}: {}", region.start, region.end, e);
                     continue;
                 }
             }

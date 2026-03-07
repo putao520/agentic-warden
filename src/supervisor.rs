@@ -123,7 +123,7 @@ fn apply_npm_claude_patch() -> anyhow::Result<()> {
     
     // 检查是否已经补丁过
     if js_content.contains("O8()!==\"firstParty\"") {
-        tracing::info!("Claude ToolSearch already patched (file)");
+        // Already patched, silent
         return Ok(());
     }
     
@@ -140,7 +140,7 @@ fn apply_npm_claude_patch() -> anyhow::Result<()> {
     fs::write(&cli_js_path, js_content)
         .map_err(|e| anyhow::anyhow!("Failed to write patched cli.js: {}", e))?;
     
-    tracing::info!("✅ Claude ToolSearch file patch applied");
+    eprintln!("✅ Claude ToolSearch unlocked");
     Ok(())
 }
 
@@ -187,11 +187,7 @@ fn apply_runtime_memory_patch(pid: u32) -> anyhow::Result<()> {
 
         match patcher.apply_claude_toolsearch_patch() {
             Ok(_addr) => {
-                tracing::info!(
-                    "✅ Claude ToolSearch runtime patch applied (attempt {}/{})",
-                    i + 1,
-                    retries.len()
-                );
+                eprintln!("✅ Claude ToolSearch unlocked");
                 return Ok(());
             }
             Err(e) => {
@@ -202,7 +198,7 @@ fn apply_runtime_memory_patch(pid: u32) -> anyhow::Result<()> {
     }
 
     let err = last_error.unwrap();
-    tracing::warn!("Claude ToolSearch runtime patch failed after {} attempts: {}", retries.len(), err);
+    // Patch failed silently (non-critical)
     Err(anyhow::anyhow!("Runtime patch failed after {} retries: {}", retries.len(), err))
 }
 
@@ -530,8 +526,8 @@ async fn execute_cli_internal<S: TaskStorage>(
 
     // Apply Claude ToolSearch patch (Claude only, non-critical)
     if matches!(cli_type, CliType::Claude) {
-        if let Err(e) = apply_claude_toolsearch_patch(child_pid) {
-            tracing::warn!("Claude ToolSearch patch failed (non-critical): {}", e);
+        if let Err(_e) = apply_claude_toolsearch_patch(child_pid) {
+            // Patch failed silently in interactive mode
         }
     }
 
@@ -1374,8 +1370,8 @@ pub async fn start_interactive_cli<S: TaskStorage>(
 
     // Apply Claude ToolSearch patch (Claude only, non-critical)
     if matches!(cli_type, CliType::Claude) {
-        if let Err(e) = apply_claude_toolsearch_patch(child_pid) {
-            tracing::warn!("Claude ToolSearch patch failed (non-critical): {}", e);
+        if let Err(_e) = apply_claude_toolsearch_patch(child_pid) {
+            // Patch failed silently in interactive mode
         }
     }
 
