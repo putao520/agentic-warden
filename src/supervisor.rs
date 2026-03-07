@@ -1312,18 +1312,18 @@ impl<S: TaskStorage> Drop for RegistrationGuard<'_, S> {
     }
 }
 
-/// Start interactive CLI mode by using exec to replace current process.
+/// Start interactive CLI mode by spawning the AI CLI process.
 ///
-/// This function replaces the current AIW process with the target AI CLI
-/// (claude/codex/gemini) using exec. The terminal control is directly handed
-/// over to the child process. This function never returns on success.
+/// This function spawns the target AI CLI (claude/codex/gemini) as a new session
+/// leader using setsid(), giving it terminal control. The parent AIW process exits
+/// immediately after spawning, while a background task applies runtime patches.
 pub fn start_interactive_cli<S: TaskStorage>(
     _registry: &Registry<S>,
     cli_type: &CliType,
     provider: Option<String>,
     cli_args: &[String],
     cwd: Option<std::path::PathBuf>,
-) -> Result<Never, ProcessError> {
+) -> Result<i32, ProcessError> {
     // Validate CWD if provided
     if let Some(ref dir) = cwd {
         if !dir.exists() {
@@ -1364,11 +1364,13 @@ pub fn start_interactive_cli<S: TaskStorage>(
     command.env_remove("CLAUDECODE");
     command.env_remove("CLAUDE_CODE_ENTRYPOINT");
 
-    // Platform-specific: set process group for the new process
+    // Platform-specific: create new session with setsid() to get terminal control
     #[cfg(unix)]
     unsafe {
         command.pre_exec(|| {
-            libc::setpgid(0, 0);
+            // Create new session so child becomes session leader
+            // This gives it control of the terminal
+            libc::setsid();
             Ok(())
         });
     }
@@ -1390,22 +1392,51 @@ pub fn start_interactive_cli<S: TaskStorage>(
         }
     }
 
-    // Apply file patch for npm installations (can be done before exec)
+    // Spawn the child process
+    let child = command.spawn()
+        .map_err(|e| ProcessError::Other(format!("Failed to spawn {}: {}", cli_command, e)))?;
+
+    let child_pid = child.id();
+
+    // For Claude CLI, apply runtime memory patch in background
     if matches!(cli_type, CliType::Claude) {
-        if let Ok(()) = apply_npm_claude_patch() {
-            eprintln!("✅ ToolSearch unlocked");
-        }
+        // Use tokio runtime to spawn background task
+        let _ = std::thread::spawn(move || {
+            // Create a new tokio runtime for this thread
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(rt) => rt,
+                Err(_) => return,
+            };
+
+            rt.block_on(async {
+                // Give Claude process some time to start up
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+                // Apply runtime patch
+                match RuntimePatcher::new(child_pid) {
+                    Ok(patcher) => {
+                        match patcher.apply_claude_toolsearch_patch() {
+                            Ok(addr) => {
+                                eprintln!("✅ ToolSearch unlocked (patch at 0x{:x})", addr);
+                            }
+                            Err(_) => {
+                                // Patch failed - could be wrong version or pattern not found
+                                // Silent failure since user might not need this feature
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        // Process might have already exited or other error
+                        // Silent failure
+                    }
+                }
+            });
+        });
     }
 
-    // Use exec to replace current process
-    // This function never returns on success
-    let error = command.exec();
-
-    // exec should never return; if it does, an error occurred
-    Err(ProcessError::Other(format!(
-        "Failed to exec {}: {}",
-        cli_command, error
-    )))
+    // Exit immediately with success code
+    // The child process continues running independently
+    Ok(0)
 }
 
 /// Execute multiple CLI processes (for codex|claude|gemini syntax)
