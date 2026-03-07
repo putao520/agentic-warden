@@ -1,4 +1,5 @@
 use crate::cli_type::CliType;
+use crate::patcher::RuntimePatcher;
 use crate::core::models::ProcessTreeInfo;
 use crate::core::process_tree::ProcessTreeError;
 use crate::error::RegistryError;
@@ -50,6 +51,52 @@ fn get_cli_command(cli_type: &CliType) -> Result<String, ProcessError> {
             cmd_name
         ))),
     }
+}
+/// Apply Claude ToolSearch memory patch
+///
+/// This is a best-effort operation - failure should not break the normal flow.
+///
+/// Note: Bun needs time to load and decompress JavaScript code, so we retry
+/// a few times with increasing delays.
+fn apply_claude_toolsearch_patch(pid: u32) -> anyhow::Result<()> {
+    use std::time::Duration;
+
+    let patcher = RuntimePatcher::new(pid)?;
+
+    // 重试策略：最多 5 次，间隔逐渐增加
+    let retries = [
+        Duration::from_millis(100),  // 立即尝试
+        Duration::from_millis(200),  // 100ms 后
+        Duration::from_millis(500),  // 300ms 后
+        Duration::from_millis(1000), // 500ms 后
+        Duration::from_millis(2000), // 1000ms 后
+    ];
+
+    let mut last_error = None;
+
+    for (i, delay) in retries.iter().enumerate() {
+        // 首次立即尝试，后续先等待再尝试
+        if i > 0 {
+            tracing::debug!("Waiting {:?} before retry (attempt {}/{})", delay, i + 1, retries.len());
+            std::thread::sleep(*delay);
+        }
+
+        match patcher.apply_claude_toolsearch_patch() {
+            Ok(addr) => {
+                tracing::info!("✅ Claude ToolSearch patch applied at address 0x{:x} (attempt {}/{})",
+                              addr, i + 1, retries.len());
+                return Ok(());
+            }
+            Err(e) => {
+                tracing::debug!("Patch attempt {}/{} failed: {}", i + 1, retries.len(), e);
+                last_error = Some(e);
+            }
+        }
+    }
+
+    let err = last_error.unwrap();
+    tracing::warn!("Claude ToolSearch patch failed after {} attempts: {}", retries.len(), err);
+    Err(anyhow::anyhow!("Patch failed after {} retries: {}", retries.len(), err))
 }
 
 /// Output handling strategy for CLI execution
@@ -373,6 +420,13 @@ async fn execute_cli_internal<S: TaskStorage>(
     let child_pid = child
         .id()
         .ok_or_else(|| io::Error::other("Failed to get child PID"))?;
+
+    // Apply Claude ToolSearch patch (Claude only, non-critical)
+    if matches!(cli_type, CliType::Claude) {
+        if let Err(e) = apply_claude_toolsearch_patch(child_pid) {
+            tracing::warn!("Claude ToolSearch patch failed (non-critical): {}", e);
+        }
+    }
 
     let log_path = match generate_log_path(child_pid) {
         Ok(path) => path,
@@ -1210,6 +1264,14 @@ pub async fn start_interactive_cli<S: TaskStorage>(
     let child_pid = child
         .id()
         .ok_or_else(|| io::Error::other("Failed to get child PID"))?;
+
+    // Apply Claude ToolSearch patch (Claude only, non-critical)
+    if matches!(cli_type, CliType::Claude) {
+        if let Err(e) = apply_claude_toolsearch_patch(child_pid) {
+            tracing::warn!("Claude ToolSearch patch failed (non-critical): {}", e);
+        }
+    }
+
 
     // Register the interactive CLI process
     let log_path = generate_log_path(child_pid)?;

@@ -28,6 +28,15 @@ const PATCH_BYTE_EXCLAMATION: u8 = 0x21;
 /// 在 "firstParty" 之前最多搜索这么多字节
 const MAX_OPERATOR_SEARCH_DISTANCE: usize = 64;
 
+/// 完整的目标代码模式: `O8()==="firstParty"&&!JB()`
+/// 这是一个较长但唯一的模式，可以精确定位需要修改的位置
+/// 注意：由于代码是压缩的，没有空格
+/// 我们搜索其中的一部分模式来定位
+const PATTERN_CLAUDE_TOOLSEARCH_BUG: &[u8] = b"O8()===\"firstParty\"&&!JB()";
+
+/// 用于快速搜索的较短模式: `O8()==="firstParty"`
+const PATTERN_O8_FIRST_PARTY: &[u8] = b"O8()===\"firstParty\"";
+
 /// 运行时内存补丁器
 ///
 /// 使用平台抽象层实现跨平台的内存补丁功能。
@@ -62,7 +71,7 @@ impl RuntimePatcher {
         }
 
         // 限制单次读取大小，避免内存问题
-        const MAX_READ_SIZE: usize = 4 * 1024 * 1024; // 4MB
+        const MAX_READ_SIZE: usize = 16 * 1024 * 1024; // 16MB
         let read_size = region_size.min(MAX_READ_SIZE);
         let mut buffer = vec![0u8; read_size];
 
@@ -97,7 +106,7 @@ impl RuntimePatcher {
             return Ok(results);
         }
 
-        const MAX_READ_SIZE: usize = 4 * 1024 * 1024;
+        const MAX_READ_SIZE: usize = 16 * 1024 * 1024; // 16MB
         let read_size = region_size.min(MAX_READ_SIZE);
         let mut buffer = vec![0u8; read_size];
 
@@ -210,13 +219,12 @@ impl RuntimePatcher {
     /// 应用 Claude CLI ToolSearch 补丁
     ///
     /// 此补丁修复 Claude CLI 中的工具搜索 BUG：
-    /// 将 `(O8())==="firstParty"` 改为 `(O8())!=="firstParty"`
+    /// 将 `if(O8()==="firstParty"&&!JB())` 改为 `if(O8()!=="firstParty"&&!JB())`
     ///
-    /// # 算法
-    /// 1. 搜索 "Party" 字符串作为锚点
-    /// 2. 验证其前面是 "first"，确认是 "firstParty"
-    /// 3. 在 "firstParty" 之前搜索 `===` 操作符
-    /// 4. 将第三个 `=` 改为 `!`
+    /// # 新算法 v2（精确定位完整模式）
+    /// 1. 搜索完整模式 `O8()==="firstParty"&&!JB()`
+    /// 2. 如果找到，计算第三个 `=` 的位置并修改
+    /// 3. 如果完整模式未找到，搜索 `O8()==="firstParty"` 作为后备
     ///
     /// # 返回
     /// 成功时返回补丁应用的地址，失败返回错误
@@ -225,26 +233,57 @@ impl RuntimePatcher {
             return Err(PatchError::ProcessNotFound { pid: 0 });
         }
 
-        info!("Searching for Claude ToolSearch pattern (Party with === before firstParty)");
+        info!("Searching for Claude ToolSearch bug pattern: O8()===\"firstParty\"&&!JB()");
 
         let regions = self.inner.read_memory_maps()?;
-
-        // 只搜索可读的内存区域
-        let rw_regions: Vec<_> = regions
+        let readable_regions: Vec<_> = regions
             .iter()
             .filter(|r| r.is_readable)
             .collect();
 
         debug!(
-            "Searching {} readable memory regions for 'Party' pattern ({} bytes)",
-            rw_regions.len(),
-            SEARCH_PATTERN_PARTY.len()
+            "Searching {} readable memory regions for target pattern",
+            readable_regions.len()
         );
 
-        let mut candidate_addrs = Vec::new();
+        // 策略 1: 搜索完整模式
+        info!("Trying strategy 1: Search for complete pattern O8()==\"firstParty\"&&!JB()");
+        match self.search_and_apply_patch(&readable_regions, PATTERN_CLAUDE_TOOLSEARCH_BUG) {
+            Ok(addr) => {
+                info!("✅ Claude ToolSearch patch successfully applied (complete pattern) at address {:x}", addr);
+                return Ok(addr);
+            }
+            Err(e) => {
+                info!("Complete pattern not found: {}, trying fallback strategy", e);
+            }
+        }
 
-        // 第一步：找到所有 "Party" 的位置
-        for region in rw_regions {
+        // 策略 2: 搜索较短模式
+        info!("Trying strategy 2: Search for pattern O8()==\"firstParty\"");
+        match self.search_and_apply_patch(&readable_regions, PATTERN_O8_FIRST_PARTY) {
+            Ok(addr) => {
+                info!("✅ Claude ToolSearch patch successfully applied (short pattern) at address {:x}", addr);
+                return Ok(addr);
+            }
+            Err(e) => {
+                warn!("Both patterns not found: {}", e);
+            }
+        }
+
+        Err(PatchError::pattern_not_found(format!(
+            "Target pattern not found in any readable memory region"
+        )))
+    }
+
+    /// 搜索模式并应用补丁
+    ///
+    /// 给定一个包含 `O8()==="firstParty"` 的模式，找到第三个 `=` 的位置并修改
+    fn search_and_apply_patch(
+        &self,
+        regions: &[&crate::patcher::platform::MemoryRegion],
+        pattern: &[u8],
+    ) -> PatchResult<usize> {
+        for region in regions {
             trace!(
                 "Searching region {:x}-{:x} ({} bytes)",
                 region.start,
@@ -252,92 +291,52 @@ impl RuntimePatcher {
                 region.end.saturating_sub(region.start),
             );
 
-            match self.search_all_patterns_in_region(region, SEARCH_PATTERN_PARTY) {
-                Ok(addrs) => {
-                    for addr in addrs {
-                        debug!("Found 'Party' at address {:x}", addr);
-                        candidate_addrs.push(addr);
+            match self.search_pattern_in_region(region, pattern) {
+                Ok(Some(pattern_addr)) => {
+                    info!("Found pattern at address {:x} in region {:x}-{:x}",
+                          pattern_addr, region.start, region.end);
+
+                    // 计算第三个 `=` 的位置
+                    // 模式是 `O8()==="firstParty"...`
+                    // O(0) 8(1) ((2) )(3) =(4) =(5) =(6) "(7) ...
+                    // 第三个 = 在偏移 6
+                    let patch_addr = pattern_addr + 6;
+
+                    // 验证这个位置确实是 `=`
+                    let mut verify_buf = [0u8; 1];
+                    self.inner.read_memory(patch_addr, &mut verify_buf)?;
+                    if verify_buf[0] != b'=' {
+                        return Err(PatchError::PatternNotFound {
+                            pattern: format!("Expected '=' at address {:x}, found 0x{:02x}",
+                                           patch_addr, verify_buf[0]),
+                            hint: None,
+                        });
                     }
-                }
-                Err(e) => {
-                    warn!("Error searching region {:x}-{:x}: {}", region.start, region.end, e);
-                }
-            }
-        }
-
-        if candidate_addrs.is_empty() {
-            return Err(PatchError::pattern_not_found(format!(
-                "'Party' pattern not found in any readable memory region"
-            )));
-        }
-
-        info!("Found {} 'Party' candidates, verifying for 'firstParty'", candidate_addrs.len());
-
-        // 第二步：验证每个候选是否是 "firstParty"
-        let mut first_party_addrs = Vec::new();
-        for &party_addr in &candidate_addrs {
-            match self.verify_first_party(party_addr) {
-                Ok(true) => {
-                    info!("✓ Confirmed 'firstParty' at address {:x}", party_addr.saturating_sub(5));
-                    first_party_addrs.push(party_addr);
-                }
-                Ok(false) => {
-                    debug!("✗ 'Party' at {:x} is not preceded by 'first'", party_addr);
-                }
-                Err(e) => {
-                    warn!("Error verifying 'firstParty' at {:x}: {}", party_addr, e);
-                }
-            }
-        }
-
-        if first_party_addrs.is_empty() {
-            return Err(PatchError::pattern_not_found(format!(
-                "'firstParty' pattern not found (found 'Party' but not preceded by 'first')"
-            )));
-        }
-
-        info!("Found {} 'firstParty' occurrences, searching for '===' operator", first_party_addrs.len());
-
-        // 第三步：在每个 "firstParty" 之前搜索 `===`
-        for &party_addr in &first_party_addrs {
-            // "first" 的起始地址
-            let first_party_start = party_addr.saturating_sub(5);
-
-            match self.find_triple_equal_before(first_party_start, MAX_OPERATOR_SEARCH_DISTANCE) {
-                Ok(Some(patch_addr)) => {
-                    // 找到了 `===`，应用补丁
-                    info!("Found target: '===' at {:x} before 'firstParty'", patch_addr.saturating_sub(2));
 
                     // 显示上下文
-                    if let Ok(context) = self.read_context(patch_addr, 8, 16) {
+                    if let Ok(context) = self.read_context(pattern_addr, 4, 40) {
                         let context_str = String::from_utf8_lossy(&context);
-                        debug!("Context around patch: {}", context_str);
+                        info!("Context around patch: {}", context_str);
                     }
 
                     // 应用补丁：将第三个 `=` 改为 `!`
                     self.apply_byte_patch(patch_addr, PATCH_BYTE_EXCLAMATION)?;
 
-                    info!(
-                        "✅ Claude ToolSearch patch successfully applied at address {:x}",
-                        patch_addr
-                    );
                     return Ok(patch_addr);
                 }
-                Ok(None) => {
-                    debug!("No '===' found before 'firstParty' at {:x}", first_party_start);
-                }
+                Ok(None) => continue,
                 Err(e) => {
-                    warn!("Error searching for '===' before 'firstParty' at {:x}: {}", first_party_start, e);
+                    trace!("Error searching region {:x}-{:x}: {}", region.start, region.end, e);
+                    continue;
                 }
             }
         }
 
-        Err(PatchError::pattern_not_found(format!(
-            "Found 'firstParty' but no '===' operator found before it within {} bytes",
-            MAX_OPERATOR_SEARCH_DISTANCE
-        )))
+        Err(PatchError::PatternNotFound {
+            pattern: String::from_utf8_lossy(pattern).to_string(),
+            hint: Some("Pattern not found in any readable region".to_string()),
+        })
     }
-
     /// 在内存中搜索字节模式
     ///
     /// # 参数
@@ -351,12 +350,12 @@ impl RuntimePatcher {
         }
 
         let regions = self.inner.read_memory_maps()?;
-        let rw_regions: Vec<_> = regions
+        let readable_regions: Vec<_> = regions
             .iter()
             .filter(|r| r.is_readable)
             .collect();
 
-        for region in rw_regions {
+        for region in readable_regions {
             match self.search_pattern_in_region(region, pattern) {
                 Ok(Some(addr)) => return Ok(Some(addr)),
                 Ok(None) => continue,
@@ -422,5 +421,39 @@ mod tests {
         assert_eq!(SEARCH_PATTERN_PARTY.len(), 5);
         assert_eq!(PATTERN_FIRST_PARTY.len(), 10);
         assert_eq!(OPERATOR_TRIPLE_EQUAL.len(), 3);
+    }
+
+    #[test]
+    fn test_patch_pattern_constants() {
+        // 验证补丁模式常量
+        assert_eq!(PATTERN_CLAUDE_TOOLSEARCH_BUG, b"O8()===\"firstParty\"&&!JB()");
+        assert_eq!(PATTERN_O8_FIRST_PARTY, b"O8()===\"firstParty\"");
+        
+        // 验证完整模式的字符串表示
+        let pattern_str = std::str::from_utf8(PATTERN_CLAUDE_TOOLSEARCH_BUG).unwrap();
+        assert_eq!(pattern_str, "O8()===\"firstParty\"&&!JB()");
+    }
+
+    #[test]
+    fn test_patch_offset_calculation() {
+        // 验证第三个 = 的偏移计算
+        // 模式: O8()==="firstParty"
+        // 索引: 0123456789...
+        // O(0) 8(1) ((2) )(3) =(4) =(5) =(6) "(7)
+        
+        let pattern = PATTERN_O8_FIRST_PARTY;
+        assert_eq!(pattern[0], b'O');
+        assert_eq!(pattern[1], b'8');
+        assert_eq!(pattern[2], b'(');
+        assert_eq!(pattern[3], b')');
+        assert_eq!(pattern[4], b'=');
+        assert_eq!(pattern[5], b'=');
+        assert_eq!(pattern[6], b'=');  // 这是第三个 =，需要改成 !
+        assert_eq!(pattern[7], b'"');
+        assert_eq!(pattern[8], b'f');
+        
+        // 验证完整模式的第三个 = 也在相同偏移
+        let full_pattern = PATTERN_CLAUDE_TOOLSEARCH_BUG;
+        assert_eq!(full_pattern[6], b'=');
     }
 }
