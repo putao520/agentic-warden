@@ -9,6 +9,57 @@
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
+use tokio::signal::unix::SignalKind;
+use tokio::select;
+use tokio::io::AsyncBufReadExt;
+
+/// Ctrl+C handler for interactive process management
+struct CtrlCHandler {
+    count: Arc<AtomicU8>,
+    signal_task: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl CtrlCHandler {
+    fn new() -> Self {
+        let count = Arc::new(AtomicU8::new(0));
+        let count_clone = count.clone();
+
+        // Spawn a task to listen for SIGINT
+        let signal_task = tokio::spawn(async move {
+            let mut stream = match tokio::signal::unix::signal(SignalKind::interrupt()) {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+
+            loop {
+                stream.recv().await;
+                let current = count_clone.fetch_add(1, Ordering::SeqCst);
+                if current == 0 {
+                    eprintln!("\n⚠️  Press Ctrl+C again to send to background...");
+                } else if current == 1 {
+                    eprintln!("\n🔄 Sending process to background...");
+                    // Reset for next use
+                    count_clone.store(0, Ordering::SeqCst);
+                }
+            }
+        });
+
+        Self {
+            count,
+            signal_task: Some(signal_task),
+        }
+    }
+
+    fn was_triggered(&self) -> bool {
+        self.count.load(Ordering::SeqCst) > 0
+    }
+
+    fn reset(&self) {
+        self.count.store(0, Ordering::SeqCst);
+    }
+}
 
 /// CLI Tool information
 #[derive(Debug, Clone)]
@@ -705,7 +756,7 @@ pub async fn execute_update(tool_name: Option<&str>) -> Result<Vec<(String, bool
             println!("  Not currently installed");
         }
 
-        // Execute npm install (with 60s timeout)
+        // Execute npm install (with real-time output and Ctrl+C handling)
         println!("  Installing...");
         let install_cmd = detector.get_install_hint(&tool.command);
 
@@ -718,35 +769,83 @@ pub async fn execute_update(tool_name: Option<&str>) -> Result<Vec<(String, bool
             install_cmd
         };
 
+        let ctrlc = CtrlCHandler::new();
+
         let child = tokio::process::Command::new("sh")
             .arg("-c")
             .arg(&install_cmd)
-            .status();
-        match tokio::time::timeout(tokio::time::Duration::from_secs(60), child).await {
-            Ok(Ok(status)) => {
-                if status.success() {
-                    println!("  ✅ Successfully updated/installed!");
-                    results.push((tool.name.clone(), true, "Success".to_string()));
-                } else {
-                    eprintln!(
-                        "  ❌ Installation failed with exit code: {:?}",
-                        status.code()
-                    );
-                    results.push((
-                        tool.name.clone(),
-                        false,
-                        format!("Installation failed: {:?}", status.code()),
-                    ));
-                }
-            }
-            Ok(Err(e)) => {
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn();
+
+        let mut child = match child {
+            Ok(c) => c,
+            Err(e) => {
                 eprintln!("  ❌ Failed to execute command: {}", e);
                 results.push((tool.name.clone(), false, format!("Execution error: {}", e)));
+                continue;
             }
-            Err(_) => {
-                eprintln!("  ⚠️  Installation timed out after 60s, skipping");
-                results.push((tool.name.clone(), false, "Timed out after 60s".to_string()));
+        };
+
+        let stdout = child.stdout.take().expect("Failed to get stdout");
+        let stderr = child.stderr.take().expect("Failed to get stderr");
+
+        let mut stdout_reader = tokio::io::BufReader::new(stdout).lines();
+        let mut stderr_reader = tokio::io::BufReader::new(stderr).lines();
+
+        loop {
+            select! {
+                // Check for Ctrl+C
+                _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
+                    if ctrlc.was_triggered() {
+                        eprintln!("\n⚠️  Process sent to background, continuing...");
+                        ctrlc.reset();
+                        // Continue waiting in background
+                        break;
+                    }
+                }
+
+                // Read stdout
+                line_result = stdout_reader.next_line() => {
+                    match line_result {
+                        Ok(Some(line)) => println!("  {}", line),
+                        Ok(None) => break,
+                        Err(e) => {
+                            eprintln!("  Error reading stdout: {}", e);
+                            break;
+                        }
+                    }
+                }
+
+                // Read stderr
+                line_result = stderr_reader.next_line() => {
+                    match line_result {
+                        Ok(Some(line)) => eprintln!("  {}", line),
+                        Ok(None) => {},
+                        Err(e) => {
+                            eprintln!("  Error reading stderr: {}", e);
+                            break;
+                        }
+                    }
+                }
             }
+        }
+
+        let status = match child.wait().await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("  ❌ Failed to wait for process: {}", e);
+                results.push((tool.name.clone(), false, format!("Wait error: {}", e)));
+                continue;
+            }
+        };
+
+        if status.success() {
+            println!("  ✅ Successfully updated/installed!");
+            results.push((tool.name.clone(), true, "Success".to_string()));
+        } else {
+            eprintln!("  ❌ Installation failed with exit code: {:?}", status.code());
+            results.push((tool.name.clone(), false, format!("Installation failed: {:?}", status.code())));
         }
     }
 
@@ -762,61 +861,154 @@ pub async fn execute_update(tool_name: Option<&str>) -> Result<Vec<(String, bool
     Ok(results)
 }
 
-/// Update/install Claude CLI using its native mechanism (with 60s timeout)
+/// Update/install Claude CLI using its native mechanism (with real-time output and Ctrl+C handling)
 async fn update_claude_cli(tool: &CliTool) -> (String, bool, String) {
-    const TIMEOUT_SECS: u64 = 60;
+    let ctrlc = CtrlCHandler::new();
 
     if tool.installed {
         // Claude is installed - use `claude update`
         if let Some(ref ver) = tool.version {
             println!("  Current version: {}", ver);
         }
-        println!("  Running claude update (timeout {}s)...", TIMEOUT_SECS);
+        println!("  Running claude update...");
+
         let child = tokio::process::Command::new("claude")
             .arg("update")
-            .status();
-        match tokio::time::timeout(tokio::time::Duration::from_secs(TIMEOUT_SECS), child).await {
-            Ok(Ok(status)) if status.success() => {
-                println!("  ✅ Claude updated successfully!");
-                (tool.name.clone(), true, "Success".to_string())
-            }
-            Ok(Ok(status)) => {
-                eprintln!("  ❌ claude update failed with exit code: {:?}", status.code());
-                (tool.name.clone(), false, format!("Update failed: {:?}", status.code()))
-            }
-            Ok(Err(e)) => {
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn();
+
+        let mut child = match child {
+            Ok(c) => c,
+            Err(e) => {
                 eprintln!("  ❌ Failed to run claude update: {}", e);
-                (tool.name.clone(), false, format!("Execution error: {}", e))
+                return (tool.name.clone(), false, format!("Execution error: {}", e));
             }
-            Err(_) => {
-                eprintln!("  ⚠️  claude update timed out after {}s, skipping", TIMEOUT_SECS);
-                (tool.name.clone(), false, format!("Timed out after {}s", TIMEOUT_SECS))
+        };
+
+        let stdout = child.stdout.take().expect("Failed to get stdout");
+        let stderr = child.stderr.take().expect("Failed to get stderr");
+
+        let mut stdout_reader = tokio::io::BufReader::new(stdout).lines();
+        let mut stderr_reader = tokio::io::BufReader::new(stderr).lines();
+
+        loop {
+            select! {
+                _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
+                    if ctrlc.was_triggered() {
+                        eprintln!("\n⚠️  Process sent to background, continuing...");
+                        ctrlc.reset();
+                        break;
+                    }
+                }
+                line_result = stdout_reader.next_line() => {
+                    match line_result {
+                        Ok(Some(line)) => println!("  {}", line),
+                        Ok(None) => break,
+                        Err(e) => {
+                            eprintln!("  Error reading stdout: {}", e);
+                            break;
+                        }
+                    }
+                }
+                line_result = stderr_reader.next_line() => {
+                    match line_result {
+                        Ok(Some(line)) => eprintln!("  {}", line),
+                        Ok(None) => {},
+                        Err(e) => {
+                            eprintln!("  Error reading stderr: {}", e);
+                            break;
+                        }
+                    }
+                }
             }
+        }
+
+        let status = match child.wait().await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("  ❌ Failed to wait for process: {}", e);
+                return (tool.name.clone(), false, format!("Wait error: {}", e));
+            }
+        };
+
+        if status.success() {
+            println!("  ✅ Claude updated successfully!");
+            (tool.name.clone(), true, "Success".to_string())
+        } else {
+            eprintln!("  ❌ claude update failed with exit code: {:?}", status.code());
+            (tool.name.clone(), false, format!("Update failed: {:?}", status.code()))
         }
     } else {
         // Claude not installed - use curl installer
-        println!("  Installing via curl (timeout {}s)...", TIMEOUT_SECS);
+        println!("  Installing via curl...");
         let child = tokio::process::Command::new("sh")
             .arg("-c")
             .arg("curl -fsSL https://claude.ai/install.sh | sh")
-            .status();
-        match tokio::time::timeout(tokio::time::Duration::from_secs(TIMEOUT_SECS), child).await {
-            Ok(Ok(status)) if status.success() => {
-                println!("  ✅ Claude installed successfully!");
-                (tool.name.clone(), true, "Success".to_string())
-            }
-            Ok(Ok(status)) => {
-                eprintln!("  ❌ Installation failed with exit code: {:?}", status.code());
-                (tool.name.clone(), false, format!("Installation failed: {:?}", status.code()))
-            }
-            Ok(Err(e)) => {
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn();
+
+        let mut child = match child {
+            Ok(c) => c,
+            Err(e) => {
                 eprintln!("  ❌ Failed to execute curl installer: {}", e);
-                (tool.name.clone(), false, format!("Execution error: {}", e))
+                return (tool.name.clone(), false, format!("Execution error: {}", e));
             }
-            Err(_) => {
-                eprintln!("  ⚠️  Claude install timed out after {}s, skipping", TIMEOUT_SECS);
-                (tool.name.clone(), false, format!("Timed out after {}s", TIMEOUT_SECS))
+        };
+
+        let stdout = child.stdout.take().expect("Failed to get stdout");
+        let stderr = child.stderr.take().expect("Failed to get stderr");
+
+        let mut stdout_reader = tokio::io::BufReader::new(stdout).lines();
+        let mut stderr_reader = tokio::io::BufReader::new(stderr).lines();
+
+        loop {
+            select! {
+                _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
+                    if ctrlc.was_triggered() {
+                        eprintln!("\n⚠️  Process sent to background, continuing...");
+                        ctrlc.reset();
+                        break;
+                    }
+                }
+                line_result = stdout_reader.next_line() => {
+                    match line_result {
+                        Ok(Some(line)) => println!("  {}", line),
+                        Ok(None) => break,
+                        Err(e) => {
+                            eprintln!("  Error reading stdout: {}", e);
+                            break;
+                        }
+                    }
+                }
+                line_result = stderr_reader.next_line() => {
+                    match line_result {
+                        Ok(Some(line)) => eprintln!("  {}", line),
+                        Ok(None) => {},
+                        Err(e) => {
+                            eprintln!("  Error reading stderr: {}", e);
+                            break;
+                        }
+                    }
+                }
             }
+        }
+
+        let status = match child.wait().await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("  ❌ Failed to wait for process: {}", e);
+                return (tool.name.clone(), false, format!("Wait error: {}", e));
+            }
+        };
+
+        if status.success() {
+            println!("  ✅ Claude installed successfully!");
+            (tool.name.clone(), true, "Success".to_string())
+        } else {
+            eprintln!("  ❌ Installation failed with exit code: {:?}", status.code());
+            (tool.name.clone(), false, format!("Installation failed: {:?}", status.code()))
         }
     }
 }
