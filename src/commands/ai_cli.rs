@@ -119,7 +119,7 @@ impl AiCliCommand {
                 prepared.provider,
                 &self.cli_args,
                 prepared.cwd.clone(),
-            )?;
+            ).await?;
 
             if let Some(ref info) = prepared.worktree_info {
                 Self::output_worktree_info(info);
@@ -250,7 +250,7 @@ impl AiCliCommand {
                 prepared.provider,
                 &inv.remaining_args,
                 prepared.cwd.clone(),
-            )?;
+            ).await?;
 
             if let Some(ref info) = prepared.worktree_info {
                 Self::output_worktree_info(info);
