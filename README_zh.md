@@ -1,5 +1,7 @@
 # AIW - AI CLI 统一网关
 
+[English](README.md)
+
 <div align="center">
 
 ![Version](https://img.shields.io/badge/version-0.5.80-blue?style=flat-square)
@@ -269,4 +271,4 @@ MIT License - 详见 [LICENSE](LICENSE) 文件
 
 ---
 
-[English](README.md) | [GitHub](https://github.com/putao520/agentic-warden) | [crates.io](https://crates.io/crates/aiw)
+[GitHub](https://github.com/putao520/agentic-warden) | [crates.io](https://crates.io/crates/aiw)

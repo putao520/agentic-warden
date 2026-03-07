@@ -1,5 +1,7 @@
 # AIW - AI CLI Unified Gateway
 
+[中文版](README_zh.md)
+
 <div align="center">
 
 ![Version](https://img.shields.io/badge/version-0.5.80-blue?style=flat-square)
@@ -269,4 +271,4 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-[中文版](README_zh.md) | [GitHub](https://github.com/putao520/agentic-warden) | [crates.io](https://crates.io/crates/aiw)
+[GitHub](https://github.com/putao520/agentic-warden) | [crates.io](https://crates.io/crates/aiw)
