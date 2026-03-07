@@ -269,6 +269,4 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-**AIW** - Unified Gateway for AI CLI | v0.5.80
-
-[GitHub](https://github.com/putao520/agentic-warden) | [crates.io](https://crates.io/crates/aiw)
+[中文版](README_zh.md) | [GitHub](https://github.com/putao520/agentic-warden) | [crates.io](https://crates.io/crates/aiw)
