@@ -1,6 +1,6 @@
 # Requirements-Architecture-Implementation Traceability Matrix
 
-**Version**: v0.1.0
+**Version**: v0.5.61
 **Last Updated**: 2025-11-12
 **Purpose**: Complete traceability from requirements through architecture to implementation
 
@@ -65,30 +65,25 @@ This matrix provides complete traceability from:
 
 ---
 
-### REQ-003: Google Drive 配置记录和同步
+### REQ-003: Google Drive 配置记录和同步 ❌ Deprecated
 
 | Layer | ID | Component | Status | Implementation Files |
 |-------|----|-----------|---------|----------------------|
-| **Requirement** | REQ-003 | Google Drive 配置记录和同步 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-003 |
-| **Architecture** | ARCH-003 | Google Drive Integration with OAuth | 🟢 Done | SPEC/02-ARCHITECTURE.md#ARCH-003 |
-| **Data** | DATA-002 | Synchronization Configuration | 🟢 Done | SPEC/03-DATA-STRUCTURE.md#DATA-002 |
-| **Data** | DATA-003 | OAuth Token Information | 🟢 Done | SPEC/03-DATA-STRUCTURE.md#DATA-003 |
-| **Data** | DATA-006 | Google Drive File Metadata | 🟢 Done | SPEC/03-DATA-STRUCTURE.md#DATA-006 |
-| **API** | API-003 | Synchronization Commands | 🟢 Done | SPEC/04-API-DESIGN.md#API-003 |
-| **API** | API-010 | Synchronization Interface | 🟢 Done | SPEC/04-API-DESIGN.md#API-010 |
-| **Implementation** | - | Google Drive Service | 🟢 Done | `src/sync/google_drive_service.rs` |
-| **Implementation** | - | OAuth Client | 🟢 Done | `src/sync/oauth_client.rs` |
-| **Implementation** | - | Config Packer | 🟢 Done | `src/sync/config_packer.rs` |
-| **Implementation** | - | Sync Command Handler | 🟢 Done | `src/sync/sync_command.rs` |
-| **Implementation** | - | Directory Hasher | 🟢 Done | `src/sync/directory_hasher.rs` |
-| **Implementation** | - | TUI Progress Screens | 🟢 Done | `src/tui/screens/mod_simple.rs` |
+| **Requirement** | REQ-003 | Google Drive 配置记录和同步 | ❌ Deprecated | SPEC/01-REQUIREMENTS.md#已废弃需求 |
+| **Architecture** | ARCH-003 | Google Drive Integration with OAuth | ❌ Deprecated | SPEC/02-ARCHITECTURE.md#ARCH-003 |
+| **Data** | DATA-002 | Synchronization Configuration | ❌ Deprecated | SPEC/03-DATA-STRUCTURE.md#DATA-002 |
+| **Data** | DATA-003 | OAuth Token Information | ❌ Deprecated | SPEC/03-DATA-STRUCTURE.md#DATA-003 |
+| **Data** | DATA-006 | Google Drive File Metadata | ❌ Deprecated | SPEC/03-DATA-STRUCTURE.md#DATA-006 |
+| **API** | API-003 | Synchronization Commands | ❌ Deprecated | SPEC/04-API-DESIGN.md#API-003 |
+| **API** | API-010 | Synchronization Interface | ❌ Deprecated | SPEC/04-API-DESIGN.md#API-010 |
+| **Implementation** | - | Google Drive Service | ❌ Deprecated | `src/sync/google_drive_service.rs` |
+| **Implementation** | - | OAuth Client | ❌ Deprecated | `src/sync/oauth_client.rs` |
+| **Implementation** | - | Config Packer | ❌ Deprecated | `src/sync/config_packer.rs` |
+| **Implementation** | - | Sync Command Handler | ❌ Deprecated | `src/sync/sync_command.rs` |
+| **Implementation** | - | Directory Hasher | ❌ Deprecated | `src/sync/directory_hasher.rs` |
+| **Implementation** | - | TUI Progress Screens | ❌ Deprecated | `src/tui/screens/mod_simple.rs` |
 
-**Key Insights**:
-- OAuth 2.0 Device Flow for headless environments
-- Selective configuration packing (1-5MB typical archives)
-- Hash-based change detection for incremental sync
-- Progress indication for large transfers
-- Automatic retry with exponential backoff
+**Deprecated**: Google Drive 云存储集成已禁用 (v0.5.19+)，push/pull 命令不可用。
 
 ---
 
@@ -223,22 +218,93 @@ This matrix provides complete traceability from:
 - `aiw claude -p openrouter` → Interactive mode with OpenRouter ✅
 - `aiw claude,gemini -p litellm` → Multiple AI CLI interactive mode ✅
 
-### REQ-010: AI CLI 更新/安装管理
+### REQ-010: Claude Code会话历史集成（Hook-Based） ❌ Deprecated
 
 | Layer | ID | Component | Status | Implementation Files |
 |-------|----|-----------|---------|----------------------|
-| **Requirement** | REQ-010 | AI CLI 更新/安装管理 | 🔴 To Do | SPEC/01-REQUIREMENTS.md#REQ-010 |
-| **Architecture** | ARCH-008 | Update Management | 🟡 Planned | SPEC/02-ARCHITECTURE.md#Update-Management |
-| **API** | API-005 | Update Command | 🟡 Planned | SPEC/04-API-DESIGN.md#API-005 |
-| **Implementation** | - | Update Implementation | 🔴 To Do | `src/commands/update.rs` |
-| **Implementation** | - | NPM Registry Client | 🔴 To Do | `src/utils/npm_client.rs` |
-| **Implementation** | - | Version Comparison | 🔴 To Do | `src/utils/version_compare.rs |
+| **Requirement** | REQ-010 | Claude Code会话历史集成 | ❌ Deprecated | SPEC/01-REQUIREMENTS.md#已废弃需求 |
+| **Architecture** | ARCH-010 | Hook-Based History Ingestion | ❌ Deprecated | SPEC/02-ARCHITECTURE.md#ARCH-010 |
+| **Data** | DATA-010 | Conversation History Data | ❌ Deprecated | SPEC/03-DATA-STRUCTURE.md#DATA-010 |
+| **API** | API-010 | search_history MCP Tool | ❌ Deprecated | SPEC/04-API-DESIGN.md#API-010 |
 
-**Key Insights**:
-- **Not Yet Implemented**: This requirement is planned for v0.2.0
-- Will support NPM package management for codex/gemini
-- Will use native `claude update` for Claude CLI
-- Automatic version detection and installation
+**Deprecated**: Claude Code 会话历史集成功能已删除，相关 Hook 机制不再使用。
+
+---
+
+### REQ-011: AI CLI 更新/安装管理
+
+| Layer | ID | Component | Status | Implementation Files |
+|-------|----|-----------|---------|----------------------|
+| **Requirement** | REQ-011 | AI CLI 更新/安装管理 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-011 |
+| **Architecture** | ARCH-008 | Process Supervisor | 🟢 Done | SPEC/02-ARCHITECTURE.md#Core-Modules |
+| **API** | API-005 | Utility Commands (Update) | 🟢 Done | SPEC/04-API-DESIGN.md#API-005 |
+
+---
+
+### REQ-012: 智能MCP路由系统
+
+| Layer | ID | Component | Status | Implementation Files |
+|-------|----|-----------|---------|----------------------|
+| **Requirement** | REQ-012 | 智能MCP路由系统 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-012 |
+| **Architecture** | ARCH-012 | 智能MCP路由系统架构设计 | 🟢 Done | SPEC/02-ARCHITECTURE.md#ARCH-012 |
+| **Data** | DATA-012 | 智能MCP路由系统数据结构 | 🟢 Done | SPEC/03-DATA-STRUCTURE.md#DATA-012 |
+| **API** | API-012 | 智能MCP路由系统API | 🟢 Done | SPEC/04-API-DESIGN.md#API-012 |
+
+---
+
+### REQ-013: 动态JS编排工具系统
+
+| Layer | ID | Component | Status | Implementation Files |
+|-------|----|-----------|---------|----------------------|
+| **Requirement** | REQ-013 | 动态JS编排工具系统 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-013 |
+| **Architecture** | ARCH-013 | 动态JS编排工具系统架构 | 🟢 Done | SPEC/02-ARCHITECTURE.md#ARCH-013 |
+| **Data** | DATA-012 | 智能MCP路由系统数据结构（共享） | 🟢 Done | SPEC/03-DATA-STRUCTURE.md#DATA-012 |
+| **API** | API-012 | 智能MCP路由系统API（共享） | 🟢 Done | SPEC/04-API-DESIGN.md#API-012 |
+
+---
+
+### REQ-014: AI CLI任务生命周期管理和角色系统
+
+| Layer | ID | Component | Status | Implementation Files |
+|-------|----|-----------|---------|----------------------|
+| **Requirement** | REQ-014 | AI CLI任务生命周期管理和角色系统 | ✅ Done | SPEC/01-REQUIREMENTS.md#REQ-014 |
+| **Architecture** | ARCH-014 | AI CLI角色系统和任务生命周期架构 | ✅ Done | SPEC/02-ARCHITECTURE.md#ARCH-014 |
+| **Data** | DATA-004 | Task Registry Record（生命周期扩展） | 🟢 Done | SPEC/03-DATA-STRUCTURE.md#DATA-004 |
+| **API** | API-008 | Task Registry Interface（生命周期扩展） | 🟢 Done | SPEC/04-API-DESIGN.md#API-008 |
+
+---
+
+### REQ-015: Google Drive OAuth授权流程 ❌ Deprecated
+
+| Layer | ID | Component | Status | Implementation Files |
+|-------|----|-----------|---------|----------------------|
+| **Requirement** | REQ-015 | Google Drive OAuth授权流程 | ❌ Deprecated | SPEC/01-REQUIREMENTS.md#REQ-015 |
+| **Architecture** | ARCH-003 | Google Drive Integration with OAuth | ❌ Deprecated | SPEC/02-ARCHITECTURE.md#ARCH-003 |
+| **Data** | DATA-003 | OAuth Token Information | ❌ Deprecated | SPEC/03-DATA-STRUCTURE.md#DATA-003 |
+| **API** | API-003 | Synchronization Commands | ❌ Deprecated | SPEC/04-API-DESIGN.md#API-003 |
+
+**Deprecated**: Google Drive OAuth public client 已不再被 Google 支持，push/pull 命令已禁用 (v0.5.19+)。
+
+---
+
+### REQ-016: MCP仓库CLI - 多源聚合搜索与安装
+
+| Layer | ID | Component | Status | Implementation Files |
+|-------|----|-----------|---------|----------------------|
+| **Requirement** | REQ-016 | MCP仓库CLI - 多源聚合搜索与安装 | ✅ Done | SPEC/01-REQUIREMENTS.md#REQ-016 |
+| **Architecture** | ARCH-015 | MCP仓库CLI多源聚合架构 | ✅ Done | SPEC/02-ARCHITECTURE.md#ARCH-015 |
+| **API** | API-015 | MCP仓库CLI命令 | ✅ Done | SPEC/04-API-DESIGN.md#API-015 |
+
+---
+
+### REQ-017: AIW插件市场系统
+
+| Layer | ID | Component | Status | Implementation Files |
+|-------|----|-----------|---------|----------------------|
+| **Requirement** | REQ-017 | AIW插件市场系统 | 🟡 Partial | SPEC/01-REQUIREMENTS.md#REQ-017 |
+| **Architecture** | ARCH-017 | AIW插件市场系统架构 | 🟡 In Progress | SPEC/02-ARCHITECTURE.md#ARCH-017 |
+| **Data** | DATA-017 | AIW插件市场数据结构 | 🟢 Done | SPEC/03-DATA-STRUCTURE.md#DATA-017 |
+| **API** | API-017 | AIW插件市场系统API | 🟡 In Progress | SPEC/04-API-DESIGN.md#API-017 |
 
 ---
 
@@ -289,6 +355,48 @@ This matrix provides complete traceability from:
 
 ---
 
+### REQ-021: AI CLI 自动故障切换系统
+
+| Layer | ID | Component | Status | Implementation Files |
+|-------|----|-----------|---------|----------------------|
+| **Requirement** | REQ-021 | AI CLI 自动故障切换系统 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-021 |
+| **Architecture** | ARCH-021 | Auto 模式架构设计 | 🟢 Done | SPEC/02-ARCHITECTURE.md#ARCH-021 |
+| **Data** | DATA-021 | AI CLI 执行顺序配置 | 🟢 Done | SPEC/03-DATA-STRUCTURE.md#DATA-021 |
+| **API** | API-021 | Auto 模式 CLI 接口 | 🟢 Done | SPEC/04-API-DESIGN.md#API-021 |
+
+---
+
+### REQ-022: Auto 模式 CLI+Provider 组合轮转
+
+| Layer | ID | Component | Status | Implementation Files |
+|-------|----|-----------|---------|----------------------|
+| **Requirement** | REQ-022 | Auto 模式 CLI+Provider 组合轮转 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-022 |
+| **Architecture** | ARCH-021 | Auto 模式架构设计（共享） | 🟢 Done | SPEC/02-ARCHITECTURE.md#ARCH-021 |
+| **Data** | DATA-022 | Auto 执行顺序配置（CLI+Provider） | 🟢 Done | SPEC/03-DATA-STRUCTURE.md#DATA-022 |
+| **Data** | DATA-023 | CLI 冷却机制数据结构 | 🟢 Done | SPEC/03-DATA-STRUCTURE.md#DATA-023 |
+| **API** | API-021 | Auto 模式 CLI 接口（共享） | 🟢 Done | SPEC/04-API-DESIGN.md#API-021 |
+
+---
+
+### REQ-023: Git 仓库检查和 Worktree 管理
+
+| Layer | ID | Component | Status | Implementation Files |
+|-------|----|-----------|---------|----------------------|
+| **Requirement** | REQ-023 | Git 仓库检查和 Worktree 管理 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-023 |
+| **Architecture** | ARCH-023 | Git 仓库检查和 Worktree 管理架构 | 🟢 Done | SPEC/02-ARCHITECTURE.md#ARCH-023 |
+
+---
+
+### REQ-024: OpenAI 环境变量配置
+
+| Layer | ID | Component | Status | Implementation Files |
+|-------|----|-----------|---------|----------------------|
+| **Requirement** | REQ-024 | OpenAI 环境变量配置 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-024 |
+| **Architecture** | ARCH-013 | 动态JS编排工具系统架构 | 🟢 Done | SPEC/02-ARCHITECTURE.md#ARCH-013 |
+| **API** | API-013 | OpenAI Environment Variable Configuration | 🟢 Done | SPEC/04-API-DESIGN.md#API-013 |
+
+---
+
 ## Cross-Cutting Concerns Traceability
 
 ### Security Architecture
@@ -320,8 +428,11 @@ This matrix provides complete traceability from:
 - **Core Infrastructure**: Process tracking, shared memory, provider management
 - **User Interface**: Complete TUI with all screens
 - **External Integration**: MCP server with 5 tools
-- **Synchronization**: Full Google Drive integration with OAuth
 - **CLI Interface**: All core commands implemented
+
+### Deprecated (❌)
+- **Synchronization**: Google Drive integration (REQ-003, REQ-015) — disabled since v0.5.19
+- **Session History**: Claude Code会话历史集成 (REQ-010) — 功能已删除
 
 ### In Progress (🟡)
 - **Testing**: Some integration tests still being expanded

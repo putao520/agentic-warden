@@ -70,6 +70,7 @@ test_registry*.rs
 test_special_chars.*
 
 # Claude and AI assistant files
+CLAUDE.md
 claude*
 ai_*.log
 integration*.log

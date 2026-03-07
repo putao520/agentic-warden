@@ -1,7 +1,7 @@
-# API Design - v0.x.x
+# API Design - v0.5.61
 
 ## Version Information
-- API version: v0
+- API version: v0.5.61
 - Base URL: N/A (CLI application)
 - Last updated: 2025-11-12
 - Based on: Initial development (v0.1.0)
@@ -1129,7 +1129,7 @@ pub trait HealthCheck {
 
 **Description**: OpenAI API configuration through environment variables with precedence over any LLM settings
 
-**Related**: REQ-013, ARCH-013
+**Related**: REQ-024, ARCH-013
 
 #### Environment Variables
 | Variable | Type | Required | Default | Description |

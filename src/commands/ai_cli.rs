@@ -3,6 +3,7 @@
 //! 处理 codex、claude、gemini 等 AI CLI 的启动和管理
 
 use crate::cli_type::{parse_cli_selector_strict, CliType};
+use crate::commands::cli_args::CliInvocation;
 use crate::registry_factory::create_cli_registry;
 use crate::supervisor;
 use crate::task_prepare::{self, TaskParams};
@@ -39,6 +40,25 @@ impl AiCliCommand {
             prompt,
             cli_args,
             cwd,
+        }
+    }
+
+    /// 从 CliInvocation 创建 AiCliCommand
+    ///
+    /// 这是一个桥接方法，允许新的 CliInvocation 结构与现有代码兼容
+    pub fn from_invocation(inv: CliInvocation) -> Self {
+        // 对于 single CLI 类型，转换为 Vec
+        let ai_types = vec![inv.cli_type];
+        // prompt 就是 remaining_args joined with spaces
+        let prompt = inv.remaining_args.join(" ");
+
+        Self {
+            ai_types,
+            role: inv.aiw_args.role,
+            provider: inv.aiw_args.provider,
+            prompt,
+            cli_args: inv.remaining_args,
+            cwd: inv.aiw_args.cwd,
         }
     }
 
@@ -186,6 +206,88 @@ impl AiCliCommand {
             Ok(ExitCode::from((final_exit_code & 0xFF) as u8))
         }
     }
+
+    /// 使用 CliInvocation 执行命令（新接口）
+    ///
+    /// 这个方法使用新的 CliInvocation 结构，提供更清晰的分层
+    pub async fn execute_from_invocation(inv: CliInvocation) -> Result<ExitCode> {
+        let original_dir = inv.aiw_args.cwd.clone().unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| ".".into())
+        });
+
+        // 检查是否是 git 仓库
+        crate::worktree::check_git_repository(&original_dir)?;
+
+        // Auto 类型不支持直接 CLI 执行，提前拒绝避免白建 worktree
+        if inv.is_auto() {
+            return Err(anyhow!(
+                "Auto CLI type is only supported via `aiw auto`"
+            ));
+        }
+
+        let registry = create_cli_registry()?;
+
+        if inv.is_interactive() {
+            // 交互模式：用 prepare_task 处理 worktree，但不构建参数（prompt 为空）
+            let prepared = task_prepare::prepare_task(TaskParams {
+                cli_type: inv.cli_type.clone(),
+                prompt: String::new(),
+                role: None, // 交互模式不需要角色
+                provider: inv.aiw_args.provider.clone(),
+                cli_args: inv.remaining_args.clone(),
+                cwd: Some(original_dir),
+                create_worktree: true,
+            })?;
+
+            if let Some(ref info) = prepared.worktree_info {
+                eprintln!("Created worktree at: {}", info.path);
+                eprintln!("Branch: {}, Commit: {}", info.branch, info.commit);
+            }
+
+            let exit_code = supervisor::start_interactive_cli(
+                &registry,
+                &prepared.cli_type,
+                prepared.provider,
+                &inv.remaining_args,
+                prepared.cwd.clone(),
+            ).await?;
+
+            if let Some(ref info) = prepared.worktree_info {
+                Self::output_worktree_info(info);
+            }
+            Ok(ExitCode::from((exit_code & 0xFF) as u8))
+        } else {
+            // 非交互模式：prompt 就是 remaining_args joined with spaces
+            let prompt = inv.remaining_args.join(" ");
+            let prepared = task_prepare::prepare_task(TaskParams {
+                cli_type: inv.cli_type.clone(),
+                prompt: prompt.clone(),
+                role: inv.aiw_args.role.clone(),
+                provider: inv.aiw_args.provider.clone(),
+                cli_args: inv.remaining_args.clone(),
+                cwd: Some(original_dir),
+                create_worktree: true,
+            })?;
+
+            if let Some(ref info) = prepared.worktree_info {
+                eprintln!("Created worktree at: {}", info.path);
+                eprintln!("Branch: {}, Commit: {}", info.branch, info.commit);
+            }
+
+            let exit_code = supervisor::execute_cli(
+                &registry,
+                &prepared.cli_type,
+                &prepared.args,
+                prepared.provider,
+                prepared.cwd.clone(),
+            ).await?;
+
+            if let Some(ref info) = prepared.worktree_info {
+                Self::output_worktree_info(info);
+            }
+            Ok(ExitCode::from((exit_code & 0xFF) as u8))
+        }
+    }
 }
 
 /// 解析 AI 类型字符串
@@ -255,6 +357,53 @@ mod tests {
 
         let result = AiCliCommand::test_check_git_repository(&temp_path);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_from_invocation_interactive() {
+        use crate::commands::cli_args::{AiwArgs, CliInvocation};
+        use crate::cli_type::CliType;
+
+        let inv = CliInvocation {
+            cli_type: CliType::Claude,
+            aiw_args: AiwArgs {
+                role: Some("senior".to_string()),
+                provider: Some("anthropic".to_string()),
+                cwd: None,
+            },
+            remaining_args: vec!["--flag".to_string()],
+        };
+
+        let cmd = AiCliCommand::from_invocation(inv);
+        assert_eq!(cmd.ai_types, vec![CliType::Claude]);
+        assert_eq!(cmd.role, Some("senior".to_string()));
+        assert_eq!(cmd.provider, Some("anthropic".to_string()));
+        // remaining_args joined with spaces becomes prompt
+        assert_eq!(cmd.prompt, "--flag");
+        assert_eq!(cmd.cli_args, vec!["--flag".to_string()]);
+    }
+
+    #[test]
+    fn test_from_invocation_non_interactive() {
+        use crate::commands::cli_args::{AiwArgs, CliInvocation};
+        use crate::cli_type::CliType;
+
+        let inv = CliInvocation {
+            cli_type: CliType::Codex,
+            aiw_args: AiwArgs {
+                role: None,
+                provider: None,
+                cwd: Some(PathBuf::from("/test/path")),
+            },
+            remaining_args: vec!["hello".to_string(), "world".to_string()],
+        };
+
+        let cmd = AiCliCommand::from_invocation(inv);
+        assert_eq!(cmd.ai_types, vec![CliType::Codex]);
+        assert!(cmd.role.is_none());
+        assert!(cmd.provider.is_none());
+        assert_eq!(cmd.prompt, "hello world");
+        assert_eq!(cmd.cwd, Some(PathBuf::from("/test/path")));
     }
 }
 

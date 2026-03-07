@@ -1,77 +1,72 @@
 use std::process::ExitCode;
 
-use crate::commands::parser::parse_cli_args;
+use crate::commands::cli_args::CliInvocation;
 use crate::error::{ConfigError, ExecutionError};
 use crate::tui::screens::cli_order::run_cli_order_tui;
 
 pub async fn handle_auto_command(args: &[String]) -> ExitCode {
-    match parse_auto_args(args) {
-        Ok(prompt) => {
-            let registry = match crate::registry_factory::create_cli_registry() {
-                Ok(r) => r,
-                Err(e) => {
-                    eprintln!("Failed to create registry: {}", e);
-                    return ExitCode::from(2);
-                }
-            };
-
-            let base = match crate::task_prepare::prepare_task_base(
-                crate::task_prepare::TaskParams {
-                    cli_type: crate::cli_type::CliType::Auto,
-                    prompt,
-                    role: None,
-                    provider: None,
-                    cli_args: vec![],
-                    cwd: None,
-                    create_worktree: false,
-                },
-            ) {
-                Ok(b) => b,
-                Err(e) => {
-                    eprintln!("{}", e);
-                    return ExitCode::from(2);
-                }
-            };
-
-            match crate::supervisor::execute_cli_with_failover(&registry, &base).await {
-                Ok(exit_code) => ExitCode::from((exit_code & 0xFF) as u8),
-                Err(e) => {
-                    eprintln!("{}", e);
-                    ExitCode::from(2)
-                }
-            }
-        }
-        Err(err) => {
-            let (code, message) = format_auto_error(err);
-            eprintln!("{}", message);
-            ExitCode::from(code)
-        }
-    }
-}
-
-/// 解析 auto 命令的参数，返回 prompt
-/// 注意：provider 现在由 auto_execution_order 配置决定，不再从命令行读取
-fn parse_auto_args(tokens: &[String]) -> Result<String, ExecutionError> {
     // 跳过第一个 "auto"
-    let start = tokens
+    let start = args
         .first()
         .filter(|value| value.eq_ignore_ascii_case("auto"))
         .map(|_| 1)
         .unwrap_or(0);
 
-    let tokens = &tokens[start..];
+    let tokens = &args[start..];
 
-    // 使用统一的参数解析逻辑
-    let parsed = parse_cli_args(tokens)
-        .map_err(|msg| ExecutionError::ExecutionFailed { message: msg })?;
+    // 使用新的 CliInvocation 解析
+    let inv = match CliInvocation::from_auto(tokens) {
+        Ok(i) => i,
+        Err(err) => {
+            let (code, message) = format_auto_error(ExecutionError::ExecutionFailed { message: err });
+            eprintln!("{}", message);
+            return ExitCode::from(code);
+        }
+    };
 
-    // auto 命令只关心 prompt，provider 由配置决定
-    let prompt = parsed.prompt.join(" ");
-    if prompt.trim().is_empty() {
-        return Err(ExecutionError::EmptyPrompt);
+    // auto 命令必须有提示词（remaining_args 不为空）
+    if inv.is_interactive() {
+        let (code, message) = format_auto_error(ExecutionError::EmptyPrompt);
+        eprintln!("{}", message);
+        return ExitCode::from(code);
     }
 
-    Ok(prompt)
+    // prompt 就是 remaining_args joined with spaces
+    let prompt = inv.remaining_args.join(" ");
+
+    let registry = match crate::registry_factory::create_cli_registry() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Failed to create registry: {}", e);
+            return ExitCode::from(2);
+        }
+    };
+
+    let base = match crate::task_prepare::prepare_task_base(
+        crate::task_prepare::TaskParams {
+            cli_type: crate::cli_type::CliType::Auto,
+            prompt,
+            role: inv.aiw_args.role,
+            provider: inv.aiw_args.provider,
+            cli_args: inv.remaining_args,
+            cwd: inv.aiw_args.cwd,
+            create_worktree: false,
+        },
+    ) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("{}", e);
+            return ExitCode::from(2);
+        }
+    };
+
+    match crate::supervisor::execute_cli_with_failover(&registry, &base).await {
+        Ok(exit_code) => ExitCode::from((exit_code & 0xFF) as u8),
+        Err(e) => {
+            eprintln!("{}", e);
+            ExitCode::from(2)
+        }
+    }
 }
 
 pub fn handle_cli_order_command() -> ExitCode {

@@ -4,10 +4,12 @@
 
 pub mod ai_cli;
 pub mod auto;
+pub mod cli_args;
 pub mod market;
 pub mod mcp;
 pub mod parser;
 pub mod tui_commands;
 
-// Re-exports (used by main.rs)
+// Re-exports (used by main.rs and other modules)
 pub use parser::*;
+pub use cli_args::*;

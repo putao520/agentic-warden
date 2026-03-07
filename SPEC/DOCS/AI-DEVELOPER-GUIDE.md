@@ -6,13 +6,13 @@ AIW (Agentic Warden) is an intelligent platform for managing AI CLI tools (Claud
 
 ## Current Version and Task
 
-**Version**: v0.5.23 (developing)
+**Version**: v0.5.61
 **Task**: Implement transparent parameter forwarding functionality for REQ-008 and REQ-009
 
 ## Project Structure
 
 ```
-/home/putao/code/rust/agentic-warden/
+/home/putao/code/rust/aiw/
 ├── src/
 │   ├── main.rs                 # Entry point and handle_external_ai_cli function
 │   ├── commands/
@@ -103,27 +103,27 @@ pub async fn execute_cli(registry: &dyn Registry, cli_type: &CliType,
 
 ## Key Implementation Files
 
-### 1. `/home/putao/code/rust/agentic-warden/src/main.rs`
+### 1. `/home/putao/code/rust/aiw/src/main.rs`
 **Location**: `handle_external_ai_cli` function (lines 66-127)
 **Changes**: Replace parameter parsing logic with separation approach
 **Reuse**: Process startup and error handling framework
 
-### 2. `/home/putao/code/rust/agentic-warden/src/cli_type.rs`
+### 2. `/home/putao/code/rust/aiw/src/cli_type.rs`
 **Location**: `build_full_access_args` and `build_interactive_args` methods
 **Changes**: Complete rewrite to support forwarded parameters
 **Reuse**: CLI type enum and basic display logic
 
-### 3. `/home/putao/code/rust/agentic-warden/src/commands/ai_cli.rs`
+### 3. `/home/putao/code/rust/aiw/src/commands/ai_cli.rs`
 **Location**: `AiCliCommand` struct and `execute` method
 **Changes**: Add `cli_args` field and pass through execution path
 **Reuse**: Process management and error handling
 
-### 4. `/home/putao/code/rust/agentic-warden/src/commands/parser.rs`
+### 4. `/home/putao/code/rust/aiw/src/commands/parser.rs`
 **Location**: Add new parameter separation functions
 **Changes**: New implementation for argument parsing
 **Reuse**: Error handling patterns and validation logic
 
-### 5. `/home/putao/code/rust/agentic-warden/src/supervisor.rs`
+### 5. `/home/putao/code/rust/aiw/src/supervisor.rs`
 **Location**: `execute_cli` and `start_interactive_cli` functions
 **Changes**: Update function signatures to accept `cli_args`
 **Reuse**: Environment injection, process execution, signal handling

@@ -30,6 +30,7 @@ pub mod utils;
 pub mod wait_mode;
 pub mod worktree;
 pub mod task_prepare;
+pub mod patcher;
 
 pub mod cli_manager;
 

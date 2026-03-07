@@ -1,10 +1,9 @@
 // Binary-specific modules
 mod help;
 
-use aiw::cli_type::parse_cli_selector_strict;
 use aiw::commands::ai_cli::AiCliCommand;
-use aiw::commands::{parse_external_cli_args, parser::{ConfigAction, McpAction, RolesAction}, Cli, Commands};
-use aiw::error::ErrorCategory;
+use aiw::commands::cli_args::CliInvocation;
+use aiw::commands::parser::{ConfigAction, McpAction, RolesAction, Cli, Commands};
 use aiw::execute_enhanced_update;
 use aiw::mcp::AgenticWardenMcpServer;
 use aiw::commands::market::handle_plugin_action;
@@ -41,7 +40,7 @@ async fn main() -> ExitCode {
         return ExitCode::from(0);
     }
 
-    // 处理外部AI CLI命令 (codex, claude, gemini)
+    // 处理外部AI CLI命令 (codex, claude, gemini, auto)
     if args.len() >= 2 {
         match args[1].as_str() {
             "codex" | "claude" | "gemini" | "auto" => {
@@ -78,45 +77,28 @@ async fn handle_external_ai_cli(args: &[String]) -> Result<ExitCode, String> {
     }
 
     let tokens = args[1..].to_vec();
-    let ai_args = parse_external_cli_args(&tokens)?;
 
-    // selector 现在是 Option<String>，对于 claude/codex/gemini 命令一定是 Some
-    let selector_str = ai_args.selector.as_ref().expect("selector should be set for external CLI commands");
-    let selector = parse_cli_selector_strict(selector_str).map_err(|err| {
-        if err.category() == ErrorCategory::Validation {
-            format!(
-                "{}\n\nUse 'agentic-warden --help' for more information.",
-                err.user_message()
-            )
-        } else {
-            err.user_message()
-        }
-    })?;
+    // 使用新的 CliInvocation 解析
+    let inv = CliInvocation::from_external(&tokens)?;
 
-    if ai_args.prompt.is_empty() {
+    // 打印启动信息
+    if inv.is_interactive() {
         println!(
             "🚀 Starting {} in interactive mode (provider: {:?})",
-            selector_str, ai_args.provider
+            inv.cli_type.display_name(),
+            inv.aiw_args.provider
         );
     } else {
         println!(
             "🚀 Starting {} with task: {} (provider: {:?})",
-            selector_str,
-            ai_args.prompt_text(),
-            ai_args.provider
+            inv.cli_type.display_name(),
+            inv.remaining_args.join(" "),
+            inv.aiw_args.provider
         );
     }
 
-    let ai_command = AiCliCommand::new(
-        selector.types,
-        ai_args.role.clone(),
-        ai_args.provider.clone(),
-        ai_args.prompt_text(),
-        ai_args.cli_args.clone(),
-        ai_args.cwd.clone(),
-    );
-
-    ai_command.execute().await.map_err(|e| e.to_string())
+    // 使用新的执行接口
+    AiCliCommand::execute_from_invocation(inv).await.map_err(|e| e.to_string())
 }
 
 async fn main_impl(command: Commands) -> Result<ExitCode, String> {
@@ -284,33 +266,27 @@ async fn handle_external_command(tokens: Vec<String>) -> Result<ExitCode, String
         return Ok(ExitCode::from(0));
     }
 
-    let ai_args = parse_external_cli_args(&tokens)?;
+    // 使用新的 CliInvocation 解析
+    let inv = CliInvocation::from_external(&tokens)?;
 
-    // selector 现在是 Option<String>，对于 claude/codex/gemini 命令一定是 Some
-    let selector_str = ai_args.selector.as_ref().expect("selector should be set for external CLI commands");
-    let selector = parse_cli_selector_strict(selector_str).map_err(|err| {
-        if err.category() == ErrorCategory::Validation {
-            format!(
-                "{}\n\nUse 'agentic-warden --help' for more information.",
-                err.user_message()
-            )
-        } else {
-            err.user_message()
-        }
-    })?;
+    // 打印启动信息
+    if inv.is_interactive() {
+        println!(
+            "🚀 Starting {} in interactive mode (provider: {:?})",
+            inv.cli_type.display_name(),
+            inv.aiw_args.provider
+        );
+    } else {
+        println!(
+            "🚀 Starting {} with task: {} (provider: {:?})",
+            inv.cli_type.display_name(),
+            inv.remaining_args.join(" "),
+            inv.aiw_args.provider
+        );
+    }
 
-    let ai_types = selector.types.clone();
-    let ai_command = AiCliCommand::new(
-        ai_types,
-        ai_args.role.clone(),
-        ai_args.provider.clone(),
-        ai_args.prompt_text(),
-        ai_args.cli_args.clone(),
-        ai_args.cwd.clone(),
-    );
-
-    // 使用当前的异步运行时执行命令
-    ai_command.execute().await.map_err(|e| e.to_string())
+    // 使用新的执行接口
+    AiCliCommand::execute_from_invocation(inv).await.map_err(|e| e.to_string())
 }
 
 fn handle_help_command(topic: Option<String>) -> Result<ExitCode, String> {

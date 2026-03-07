@@ -18,6 +18,8 @@ use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::io::{self, IsTerminal};
 use std::path::PathBuf;
+use std::path::Path;
+use std::process::Command as StdCommand;
 use std::process::{ExitStatus, Stdio};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -52,30 +54,132 @@ fn get_cli_command(cli_type: &CliType) -> Result<String, ProcessError> {
         ))),
     }
 }
-/// Apply Claude ToolSearch memory patch
+/// Apply Claude ToolSearch patch for npm installation
+/// 
+/// For npm-installed Claude CLI, we use sed to directly modify the JavaScript file.
+/// This is a one-time modification that persists across restarts.
+fn apply_npm_claude_patch() -> anyhow::Result<()> {
+    use std::fs;
+    
+    // 找到 claude 命令路径
+    let claude_path = StdCommand::new("which")
+        .arg("claude")
+        .output()
+        .map_err(|e| anyhow::anyhow!("Failed to find claude command: {}", e))?;
+    
+    if !claude_path.status.success() {
+        return Err(anyhow::anyhow!("claude command not found"));
+    }
+    
+    let claude_cli = String::from_utf8_lossy(&claude_path.stdout).trim().to_string();
+    tracing::debug!("Found claude at: {}", claude_cli);
+    
+    // 读取 claude 脚本内容
+    let script_content = fs::read_to_string(claude_cli)
+        .map_err(|e| anyhow::anyhow!("Failed to read claude script: {}", e))?;
+    
+    // 检查是否是 npm 安装（检查是否包含 node_modules 路径）
+    if !script_content.contains("node_modules") {
+        tracing::debug!("Claude is not npm-installed, skipping file patch");
+        return Err(anyhow::anyhow!("Not npm installation"));
+    }
+    
+    // 提取 node_modules 路径
+    let pnpm_path = script_content
+        .lines()
+        .filter_map(|line| {
+            if line.contains("node_modules/@anthropic-ai/claude-code") {
+                Some(line.trim())
+            } else {
+                None
+            }
+        })
+        .last()
+        .ok_or_else(|| anyhow::anyhow!("Could not find node_modules path"))?;
+    
+    // 解析 basedir
+    let basedir = pnpm_path
+        .split("basedir=")
+        .nth(1)
+        .and_then(|s| s.split_whitespace().next())
+        .ok_or_else(|| anyhow::anyhow!("Could not parse basedir"))?;
+        
+    // 展开环境变量
+    let basedir = shellexpand::env(basedir)
+        .map_err(|e| anyhow::anyhow!("Failed to expand basedir: {}", e))?;
+    
+    let cli_js_path = Path::new(basedir.as_ref())
+        .join("cli.js");
+    
+    tracing::debug!("Claude cli.js path: {:?}", cli_js_path);
+    
+    if !cli_js_path.exists() {
+        return Err(anyhow::anyhow!("cli.js not found at {:?}", cli_js_path));
+    }
+    
+    // 读取 cli.js 内容
+    let mut js_content = fs::read_to_string(&cli_js_path)
+        .map_err(|e| anyhow::anyhow!("Failed to read cli.js: {}", e))?;
+    
+    // 检查是否已经补丁过
+    if js_content.contains("O8()!==\"firstParty\"") {
+        tracing::info!("Claude ToolSearch already patched (file)");
+        return Ok(());
+    }
+    
+    // 检查是否包含目标模式
+    if !js_content.contains("O8()===\"firstParty\"") {
+        tracing::debug!("Target pattern not found in cli.js, may be different version");
+        return Err(anyhow::anyhow!("Target pattern not found"));
+    }
+    
+    // 应用补丁：将 O8()==="firstParty" 改为 O8()!=="firstParty"
+    js_content = js_content.replace("O8()===\"firstParty\"", "O8()!==\"firstParty\"");
+    
+    // 写回文件
+    fs::write(&cli_js_path, js_content)
+        .map_err(|e| anyhow::anyhow!("Failed to write patched cli.js: {}", e))?;
+    
+    tracing::info!("✅ Claude ToolSearch file patch applied");
+    Ok(())
+}
+
+/// Apply Claude ToolSearch patch
 ///
 /// This is a best-effort operation - failure should not break the normal flow.
-///
-/// Note: Bun needs time to load and decompress JavaScript code, so we retry
-/// a few times with increasing delays.
+/// 
+/// Strategy:
+/// 1. For npm installation: patch the JavaScript file directly (one-time, persistent)
+/// 2. For native/cargo installation: use runtime memory patch (applied each launch)
 fn apply_claude_toolsearch_patch(pid: u32) -> anyhow::Result<()> {
+    // 首先尝试文件补丁（针对 npm 安装）
+    if let Ok(()) = apply_npm_claude_patch() {
+        return Ok(());
+    }
+    
+    // 文件补丁失败或不是 npm 安装，使用运行时补丁
+    tracing::debug!("File patch not applicable, using runtime memory patch");
+    apply_runtime_memory_patch(pid)
+}
+
+/// Apply runtime memory patch for native/cargo installations
+fn apply_runtime_memory_patch(pid: u32) -> anyhow::Result<()> {
     use std::time::Duration;
 
     let patcher = RuntimePatcher::new(pid)?;
 
     // 重试策略：最多 5 次，间隔逐渐增加
     let retries = [
-        Duration::from_millis(100),  // 立即尝试
-        Duration::from_millis(200),  // 100ms 后
-        Duration::from_millis(500),  // 300ms 后
-        Duration::from_millis(1000), // 500ms 后
-        Duration::from_millis(2000), // 1000ms 后
+        Duration::from_millis(100),
+        Duration::from_millis(200),
+        Duration::from_millis(500),
+        Duration::from_millis(1000),
+        Duration::from_millis(2000),
     ];
 
     let mut last_error = None;
 
     for (i, delay) in retries.iter().enumerate() {
-        // 首次立即尝试，后续先等待再尝试
         if i > 0 {
             tracing::debug!("Waiting {:?} before retry (attempt {}/{})", delay, i + 1, retries.len());
             std::thread::sleep(*delay);
@@ -84,22 +188,22 @@ fn apply_claude_toolsearch_patch(pid: u32) -> anyhow::Result<()> {
         match patcher.apply_claude_toolsearch_patch() {
             Ok(_addr) => {
                 tracing::info!(
-                    "✅ Claude ToolSearch patch applied (attempt {}/{})",
+                    "✅ Claude ToolSearch runtime patch applied (attempt {}/{})",
                     i + 1,
                     retries.len()
                 );
                 return Ok(());
             }
             Err(e) => {
-                tracing::debug!("Attempt {}/{} failed", i + 1, retries.len());
+                tracing::debug!("Runtime patch attempt {}/{} failed", i + 1, retries.len());
                 last_error = Some(e);
             }
         }
     }
 
     let err = last_error.unwrap();
-    tracing::warn!("Claude ToolSearch patch failed after {} attempts: {}", retries.len(), err);
-    Err(anyhow::anyhow!("Patch failed after {} retries: {}", retries.len(), err))
+    tracing::warn!("Claude ToolSearch runtime patch failed after {} attempts: {}", retries.len(), err);
+    Err(anyhow::anyhow!("Runtime patch failed after {} retries: {}", retries.len(), err))
 }
 
 /// Output handling strategy for CLI execution

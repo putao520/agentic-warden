@@ -1,7 +1,7 @@
 # Requirements Specification - v0.1.0
 
 ## Version Information
-- Current version: v0.1.0
+- Current version: v0.5.61
 - Start date: 2025-11-08
 - Based on: Initial development
 
@@ -67,129 +67,6 @@ Agentic-Warden MUST provide unified management of third-party API providers (Ope
 - Sensitive data must be masked in UI output
 - Compatibility validation required before provider injection
 - `auto` is a reserved keyword: users MUST NOT create a provider named `auto` in provider.json
-
----
-
-### REQ-003: Google Drive 配置记录和同步
-**Status**: ❌ Disabled (v0.5.19+)
-**Priority**: P1 (High)
-**Version**: v0.1.0
-**Related**: ARCH-003, DATA-003
-
-**Description**:
-~~Agentic-Warden MUST integrate with Google Drive for selective AI CLI configuration backup and restoration through `push` and `pull` commands, with intelligent file selection to avoid unnecessary data transfer.~~
-
-**Disabled Reason**: Cloud storage integration disabled. Push/pull commands are not available in current version.
-
-**Acceptance Criteria**:
-- [x] Support OAuth 2.0 Device Flow (RFC 8628) for headless environments
-- [x] Automatically detect environment (desktop/server/headless) and choose optimal auth method
-- [x] Authorize only when executing push/pull commands (no background auth)
-- [x] Implement selective configuration packing (exclude temp/cache/unnecessary files)
-- [x] Push compressed configuration archives to Google Drive with metadata
-- [x] Pull and extract configuration archives with conflict resolution
-- [x] List remote configuration files with version information
-- [x] Maintain sync state with hash-based change detection
-- [x] Support incremental sync (only changed configurations)
-- [x] Provide progress indicators for large configuration transfers
-- [x] Handle network interruptions with automatic retry mechanism
-
-**Technical Constraints**:
-- Authorization MUST auto-trigger with push/pull commands
-- Support concurrent local callback + manual input for better UX
-- Store OAuth tokens securely with automatic refresh
-- Configuration archives MUST be compressed (tar.gz format)
-- File selection MUST exclude: temp files, cache, logs, binaries
-- Hash validation MUST ensure data integrity
-- Retry policy MUST use exponential backoff (max 3 attempts)
-- Archive size MUST be optimized (< 5MB typical)
-
----
-
-### REQ-015: Google Drive OAuth授权流程
-**Status**: ❌ Disabled (v0.5.19+)
-**Priority**: P0 (Critical)
-**Version**: v0.5.18
-**Related**: ARCH-003, DATA-003
-
-**Description**:
-~~Agentic-Warden MUST provide Google Drive OAuth authorization flow that allows users to authenticate with their own Google Drive accounts using only the built-in public OAuth client. MUST comply with SPEC second iron law (no configuration files) and first iron law (no environment variables).~~
-
-**Disabled Reason**: Google Drive OAuth public client is no longer supported by Google. Push/pull commands disabled pending future cloud storage solution.
-
-**Acceptance Criteria**:
-- [x] **Built-in Public Client**: MUST provide working public OAuth client ID for immediate usage
-- [x] **No Application Registration**: Users MUST NOT need to register OAuth applications in Google Cloud Console
-- [x] **CLI-Only Authorization**: MUST support headless CLI-based OAuth flow without requiring TUI interfaces
-- [x] **Unique Authorization URLs**: MUST generate complete authorization URLs with embedded user code and device code parameters
-- [x] **No Configuration Files**: MUST NOT support configuration file-based OAuth credentials (SPEC second iron law compliance)
-- [x] **No Environment Variables**: MUST NOT support environment variable configuration (SPEC first iron law compliance)
-- [x] **Built-in Client Only**: MUST use only the built-in public OAuth client
-- [x] **Public Client Warnings**: MUST display clear warnings when using public client (rate limits, production limitations)
-- [x] **English Log Messages**: All OAuth flow messages MUST be in English (no Chinese)
-- [x] **Token Persistence**: MUST save and refresh OAuth tokens securely for repeated use
-
-**Standard User Authorization Flow**:
-
-1. **Direct Usage** (Immediate access):
-   ```bash
-   aiw push    # or aiw pull
-   ```
-   - System automatically uses built-in public OAuth client
-   - Displays complete authorization URL with embedded parameters
-   - User opens URL in browser and authenticates with their own Google account
-   - User enters the displayed user code to complete authorization
-   - OAuth tokens are saved locally for future use
-
-2. **Subsequent Usage**:
-   - After successful authorization, credentials are stored locally in `~/.aiw/auth.json`
-   - No repeated authorization required for future operations
-   - AIW directly operates on the user's own Google Drive
-   - Built-in public client is used for all operations
-
-**Technical Constraints**:
-- **Public Client ID**: `77185425430.apps.googleusercontent.com` (built-in only)
-- **Public Client Secret**: `GOCSPX-1r0aNJW8XY1Mqg4k5L_KzQDGH43` (built-in only)
-- **Token Storage**: MUST store tokens in `~/.aiw/auth.json` with 0o600 permissions
-- **Authorization URL**: MUST include both user_code and device_code as query parameters
-- **Device Flow**: MUST implement RFC 8628 Device Authorization Flow
-- **Error Handling**: MUST handle OAuth errors gracefully (invalid_client, access_denied, etc.)
-- **Public Client Limitations**: MUST warn about rate limits and production limitations
-- **No Configuration Files**: STRICTLY PROHIBITED by SPEC second iron law
-- **No Environment Variables**: STRICTLY PROHIBITED by SPEC first iron law
-
-**Public Client Warning Message**:
-```
-⚠️  Using public OAuth client. It may have limitations. For better results, create your own Google OAuth credentials in Google Cloud Console.
-```
-
-**Security Requirements**:
-- OAuth tokens MUST be stored with 0o600 permissions (user read/write only)
-- Configuration directory MUST have 0o700 permissions (user access only)
-- MUST validate OAuth configuration before making API calls
-- MUST clear sensitive data from memory when no longer needed
-- MUST implement proper token refresh mechanism
-
-**Why No Application Registration Required**:
-
-1. **User's Own Drive Access**: The OAuth flow authorizes AIW to access the user's own Google Drive, following standard OAuth patterns where users grant applications access to their data
-2. **Built-in Public Client**: The system provides a working public OAuth client that supports Google Drive API access for device flow authorization
-3. **Immediate Usability**: Users can start using the system immediately without needing developers to register separate OAuth applications in Google Cloud Console
-
-**Core Principle**:
-Users authenticate AIW to access their own Google Drive accounts through standard OAuth 2.0 Device Flow. This is the normal OAuth pattern where users grant applications permission to access their personal data, rather than developers needing to register applications for each user.
-
-**Configuration File Selection Strategy**:
-- **Claude**: `CLAUDE.md`, `settings.json`, `agents/`, `skills/SKILL.md`, `hooks/`, `scripts/`, `commands/`, `mcp.json`
-- **Codex**: `auth.json`, `config.toml`, `agents.md`, `history.jsonl`
-- **Gemini**: `google_accounts.json`, `oauth_creds.json`, `settings.json`, `gemini.md`
-- **Exclude**: `.cache/`, `temp/`, `logs/`, `node_modules/`, binaries
-
-**Claude Configuration Details**:
-- `hooks/`: Claude Code hook handlers and configuration files (SessionEnd/PreCompact/Stop)
-- `scripts/`: Execution scripts including ai-cli-runner.sh and custom workflow scripts
-- `commands/`: Custom slash command definitions and configurations
-- `mcp.json`: MCP server configuration for Claude Code integration
 
 ---
 
@@ -415,115 +292,6 @@ agentic-warden claude -p glm --print --output-format json --allowed-tools Bash,E
 - Provider injection works identically to task mode, ensuring consistency
 - Process tree tracking continues throughout interactive session
 - Task lifecycle follows same pattern: Running → Interactive → Completed
-
----
-
-### REQ-010: Claude Code会话历史集成（Hook-Based）
-**Status**: 🟢 Done
-**Priority**: P1 (High)
-**Version**: v0.2.0
-**Related**: ARCH-010, DATA-010, API-010
-
-**Description**:
-Agentic-Warden MUST integrate with Claude Code hooks mechanism to automatically capture and index conversation history for semantic search via MCP tools.
-
-**Architecture**:
-Hook-driven design using Claude Code's `SessionEnd` and `PreCompact` hooks to trigger conversation history ingestion. MCP server automatically manages hooks installation/uninstallation.
-
-**Acceptance Criteria**:
-- [x] Implement `agentic-warden hooks handle` CLI command
-- [x] Read hook input from stdin (session_id, transcript_path, hook_event_name)
-- [x] Parse Claude Code JSONL transcript format
-- [x] Extract and parse TODO items from conversation content
-- [x] Generate embeddings using FastEmbed (AllMiniLML6V2)
-- [x] Store conversations in SahomeDB vector database with TODO metadata
-- [x] Provide MCP tool: `search_history` for semantic conversation search with TODO context
-- [x] Return TODO items alongside conversation results (no separate get_session_todos tool)
-- [x] Support session_id-based filtering
-- [x] Handle incremental updates (avoid duplicates)
-- [x] Auto-install hooks when MCP server starts
-- [x] Auto-uninstall hooks when MCP server stops
-- [x] RAII cleanup guard for signal/panic safety
-
-**Hook Integration Flow**:
-```
-Claude Code Session End/PreCompact
-    ↓ (trigger hook)
-agentic-warden hooks handle
-    ↓ (read stdin)
-Hook Input JSON: {session_id, transcript_path, hook_event_name}
-    ↓ (read JSONL file)
-Parse Claude Code JSONL transcript
-    ↓ (generate embeddings)
-FastEmbed (local, no network)
-    ↓ (save to vector DB)
-SahomeDB: conversation_history collection
-    ↓ (MCP query)
-search_history MCP tool
-```
-
-**Claude Code Configuration** (~/.config/claude/hooks.json):
-```json
-{
-  "SessionEnd": {
-    "command": "agentic-warden hooks handle",
-    "stdin": true
-  },
-  "PreCompact": {
-    "command": "agentic-warden hooks handle",
-    "stdin": true
-  }
-}
-```
-
-**Note**: This configuration is automatically managed by `agentic-warden mcp` (installs on start, uninstalls on stop). Manual configuration is not required.
-
-**Hook Input Format** (stdin):
-```json
-{
-  "session_id": "session-abc123",
-  "transcript_path": "/home/user/.claude/sessions/2025-11-14.jsonl",
-  "hook_event_name": "SessionEnd",
-  "cwd": "/home/user/project",
-  "permission_mode": "normal"
-}
-```
-
-**Claude Code JSONL Format**:
-```jsonl
-{"session_id":"xxx","timestamp":"2025-11-14T10:30:00Z","message_id":"msg-001","role":"user","content":"Help me implement auth"}
-{"session_id":"xxx","timestamp":"2025-11-14T10:30:05Z","message_id":"msg-002","role":"assistant","content":"I'll help..."}
-```
-
-**TODO Extraction**:
-- Parse TODO markers from assistant messages: `- [ ]`, `TODO:`, `Action Items:`
-- Extract task description, priority (if present), and context
-- Store TODO items as structured metadata alongside conversation records
-- `search_history` returns conversations with associated TODO items in response
-
-**Technical Constraints**:
-- Vector database: SahomeDB (file-based persistent storage)
-- Embedding service: FastEmbed (AllMiniLML6V2, 384 dimensions, local generation)
-- Session ID source: Hook stdin input (not parsed from JSONL)
-- Semantic search: cosine similarity with configurable threshold
-- Storage location: ~/.aiw/conversation_history.db
-- Duplicate detection: Check existing session_id before insertion
-- TODO extraction: Pattern matching on assistant messages (markdown checkboxes, TODO keywords)
-- TODO metadata: Stored as JSON in conversation record metadata field
-
-**Performance Requirements**:
-- Hook processing: < 2s for typical session (~100 messages)
-- Embedding generation: < 100ms for batch of 10 messages (FastEmbed local)
-- Vector insertion: < 500ms for batch of 100 vectors
-- MCP search_history: < 200ms for typical query
-- Zero network dependency for embeddings
-
-**Error Handling**:
-- Hook must return exit code 0 on success
-- Hook must return exit code 2 on critical errors (blocks Claude Code)
-- Log errors to ~/.aiw/hooks.log
-- Gracefully handle missing transcript files
-- Skip already-processed sessions
 
 ---
 
@@ -1327,19 +1095,19 @@ Agentic-Warden MUST meet performance criteria for process tracking and task mana
 |----------------|-------|----------|--------|---------|-----------------|-------------|
 | REQ-001 | AI CLI 进程树追踪 | P0 | 🟢 Done | v0.1.0 | ARCH-001, DATA-001 | Initial commit |
 | REQ-002 | 第三方 Provider 管理 | P0 | 🟢 Done | v0.1.0 | ARCH-002, DATA-002, API-001 | Initial commit |
-| REQ-003 | Google Drive 同步集成 | P1 | 🟢 Done | v0.1.0 | ARCH-003, DATA-003 | Initial commit |
+| REQ-003 | Google Drive 同步集成 | P1 | ❌ Deprecated | v0.1.0 | ARCH-003, DATA-003 | Disabled since v0.5.19 |
 | REQ-004 | 统一 TUI 体验 | P1 | 🟢 Done | v0.1.0 | ARCH-004, MODULE-001 | Initial commit |
 | REQ-005 | Wait 模式跨进程等待 | P2 | 🟢 Done | v0.1.0 | ARCH-005, DATA-005, API-002 | Initial commit |
 | REQ-006 | AI CLI 工具检测与状态管理 | P1 | 🟢 Done | v0.1.0 | ARCH-006, MODULE-002 | Initial commit |
 | REQ-007 | MCP 服务器 | P1 | 🟢 Done | v0.1.0 | ARCH-007, API-003 | Initial commit |
 | REQ-008 | 指定供应商模式 AI CLI 启动 | P0 | 🟢 Done | v0.1.0 | ARCH-002, ARCH-008, API-004 | Initial commit |
 | REQ-009 | 交互式 AI CLI 启动 | P1 | 🟢 Done | v0.1.1 | ARCH-008, API-001 | Interactive mode implementation |
-| REQ-010 | 内存集成与语义搜索 | P1 | 🟢 Done | v0.1.0 | ARCH-010, DATA-003, API-005 | Memory and search integration |
+| REQ-010 | 内存集成与语义搜索 | P1 | ❌ Deprecated | v0.1.0 | ARCH-010, DATA-003, API-005 | 功能已删除 |
 | REQ-011 | AI CLI 更新/安装管理 | P1 | 🟢 Done | v0.1.0 | ARCH-008, MODULE-002, API-004 | Update command implementation |
 | REQ-012 | 智能MCP路由系统 | P0 | 🟢 Done | v0.2.0 | ARCH-012, DATA-012, API-012 | Intelligent routing system design |
-| REQ-013 | OpenAI环境变量配置 | P0 | 🟢 Done | v5.1.1 | ARCH-013, API-013 | OpenAI environment variable configuration |
+| REQ-024 | OpenAI环境变量配置 | P0 | 🟢 Done | v5.1.1 | ARCH-013, API-013 | OpenAI environment variable configuration |
 | REQ-014 | AI CLI任务生命周期管理和角色系统 | P1 | ✅ Done | v0.2.0→v0.6.x | ARCH-014 | Phase 1-4 全部完成 [commit: a2cc2e2] |
-| REQ-015 | 简化的Google Drive OAuth授权流程 | P0 | 🟢 Done | v0.5.18 | ARCH-003, DATA-003 | Simplified OAuth authorization with built-in public client |
+| REQ-015 | 简化的Google Drive OAuth授权流程 | P0 | ❌ Deprecated | v0.5.18 | ARCH-003, DATA-003 | Disabled since v0.5.19 |
 | REQ-016 | MCP仓库CLI - 多源聚合搜索与安装 | P1 | ✅ Done | v0.6.0 | ARCH-016, API-016 | MCP Registry CLI implementation |
 | REQ-022 | Auto 模式 CLI+Provider 组合轮转 | P1 | 🟢 Done | v0.5.48+ | REQ-021, ARCH-021, DATA-022, DATA-023 | CLI+Provider rotation in auto mode |
 | REQ-023 | Git 仓库检查和 Worktree 管理 | P0 | 🟢 Done | v0.5.48+ | ARCH-023 | Git repository check and worktree management |
@@ -1347,86 +1115,6 @@ Agentic-Warden MUST meet performance criteria for process tracking and task mana
 | REQ-019 | MCP Browse - 已安装MCP服务器查看 | P1 | 🟡 Design | v0.6.1 | ARCH-019, DATA-019 | View installed MCPs feature |
 | REQ-020 | MCP Browse - 已安装MCP环境变量编辑 | P1 | 🟡 Design | v0.6.1 | ARCH-020, DATA-020 | Edit env vars for installed MCPs |
 | REQ-017 | AIW插件市场系统 | P1 | 🟡 Partial Implementation | v0.7.0 | ARCH-017, DATA-017, API-017 | Plugin marketplace system |
-
----
-
-### REQ-013: OpenAI 环境变量配置
-**Status**: 🟢 Done
-**Priority**: P0 (Critical)
-**Version**: v5.1.1
-**Related**: ARCH-013, API-013
-
-**Description**:
-Agentic-Warden MUST support OpenAI API configuration exclusively through environment variables, replacing configuration file-based LLM settings to improve security and containerized deployment compatibility.
-
-**Acceptance Criteria**:
-- [x] Support `OPENAI_ENDPOINT` environment variable for OpenAI API endpoint
-- [x] Support `OPENAI_TOKEN` environment variable for OpenAI API authentication token
-- [x] Support `OPENAI_MODEL` environment variable for default model selection
-- [x] Environment variables MUST take precedence over any configuration file LLM settings
-- [x] LLM configuration in `mcp.json` MUST be ignored when environment variables are present
-- [x] Support containerized deployment with environment variable injection
-- [x] Graceful fallback to default values when environment variables are not set
-- [x] Security validation for token values and endpoint URLs
-
-**Technical Constraints**:
-- Environment variables MUST override configuration file LLM settings completely
-- Default endpoint MUST be `https://api.openai.com/v1` when not specified
-- Default model MUST be `gpt-4` when not specified
-- Token validation MUST ensure non-empty string values
-- Endpoint validation MUST ensure valid URL format
-- Configuration loading MUST validate environment variables before file config
-- Security warnings MUST be logged when tokens are detected in configuration files
-
-**Environment Variables**:
-```bash
-# Required: OpenAI API token
-OPENAI_TOKEN="sk-..."
-
-# Optional: Custom OpenAI endpoint (defaults to https://api.openai.com/v1)
-OPENAI_ENDPOINT="https://api.openai.com/v1"
-
-# Optional: Default model (defaults to gpt-4)
-OPENAI_MODEL="gpt-4"
-```
-
-### 2025-12-13
-- Updated REQ-008 and REQ-009: 透明参数转发支持
-- Status: Enhancement for v0.5.23 user experience improvement
-- Added transparent parameter forwarding capability:
-  - Parameters starting with `-` (excluding `-p/--provider`) are transparently forwarded to AI CLI
-  - Provider flags must be specified before other CLI parameters
-  - Maintains full AI CLI functionality while using Agentic-Warden provider management
-  - Enhanced usage examples with parameter forwarding scenarios
-
-### 2025-11-19
-- Added REQ-013: OpenAI环境变量配置
-- Status: Critical requirement for v5.1.1 security and containerization improvements
-- Complete OpenAI environment variable configuration with:
-  - OPENAI_ENDPOINT for API endpoint configuration
-  - OPENAI_TOKEN for secure authentication (replaces config file tokens)
-  - OPENAI_MODEL for default model selection
-  - Environment variable precedence over configuration file settings
-  - Security validation and container deployment support
-
-### 2025-11-13
-- Added REQ-012: 智能MCP路由系统
-- Status: New requirement for v0.2.0 feature (P0 Critical)
-- Complete intelligent routing system design with:
-  - Industry-standard mcp.json configuration support
-  - Dual Qdrant collections for tool/method indexing
-  - RMCP client integration for dynamic MCP connections
-  - Internal LLM-powered intelligent tool selection
-  - Two-method interface for external AI integration
-  - Clustering-based routing with semantic search
-  - Health monitoring and performance optimization
-
-### 2025-11-12
-- Added REQ-009: 交互式 AI CLI 启动
-- Status: New requirement for v0.1.1 feature
-- Added REQ-010: AI CLI 更新/安装管理 (renumbered from REQ-009)
-- Status: New requirement for v0.2.0 feature
-- Re-numbered requirements to maintain sequential ordering
 
 ---
 
@@ -1538,141 +1226,6 @@ indicatif = "0.17"     # 进度条和spinner
 - 配置文件中敏感值使用引用格式
 
 ---
-
----
-
-### REQ-018: MCP Browse 环境变量快速跳过
-**Status**: ✅ 已实现 (2025-12-26) [commit: 3a9f72a]
-**Priority**: P1 (High)
-**Version**: v0.6.1
-**Related**: ARCH-018, REQ-016
-
-**Description**:
-Agentic-Warden MCP Browse TUI MUST support one-key skip for all remaining optional environment variables during interactive MCP installation. Users can quickly skip optional configuration steps without entering individual values.
-
-**Acceptance Criteria**:
-- [ ] In environment variable input dialog, display hint when optional variables remain
-- [ ] Pressing 'a' or 'A' key skips all remaining optional environment variables
-- [ ] Only works when current variable is optional (skip has no effect on required vars)
-- [ ] Returns to MCP installation with remaining required variables still collected
-- [ ] Behavior is intuitive and non-destructive (can still edit optional vars individually)
-- [ ] Unit test: test_env_input_skip_all_optional passes
-
-**Technical Constraints**:
-- Integration with existing `EnvInputState` in `src/commands/mcp/registry/browse.rs`
-- Extends enum-based event handling pattern (no major refactor)
-- Display hint in env dialog footer when optional vars exist
-- Call `skip_all_optional()` method on `EnvInputState`
-
----
-
-### REQ-019: MCP Browse - 已安装MCP服务器查看
-**Status**: ✅ 已实现 (2025-12-26) [commit: 3a9f72a]
-**Priority**: P1 (High)
-**Version**: v0.6.1
-**Related**: ARCH-019, REQ-016, DATA-019
-
-**Description**:
-Agentic-Warden MCP Browse MUST support viewing, searching, and filtering installed MCP servers from `~/.aiw/mcp.json`. Users can browse their installed ecosystem without leaving the TUI.
-
-**Acceptance Criteria**:
-- [ ] New menu option "Installed MCPs" in Browse main screen (Press 'i')
-- [ ] Display list of installed MCP servers with name, description, enabled status
-- [ ] Search by name using '/' key (real-time filtering)
-- [ ] Filter by status (enabled/disabled) using keyboard
-- [ ] Show environment variable count per MCP
-- [ ] Press Enter on MCP to view detailed configuration
-- [ ] Details view shows: name, source, environment variables, command
-- [ ] Return to list with ESC key
-- [ ] Return to main Browse menu with ESC from list view
-- [ ] Handle empty list gracefully (no installed MCPs)
-- [ ] Integration test passes
-
-**Data Structures**:
-```rust
-struct InstalledMcpListItem {
-    name: String,
-    description: String,
-    enabled: bool,
-    env_var_count: usize,
-    source: String,
-}
-
-struct InstalledMcpScreen {
-    items: Vec<InstalledMcpListItem>,
-    selected_index: usize,
-    search_query: String,
-    filtered_items: Vec<usize>,
-}
-```
-
-**Technical Constraints**:
-- Read from `McpConfigManager::load()` existing implementation
-- Reuse existing screen pattern from `DashboardScreen`, `StatusScreen`
-- Implement `Screen` trait
-- No new dependencies required
-- File: `src/tui/screens/installed_mcp.rs` (new)
-
----
-
-### REQ-020: MCP Browse - 已安装MCP环境变量编辑
-**Status**: ✅ 已实现 (2025-12-26) [commit: 3a9f72a]
-**Priority**: P1 (High)
-**Version**: v0.6.1
-**Related**: ARCH-020, REQ-019, DATA-020
-
-**Description**:
-Agentic-Warden MCP Browse MUST support editing and resetting environment variables for already-installed MCP servers. Users can modify MCP configurations without manual file editing.
-
-**Acceptance Criteria**:
-- [ ] From installed MCP list (REQ-019), press 'e' to enter edit mode
-- [ ] Reuse existing `EnvInputState` component for variable input
-- [ ] Preload existing variable values for editing
-- [ ] Support updating variables to new values
-- [ ] Support clearing optional variables
-- [ ] Press 's' to save changes back to `~/.aiw/mcp.json`
-- [ ] Press 'Esc' to cancel editing without saving
-- [ ] Show confirmation before overwriting config
-- [ ] Graceful error handling for file write failures
-- [ ] Log changes for audit trail
-- [ ] Integration test passes
-
-**Edit Mode Workflow**:
-```
-InstalledMcpScreen
-    ↓ (select MCP, press 'e')
-EditEnvState (setup)
-    ↓ (preload existing values)
-EnvInputState (use existing component)
-    ↓ (user modifies values)
-Save confirmation (press 's')
-    ↓ (persist to mcp.json)
-Return to list (show success/error)
-```
-
-**Data Structures**:
-```rust
-struct EditEnvState {
-    server_name: String,
-    env_input: EnvInputState,
-    original_values: HashMap<String, String>,
-    modified: bool,
-}
-
-impl EditEnvState {
-    fn apply_changes(&self) -> Result<()> {
-        // Update McpConfigManager and save to mcp.json
-    }
-}
-```
-
-**Technical Constraints**:
-- Reuse `EnvInputState` from REQ-018
-- Use existing `McpConfigManager::update_server_env()` method
-- Extend `InstalledMcpScreen` or create new `EditEnvScreen`
-- Persist changes using `McpConfigManager::save()`
-- Handle file locking for concurrent access
-- File: modify `src/tui/screens/installed_mcp.rs`
 
 ---
 
@@ -1838,6 +1391,144 @@ git2 = "0.18"          # Git仓库克隆
 说明: Google Drive同步是通用基础设施，与CC会话系统无技术依赖，
 因此根据用户反馈恢复此功能。
 -->
+
+---
+
+### REQ-018: MCP Browse 环境变量快速跳过
+**Status**: ✅ 已实现 (2025-12-26) [commit: 3a9f72a]
+**Priority**: P1 (High)
+**Version**: v0.6.1
+**Related**: ARCH-018, REQ-016
+
+**Description**:
+Agentic-Warden MCP Browse TUI MUST support one-key skip for all remaining optional environment variables during interactive MCP installation. Users can quickly skip optional configuration steps without entering individual values.
+
+**Acceptance Criteria**:
+- [ ] In environment variable input dialog, display hint when optional variables remain
+- [ ] Pressing 'a' or 'A' key skips all remaining optional environment variables
+- [ ] Only works when current variable is optional (skip has no effect on required vars)
+- [ ] Returns to MCP installation with remaining required variables still collected
+- [ ] Behavior is intuitive and non-destructive (can still edit optional vars individually)
+- [ ] Unit test: test_env_input_skip_all_optional passes
+
+**Technical Constraints**:
+- Integration with existing `EnvInputState` in `src/commands/mcp/registry/browse.rs`
+- Extends enum-based event handling pattern (no major refactor)
+- Display hint in env dialog footer when optional vars exist
+- Call `skip_all_optional()` method on `EnvInputState`
+
+---
+
+### REQ-019: MCP Browse - 已安装MCP服务器查看
+**Status**: ✅ 已实现 (2025-12-26) [commit: 3a9f72a]
+**Priority**: P1 (High)
+**Version**: v0.6.1
+**Related**: ARCH-019, REQ-016, DATA-019
+
+**Description**:
+Agentic-Warden MCP Browse MUST support viewing, searching, and filtering installed MCP servers from `~/.aiw/mcp.json`. Users can browse their installed ecosystem without leaving the TUI.
+
+**Acceptance Criteria**:
+- [ ] New menu option "Installed MCPs" in Browse main screen (Press 'i')
+- [ ] Display list of installed MCP servers with name, description, enabled status
+- [ ] Search by name using '/' key (real-time filtering)
+- [ ] Filter by status (enabled/disabled) using keyboard
+- [ ] Show environment variable count per MCP
+- [ ] Press Enter on MCP to view detailed configuration
+- [ ] Details view shows: name, source, environment variables, command
+- [ ] Return to list with ESC key
+- [ ] Return to main Browse menu with ESC from list view
+- [ ] Handle empty list gracefully (no installed MCPs)
+- [ ] Integration test passes
+
+**Data Structures**:
+```rust
+struct InstalledMcpListItem {
+    name: String,
+    description: String,
+    enabled: bool,
+    env_var_count: usize,
+    source: String,
+}
+
+struct InstalledMcpScreen {
+    items: Vec<InstalledMcpListItem>,
+    selected_index: usize,
+    search_query: String,
+    filtered_items: Vec<usize>,
+}
+```
+
+**Technical Constraints**:
+- Read from `McpConfigManager::load()` existing implementation
+- Reuse existing screen pattern from `DashboardScreen`, `StatusScreen`
+- Implement `Screen` trait
+- No new dependencies required
+- File: `src/tui/screens/installed_mcp.rs` (new)
+
+---
+
+### REQ-020: MCP Browse - 已安装MCP环境变量编辑
+**Status**: ✅ 已实现 (2025-12-26) [commit: 3a9f72a]
+**Priority**: P1 (High)
+**Version**: v0.6.1
+**Related**: ARCH-020, REQ-019, DATA-020
+
+**Description**:
+Agentic-Warden MCP Browse MUST support editing and resetting environment variables for already-installed MCP servers. Users can modify MCP configurations without manual file editing.
+
+**Acceptance Criteria**:
+- [ ] From installed MCP list (REQ-019), press 'e' to enter edit mode
+- [ ] Reuse existing `EnvInputState` component for variable input
+- [ ] Preload existing variable values for editing
+- [ ] Support updating variables to new values
+- [ ] Support clearing optional variables
+- [ ] Press 's' to save changes back to `~/.aiw/mcp.json`
+- [ ] Press 'Esc' to cancel editing without saving
+- [ ] Show confirmation before overwriting config
+- [ ] Graceful error handling for file write failures
+- [ ] Log changes for audit trail
+- [ ] Integration test passes
+
+**Edit Mode Workflow**:
+```
+InstalledMcpScreen
+    ↓ (select MCP, press 'e')
+EditEnvState (setup)
+    ↓ (preload existing values)
+EnvInputState (use existing component)
+    ↓ (user modifies values)
+Save confirmation (press 's')
+    ↓ (persist to mcp.json)
+Return to list (show success/error)
+```
+
+**Data Structures**:
+```rust
+struct EditEnvState {
+    server_name: String,
+    env_input: EnvInputState,
+    original_values: HashMap<String, String>,
+    modified: bool,
+}
+
+impl EditEnvState {
+    fn apply_changes(&self) -> Result<()> {
+        // Update McpConfigManager and save to mcp.json
+    }
+}
+```
+
+**Technical Constraints**:
+- Reuse `EnvInputState` from REQ-018
+- Use existing `McpConfigManager::update_server_env()` method
+- Extend `InstalledMcpScreen` or create new `EditEnvScreen`
+- Persist changes using `McpConfigManager::save()`
+- Handle file locking for concurrent access
+- File: modify `src/tui/screens/installed_mcp.rs`
+
+---
+
 ### REQ-021: AI CLI 自动故障切换系统
 **Status**: 🟢 Completed (v0.5.47)
 **Priority**: P1 (High)
@@ -1953,85 +1644,6 @@ cli_execution_order 验证:
 
 ---
 
-### REQ-023: Git 仓库检查和 Worktree 管理
-
-**Status**: 🟢 Done (v0.5.48+)
-**Priority**: P0 (Critical)
-**Version**: v0.5.48+
-**Related**: ARCH-023
-
-**Description**:
-在启动 AI CODE 任务前，aiw MUST 检查工作目录（由 `-C` 参数指定或当前目录）是否是 git 仓库。如果检查通过，aiw MUST 创建 git worktree 作为 AI CODE 的隔离工作目录。
-
-**Acceptance Criteria**:
-- [x] 执行 AI CLI 任务前检查工作目录是否是 git 仓库
-- [x] 非 git 仓库时返回清晰的错误信息，包含 `git init` 命令提示
-- [x] 检查逻辑在 `AiCliCommand::execute()` 方法开始时执行
-- [x] 支持通过 `-C` 参数指定的工作目录检查
-- [ ] 检查通过后，使用 git worktree add 创建临时工作目录
-- [ ] Worktree 创建位置：`/tmp/aiw-worktree-<8位随机hex>`
-- [ ] AI CODE 在 worktree 目录中执行任务
-- [ ] 任务完成后在 stdout 输出 worktree 信息
-
-**Technical Constraints**:
-- 使用 git 库进行 git 仓库检测和 worktree 操作
-- 检查和 worktree 创建 MUST 在 AI CLI 进程启动前完成
-- 错误信息格式：`Error: Not a git repository. Please initialize git first:\n  cd <path> && git init`
-- Worktree 命名格式：`aiw-worktree-<8位随机小写hex>`
-- Worktree 创建失败 MUST 阻止 AI CLI 任务执行
-- Worktree 已存在时 MUST 返回错误或使用现有 worktree
-
-**错误处理**:
-| 场景 | 错误消息 | 行为 |
-|------|----------|------|
-| 非 git 仓库 | 提示运行 `git init` | 返回错误码 1 |
-| 权限不足 | 无法访问 git 仓库信息 | 返回错误码 1 |
-| Worktree 创建失败 | 显示具体 git 错误 | 返回错误码 1 |
-| Worktree 已存在 | 提示使用现有或手动清理 | 返回错误码 1 或使用现有 |
-| 其他 git 错误 | 显示具体错误信息 | 返回错误码 1 |
-
-**输出格式**:
-- AI CODE 输出 → stdout（透传）
-- aiw 调试信息 → stderr
-- Worktree 信息 → stdout（任务完成后）
-- 分隔符：`=== AIW WORKTREE END ===`
-
-**使用流程**:
-```bash
-# 场景 1: 非 git 仓库
-$ aiw codex -r common -C /tmp/not-a-repo "task"
-Error: Not a git repository. Please initialize git first:
-  cd /tmp/not-a-repo && git init
-
-# 场景 2: git 仓库 - 创建 worktree 并执行
-$ aiw codex -r common -C /path/to/repo "task"
-Creating worktree: /tmp/aiw-worktree-a1b2c3d4
-🚀 Starting codex with task: task ...
-[AI CODE 输出...]
-=== AIW WORKTREE END ===
-Worktree: /tmp/aiw-worktree-a1b2c3d4
-Branch: feature-branch
-Commit: abc123def456
-```
-
-**职责划分**:
-
-| 步骤 | 职责方 | 操作 | 输出 |
-|------|--------|------|------|
-| 1. Git 仓库检查 | aiw | 检查是否是 git 仓库 | - |
-| 2. Worktree 创建 | aiw | 创建临时 worktree | worktree_path |
-| 3. 指定工作目录 | aiw | 设置 cwd 为 worktree 路径 | - |
-| 4. 任务执行 | AI CODE | 在 worktree 中执行任务 | 执行结果 |
-| 5. 输出路径 | aiw | 在 stdout 输出 worktree 信息 | 格式化信息 |
-| 6. 审查更改 | 主会话 | 查看代码变更 | - |
-| 7. 决定合并 | 主会话 | 选择合并方式 | - |
-| 8. 清理 worktree | 主会话 | 手动执行 git worktree remove | - |
-
-**相关设计**:
-- 架构设计：ARCH-023
-
----
-
 ### REQ-022: Auto 模式 CLI+Provider 组合轮转
 **Status**: 🟢 Done (v0.5.48)
 **Priority**: P1 (High)
@@ -2117,5 +1729,404 @@ Commit: abc123def456
 - 无效 Provider 名称：返回配置验证错误（Provider 必须在 providers.json 中定义或为 "auto"）
 - 空数组：返回配置验证错误
 - 所有组合都失败或都在冷却期：返回错误信息
+
+---
+
+### REQ-023: Git 仓库检查和 Worktree 管理
+
+**Status**: 🟢 Done (v0.5.48+)
+**Priority**: P0 (Critical)
+**Version**: v0.5.48+
+**Related**: ARCH-023
+
+**Description**:
+在启动 AI CODE 任务前，aiw MUST 检查工作目录（由 `-C` 参数指定或当前目录）是否是 git 仓库。如果检查通过，aiw MUST 创建 git worktree 作为 AI CODE 的隔离工作目录。
+
+**Acceptance Criteria**:
+- [x] 执行 AI CLI 任务前检查工作目录是否是 git 仓库
+- [x] 非 git 仓库时返回清晰的错误信息，包含 `git init` 命令提示
+- [x] 检查逻辑在 `AiCliCommand::execute()` 方法开始时执行
+- [x] 支持通过 `-C` 参数指定的工作目录检查
+- [ ] 检查通过后，使用 git worktree add 创建临时工作目录
+- [ ] Worktree 创建位置：`/tmp/aiw-worktree-<8位随机hex>`
+- [ ] AI CODE 在 worktree 目录中执行任务
+- [ ] 任务完成后在 stdout 输出 worktree 信息
+
+**Technical Constraints**:
+- 使用 git 库进行 git 仓库检测和 worktree 操作
+- 检查和 worktree 创建 MUST 在 AI CLI 进程启动前完成
+- 错误信息格式：`Error: Not a git repository. Please initialize git first:\n  cd <path> && git init`
+- Worktree 命名格式：`aiw-worktree-<8位随机小写hex>`
+- Worktree 创建失败 MUST 阻止 AI CLI 任务执行
+- Worktree 已存在时 MUST 返回错误或使用现有 worktree
+
+**错误处理**:
+| 场景 | 错误消息 | 行为 |
+|------|----------|------|
+| 非 git 仓库 | 提示运行 `git init` | 返回错误码 1 |
+| 权限不足 | 无法访问 git 仓库信息 | 返回错误码 1 |
+| Worktree 创建失败 | 显示具体 git 错误 | 返回错误码 1 |
+| Worktree 已存在 | 提示使用现有或手动清理 | 返回错误码 1 或使用现有 |
+| 其他 git 错误 | 显示具体错误信息 | 返回错误码 1 |
+
+**输出格式**:
+- AI CODE 输出 → stdout（透传）
+- aiw 调试信息 → stderr
+- Worktree 信息 → stdout（任务完成后）
+- 分隔符：`=== AIW WORKTREE END ===`
+
+**使用流程**:
+```bash
+# 场景 1: 非 git 仓库
+$ aiw codex -r common -C /tmp/not-a-repo "task"
+Error: Not a git repository. Please initialize git first:
+  cd /tmp/not-a-repo && git init
+
+# 场景 2: git 仓库 - 创建 worktree 并执行
+$ aiw codex -r common -C /path/to/repo "task"
+Creating worktree: /tmp/aiw-worktree-a1b2c3d4
+🚀 Starting codex with task: task ...
+[AI CODE 输出...]
+=== AIW WORKTREE END ===
+Worktree: /tmp/aiw-worktree-a1b2c3d4
+Branch: feature-branch
+Commit: abc123def456
+```
+
+**职责划分**:
+
+| 步骤 | 职责方 | 操作 | 输出 |
+|------|--------|------|------|
+| 1. Git 仓库检查 | aiw | 检查是否是 git 仓库 | - |
+| 2. Worktree 创建 | aiw | 创建临时 worktree | worktree_path |
+| 3. 指定工作目录 | aiw | 设置 cwd 为 worktree 路径 | - |
+| 4. 任务执行 | AI CODE | 在 worktree 中执行任务 | 执行结果 |
+| 5. 输出路径 | aiw | 在 stdout 输出 worktree 信息 | 格式化信息 |
+| 6. 审查更改 | 主会话 | 查看代码变更 | - |
+| 7. 决定合并 | 主会话 | 选择合并方式 | - |
+| 8. 清理 worktree | 主会话 | 手动执行 git worktree remove | - |
+
+**相关设计**:
+- 架构设计：ARCH-023
+
+---
+
+### REQ-024: OpenAI 环境变量配置
+**Status**: 🟢 Done
+**Priority**: P0 (Critical)
+**Version**: v5.1.1
+**Related**: ARCH-013, API-013
+
+**Description**:
+Agentic-Warden MUST support OpenAI API configuration exclusively through environment variables, replacing configuration file-based LLM settings to improve security and containerized deployment compatibility.
+
+**Acceptance Criteria**:
+- [x] Support `OPENAI_ENDPOINT` environment variable for OpenAI API endpoint
+- [x] Support `OPENAI_TOKEN` environment variable for OpenAI API authentication token
+- [x] Support `OPENAI_MODEL` environment variable for default model selection
+- [x] Environment variables MUST take precedence over any configuration file LLM settings
+- [x] LLM configuration in `mcp.json` MUST be ignored when environment variables are present
+- [x] Support containerized deployment with environment variable injection
+- [x] Graceful fallback to default values when environment variables are not set
+- [x] Security validation for token values and endpoint URLs
+
+**Technical Constraints**:
+- Environment variables MUST override configuration file LLM settings completely
+- Default endpoint MUST be `https://api.openai.com/v1` when not specified
+- Default model MUST be `gpt-4` when not specified
+- Token validation MUST ensure non-empty string values
+- Endpoint validation MUST ensure valid URL format
+- Configuration loading MUST validate environment variables before file config
+- Security warnings MUST be logged when tokens are detected in configuration files
+
+**Environment Variables**:
+```bash
+# Required: OpenAI API token
+OPENAI_TOKEN="sk-..."
+
+# Optional: Custom OpenAI endpoint (defaults to https://api.openai.com/v1)
+OPENAI_ENDPOINT="https://api.openai.com/v1"
+
+# Optional: Default model (defaults to gpt-4)
+OPENAI_MODEL="gpt-4"
+```
+
+## 已废弃需求 (Deprecated)
+
+> **废弃原因**: Google Drive 云存储集成已禁用，push/pull 命令不可用。自 v0.5.19 起标记为 Disabled。
+
+### REQ-003: Google Drive 配置记录和同步
+**Status**: ❌ Disabled (v0.5.19+)
+**Priority**: P1 (High)
+**Version**: v0.1.0
+**Related**: ARCH-003, DATA-003
+
+**Description**:
+~~Agentic-Warden MUST integrate with Google Drive for selective AI CLI configuration backup and restoration through `push` and `pull` commands, with intelligent file selection to avoid unnecessary data transfer.~~
+
+**Disabled Reason**: Cloud storage integration disabled. Push/pull commands are not available in current version.
+
+**Acceptance Criteria**:
+- [x] Support OAuth 2.0 Device Flow (RFC 8628) for headless environments
+- [x] Automatically detect environment (desktop/server/headless) and choose optimal auth method
+- [x] Authorize only when executing push/pull commands (no background auth)
+- [x] Implement selective configuration packing (exclude temp/cache/unnecessary files)
+- [x] Push compressed configuration archives to Google Drive with metadata
+- [x] Pull and extract configuration archives with conflict resolution
+- [x] List remote configuration files with version information
+- [x] Maintain sync state with hash-based change detection
+- [x] Support incremental sync (only changed configurations)
+- [x] Provide progress indicators for large configuration transfers
+- [x] Handle network interruptions with automatic retry mechanism
+
+**Technical Constraints**:
+- Authorization MUST auto-trigger with push/pull commands
+- Support concurrent local callback + manual input for better UX
+- Store OAuth tokens securely with automatic refresh
+- Configuration archives MUST be compressed (tar.gz format)
+- File selection MUST exclude: temp files, cache, logs, binaries
+- Hash validation MUST ensure data integrity
+- Retry policy MUST use exponential backoff (max 3 attempts)
+- Archive size MUST be optimized (< 5MB typical)
+
+---
+
+> **废弃原因**: Claude Code 会话历史集成功能已删除，相关 Hook 机制不再使用。
+
+### REQ-010: Claude Code会话历史集成（Hook-Based）
+**Status**: 🟢 Done
+**Priority**: P1 (High)
+**Version**: v0.2.0
+**Related**: ARCH-010, DATA-010, API-010
+
+**Description**:
+Agentic-Warden MUST integrate with Claude Code hooks mechanism to automatically capture and index conversation history for semantic search via MCP tools.
+
+**Architecture**:
+Hook-driven design using Claude Code's `SessionEnd` and `PreCompact` hooks to trigger conversation history ingestion. MCP server automatically manages hooks installation/uninstallation.
+
+**Acceptance Criteria**:
+- [x] Implement `agentic-warden hooks handle` CLI command
+- [x] Read hook input from stdin (session_id, transcript_path, hook_event_name)
+- [x] Parse Claude Code JSONL transcript format
+- [x] Extract and parse TODO items from conversation content
+- [x] Generate embeddings using FastEmbed (AllMiniLML6V2)
+- [x] Store conversations in SahomeDB vector database with TODO metadata
+- [x] Provide MCP tool: `search_history` for semantic conversation search with TODO context
+- [x] Return TODO items alongside conversation results (no separate get_session_todos tool)
+- [x] Support session_id-based filtering
+- [x] Handle incremental updates (avoid duplicates)
+- [x] Auto-install hooks when MCP server starts
+- [x] Auto-uninstall hooks when MCP server stops
+- [x] RAII cleanup guard for signal/panic safety
+
+**Hook Integration Flow**:
+```
+Claude Code Session End/PreCompact
+    ↓ (trigger hook)
+agentic-warden hooks handle
+    ↓ (read stdin)
+Hook Input JSON: {session_id, transcript_path, hook_event_name}
+    ↓ (read JSONL file)
+Parse Claude Code JSONL transcript
+    ↓ (generate embeddings)
+FastEmbed (local, no network)
+    ↓ (save to vector DB)
+SahomeDB: conversation_history collection
+    ↓ (MCP query)
+search_history MCP tool
+```
+
+**Claude Code Configuration** (~/.config/claude/hooks.json):
+```json
+{
+  "SessionEnd": {
+    "command": "agentic-warden hooks handle",
+    "stdin": true
+  },
+  "PreCompact": {
+    "command": "agentic-warden hooks handle",
+    "stdin": true
+  }
+}
+```
+
+**Note**: This configuration is automatically managed by `agentic-warden mcp` (installs on start, uninstalls on stop). Manual configuration is not required.
+
+**Hook Input Format** (stdin):
+```json
+{
+  "session_id": "session-abc123",
+  "transcript_path": "/home/user/.claude/sessions/2025-11-14.jsonl",
+  "hook_event_name": "SessionEnd",
+  "cwd": "/home/user/project",
+  "permission_mode": "normal"
+}
+```
+
+**Claude Code JSONL Format**:
+```jsonl
+{"session_id":"xxx","timestamp":"2025-11-14T10:30:00Z","message_id":"msg-001","role":"user","content":"Help me implement auth"}
+{"session_id":"xxx","timestamp":"2025-11-14T10:30:05Z","message_id":"msg-002","role":"assistant","content":"I'll help..."}
+```
+
+**TODO Extraction**:
+- Parse TODO markers from assistant messages: `- [ ]`, `TODO:`, `Action Items:`
+- Extract task description, priority (if present), and context
+- Store TODO items as structured metadata alongside conversation records
+- `search_history` returns conversations with associated TODO items in response
+
+**Technical Constraints**:
+- Vector database: SahomeDB (file-based persistent storage)
+- Embedding service: FastEmbed (AllMiniLML6V2, 384 dimensions, local generation)
+- Session ID source: Hook stdin input (not parsed from JSONL)
+- Semantic search: cosine similarity with configurable threshold
+- Storage location: ~/.aiw/conversation_history.db
+- Duplicate detection: Check existing session_id before insertion
+- TODO extraction: Pattern matching on assistant messages (markdown checkboxes, TODO keywords)
+- TODO metadata: Stored as JSON in conversation record metadata field
+
+**Performance Requirements**:
+- Hook processing: < 2s for typical session (~100 messages)
+- Embedding generation: < 100ms for batch of 10 messages (FastEmbed local)
+- Vector insertion: < 500ms for batch of 100 vectors
+- MCP search_history: < 200ms for typical query
+- Zero network dependency for embeddings
+
+**Error Handling**:
+- Hook must return exit code 0 on success
+- Hook must return exit code 2 on critical errors (blocks Claude Code)
+- Log errors to ~/.aiw/hooks.log
+- Gracefully handle missing transcript files
+- Skip already-processed sessions
+
+---
+
+> **废弃原因**: Google Drive OAuth public client 不再被 Google 支持，授权流程已禁用。自 v0.5.19 起标记为 Disabled。
+
+### REQ-015: Google Drive OAuth授权流程
+**Status**: ❌ Disabled (v0.5.19+)
+**Priority**: P0 (Critical)
+**Version**: v0.5.18
+**Related**: ARCH-003, DATA-003
+
+**Description**:
+~~Agentic-Warden MUST provide Google Drive OAuth authorization flow that allows users to authenticate with their own Google Drive accounts using only the built-in public OAuth client. MUST comply with SPEC second iron law (no configuration files) and first iron law (no environment variables).~~
+
+**Disabled Reason**: Google Drive OAuth public client is no longer supported by Google. Push/pull commands disabled pending future cloud storage solution.
+
+**Acceptance Criteria**:
+- [x] **Built-in Public Client**: MUST provide working public OAuth client ID for immediate usage
+- [x] **No Application Registration**: Users MUST NOT need to register OAuth applications in Google Cloud Console
+- [x] **CLI-Only Authorization**: MUST support headless CLI-based OAuth flow without requiring TUI interfaces
+- [x] **Unique Authorization URLs**: MUST generate complete authorization URLs with embedded user code and device code parameters
+- [x] **No Configuration Files**: MUST NOT support configuration file-based OAuth credentials (SPEC second iron law compliance)
+- [x] **No Environment Variables**: MUST NOT support environment variable configuration (SPEC first iron law compliance)
+- [x] **Built-in Client Only**: MUST use only the built-in public OAuth client
+- [x] **Public Client Warnings**: MUST display clear warnings when using public client (rate limits, production limitations)
+- [x] **English Log Messages**: All OAuth flow messages MUST be in English (no Chinese)
+- [x] **Token Persistence**: MUST save and refresh OAuth tokens securely for repeated use
+
+**Standard User Authorization Flow**:
+
+1. **Direct Usage** (Immediate access):
+   ```bash
+   aiw push    # or aiw pull
+   ```
+   - System automatically uses built-in public OAuth client
+   - Displays complete authorization URL with embedded parameters
+   - User opens URL in browser and authenticates with their own Google account
+   - User enters the displayed user code to complete authorization
+   - OAuth tokens are saved locally for future use
+
+2. **Subsequent Usage**:
+   - After successful authorization, credentials are stored locally in `~/.aiw/auth.json`
+   - No repeated authorization required for future operations
+   - AIW directly operates on the user's own Google Drive
+   - Built-in public client is used for all operations
+
+**Technical Constraints**:
+- **Public Client ID**: `77185425430.apps.googleusercontent.com` (built-in only)
+- **Public Client Secret**: `GOCSPX-1r0aNJW8XY1Mqg4k5L_KzQDGH43` (built-in only)
+- **Token Storage**: MUST store tokens in `~/.aiw/auth.json` with 0o600 permissions
+- **Authorization URL**: MUST include both user_code and device_code as query parameters
+- **Device Flow**: MUST implement RFC 8628 Device Authorization Flow
+- **Error Handling**: MUST handle OAuth errors gracefully (invalid_client, access_denied, etc.)
+- **Public Client Limitations**: MUST warn about rate limits and production limitations
+- **No Configuration Files**: STRICTLY PROHIBITED by SPEC second iron law
+- **No Environment Variables**: STRICTLY PROHIBITED by SPEC first iron law
+
+**Public Client Warning Message**:
+```
+⚠️  Using public OAuth client. It may have limitations. For better results, create your own Google OAuth credentials in Google Cloud Console.
+```
+
+**Security Requirements**:
+- OAuth tokens MUST be stored with 0o600 permissions (user read/write only)
+- Configuration directory MUST have 0o700 permissions (user access only)
+- MUST validate OAuth configuration before making API calls
+- MUST clear sensitive data from memory when no longer needed
+- MUST implement proper token refresh mechanism
+
+**Why No Application Registration Required**:
+
+1. **User's Own Drive Access**: The OAuth flow authorizes AIW to access the user's own Google Drive, following standard OAuth patterns where users grant applications access to their data
+2. **Built-in Public Client**: The system provides a working public OAuth client that supports Google Drive API access for device flow authorization
+3. **Immediate Usability**: Users can start using the system immediately without needing developers to register separate OAuth applications in Google Cloud Console
+
+**Core Principle**:
+Users authenticate AIW to access their own Google Drive accounts through standard OAuth 2.0 Device Flow. This is the normal OAuth pattern where users grant applications permission to access their personal data, rather than developers needing to register applications for each user.
+
+**Configuration File Selection Strategy**:
+- **Claude**: `CLAUDE.md`, `settings.json`, `agents/`, `skills/SKILL.md`, `hooks/`, `scripts/`, `commands/`, `mcp.json`
+- **Codex**: `auth.json`, `config.toml`, `agents.md`, `history.jsonl`
+- **Gemini**: `google_accounts.json`, `oauth_creds.json`, `settings.json`, `gemini.md`
+- **Exclude**: `.cache/`, `temp/`, `logs/`, `node_modules/`, binaries
+
+**Claude Configuration Details**:
+- `hooks/`: Claude Code hook handlers and configuration files (SessionEnd/PreCompact/Stop)
+- `scripts/`: Execution scripts including ai-cli-runner.sh and custom workflow scripts
+- `commands/`: Custom slash command definitions and configurations
+- `mcp.json`: MCP server configuration for Claude Code integration
+
+---
+
+### 2025-12-13
+- Updated REQ-008 and REQ-009: 透明参数转发支持
+- Status: Enhancement for v0.5.23 user experience improvement
+- Added transparent parameter forwarding capability:
+  - Parameters starting with `-` (excluding `-p/--provider`) are transparently forwarded to AI CLI
+  - Provider flags must be specified before other CLI parameters
+  - Maintains full AI CLI functionality while using Agentic-Warden provider management
+  - Enhanced usage examples with parameter forwarding scenarios
+
+### 2025-11-19
+- Added REQ-024: OpenAI环境变量配置
+- Status: Critical requirement for v5.1.1 security and containerization improvements
+- Complete OpenAI environment variable configuration with:
+  - OPENAI_ENDPOINT for API endpoint configuration
+  - OPENAI_TOKEN for secure authentication (replaces config file tokens)
+  - OPENAI_MODEL for default model selection
+  - Environment variable precedence over configuration file settings
+  - Security validation and container deployment support
+
+### 2025-11-13
+- Added REQ-012: 智能MCP路由系统
+- Status: New requirement for v0.2.0 feature (P0 Critical)
+- Complete intelligent routing system design with:
+  - Industry-standard mcp.json configuration support
+  - Dual Qdrant collections for tool/method indexing
+  - RMCP client integration for dynamic MCP connections
+  - Internal LLM-powered intelligent tool selection
+  - Two-method interface for external AI integration
+  - Clustering-based routing with semantic search
+  - Health monitoring and performance optimization
+
+### 2025-11-12
+- Added REQ-009: 交互式 AI CLI 启动
+- Status: New requirement for v0.1.1 feature
+- Added REQ-010: AI CLI 更新/安装管理 (renumbered from REQ-009)
+- Status: New requirement for v0.2.0 feature
+- Re-numbered requirements to maintain sequential ordering
 
 ---
