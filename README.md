@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.5.63-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.5.64-blue?style=flat-square)
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange?style=flat-square&logo=rust)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 
@@ -28,6 +28,7 @@ AIW is a **unified gateway** that acts as an AI CLI proxy router with provider s
 │  │                     │                                     │
 │  │  + Provider Switch  │                                     │
 │  │  + Role Injection   │                                     │
+│  │  + Tool Search Unlock │                                    │
 │  │  + Param Forwarding │                                     │
 │  │  + CWD Control      │                                     │
 │  └─────────────────────┘                                     │
@@ -78,6 +79,22 @@ aiw auto -p auto "implement feature"  # Auto CLI + auto provider
 
 # Provider config: ~/.aiw/providers.json
 ```
+
+### Tool Search Unlock
+
+When using third-party API providers (non-Anthropic official), Claude's Tool Search feature is disabled by default. AIW automatically unlocks this feature via runtime memory patch.
+
+```bash
+# Tool Search is automatically enabled when using third-party providers
+aiw claude -p glm "use web search to find latest Rust news"
+aiw claude -p openrouter "search for documentation"
+```
+
+**How it works**: AIW applies a runtime patch to the Claude process, changing `if(O8()==="firstParty"&&!JB())` to `if(O8()!=="firstParty"&&!JB())`, enabling Tool Search for third-party providers.
+
+- Works on Linux/macOS/Windows
+- Non-destructive: only affects running process, no system files modified
+- Automatic retry with increasing delays (up to 5 attempts)
 
 ### Auto Mode (Automatic Failover)
 
@@ -232,6 +249,6 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-**AIW** - Unified Gateway for AI CLI | v0.5.63
+**AIW** - Unified Gateway for AI CLI | v0.5.64
 
 [GitHub](https://github.com/putao520/agentic-warden) | [crates.io](https://crates.io/crates/aiw)
