@@ -5,6 +5,9 @@ use crate::core::process_tree::ProcessTreeError;
 use crate::error::RegistryError;
 use crate::logging::debug;
 use crate::logging::warn;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+
 #[cfg(windows)]
 use crate::platform::ChildResources;
 use crate::platform::{self};
@@ -415,9 +418,19 @@ fn resolve_provider(
         {
             (selected_name, config.clone(), false)
         } else {
-            return Err(ProcessError::Other(
-                "No available providers. All providers are disabled or misconfigured.".to_string()
-            ));
+            // No provider configured - use empty config (no env injection)
+            use crate::provider::config::Provider;
+            (
+                "".to_string(),
+                Provider {
+                    enabled: false,
+                    scenario: None,
+                    compatible_with: None,
+                    env: std::collections::HashMap::new(),
+                    disabled_until: None,
+                },
+                true,
+            )
         }
     };
 
@@ -1287,23 +1300,18 @@ impl<S: TaskStorage> Drop for RegistrationGuard<'_, S> {
     }
 }
 
-/// Start interactive CLI mode using exec to replace current process.
+/// Start interactive CLI mode by spawning a background process.
 ///
-/// This function uses the exec system call to replace the current AIW process
-/// with the target AI CLI (claude/codex/gemini). This ensures proper terminal
-/// control and signal handling - the AI CLI becomes the direct child of the
-/// shell/terminal, not a subprocess of AIW.
-///
-/// Note: This function never returns on success. On failure, it returns an error.
-pub fn start_interactive_cli<S: TaskStorage>(
+/// This function spawns the target AI CLI (claude/codex/gemini) as a background
+/// process and returns immediately. The CLI runs independently while AIW exits.
+/// Patches are applied asynchronously after a short delay.
+pub async fn start_interactive_cli<S: TaskStorage>(
     _registry: &Registry<S>,
     cli_type: &CliType,
     provider: Option<String>,
     cli_args: &[String],
     cwd: Option<std::path::PathBuf>,
 ) -> Result<i32, ProcessError> {
-    use std::os::unix::process::CommandExt;
-
     // Validate CWD if provided
     if let Some(ref dir) = cwd {
         if !dir.exists() {
@@ -1327,14 +1335,14 @@ pub fn start_interactive_cli<S: TaskStorage>(
 
     let cli_command = get_cli_command(cli_type)?;
 
-    // Build command for exec
+    // Build command for spawning
     let mut command = std::process::Command::new(&cli_command);
 
     // Add interactive args (e.g., "exec" for Codex, "-p" for Claude)
     let interactive_args = cli_type.build_interactive_args_with_cli(cli_args);
     command.args(&interactive_args);
 
-    // Inherit stdin/stdout/stderr - these are automatically inherited by exec
+    // Inherit stdin/stdout/stderr
     command.stdin(std::process::Stdio::inherit());
     command.stdout(std::process::Stdio::inherit());
     command.stderr(std::process::Stdio::inherit());
@@ -1343,6 +1351,15 @@ pub fn start_interactive_cli<S: TaskStorage>(
     // they are running inside another session (e.g. Claude Code's CLAUDECODE check).
     command.env_remove("CLAUDECODE");
     command.env_remove("CLAUDE_CODE_ENTRYPOINT");
+
+    // Platform-specific: set process group (NOT death signal - we want child to survive AIW exit)
+    #[cfg(unix)]
+    unsafe {
+        command.pre_exec(|| {
+            libc::setpgid(0, 0);
+            Ok(())
+        });
+    }
 
     // Set working directory if provided
     if let Some(ref dir) = cwd {
@@ -1361,23 +1378,23 @@ pub fn start_interactive_cli<S: TaskStorage>(
         }
     }
 
-    // Apply file patch for npm installations (no PID needed)
-    // This works before exec since we modify the actual CLI file
-    if matches!(cli_type, CliType::Claude) {
-        if let Ok(()) = apply_npm_claude_patch() {
-            eprintln!("✅ ToolSearch unlocked");
+    // Spawn the CLI process
+    let child = command.spawn()?;
+    let child_pid = child.id();
+
+    // Apply patches in background (non-blocking)
+    let cli_type_for_patch = cli_type.clone();
+    tokio::spawn(async move {
+        // Short delay to let the CLI fully start
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+        if matches!(cli_type_for_patch, CliType::Claude) {
+            let _ = apply_claude_toolsearch_patch(child_pid);
         }
-    }
+    });
 
-    // Use exec to replace current process
-    // This function never returns on success
-    let error = command.exec();
-
-    // exec should never return; if it does, an error occurred
-    Err(ProcessError::Other(format!(
-        "Failed to exec {}: {}",
-        cli_command, error
-    )))
+    // Return immediately - AIW exits, user interacts with spawned CLI
+    Ok(0)
 }
 
 /// Execute multiple CLI processes (for codex|claude|gemini syntax)
@@ -1446,7 +1463,7 @@ pub async fn execute_cli_with_failover<S: TaskStorage>(
 
         eprintln!("[aiw-auto] Trying {}...", entry.display_name());
 
-        let prepared = finalize_for_entry(base, cli_type.clone(), entry.provider.clone());
+        let prepared = finalize_for_entry(base, cli_type.clone(), Some(entry.provider.clone()));
 
         let result = execute_cli(
             registry,

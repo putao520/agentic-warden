@@ -56,11 +56,10 @@ pub fn prepare_task(params: TaskParams) -> anyhow::Result<PreparedTask> {
 
     // 3. Provider: resolved_provider（Auto 解析出的）优先于用户指定的
     let provider = resolved_provider
-        .or(base.user_provider.clone())
-        .unwrap_or_default();
+        .or(base.user_provider.clone());
 
     // 4. 构建最终任务
-    Ok(finalize_for_entry(&base, cli_type, provider))
+    Ok(finalize_for_entry(&base, cli_type, provider.filter(|p| !p.is_empty())))
 }
 
 /// 只做角色处理 + worktree 创建，不解析 Auto CLI，不构建 CLI 参数
@@ -97,7 +96,7 @@ pub fn prepare_task_base(params: TaskParams) -> anyhow::Result<PreparedTaskBase>
 }
 
 /// 基于公共准备结果 + 具体 CLI+Provider 构建最终 PreparedTask
-pub fn finalize_for_entry(base: &PreparedTaskBase, cli_type: CliType, provider: String) -> PreparedTask {
+pub fn finalize_for_entry(base: &PreparedTaskBase, cli_type: CliType, provider: Option<String>) -> PreparedTask {
     let args = cli_type.build_full_access_args_with_cli(&base.prompt, &base.cli_args);
     let os_args: Vec<OsString> = args.into_iter().map(OsString::from).collect();
 
@@ -105,7 +104,7 @@ pub fn finalize_for_entry(base: &PreparedTaskBase, cli_type: CliType, provider: 
         cli_type,
         prompt: base.prompt.clone(),
         args: os_args,
-        provider: Some(provider),
+        provider: provider,
         cwd: base.cwd.clone(),
         worktree_info: base.worktree_info.clone(),
     }

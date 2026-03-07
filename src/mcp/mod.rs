@@ -326,7 +326,7 @@ pub async fn start_task(
     } else {
         // 非 Auto 模式：直接执行指定 CLI
         let resolved_provider = params.provider.clone();
-        let prepared = task_prepare::finalize_for_entry(&base, cli_type.clone(), resolved_provider.unwrap_or_default());
+        let prepared = task_prepare::finalize_for_entry(&base, cli_type.clone(), resolved_provider);
 
         let spawn_registry = registry.clone();
         let spawn_cli_type = prepared.cli_type.clone();
