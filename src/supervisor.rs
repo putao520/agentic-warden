@@ -834,10 +834,29 @@ async fn execute_cli_internal<S: TaskStorage>(
 /// the OAuth token is invalid, causing 401 errors. This function creates a
 /// temporary CODEX_HOME directory with a clean `auth.json` containing only
 /// the provider's API key, and copies the user's `config.toml` for settings.
-fn setup_codex_home_for_provider(
-    command: &mut Command,
+// Trait for setting environment variables on both std and tokio Command
+trait CommandEnv {
+    fn set_env(&mut self, key: &str, value: &str);
+}
+
+impl CommandEnv for std::process::Command {
+    fn set_env(&mut self, key: &str, value: &str) {
+        self.env(key, value);
+    }
+}
+
+impl CommandEnv for tokio::process::Command {
+    fn set_env(&mut self, key: &str, value: &str) {
+        self.env(key, value);
+    }
+}
+
+fn setup_codex_home_for_provider<C>(
+    command: &mut C,
     provider_config: &crate::provider::config::Provider,
-) {
+) where
+    C: CommandEnv,
+{
     use std::fs;
 
     // Create a unique temp directory for this codex session
@@ -871,7 +890,7 @@ fn setup_codex_home_for_provider(
     };
     let _ = fs::write(codex_home.join("auth.json"), auth_json);
 
-    command.env("CODEX_HOME", &codex_home);
+    command.set_env("CODEX_HOME", codex_home.to_str().unwrap());
 }
 
 /// - Logs are automatically cleaned up on system reboot
@@ -1268,14 +1287,23 @@ impl<S: TaskStorage> Drop for RegistrationGuard<'_, S> {
     }
 }
 
-/// Start interactive CLI mode (directly launch AI CLI without task prompt)
-pub async fn start_interactive_cli<S: TaskStorage>(
-    registry: &Registry<S>,
+/// Start interactive CLI mode using exec to replace current process.
+///
+/// This function uses the exec system call to replace the current AIW process
+/// with the target AI CLI (claude/codex/gemini). This ensures proper terminal
+/// control and signal handling - the AI CLI becomes the direct child of the
+/// shell/terminal, not a subprocess of AIW.
+///
+/// Note: This function never returns on success. On failure, it returns an error.
+pub fn start_interactive_cli<S: TaskStorage>(
+    _registry: &Registry<S>,
     cli_type: &CliType,
     provider: Option<String>,
     cli_args: &[String],
     cwd: Option<std::path::PathBuf>,
 ) -> Result<i32, ProcessError> {
+    use std::os::unix::process::CommandExt;
+
     // Validate CWD if provided
     if let Some(ref dir) = cwd {
         if !dir.exists() {
@@ -1294,29 +1322,22 @@ pub async fn start_interactive_cli<S: TaskStorage>(
 
     platform::init_platform();
 
-    let terminate_wrapper = |pid: u32| {
-        platform::terminate_process(pid);
-        Ok(())
-    };
-    registry.sweep_stale_entries(Utc::now(), platform::process_alive, &terminate_wrapper)?;
-
-    let (provider_name, provider_config, is_fallback, mut provider_manager) =
+    let (provider_name, provider_config, is_fallback, _provider_manager) =
         resolve_provider(cli_type, &provider)?;
-
-    // Display provider info only in debug/verbose scenarios (silent by default)
 
     let cli_command = get_cli_command(cli_type)?;
 
-    // Interactive mode: launch CLI with stdin/stdout/stderr inherited
-    let mut command = Command::new(&cli_command);
+    // Build command for exec
+    let mut command = std::process::Command::new(&cli_command);
 
     // Add interactive args (e.g., "exec" for Codex, "-p" for Claude)
     let interactive_args = cli_type.build_interactive_args_with_cli(cli_args);
     command.args(&interactive_args);
 
-    command.stdin(Stdio::inherit());
-    command.stdout(Stdio::inherit());
-    command.stderr(Stdio::inherit());
+    // Inherit stdin/stdout/stderr - these are automatically inherited by exec
+    command.stdin(std::process::Stdio::inherit());
+    command.stdout(std::process::Stdio::inherit());
+    command.stderr(std::process::Stdio::inherit());
 
     // Remove nesting-detection env vars so child CLI processes don't think
     // they are running inside another session (e.g. Claude Code's CLAUDECODE check).
@@ -1326,29 +1347,6 @@ pub async fn start_interactive_cli<S: TaskStorage>(
     // Set working directory if provided
     if let Some(ref dir) = cwd {
         command.current_dir(dir);
-    }
-
-    // Platform-specific command preparation (Unix: set process group and death signal)
-    #[cfg(unix)]
-    {
-        unsafe {
-            command.pre_exec(|| {
-                // Set process group ID
-                let result = libc::setpgid(0, 0);
-                if result != 0 {
-                    return Err(io::Error::last_os_error());
-                }
-                // Set parent death signal on Linux
-                #[cfg(target_os = "linux")]
-                {
-                    let result = libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
-                    if result != 0 {
-                        return Err(io::Error::last_os_error());
-                    }
-                }
-                Ok(())
-            });
-        }
     }
 
     // Inject environment variables (skip in fallback mode)
@@ -1363,72 +1361,23 @@ pub async fn start_interactive_cli<S: TaskStorage>(
         }
     }
 
-    let mut child = command.spawn()?;
-    let child_pid = child
-        .id()
-        .ok_or_else(|| io::Error::other("Failed to get child PID"))?;
-
-    // Skip patch in interactive mode to avoid blocking startup
-    // Users who need ToolSearch unlock can use non-interactive mode or apply manually
-
-
-    // Register the interactive CLI process
-    let log_path = generate_log_path(child_pid)?;
-    let record = TaskRecord::new(
-        Utc::now(),
-        child_pid.to_string(),
-        log_path.to_string_lossy().into_owned(),
-        Some(platform::current_pid()),
-    );
-
-    // Get process tree information
-    let record = match ProcessTreeInfo::current() {
-        Ok(tree_info) => match record.clone().with_process_tree_info(tree_info) {
-            Ok(updated) => updated,
-            Err(err) => {
-                warn(format!("Failed to attach process tree info: {}", err));
-                record
-            }
-        },
-        Err(err) => {
-            warn(format!("Failed to get process tree info: {}", err));
-            record
+    // Apply file patch for npm installations (no PID needed)
+    // This works before exec since we modify the actual CLI file
+    if matches!(cli_type, CliType::Claude) {
+        if let Ok(()) = apply_npm_claude_patch() {
+            eprintln!("✅ ToolSearch unlocked");
         }
-    };
-
-    if let Err(err) = registry.register(child_pid, &record) {
-        platform::terminate_process(child_pid);
-        let _ = child.wait().await;
-        return Err(err.into());
     }
 
-    let registration_guard = RegistrationGuard::new(registry, child_pid);
-    let signal_guard = signal::install(child_pid)?;
+    // Use exec to replace current process
+    // This function never returns on success
+    let error = command.exec();
 
-    let status = child.wait().await?;
-    drop(signal_guard);
-
-    // Mark as completed
-    let completed_at = Utc::now();
-    let exit_code = status.code();
-    let result = match (status.success(), exit_code) {
-        (true, _) => Some("interactive_session_completed".to_owned()),
-        (false, Some(code)) => Some(format!("interactive_session_failed_with_exit_code_{code}")),
-        (false, None) => Some("interactive_session_failed_without_exit_code".to_owned()),
-    };
-    let _ = registration_guard.mark_completed(result, exit_code, completed_at);
-
-    // Auto-disable provider on failure (non-zero exit code, non-fallback, non-empty provider)
-    if !status.success() && !is_fallback && !provider_name.is_empty() && provider_name != "official" {
-        debug(format!(
-            "Provider '{}' failed (exit {}), temporarily disabling for 1 hour",
-            provider_name,
-            status.code().unwrap_or(-1)
-        ));
-        let _ = provider_manager.disable_provider_temporarily(&provider_name);
-    }
-
-    Ok(extract_exit_code(status))
+    // exec should never return; if it does, an error occurred
+    Err(ProcessError::Other(format!(
+        "Failed to exec {}: {}",
+        cli_command, error
+    )))
 }
 
 /// Execute multiple CLI processes (for codex|claude|gemini syntax)
