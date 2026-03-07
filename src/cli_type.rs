@@ -110,10 +110,7 @@ impl CliType {
     pub fn build_interactive_args_with_cli(&self, cli_args: &[String]) -> Vec<String> {
         let mut args = match self {
             CliType::Claude => {
-                vec![
-                    "-p".to_string(),
-                    "--dangerously-skip-permissions".to_string(),
-                ]
+                vec![]  // 交互模式不需要任何参数
             }
             CliType::Codex => {
                 vec![
