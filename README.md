@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.5.72-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.5.73-blue?style=flat-square)
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange?style=flat-square&logo=rust)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 
@@ -264,6 +264,6 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-**AIW** - Unified Gateway for AI CLI | v0.5.72
+**AIW** - Unified Gateway for AI CLI | v0.5.73
 
 [GitHub](https://github.com/putao520/agentic-warden) | [crates.io](https://crates.io/crates/aiw)

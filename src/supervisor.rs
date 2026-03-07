@@ -1368,12 +1368,8 @@ pub async fn start_interactive_cli<S: TaskStorage>(
         .id()
         .ok_or_else(|| io::Error::other("Failed to get child PID"))?;
 
-    // Apply Claude ToolSearch patch (Claude only, non-critical)
-    if matches!(cli_type, CliType::Claude) {
-        if let Err(_e) = apply_claude_toolsearch_patch(child_pid) {
-            // Patch failed silently in interactive mode
-        }
-    }
+    // Skip patch in interactive mode to avoid blocking startup
+    // Users who need ToolSearch unlock can use non-interactive mode or apply manually
 
 
     // Register the interactive CLI process
