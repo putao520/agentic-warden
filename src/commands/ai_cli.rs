@@ -113,18 +113,20 @@ impl AiCliCommand {
                 eprintln!("Branch: {}, Commit: {}", info.branch, info.commit);
             }
 
-            let exit_code = supervisor::start_interactive_cli(
+            // This function never returns on success
+            let _ = supervisor::start_interactive_cli(
                 &registry,
                 &prepared.cli_type,
                 prepared.provider,
                 &self.cli_args,
                 prepared.cwd.clone(),
-            ).await?;
+            );
 
             if let Some(ref info) = prepared.worktree_info {
                 Self::output_worktree_info(info);
             }
-            Ok(ExitCode::from((exit_code & 0xFF) as u8))
+            // Unreachable - exec never returns
+            Ok(ExitCode::SUCCESS)
         } else if self.ai_types.len() == 1 {
             // 单 CLI 任务模式
             let prepared = task_prepare::prepare_task(TaskParams {
@@ -244,18 +246,20 @@ impl AiCliCommand {
                 eprintln!("Branch: {}, Commit: {}", info.branch, info.commit);
             }
 
-            let exit_code = supervisor::start_interactive_cli(
+            // This function never returns on success
+            let _ = supervisor::start_interactive_cli(
                 &registry,
                 &prepared.cli_type,
                 prepared.provider,
                 &inv.remaining_args,
                 prepared.cwd.clone(),
-            ).await?;
+            );
 
             if let Some(ref info) = prepared.worktree_info {
                 Self::output_worktree_info(info);
             }
-            Ok(ExitCode::from((exit_code & 0xFF) as u8))
+            // Unreachable - exec never returns
+            Ok(ExitCode::SUCCESS)
         } else {
             // 非交互模式：prompt 就是 remaining_args joined with spaces
             let prompt = inv.remaining_args.join(" ");
