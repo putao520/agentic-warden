@@ -40,6 +40,35 @@ pub enum RolesAction {
     List,
 }
 
+/// 补丁管理动作
+#[derive(Subcommand, Debug, Clone)]
+pub enum PatchAction {
+    /// 列出所有可用的补丁
+    List {
+        /// 显示详细信息
+        #[arg(long)]
+        verbose: bool,
+    },
+
+    /// 应用文件补丁
+    Apply {
+        /// 功能名称 (toolsearch|ultrathink|websearch|all)
+        feature: String,
+    },
+
+    /// 查看补丁状态
+    Status {
+        /// 功能名称 (可选，不指定则显示所有)
+        feature: Option<String>,
+    },
+
+    /// 还原文件补丁
+    Restore {
+        /// 功能名称 (toolsearch|ultrathink|websearch|all)
+        feature: String,
+    },
+}
+
 /// 配置管理动作
 #[derive(Subcommand, Debug, Clone)]
 pub enum ConfigAction {
@@ -329,6 +358,10 @@ pub enum Commands {
     /// AI CLI 角色管理
     #[command(subcommand)]
     Roles(RolesAction),
+
+    /// 补丁管理
+    #[command(subcommand)]
+    Patch(PatchAction),
 
     /// 显示版本信息
     #[command(name = "v")]

@@ -3,7 +3,7 @@ mod help;
 
 use aiw::commands::ai_cli::AiCliCommand;
 use aiw::commands::cli_args::CliInvocation;
-use aiw::commands::parser::{ConfigAction, McpAction, RolesAction, Cli, Commands};
+use aiw::commands::parser::{ConfigAction, McpAction, RolesAction, PatchAction, Cli, Commands};
 use aiw::execute_enhanced_update;
 use aiw::mcp::AgenticWardenMcpServer;
 use aiw::commands::market::handle_plugin_action;
@@ -194,6 +194,7 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
         Commands::Plugin(action) => handle_plugin_action(action).await.map_err(|e| e.to_string()),
         Commands::Roles(action) => handle_roles_command(action).await,
         Commands::Config(action) => handle_config_action(action),
+        Commands::Patch(action) => handle_patch_action(action).await,
         Commands::External(tokens) => handle_external_command(tokens).await,
     }
 }
@@ -304,6 +305,17 @@ fn handle_help_command(topic: Option<String>) -> Result<ExitCode, String> {
 fn handle_config_action(action: ConfigAction) -> Result<ExitCode, String> {
     match action {
         ConfigAction::CliOrder => Ok(aiw::commands::auto::handle_cli_order_command()),
+    }
+}
+
+/// Handle patch management commands
+async fn handle_patch_action(action: PatchAction) -> Result<ExitCode, String> {
+    match aiw::commands::patch::execute_patch_command(action).await {
+        Ok(_) => Ok(ExitCode::from(0)),
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            Ok(ExitCode::from(1))
+        }
     }
 }
 

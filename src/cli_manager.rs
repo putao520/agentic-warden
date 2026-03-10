@@ -6,6 +6,7 @@
 
 #![allow(dead_code)] // CLI管理模块，部分功能当前未使用
 
+use crate::patcher::versions::ClaudeVersion;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -545,6 +546,11 @@ pub async fn execute_enhanced_update() -> Result<(bool, Vec<(String, bool, Strin
         }
     }
 
+
+    // Apply auto file patches after successful updates
+    if let Err(e) = apply_auto_patches() {
+        eprintln!("⚠️  Auto patching failed: {}", e);
+    }
     Ok((aiw_updated, cli_results))
 }
 
@@ -571,6 +577,63 @@ async fn update_aiw() -> Result<bool> {
     Ok(true)
 }
 
+
+/// Apply automatic file patches after update
+fn apply_auto_patches() -> anyhow::Result<()> {
+    use crate::patcher::{get_claude_js_path, apply_file_patch};
+    use crate::patcher::types::{FeatureType, PatchType};
+    use crate::patcher::registry::get_feature_patches;
+    use crate::patcher::versions::ClaudeVersion;
+    
+    let js_path = match get_claude_js_path() {
+        Ok(p) => p,
+        Err(_) => {
+            // Not an npm installation, skip file patching
+            return Ok(());
+        }
+    };
+    
+    let version = match get_claude_version_from_string() {
+        Ok(v) => v,
+        Err(_) => {
+            // Could not get version, use default
+            ClaudeVersion { major: 2, minor: 1, patch: 72 }
+        }
+    };
+    
+    let features = vec![
+        FeatureType::ToolSearch,
+        FeatureType::UltraThink,
+        FeatureType::WebSearch,
+    ];
+    
+    for feature in features {
+        let patches = get_feature_patches(feature, &version);
+        for patch in patches.iter().filter(|p| p.patch_type == PatchType::File) {
+            let _ = apply_file_patch(&js_path, patch); // Silent failure
+        }
+    }
+    
+    Ok(())
+}
+
+/// Get Claude version string
+fn get_claude_version_from_string() -> anyhow::Result<ClaudeVersion> {
+    use std::process::Command;
+    
+    let output = Command::new("claude")
+        .arg("--version")
+        .output()?;
+    
+    let version_str = String::from_utf8_lossy(&output.stdout);
+    let version = version_str
+        .split_whitespace()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("Could not parse version"))?;
+    
+    ClaudeVersion::from_string(version)
+        .ok_or_else(|| anyhow::anyhow!("Invalid version format"))
+}
 /// Get current AIW version
 fn get_aiw_current_version() -> Result<String> {
     // Use compile-time version directly - no subprocess needed

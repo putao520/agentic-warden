@@ -9,6 +9,7 @@ pub mod market;
 pub mod mcp;
 pub mod parser;
 pub mod tui_commands;
+pub mod patch;
 
 // Re-exports (used by main.rs and other modules)
 pub use parser::*;

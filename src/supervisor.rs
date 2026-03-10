@@ -162,6 +162,98 @@ fn apply_npm_claude_patch() -> anyhow::Result<()> {
 /// Apply Claude ToolSearch patch
 ///
 /// This is a best-effort operation - failure should not break the normal flow.
+
+/// Apply unified memory patches for all features
+fn apply_unified_memory_patches(pid: u32, cli_type: &CliType) {
+    use crate::patcher::RuntimePatcher;
+    use crate::patcher::types::{PatchType, FeatureType};
+    use crate::patcher::registry::get_feature_patches;
+    use crate::patcher::versions::ClaudeVersion;
+    
+    // Only patch Claude CLI
+    if !matches!(cli_type, CliType::Claude) {
+        return;
+    }
+    
+    // Get version
+    let version = match get_claude_version_string_for_patch() {
+        Some(v) => ClaudeVersion::from_string(&v).unwrap_or_else(|| ClaudeVersion {
+            major: 2, minor: 1, patch: 72
+        }),
+        None => return,
+    };
+    
+    let patcher = match RuntimePatcher::new(pid) {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    
+    let features = vec![
+        FeatureType::ToolSearch,
+        FeatureType::UltraThink,
+        FeatureType::WebSearch,
+    ];
+    
+    for feature in features {
+        let patches = get_feature_patches(feature, &version);
+        let memory_patches: Vec<_> = patches
+            .iter()
+            .filter(|p| p.patch_type == PatchType::Memory)
+            .collect();
+        
+        for patch in memory_patches {
+            // Apply memory patch (non-blocking, failure doesn't affect main flow)
+            let _ = apply_memory_patch_inline(&patcher, patch, pid);
+        }
+    }
+}
+
+/// Apply a single memory patch (inline implementation)
+/// Apply a single memory patch (inline implementation)
+fn apply_memory_patch_inline(
+    patcher: &RuntimePatcher,
+    patch: &crate::patcher::types::UnifiedPatchPattern,
+    _pid: u32,
+) -> anyhow::Result<()> {
+    use std::time::Duration;
+    use std::thread;
+    
+    let retries = [
+        Duration::from_millis(100),
+        Duration::from_millis(200),
+        Duration::from_millis(500),
+    ];
+    
+    for delay in retries {
+        thread::sleep(delay);
+        
+        // Try to find and patch the pattern
+        if let Ok(Some(addr)) = patcher.search_pattern(patch.search_pattern) {
+            if let (Some(patch_byte), Some(offset)) = (patch.patch_byte, patch.patch_offset) {
+                let patch_addr = addr + offset;
+                if patcher.write_memory(patch_addr, &[patch_byte]).is_ok() {
+                    tracing::debug!("Memory patch applied: {}", patch.description);
+                    return Ok(());
+                }
+            }
+        }
+    }
+    
+    Err(anyhow::anyhow!("Memory patch failed: {}", patch.description))
+}
+
+
+fn get_claude_version_string_for_patch() -> Option<String> {
+    use std::process::Command;
+    
+    let output = Command::new("claude")
+        .arg("--version")
+        .output()
+        .ok()?;
+    
+    let version_str = String::from_utf8_lossy(&output.stdout);
+    Some(version_str.split_whitespace().next()?.to_string())
+}
 /// 
 /// Strategy:
 /// 1. For npm installation: patch the JavaScript file directly (one-time, persistent)
@@ -542,6 +634,7 @@ async fn execute_cli_internal<S: TaskStorage>(
         if matches!(cli_type, CliType::Codex) && provider_name != "official" {
             setup_codex_home_for_provider(&mut command, &provider_config);
         }
+
     }
 
     let mut child = command.spawn()?;
@@ -549,18 +642,16 @@ async fn execute_cli_internal<S: TaskStorage>(
         .id()
         .ok_or_else(|| io::Error::other("Failed to get child PID"))?;
 
-    // Apply Claude ToolSearch patch (Claude only, non-critical)
+    // Apply unified memory patches for all features (Claude only)
     if matches!(cli_type, CliType::Claude) {
-        if let Err(_e) = apply_claude_toolsearch_patch(child_pid) {
-            // Patch failed silently in interactive mode
-        }
+        apply_unified_memory_patches(child_pid, cli_type);
     }
 
     let log_path = match generate_log_path(child_pid) {
         Ok(path) => path,
         Err(err) => {
             platform::terminate_process(child_pid);
-            let _ = child.wait();
+            let _ = child.wait().await;
             return Err(err.into());
         }
     };
@@ -917,6 +1008,7 @@ fn setup_codex_home_for_provider<C>(
 
     command.set_env("CODEX_HOME", codex_home.to_str().unwrap());
 }
+
 
 /// - Logs are automatically cleaned up on system reboot
 /// - Collision-resistant filename format: {PID}-{timestamp}-{random}.log
@@ -1390,6 +1482,7 @@ pub fn start_interactive_cli<S: TaskStorage>(
         if matches!(cli_type, CliType::Codex) && provider_name != "official" {
             setup_codex_home_for_provider(&mut command, &provider_config);
         }
+
     }
 
     // Spawn the child process

@@ -4,7 +4,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.5.80-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.5.82-blue?style=flat-square)
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange?style=flat-square&logo=rust)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 
@@ -198,6 +198,63 @@ aiw wait
 # Wait for specific process
 aiw pwait <PID>
 ```
+
+## Patch Management
+
+AIW includes a unified patching framework that unlocks features restricted to official API usage, making them available with third-party providers.
+
+### Available Patches
+
+| Feature | Description | Unlock Method |
+|---------|-------------|---------------|
+| **ToolSearch** | Tool search functionality | File + Memory patch |
+| **UltraThink** | Extended thinking mode | File + Memory patch |
+| **WebSearch** | Region restriction bypass | File + Memory patch |
+
+### Patch Commands
+
+```bash
+# List all available patches
+aiw patch list
+
+# Show patch status
+aiw patch status
+
+# Apply file patches (for npm installations)
+aiw patch apply toolsearch
+aiw patch apply all
+
+# Restore patches
+aiw patch restore <feature>
+```
+
+### How Patching Works
+
+**File Patches** (npm installations):
+- Modifies Claude CLI JavaScript files on disk
+- Persists across restarts
+- Applied automatically after `aiw update`
+
+**Memory Patches** (all installations):
+- Applied at runtime when starting AI CLI
+- Works with both npm and cargo installations
+- Automatically applied every time you run `aiw claude`
+
+### Patch Strategy
+
+The patching system ensures features work with **any provider** (official or third-party):
+
+```javascript
+// Original code
+if (cL()==="firstParty") { enableFeature(); }
+
+// Patched code (always enabled)
+if (cL()!=="!irstParty") { enableFeature(); }
+```
+
+This ensures:
+- ✅ Official API (`cL()="firstParty"`): `"firstParty"!=="!irstParty"` → `true`
+- ✅ Third-party API (`cL()="glm"`): `"glm"!=="!irstParty"` → `true`
 
 ## Update
 

@@ -4,7 +4,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.5.80-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.5.82-blue?style=flat-square)
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange?style=flat-square&logo=rust)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 
@@ -198,6 +198,63 @@ aiw wait
 # 等待指定进程
 aiw pwait <PID>
 ```
+
+## 补丁管理
+
+AIW 内置统一补丁框架，解锁仅限官方 API 使用的功能，使其在第三方 Provider 上也可用。
+
+### 可用补丁
+
+| 功能 | 描述 | 解锁方式 |
+|-----|------|---------|
+| **ToolSearch** | 工具搜索功能 | 文件 + 内存补丁 |
+| **UltraThink** | 扩展思考模式 | 文件 + 内存补丁 |
+| **WebSearch** | 地区限制绕过 | 文件 + 内存补丁 |
+
+### 补丁命令
+
+```bash
+# 列出所有可用补丁
+aiw patch list
+
+# 查看补丁状态
+aiw patch status
+
+# 应用文件补丁（npm 安装）
+aiw patch apply toolsearch
+aiw patch apply all
+
+# 还原补丁
+aiw patch restore <feature>
+```
+
+### 补丁工作原理
+
+**文件补丁**（npm 安装）：
+- 修改磁盘上的 Claude CLI JavaScript 文件
+- 重启后保持
+- `aiw update` 后自动应用
+
+**内存补丁**（所有安装方式）：
+- 启动 AI CLI 时运行时应用
+- 适用于 npm 和 cargo 安装
+- 每次运行 `aiw claude` 自动应用
+
+### 补丁策略
+
+补丁系统确保功能在**任何 Provider**（官方或第三方）上都能正常工作：
+
+```javascript
+// 原始代码
+if (cL()==="firstParty") { enableFeature(); }
+
+// 补丁后（始终启用）
+if (cL()!=="!irstParty") { enableFeature(); }
+```
+
+这确保了：
+- ✅ 官方 API (`cL()="firstParty"`): `"firstParty"!=="!irstParty"` → `true`
+- ✅ 第三方 API (`cL()="glm"`): `"glm"!=="!irstParty"` → `true`
 
 ## 更新
 
