@@ -169,12 +169,27 @@ fn apply_unified_memory_patches(pid: u32, cli_type: &CliType) {
     use crate::patcher::types::{PatchType, FeatureType};
     use crate::patcher::registry::get_feature_patches;
     use crate::patcher::versions::ClaudeVersion;
+    use crate::patcher::{get_patchable_path, is_file_patched};
     
     // Only patch Claude CLI
     if !matches!(cli_type, CliType::Claude) {
         return;
     }
     
+    // 检查文件补丁是否已应用，如果已应用则跳过内存补丁
+    if let Ok(patch_path) = get_patchable_path() {
+        let version = ClaudeVersion::from_string("2.1.72").unwrap_or(ClaudeVersion { major: 2, minor: 1, patch: 72 });
+        let patches = get_feature_patches(FeatureType::ToolSearch, &version);
+        
+        let file_already_patched = patches.iter()
+            .filter(|p| p.patch_type == PatchType::File)
+            .any(|p| is_file_patched(&patch_path, p).unwrap_or(false));
+        
+        if file_already_patched {
+            // 文件补丁已应用，跳过内存补丁避免重复
+            return;
+        }
+    }
     // Get version
     let version = match get_claude_version_string_for_patch() {
         Some(v) => ClaudeVersion::from_string(&v).unwrap_or_else(|| ClaudeVersion {
@@ -209,14 +224,16 @@ fn apply_unified_memory_patches(pid: u32, cli_type: &CliType) {
 }
 
 /// Apply a single memory patch (inline implementation)
-/// Apply a single memory patch (inline implementation)
 fn apply_memory_patch_inline(
     patcher: &RuntimePatcher,
     patch: &crate::patcher::types::UnifiedPatchPattern,
-    _pid: u32,
+    pid: u32,
 ) -> anyhow::Result<()> {
     use std::time::Duration;
     use std::thread;
+
+    eprintln!("[AIW_MEM_PATCH] Applying memory patch: {}", patch.description);
+    eprintln!("[AIW_MEM_PATCH] PID: {}, Pattern: {:?}", pid, std::str::from_utf8(patch.search_pattern));
     
     let retries = [
         Duration::from_millis(100),
@@ -232,6 +249,7 @@ fn apply_memory_patch_inline(
             if let (Some(patch_byte), Some(offset)) = (patch.patch_byte, patch.patch_offset) {
                 let patch_addr = addr + offset;
                 if patcher.write_memory(patch_addr, &[patch_byte]).is_ok() {
+                    eprintln!("[AIW_MEM_PATCH] SUCCESS: Patched at {:#x}", patch_addr);
                     tracing::debug!("Memory patch applied: {}", patch.description);
                     return Ok(());
                 }
@@ -239,6 +257,7 @@ fn apply_memory_patch_inline(
         }
     }
     
+    eprintln!("[AIW_MEM_PATCH] FAILED: {}", patch.description);
     Err(anyhow::anyhow!("Memory patch failed: {}", patch.description))
 }
 

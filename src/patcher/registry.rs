@@ -54,10 +54,10 @@ fn get_toolsearch_patches(version: &ClaudeVersion) -> Vec<UnifiedPatchPattern> {
             UnifiedPatchPattern {
                 feature: FeatureType::ToolSearch,
                 patch_type: PatchType::Memory,
-                search_pattern: b"cL()==\"firstParty\"",
+                search_pattern: b"cL()===\"firstParty\"",
                 replace_pattern: None,
                 patch_byte: Some(b'!'),
-                patch_offset: Some(6),
+                patch_offset: Some(7),  // 三等号时偏移是 7
                 description: "ToolSearch memory patch: Invert === to !==",
             },
             UnifiedPatchPattern {
@@ -101,24 +101,10 @@ fn get_agentteams_patches(_version: &ClaudeVersion) -> Vec<UnifiedPatchPattern> 
 
 /// WebSearch 补丁模式
 ///
-/// 注意: WebSearch 的地区限制是通过服务器端或其他逻辑判断的
-/// 修改描述文本不能真正启用功能，所以只保留内存补丁用于监控
-fn get_websearch_patches(version: &ClaudeVersion) -> Vec<UnifiedPatchPattern> {
-    match (version.major, version.minor, version.patch) {
-        (2, 1, 72..) => vec![
-            // 内存补丁: 仅用于监控，实际地区限制由其他逻辑控制
-            UnifiedPatchPattern {
-                feature: FeatureType::WebSearch,
-                patch_type: PatchType::Memory,
-                search_pattern: b"getTimezoneOffset()>300",
-                replace_pattern: Some(b"getTimezoneOffset()<=300"),
-                patch_byte: None,
-                patch_offset: None,
-                description: "WebSearch: Bypass timezone-based region check",
-            },
-        ],
-        _ => vec![],
-    }
+/// 注意: WebSearch 的地区限制通过 cL() === "firstParty" 检查，已被 ToolSearch 补丁覆盖
+/// ELF 中不存在 getTimezoneOffset()>300 模式，无需内存补丁
+fn get_websearch_patches(_version: &ClaudeVersion) -> Vec<UnifiedPatchPattern> {
+    vec![]
 }
 
 /// 持久代理内存补丁模式

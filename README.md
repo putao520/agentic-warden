@@ -4,7 +4,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.5.82-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.5.85-blue?style=flat-square)
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange?style=flat-square&logo=rust)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 
@@ -97,11 +97,35 @@ aiw claude -p glm "use web search to find latest Rust news"
 aiw claude -p openrouter "search for documentation"
 ```
 
-**How it works**: AIW applies a runtime patch to the Claude process, changing `if(O8()==="firstParty"&&!JB())` to `if(O8()!=="firstParty"&&!JB())`, enabling Tool Search for third-party providers.
+**How it works**: AIW applies a runtime patch to the Claude process, changing `cL()==="firstParty"` to `cL()!=="!irstParty"`, enabling Tool Search for third-party providers.
 
-- Works on Linux/macOS/Windows
-- Non-destructive: only affects running process, no system files modified
-- Automatic retry with increasing delays (up to 5 attempts)
+### Patch Management (File & Runtime)
+
+AIW supports both persistent file patches and runtime memory patches:
+
+```bash
+# View patch status
+aiw patch status
+
+# Apply file patches (persistent, recommended)
+aiw patch apply
+
+# Restore patches
+aiw patch restore
+```
+
+**Patch Types**:
+- **File Patch**: Modifies the Claude CLI binary on disk (persistent across restarts)
+- **Memory Patch**: Applied at runtime when file is unpatched (automatic)
+
+**Supported Installations**:
+- Native binary (ELF/Mach-O): `~/.local/bin/claude`
+- npm installation: `npm install -g @anthropic-ai/claude-code`
+
+**What Gets Unlocked**:
+- ToolSearch (web search functionality)
+- UltraThink (extended thinking modes)
+- WebSearch (region restrictions bypassed)
 
 ### Auto Mode (Automatic Failover)
 
