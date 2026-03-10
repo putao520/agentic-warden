@@ -237,36 +237,8 @@ aiw patch apply toolsearch
 aiw patch apply all
 
 # Restore patches
-aiw patch restore <feature>
+aiw patch restore
 ```
-
-### How Patching Works
-
-**File Patches** (npm installations):
-- Modifies Claude CLI JavaScript files on disk
-- Persists across restarts
-- Applied automatically after `aiw update`
-
-**Memory Patches** (all installations):
-- Applied at runtime when starting AI CLI
-- Works with both npm and cargo installations
-- Automatically applied every time you run `aiw claude`
-
-### Patch Strategy
-
-The patching system ensures features work with **any provider** (official or third-party):
-
-```javascript
-// Original code
-if (cL()==="firstParty") { enableFeature(); }
-
-// Patched code (always enabled)
-if (cL()!=="!irstParty") { enableFeature(); }
-```
-
-This ensures:
-- ✅ Official API (`cL()="firstParty"`): `"firstParty"!=="!irstParty"` → `true`
-- ✅ Third-party API (`cL()="glm"`): `"glm"!=="!irstParty"` → `true`
 
 ## Update
 
