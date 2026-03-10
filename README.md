@@ -115,11 +115,6 @@ aiw patch restore
 - UltraThink (extended thinking modes)
 - WebSearch (region restrictions bypassed)
 
-**How it works**:
-- File patches use 19-byte equal-length replacement: `cL()==="firstParty"` → `true/*           */`
-- Memory patches use 2-strategy: `=== → !==` and `"firstParty"` → `"!irstParty"`
-- When file is patched, memory patches are skipped to avoid duplication
-
 ### Auto Mode (Automatic Failover)
 
 ```bash
