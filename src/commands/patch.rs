@@ -3,7 +3,8 @@
 //! 提供文件补丁的管理功能：列表、应用、状态查询、还原
 
 use crate::patcher::{
-    get_claude_js_path, is_file_patched, apply_file_patch,
+    get_patchable_path, detect_installation, is_file_patched, apply_file_patch,
+    restore_from_backup, InstallationType,
     types::{FeatureType, PatchType},
     registry::get_feature_patches,
     versions::ClaudeVersion,
@@ -85,9 +86,15 @@ fn execute_apply_patch(feature_name: &str) -> Result<()> {
         vec![parse_feature_type(feature_name)?]
     };
 
-    // 获取 Claude CLI 文件路径
-    let js_path = get_claude_js_path()?;
-    println!("📂 Claude CLI 文件: {}", js_path.display());
+    // 获取可补丁的文件路径
+    let patch_path = get_patchable_path()?;
+    let install_type = detect_installation().ok();
+    let type_label = match &install_type {
+        Some(InstallationType::Npm { .. }) => "npm (JS)",
+        Some(InstallationType::NativeBinary { .. }) => "NativeBinary",
+        _ => "Unknown",
+    };
+    println!("📂 Claude CLI 文件: {} ({})", patch_path.display(), type_label);
 
     for feature in features {
         println!("🔧 应用补丁: {}", feature.description());
@@ -104,7 +111,7 @@ fn execute_apply_patch(feature_name: &str) -> Result<()> {
         }
 
         for patch in file_patches {
-            match apply_file_patch(&js_path, patch) {
+            match apply_file_patch(&patch_path, patch) {
                 Ok(_) => println!("   ✅ {}", patch.description),
                 Err(e) => {
                     println!("   ❌ 失败: {}", e);
@@ -132,20 +139,27 @@ fn execute_patch_status(feature_name: &Option<String>) {
         ]
     };
 
-    // 获取 Claude CLI 文件路径
-    let js_path = match get_claude_js_path() {
+    // 获取可补丁的文件路径
+    let patch_path = match get_patchable_path() {
         Ok(path) => path,
         Err(_) => {
-            println!("⚠️  未找到 npm 安装的 Claude CLI");
-            println!("   文件补丁仅适用于 npm 安装版本");
-            println!("   cargo 安装版本会自动使用内存补丁");
+            println!("⚠️  未找到可补丁的 Claude CLI");
+            println!("   支持 npm 安装和本地二进制安装");
             return;
         }
     };
 
+    let install_type = detect_installation().ok();
+    let type_label = match &install_type {
+        Some(InstallationType::Npm { .. }) => "npm (JS)",
+        Some(InstallationType::NativeBinary { .. }) => "NativeBinary",
+        _ => "Unknown",
+    };
+
     println!("📊 补丁状态:");
     println!("   Claude 版本: {}", format_version(&version));
-    println!("   文件: {}", js_path.display());
+    println!("   安装类型: {}", type_label);
+    println!("   文件: {}", patch_path.display());
     println!();
 
     for feature in features {
@@ -163,7 +177,7 @@ fn execute_patch_status(feature_name: &Option<String>) {
         }
 
         for patch in file_patches {
-            match is_file_patched(&js_path, patch) {
+            match is_file_patched(&patch_path, patch) {
                 Ok(true) => println!("     ✅ 已补丁: {}", patch.description),
                 Ok(false) => println!("     ❌ 未补丁: {}", patch.description),
                 Err(e) => println!("     ⚠️  检查失败: {}", e),
@@ -174,9 +188,26 @@ fn execute_patch_status(feature_name: &Option<String>) {
 
 /// 还原文件补丁
 fn execute_restore_patch(feature_name: &str) -> Result<()> {
-    println!("⚠️  还原功能尚未实现");
-    println!("   如需还原，请重新安装 Claude CLI:");
-    println!("   npm install -g @anthropic-ai/claude-code");
+    let patch_path = get_patchable_path()?;
+    let install_type = detect_installation().ok();
+
+    match &install_type {
+        Some(InstallationType::NativeBinary { .. }) => {
+            // 从备份恢复
+            println!("🔄 从备份恢复 NativeBinary...");
+            match restore_from_backup(&patch_path) {
+                Ok(()) => println!("✅ 已从备份恢复: {}", patch_path.display()),
+                Err(e) => println!("❌ 恢复失败: {}", e),
+            }
+        }
+        Some(InstallationType::Npm { .. }) => {
+            println!("ℹ️  npm 安装版本请重新安装以还原:");
+            println!("   npm install -g @anthropic-ai/claude-code");
+        }
+        _ => {
+            println!("⚠️  无法识别安装类型，无法还原");
+        }
+    }
     Ok(())
 }
 

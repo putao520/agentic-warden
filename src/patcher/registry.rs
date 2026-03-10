@@ -47,6 +47,16 @@ fn get_toolsearch_patches(version: &ClaudeVersion) -> Vec<UnifiedPatchPattern> {
                 patch_offset: None,
                 description: "ToolSearch file patch: Replace condition with true (always enable)",
             },
+            // NativeBinary 文件补丁：三等号 + 等长替换（19字节）
+            UnifiedPatchPattern {
+                feature: FeatureType::ToolSearch,
+                patch_type: PatchType::File,
+                search_pattern: b"cL()===\"firstParty\"",
+                replace_pattern: Some(b"true/*           */"),
+                patch_byte: None,
+                patch_offset: None,
+                description: "ToolSearch file patch (native binary): Equal-length replacement",
+            },
             // 内存补丁：双重策略
             // 1. 将 === 改为 !== (反转比较)
             // 2. 将 "firstParty" 改为 "!irstParty" (修改第一个字符)
@@ -120,6 +130,16 @@ fn get_toolsearch_patches(version: &ClaudeVersion) -> Vec<UnifiedPatchPattern> {
                 patch_offset: None,
                 description: "ToolSearch unlock (O8, unknown version): Replace with true",
             },
+            // NativeBinary 等长补丁
+            UnifiedPatchPattern {
+                feature: FeatureType::ToolSearch,
+                patch_type: PatchType::File,
+                search_pattern: b"cL()===\"firstParty\"",
+                replace_pattern: Some(b"true/*           */"),
+                patch_byte: None,
+                patch_offset: None,
+                description: "ToolSearch unlock (cL native, unknown version): Equal-length replacement",
+            },
         ],
     }
 }
@@ -141,6 +161,16 @@ fn get_ultrathink_patches(version: &ClaudeVersion) -> Vec<UnifiedPatchPattern> {
                 patch_byte: None,
                 patch_offset: None,
                 description: "UltraThink file patch: Always return true",
+            },
+            // NativeBinary 文件补丁：三等号 + 等长替换（26字节）
+            UnifiedPatchPattern {
+                feature: FeatureType::UltraThink,
+                patch_type: PatchType::File,
+                search_pattern: b"return cL()===\"firstParty\"",
+                replace_pattern: Some(b"return true/*           */"),
+                patch_byte: None,
+                patch_offset: None,
+                description: "UltraThink file patch (native binary): Equal-length replacement",
             },
             // 内存补丁：反转条件 + 修改字符串
             UnifiedPatchPattern {
@@ -176,6 +206,16 @@ fn get_websearch_patches(version: &ClaudeVersion) -> Vec<UnifiedPatchPattern> {
                 patch_byte: None,
                 patch_offset: None,
                 description: "WebSearch: Remove US-only restriction from description",
+            },
+            // NativeBinary 文件补丁：等长替换（38字节）
+            UnifiedPatchPattern {
+                feature: FeatureType::WebSearch,
+                patch_type: PatchType::File,
+                search_pattern: b"Web search is only available in the US",
+                replace_pattern: Some(b"Web search is available in all regions"),
+                patch_byte: None,
+                patch_offset: None,
+                description: "WebSearch file patch (native binary): Equal-length replacement",
             },
             // 内存补丁: 同样的修改（如果在内存中）
             UnifiedPatchPattern {

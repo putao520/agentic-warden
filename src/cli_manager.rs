@@ -580,15 +580,15 @@ async fn update_aiw() -> Result<bool> {
 
 /// Apply automatic file patches after update
 fn apply_auto_patches() -> anyhow::Result<()> {
-    use crate::patcher::{get_claude_js_path, apply_file_patch};
+    use crate::patcher::{get_patchable_path, apply_file_patch};
     use crate::patcher::types::{FeatureType, PatchType};
     use crate::patcher::registry::get_feature_patches;
     use crate::patcher::versions::ClaudeVersion;
     
-    let js_path = match get_claude_js_path() {
+    let patch_path = match get_patchable_path() {
         Ok(p) => p,
         Err(_) => {
-            // Not an npm installation, skip file patching
+            // 无法识别安装类型，跳过文件补丁
             return Ok(());
         }
     };
@@ -610,7 +610,7 @@ fn apply_auto_patches() -> anyhow::Result<()> {
     for feature in features {
         let patches = get_feature_patches(feature, &version);
         for patch in patches.iter().filter(|p| p.patch_type == PatchType::File) {
-            let _ = apply_file_patch(&js_path, patch); // Silent failure
+            let _ = apply_file_patch(&patch_path, patch); // Silent failure
         }
     }
     

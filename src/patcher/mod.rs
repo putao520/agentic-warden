@@ -31,4 +31,4 @@ pub use types::{
     UnifiedPatchError, Result as PatchResultType,
 };
 pub use registry::get_feature_patches;
-pub use file::{apply_file_patch, is_file_patched, get_claude_cli_path, get_claude_js_path};
+pub use file::{apply_file_patch, is_file_patched, get_claude_cli_path, get_claude_js_path, InstallationType, detect_installation, get_patchable_path, restore_from_backup};
