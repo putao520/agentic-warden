@@ -87,21 +87,9 @@ aiw auto -p auto "implement feature"  # Auto CLI + auto provider
 # Provider config: ~/.aiw/providers.json
 ```
 
-### Tool Search Unlock
-
-When using third-party API providers (non-Anthropic official), Claude's Tool Search feature is disabled by default. AIW automatically unlocks this feature via runtime memory patch.
-
-```bash
-# Tool Search is automatically enabled when using third-party providers
-aiw claude -p glm "use web search to find latest Rust news"
-aiw claude -p openrouter "search for documentation"
-```
-
-**How it works**: AIW applies a runtime patch to the Claude process, changing `cL()==="firstParty"` to `cL()!=="!irstParty"`, enabling Tool Search for third-party providers.
-
 ### Patch Management (File & Runtime)
 
-AIW supports both persistent file patches and runtime memory patches:
+AIW supports both persistent file patches and runtime memory patches to unlock Claude features:
 
 ```bash
 # View patch status
@@ -126,6 +114,11 @@ aiw patch restore
 - ToolSearch (web search functionality)
 - UltraThink (extended thinking modes)
 - WebSearch (region restrictions bypassed)
+
+**How it works**:
+- File patches use 19-byte equal-length replacement: `cL()==="firstParty"` → `true/*           */`
+- Memory patches use 2-strategy: `=== → !==` and `"firstParty"` → `"!irstParty"`
+- When file is patched, memory patches are skipped to avoid duplication
 
 ### Auto Mode (Automatic Failover)
 
