@@ -43,30 +43,14 @@ pub enum RolesAction {
 /// 补丁管理动作
 #[derive(Subcommand, Debug, Clone)]
 pub enum PatchAction {
-    /// 列出所有可用的补丁
-    List {
-        /// 显示详细信息
-        #[arg(long)]
-        verbose: bool,
-    },
-
-    /// 应用文件补丁
-    Apply {
-        /// 功能名称 (toolsearch|ultrathink|websearch|all)
-        feature: String,
-    },
+    /// 应用文件补丁（解锁所有功能）
+    Apply,
 
     /// 查看补丁状态
-    Status {
-        /// 功能名称 (可选，不指定则显示所有)
-        feature: Option<String>,
-    },
+    Status,
 
     /// 还原文件补丁
-    Restore {
-        /// 功能名称 (toolsearch|ultrathink|websearch|all)
-        feature: String,
-    },
+    Restore,
 }
 
 /// 配置管理动作

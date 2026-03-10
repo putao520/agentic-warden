@@ -37,16 +37,6 @@ fn get_toolsearch_patches(version: &ClaudeVersion) -> Vec<UnifiedPatchPattern> {
     match (version.major, version.minor, version.patch) {
         // 2.1.72+: cL 函数
         (2, 1, 72..) => vec![
-            // 文件补丁：将整个条件替换为 true
-            UnifiedPatchPattern {
-                feature: FeatureType::ToolSearch,
-                patch_type: PatchType::File,
-                search_pattern: b"cL()==\"firstParty\"",
-                replace_pattern: Some(b"true".as_slice()),
-                patch_byte: None,
-                patch_offset: None,
-                description: "ToolSearch file patch: Replace condition with true (always enable)",
-            },
             // NativeBinary 文件补丁：三等号 + 等长替换（19字节）
             UnifiedPatchPattern {
                 feature: FeatureType::ToolSearch,
@@ -80,57 +70,8 @@ fn get_toolsearch_patches(version: &ClaudeVersion) -> Vec<UnifiedPatchPattern> {
                 description: "ToolSearch memory patch: Modify 'firstParty' to '!irstParty'",
             },
         ],
-        // 2.1.71 及之前: O8 函数
-        (2, 0..=1, 0..=71) => vec![
-            UnifiedPatchPattern {
-                feature: FeatureType::ToolSearch,
-                patch_type: PatchType::File,
-                search_pattern: b"O8()==\"firstParty\"",
-                replace_pattern: Some(b"true".as_slice()),
-                patch_byte: None,
-                patch_offset: None,
-                description: "ToolSearch file patch (O8): Replace with true",
-            },
-            UnifiedPatchPattern {
-                feature: FeatureType::ToolSearch,
-                patch_type: PatchType::Memory,
-                search_pattern: b"O8()==\"firstParty\"",
-                replace_pattern: None,
-                patch_byte: Some(b'!'),
-                patch_offset: Some(6),
-                description: "ToolSearch memory patch (O8): Invert === to !==",
-            },
-            UnifiedPatchPattern {
-                feature: FeatureType::ToolSearch,
-                patch_type: PatchType::Memory,
-                search_pattern: b"firstParty",
-                replace_pattern: None,
-                patch_byte: Some(b'!'),
-                patch_offset: Some(0),
-                description: "ToolSearch memory patch (O8): Modify firstParty string",
-            },
-        ],
-        // 未知版本 - 返回常用模式
+        // 未知版本 - 只保留 NativeBinary 等长补丁
         _ => vec![
-            UnifiedPatchPattern {
-                feature: FeatureType::ToolSearch,
-                patch_type: PatchType::File,
-                search_pattern: b"cL()==\"firstParty\"",
-                replace_pattern: Some(b"true".as_slice()),
-                patch_byte: None,
-                patch_offset: None,
-                description: "ToolSearch unlock (cL, unknown version): Replace with true",
-            },
-            UnifiedPatchPattern {
-                feature: FeatureType::ToolSearch,
-                patch_type: PatchType::File,
-                search_pattern: b"O8()==\"firstParty\"",
-                replace_pattern: Some(b"true".as_slice()),
-                patch_byte: None,
-                patch_offset: None,
-                description: "ToolSearch unlock (O8, unknown version): Replace with true",
-            },
-            // NativeBinary 等长补丁
             UnifiedPatchPattern {
                 feature: FeatureType::ToolSearch,
                 patch_type: PatchType::File,
@@ -146,45 +87,10 @@ fn get_toolsearch_patches(version: &ClaudeVersion) -> Vec<UnifiedPatchPattern> {
 
 /// UltraThink 补丁模式
 ///
-/// 修复策略：同样使用始终启用的方法
-fn get_ultrathink_patches(version: &ClaudeVersion) -> Vec<UnifiedPatchPattern> {
-    match (version.major, version.minor, version.patch) {
-        (2, 1, 72..) => vec![
-            // UltraThink wS() 函数中的 firstParty 检查
-            // 原始：return cL()==="firstParty"
-            // 文件补丁：直接返回 true
-            UnifiedPatchPattern {
-                feature: FeatureType::UltraThink,
-                patch_type: PatchType::File,
-                search_pattern: b"return cL()==\"firstParty\"",
-                replace_pattern: Some(b"return true".as_slice()),
-                patch_byte: None,
-                patch_offset: None,
-                description: "UltraThink file patch: Always return true",
-            },
-            // NativeBinary 文件补丁：三等号 + 等长替换（26字节）
-            UnifiedPatchPattern {
-                feature: FeatureType::UltraThink,
-                patch_type: PatchType::File,
-                search_pattern: b"return cL()===\"firstParty\"",
-                replace_pattern: Some(b"return true/*           */"),
-                patch_byte: None,
-                patch_offset: None,
-                description: "UltraThink file patch (native binary): Equal-length replacement",
-            },
-            // 内存补丁：反转条件 + 修改字符串
-            UnifiedPatchPattern {
-                feature: FeatureType::UltraThink,
-                patch_type: PatchType::Memory,
-                search_pattern: b"return cL()===\"firstParty\"",
-                replace_pattern: None,
-                patch_byte: Some(b'!'),
-                patch_offset: Some(14),
-                description: "UltraThink memory patch: Invert === to !==",
-            },
-        ],
-        _ => vec![],
-    }
+/// 注意：UltraThink 通过 ToolSearch 补丁已启用（cL()==="firstParty" 被替换为 true）
+/// 不需要单独的补丁，因此返回空向量
+fn get_ultrathink_patches(_version: &ClaudeVersion) -> Vec<UnifiedPatchPattern> {
+    vec![]
 }
 
 /// AgentTeams 补丁模式
@@ -194,40 +100,13 @@ fn get_agentteams_patches(_version: &ClaudeVersion) -> Vec<UnifiedPatchPattern> 
 }
 
 /// WebSearch 补丁模式
+///
+/// 注意: WebSearch 的地区限制是通过服务器端或其他逻辑判断的
+/// 修改描述文本不能真正启用功能，所以只保留内存补丁用于监控
 fn get_websearch_patches(version: &ClaudeVersion) -> Vec<UnifiedPatchPattern> {
     match (version.major, version.minor, version.patch) {
         (2, 1, 72..) => vec![
-            // 文件补丁: 修改描述文本，移除 "only available in the US"
-            UnifiedPatchPattern {
-                feature: FeatureType::WebSearch,
-                patch_type: PatchType::File,
-                search_pattern: b"Web search is only available in the US",
-                replace_pattern: Some(b"Web search is available globally"),
-                patch_byte: None,
-                patch_offset: None,
-                description: "WebSearch: Remove US-only restriction from description",
-            },
-            // NativeBinary 文件补丁：等长替换（38字节）
-            UnifiedPatchPattern {
-                feature: FeatureType::WebSearch,
-                patch_type: PatchType::File,
-                search_pattern: b"Web search is only available in the US",
-                replace_pattern: Some(b"Web search is available in all regions"),
-                patch_byte: None,
-                patch_offset: None,
-                description: "WebSearch file patch (native binary): Equal-length replacement",
-            },
-            // 内存补丁: 同样的修改（如果在内存中）
-            UnifiedPatchPattern {
-                feature: FeatureType::WebSearch,
-                patch_type: PatchType::Memory,
-                search_pattern: b"Web search is only available in the US",
-                replace_pattern: None,
-                patch_byte: Some(b'g'), // 将 'U' 改为 'g' (global)
-                patch_offset: Some(28), // "Web search is only available in the US" 中 'U' 的位置
-                description: "WebSearch: Memory patch for US-only restriction",
-            },
-            // 额外的补丁: 寻找可能的地区检测函数
+            // 内存补丁: 仅用于监控，实际地区限制由其他逻辑控制
             UnifiedPatchPattern {
                 feature: FeatureType::WebSearch,
                 patch_type: PatchType::Memory,
@@ -260,6 +139,7 @@ fn get_persistent_memory_patches(version: &ClaudeVersion) -> Vec<UnifiedPatchPat
     }
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -271,30 +151,15 @@ mod tests {
         assert!(!patches.is_empty());
         assert_eq!(patches[0].feature, FeatureType::ToolSearch);
         
-        // 验证文件补丁使用 true 而非反转条件
+        // 验证文件补丁使用等长替换
         let file_patch = patches.iter().find(|p| p.patch_type == PatchType::File).unwrap();
-        assert_eq!(file_patch.replace_pattern, Some(b"true".as_slice()));
-    }
-
-    #[test]
-    fn test_old_version_patches() {
-        let version = ClaudeVersion { major: 2, minor: 1, patch: 70 };
-        let patches = get_toolsearch_patches(&version);
-        assert!(!patches.is_empty());
-        // Old version uses O8 function
-        assert!(patches.iter().any(|p| {
-            String::from_utf8_lossy(p.search_pattern).contains("O8")
-        }));
+        assert_eq!(file_patch.replace_pattern, Some(b"true/*           */".as_slice()));
     }
 
     #[test]
     fn test_ultrathink_patches() {
         let version = ClaudeVersion { major: 2, minor: 1, patch: 72 };
         let patches = get_ultrathink_patches(&version);
-        assert!(!patches.is_empty());
-        
-        // 验证文件补丁返回 true
-        let file_patch = patches.iter().find(|p| p.patch_type == PatchType::File).unwrap();
-        assert_eq!(file_patch.replace_pattern, Some(b"return true".as_slice()));
+        assert!(patches.is_empty());  // UltraThink 现在通过 ToolSearch 启用，无独立补丁
     }
 }
