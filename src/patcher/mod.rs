@@ -4,6 +4,7 @@
 //! 提供跨平台的内存补丁接口，支持 Linux、macOS 和 Windows。
 
 pub mod error;
+pub mod versions;
 pub mod platform;
 mod runtime;
 
