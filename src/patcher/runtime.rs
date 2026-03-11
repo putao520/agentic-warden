@@ -5,7 +5,7 @@
 
 use crate::patcher::error::{PatchError, PatchResult};
 use crate::patcher::platform::{MemoryPatcher, PlatformMemoryPatcher};
-use crate::patcher::versions::{ClaudeVersion, detect_patch_pattern, get_patch_pattern};
+use crate::patcher::versions::{ClaudeVersion, VersionSignature};
 use tracing::{debug, info, trace};
 
 /// Claude CLI firstParty 补丁
@@ -148,7 +148,7 @@ impl RuntimePatcher {
     /// 将 `XXX()==="firstParty"` 改为 `XXX()!=="firstParty"`
     ///
     /// 由于代码混淆，函数名可能会变化（如 O8, cL 等）
-    /// 因此我们动态搜索 `()==="firstParty"` 模式
+    /// 因此我们通过版本签名数据库查找对应模式
     ///
     /// # 返回
     /// 成功时返回补丁应用的地址，失败返回错误
@@ -168,40 +168,30 @@ impl RuntimePatcher {
             readable_regions.len()
         );
 
-        // 尝试获取 Claude 版本并获取对应模式
-        // 如果版本检测失败，使用动态检测列表
-        let patterns = if let Ok(version_str) = self.get_claude_version() {
+        // 尝试获取 Claude 版本并获取对应签名
+        let version = if let Ok(version_str) = self.get_claude_version() {
             debug!("Detected Claude version: {}", version_str);
-            if let Some(version) = ClaudeVersion::from_string(&version_str) {
-                if let Some(pattern) = get_patch_pattern(&version) {
-                    debug!("Using known pattern for version: {} (function: {})", 
-                           version_str, pattern.function_name);
-                    vec![pattern]
-                } else {
-                    debug!("Unknown version, using detection list");
-                    detect_patch_pattern()
-                }
-            } else {
-                debug!("Failed to parse version, using detection list");
-                detect_patch_pattern()
-            }
+            ClaudeVersion::from_string(&version_str)
         } else {
-            debug!("Failed to detect version, trying all known patterns");
-            detect_patch_pattern()
+            debug!("Failed to detect version");
+            None
         };
 
-        // 尝试每个模式
-        for pattern in &patterns {
-            debug!("Trying pattern with function: {}", pattern.function_name);
-            match self.try_pattern(&readable_regions, pattern) {
+        let signature = version.as_ref().and_then(|v| v.signature());
+
+        if let Some(sig) = signature {
+            debug!("Using known signature for function: {}", sig.fn_name);
+            match self.try_pattern(&readable_regions, sig) {
                 Ok(addr) => {
-                    info!("✅ Claude firstParty unlocked (using {} function)", pattern.function_name);
+                    info!("✅ Claude firstParty unlocked (using {} function)", sig.fn_name);
                     return Ok(addr);
                 }
                 Err(_) => {
-                    continue;
+                    debug!("Known signature failed, no fallback available");
                 }
             }
+        } else {
+            debug!("No signature available for this version");
         }
 
         Err(PatchError::PatternNotFound {
@@ -291,11 +281,11 @@ impl RuntimePatcher {
         Ok(version)
     }
 
-    /// 尝试使用指定的模式进行补丁
+    /// 尝试使用指定的版本签名进行补丁
     fn try_pattern(
         &self,
         regions: &[&crate::patcher::platform::MemoryRegion],
-        pattern: &super::versions::PatchPattern,
+        sig: &VersionSignature,
     ) -> PatchResult<usize> {
         for region in regions {
             trace!(
@@ -305,10 +295,10 @@ impl RuntimePatcher {
                 region.end.saturating_sub(region.start),
             );
 
-            match self.search_pattern_in_region(region, pattern.short_pattern) {
+            match self.search_pattern_in_region(region, sig.mem_search) {
                 Ok(Some(pattern_addr)) => {
-                    // 计算第三个 = 的位置
-                    let patch_addr = pattern_addr + pattern.equals_offset;
+                    // 计算补丁位置
+                    let patch_addr = pattern_addr + sig.mem_patch_offset;
 
                     // 验证这个位置确实是 =
                     let mut verify_buf = [0u8; 1];
@@ -321,10 +311,10 @@ impl RuntimePatcher {
                         });
                     }
 
-                    debug!("Patching at {:x} (using {})", patch_addr, pattern.function_name);
+                    debug!("Patching at {:x} (using {})", patch_addr, sig.fn_name);
 
-                    // 应用补丁：将第三个 = 改为 !
-                    self.apply_byte_patch(patch_addr, PATCH_BYTE_EXCLAMATION)?;
+                    // 应用补丁：将 = 改为 !
+                    self.apply_byte_patch(patch_addr, sig.mem_patch_byte)?;
 
                     return Ok(patch_addr);
                 }
@@ -334,7 +324,7 @@ impl RuntimePatcher {
         }
 
         Err(PatchError::PatternNotFound {
-            pattern: String::from_utf8_lossy(pattern.short_pattern).to_string(),
+            pattern: String::from_utf8_lossy(sig.mem_search).to_string(),
             hint: Some("Pattern not found in any readable region".to_string()),
         })
     }

@@ -547,10 +547,8 @@ pub async fn execute_enhanced_update() -> Result<(bool, Vec<(String, bool, Strin
     }
 
 
-    // Apply auto file patches after successful updates
-    if let Err(e) = apply_auto_patches() {
-        eprintln!("⚠️  Auto patching failed: {}", e);
-    }
+    // Check patch compatibility after update (do NOT auto-apply)
+    check_patch_compatibility();
     Ok((aiw_updated, cli_results))
 }
 
@@ -578,46 +576,28 @@ async fn update_aiw() -> Result<bool> {
 }
 
 
-/// Apply automatic file patches after update
-fn apply_auto_patches() -> anyhow::Result<()> {
-    use crate::patcher::{get_patchable_path, apply_file_patch};
-    use crate::patcher::types::{FeatureType, PatchType};
-    use crate::patcher::registry::get_feature_patches;
+
+/// Check patch compatibility after update and show hint
+fn check_patch_compatibility() {
     use crate::patcher::versions::ClaudeVersion;
-    
-    let patch_path = match get_patchable_path() {
-        Ok(p) => p,
-        Err(_) => {
-            // 无法识别安装类型，跳过文件补丁
-            return Ok(());
-        }
-    };
-    
+
     let version = match get_claude_version_from_string() {
         Ok(v) => v,
-        Err(_) => {
-            // Could not get version, use default
-            ClaudeVersion { major: 2, minor: 1, patch: 72 }
-        }
+        Err(_) => return,
     };
-    
-    let features = vec![
-        FeatureType::ToolSearch,
-        FeatureType::UltraThink,
-        FeatureType::WebSearch,
-    ];
-    
-    for feature in features {
-        let patches = get_feature_patches(feature, &version);
-        for patch in patches.iter().filter(|p| p.patch_type == PatchType::File) {
-            let _ = apply_file_patch(&patch_path, patch); // Silent failure
-        }
-    }
-    
-    Ok(())
-}
 
-/// Get Claude version string
+    if version.is_supported() {
+        println!("\n💡 Claude CLI {}.{}.{} is in supported versions ({}).",
+            version.major, version.minor, version.patch,
+            ClaudeVersion::supported_versions_str());
+        println!("   Run `aiw patch apply` to apply patches, or `aiw patch status` to check.");
+    } else {
+        println!("\n⚠️  Claude CLI {}.{}.{} is not in supported versions ({}).",
+            version.major, version.minor, version.patch,
+            ClaudeVersion::supported_versions_str());
+        println!("   Patches are NOT applied. Wait for AIW update to support this version.");
+    }
+}
 fn get_claude_version_from_string() -> anyhow::Result<ClaudeVersion> {
     use std::process::Command;
     

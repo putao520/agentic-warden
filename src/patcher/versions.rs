@@ -1,9 +1,30 @@
-//! Claude CLI 版本相关补丁配置
+//! Claude CLI version signature database
 //!
-//! 由于代码混淆，每个版本的函数名可能不同。
-//! 此模块维护版本到补丁模式的映射。
+//! Each verified version has its patch signatures stored here.
+//! Add new versions ONLY after verifying the patch patterns work.
 
-/// Claude CLI 版本信息
+/// Patch signatures for a specific Claude CLI version
+#[derive(Debug, Clone)]
+pub struct VersionSignature {
+    /// The function name used in firstParty check (e.g. "cL", "O8")
+    pub fn_name: &'static str,
+    /// File patch: search pattern
+    pub file_search: &'static [u8],
+    /// File patch: replace pattern (must be same length as file_search)
+    pub file_replace: &'static [u8],
+    /// Memory patch: search pattern for operator inversion
+    pub mem_search: &'static [u8],
+    /// Memory patch: byte to write for operator inversion
+    pub mem_patch_byte: u8,
+    /// Memory patch: offset within mem_search to patch
+    pub mem_patch_offset: usize,
+    /// Memory patch: search pattern for string mutation
+    pub mem_str_search: &'static [u8],
+    /// Memory patch: replacement byte for first char of string
+    pub mem_str_patch_byte: u8,
+}
+
+/// Claude CLI version
 #[derive(Debug, Clone)]
 pub struct ClaudeVersion {
     pub major: u32,
@@ -11,9 +32,14 @@ pub struct ClaudeVersion {
     pub patch: u32,
 }
 
+impl std::fmt::Display for ClaudeVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}.{}", self.major, self.minor, self.patch)
+    }
+}
+
 impl ClaudeVersion {
     pub fn from_string(s: &str) -> Option<Self> {
-        // 格式: "2.1.72" 或类似
         let parts: Vec<&str> = s.split('.').collect();
         if parts.len() >= 3 {
             let major = parts[0].parse().ok()?;
@@ -24,70 +50,49 @@ impl ClaudeVersion {
             None
         }
     }
-}
 
-/// 补丁模式配置
-#[derive(Debug, Clone)]
-pub struct PatchPattern {
-    /// 函数名（可能是混淆后的，如 "O8", "cL" 等）
-    pub function_name: &'static str,
-    /// 完整模式: `function_name()==="firstParty"`
-    pub full_pattern: &'static [u8],
-    /// 短模式: `function_name()==="firstParty"&&(`
-    pub short_pattern: &'static [u8],
-    /// 在模式中第三个 `=` 的偏移位置
-    pub equals_offset: usize,
-}
+    /// Look up the signature for this version
+    pub fn signature(&self) -> Option<&'static VersionSignature> {
+        get_signature(self.major, self.minor, self.patch)
+    }
 
-/// 版本到补丁模式的映射
-///
-/// | Claude 版本 | 函数名 | 状态 |
-/// |-------------|--------|------|
-/// | <= 2.1.71   | O8     | 已弃用 |
-/// | 2.1.72+     | cL     | 当前 |
-/// | 未来版本    | 未知   | 需检测 |
-pub fn get_patch_pattern(version: &ClaudeVersion) -> Option<PatchPattern> {
-    match (version.major, version.minor, version.patch) {
-        // 2.1.72 及以后: 使用 cL 函数
-        (2, 1, 72..) => Some(PatchPattern {
-            function_name: "cL",
-            full_pattern: b"cL()===\"firstParty\"",
-            short_pattern: b"cL()===\"firstParty\"",
-            equals_offset: 6, // c(0) L(1) ((2) )(3) =(4) =(5) =(6)
-        }),
-        // 2.1.71 及之前: 使用 O8 函数
-        (2, 0..=1, 0..=71) => Some(PatchPattern {
-            function_name: "O8",
-            full_pattern: b"O8()===\"firstParty\"",
-            short_pattern: b"O8()===\"firstParty\"",
-            equals_offset: 6, // O(0) 8(1) ((2) )(3) =(4) =(5) =(6)
-        }),
-        // 未知版本: 尝试动态检测
-        _ => None,
+    /// Check if this version has verified patch signatures
+    pub fn is_supported(&self) -> bool {
+        self.signature().is_some()
+    }
+
+    /// List all supported version strings
+    pub fn supported_versions_str() -> String {
+        VERSION_DB
+            .iter()
+            .map(|(ma, mi, pa, _)| format!("{}.{}.{}", ma, mi, pa))
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }
 
-/// 动态检测补丁模式
-///
-/// 当版本未知时，尝试搜索常见的模式
-pub fn detect_patch_pattern() -> Vec<PatchPattern> {
-    vec![
-        // 尝试 cL (当前版本 2.1.72+)
-        PatchPattern {
-            function_name: "cL",
-            full_pattern: b"cL()===\"firstParty\"",
-            short_pattern: b"cL()===\"firstParty\"",
-            equals_offset: 6,
-        },
-        // 尝试 O8 (旧版本)
-        PatchPattern {
-            function_name: "O8",
-            full_pattern: b"O8()===\"firstParty\"",
-            short_pattern: b"O8()===\"firstParty\"",
-            equals_offset: 6,
-        },
-        // 未来可以添加更多可能的函数名
-    ]
+/// Version signature database
+/// Format: (major, minor, patch, signature)
+/// Add new entries ONLY after verifying patch patterns against the actual binary
+const VERSION_DB: &[(u32, u32, u32, VersionSignature)] = &[
+    (2, 1, 72, VersionSignature {
+        fn_name: "cL",
+        file_search: b"cL()===\"firstParty\"",
+        file_replace: b"true/*           */",
+        mem_search: b"cL()===\"firstParty\"",
+        mem_patch_byte: b'!',
+        mem_patch_offset: 7,
+        mem_str_search: b"firstParty",
+        mem_str_patch_byte: b'!',
+    }),
+];
+
+/// Look up signature by version tuple
+fn get_signature(major: u32, minor: u32, patch: u32) -> Option<&'static VersionSignature> {
+    VERSION_DB
+        .iter()
+        .find(|(ma, mi, pa, _)| *ma == major && *mi == minor && *pa == patch)
+        .map(|(_, _, _, sig)| sig)
 }
 
 #[cfg(test)]
@@ -103,19 +108,29 @@ mod tests {
     }
 
     #[test]
-    fn test_version_pattern_mapping() {
+    fn test_supported_version() {
         let v = ClaudeVersion::from_string("2.1.72").unwrap();
-        let pattern = get_patch_pattern(&v).unwrap();
-        assert_eq!(pattern.function_name, "cL");
-
-        let v_old = ClaudeVersion::from_string("2.1.70").unwrap();
-        let pattern_old = get_patch_pattern(&v_old).unwrap();
-        assert_eq!(pattern_old.function_name, "O8");
+        assert!(v.is_supported());
+        assert!(v.signature().is_some());
+        assert_eq!(v.signature().unwrap().fn_name, "cL");
     }
 
     #[test]
-    fn test_unknown_version() {
+    fn test_unsupported_version() {
         let v = ClaudeVersion::from_string("3.0.0").unwrap();
-        assert!(get_patch_pattern(&v).is_none());
+        assert!(!v.is_supported());
+        assert!(v.signature().is_none());
+    }
+
+    #[test]
+    fn test_signature_lengths_match() {
+        for (_, _, _, sig) in VERSION_DB {
+            assert_eq!(
+                sig.file_search.len(),
+                sig.file_replace.len(),
+                "File patch must be equal length for {}",
+                sig.fn_name
+            );
+        }
     }
 }

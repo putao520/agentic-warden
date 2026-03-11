@@ -1,151 +1,111 @@
-//! 功能补丁注册表
-//!
-//! 为每个功能定义版本相关的补丁模式
+//! Patch registry - generates UnifiedPatchPattern from version signatures
 
 use crate::patcher::types::{FeatureType, PatchType, UnifiedPatchPattern};
 use crate::patcher::versions::ClaudeVersion;
 
-/// 获取功能的补丁模式
+/// Get patches for a feature based on version signature
 pub fn get_feature_patches(
     feature: FeatureType,
     version: &ClaudeVersion,
 ) -> Vec<UnifiedPatchPattern> {
     match feature {
         FeatureType::ToolSearch => get_toolsearch_patches(version),
-        FeatureType::UltraThink => get_ultrathink_patches(version),
-        FeatureType::AgentTeams => get_agentteams_patches(version),
-        FeatureType::WebSearch => get_websearch_patches(version),
+        // These features are covered by ToolSearch patch or don't need patches
+        FeatureType::UltraThink | FeatureType::WebSearch | FeatureType::AgentTeams => vec![],
         FeatureType::PersistentMemory => get_persistent_memory_patches(version),
     }
 }
 
-/// ToolSearch 补丁模式
-///
-/// 修复策略：让功能始终启用，而不是条件反转
-///
-/// 原始代码分析：
-///   if (cL()==="firstParty") { ...启用功能... }
-///
-/// 错误的补丁方法（已废弃）：
-///   if (cL()!=="firstParty") { ...启用功能... }
-///   问题：当使用官方 API 时，cL() 返回 "firstParty"，条件为 false，功能被禁用！
-///
-/// 正确的修复方法：
-///   文件补丁：将条件替换为 true
-///   内存补丁：组合策略 - 反转运算符 + 修改字符串
+/// Generate ToolSearch patches from version signature
 fn get_toolsearch_patches(version: &ClaudeVersion) -> Vec<UnifiedPatchPattern> {
-    match (version.major, version.minor, version.patch) {
-        // 2.1.72+: cL 函数
-        (2, 1, 72..) => vec![
-            // NativeBinary 文件补丁：三等号 + 等长替换（19字节）
-            UnifiedPatchPattern {
-                feature: FeatureType::ToolSearch,
-                patch_type: PatchType::File,
-                search_pattern: b"cL()===\"firstParty\"",
-                replace_pattern: Some(b"true/*           */"),
-                patch_byte: None,
-                patch_offset: None,
-                description: "ToolSearch file patch (native binary): Equal-length replacement",
-            },
-            // 内存补丁：双重策略
-            // 1. 将 === 改为 !== (反转比较)
-            // 2. 将 "firstParty" 改为 "!irstParty" (修改第一个字符)
-            // 结果：cL()!=="!irstParty"，当 cL() 返回 "firstParty" 时为 true
-            UnifiedPatchPattern {
-                feature: FeatureType::ToolSearch,
-                patch_type: PatchType::Memory,
-                search_pattern: b"cL()===\"firstParty\"",
-                replace_pattern: None,
-                patch_byte: Some(b'!'),
-                patch_offset: Some(7),  // 三等号时偏移是 7
-                description: "ToolSearch memory patch: Invert === to !==",
-            },
-            UnifiedPatchPattern {
-                feature: FeatureType::ToolSearch,
-                patch_type: PatchType::Memory,
-                search_pattern: b"firstParty",
-                replace_pattern: None,
-                patch_byte: Some(b'!'),  // 将 'f' 改为 '!'
-                patch_offset: Some(0),
-                description: "ToolSearch memory patch: Modify 'firstParty' to '!irstParty'",
-            },
-        ],
-        // 未知版本 - 只保留 NativeBinary 等长补丁
-        _ => vec![
-            UnifiedPatchPattern {
-                feature: FeatureType::ToolSearch,
-                patch_type: PatchType::File,
-                search_pattern: b"cL()===\"firstParty\"",
-                replace_pattern: Some(b"true/*           */"),
-                patch_byte: None,
-                patch_offset: None,
-                description: "ToolSearch unlock (cL native, unknown version): Equal-length replacement",
-            },
-        ],
-    }
+    let sig = match version.signature() {
+        Some(s) => s,
+        None => return vec![],
+    };
+
+    vec![
+        // File patch: equal-length replacement
+        UnifiedPatchPattern {
+            feature: FeatureType::ToolSearch,
+            patch_type: PatchType::File,
+            search_pattern: sig.file_search,
+            replace_pattern: Some(sig.file_replace),
+            patch_byte: None,
+            patch_offset: None,
+            description: "ToolSearch file patch: equal-length replacement",
+        },
+        // Memory patch 1: invert operator
+        UnifiedPatchPattern {
+            feature: FeatureType::ToolSearch,
+            patch_type: PatchType::Memory,
+            search_pattern: sig.mem_search,
+            replace_pattern: None,
+            patch_byte: Some(sig.mem_patch_byte),
+            patch_offset: Some(sig.mem_patch_offset),
+            description: "ToolSearch memory patch: invert operator",
+        },
+        // Memory patch 2: mutate string
+        UnifiedPatchPattern {
+            feature: FeatureType::ToolSearch,
+            patch_type: PatchType::Memory,
+            search_pattern: sig.mem_str_search,
+            replace_pattern: None,
+            patch_byte: Some(sig.mem_str_patch_byte),
+            patch_offset: Some(0),
+            description: "ToolSearch memory patch: mutate string",
+        },
+    ]
 }
 
-/// UltraThink 补丁模式
-///
-/// 注意：UltraThink 通过 ToolSearch 补丁已启用（cL()==="firstParty" 被替换为 true）
-/// 不需要单独的补丁，因此返回空向量
-fn get_ultrathink_patches(_version: &ClaudeVersion) -> Vec<UnifiedPatchPattern> {
-    vec![]
-}
-
-/// AgentTeams 补丁模式
-fn get_agentteams_patches(_version: &ClaudeVersion) -> Vec<UnifiedPatchPattern> {
-    // AgentTeams 通过 --agent-teams 参数启用，不需要补丁
-    vec![]
-}
-
-/// WebSearch 补丁模式
-///
-/// 注意: WebSearch 的地区限制通过 cL() === "firstParty" 检查，已被 ToolSearch 补丁覆盖
-/// ELF 中不存在 getTimezoneOffset()>300 模式，无需内存补丁
-fn get_websearch_patches(_version: &ClaudeVersion) -> Vec<UnifiedPatchPattern> {
-    vec![]
-}
-
-/// 持久代理内存补丁模式
+/// PersistentMemory patches (monitoring only)
 fn get_persistent_memory_patches(version: &ClaudeVersion) -> Vec<UnifiedPatchPattern> {
-    match (version.major, version.minor, version.patch) {
-        (2, 1, 72..) => vec![
-            UnifiedPatchPattern {
-                feature: FeatureType::PersistentMemory,
-                patch_type: PatchType::Memory,
-                search_pattern: b"tengu_swinburne_dune",
-                replace_pattern: None,
-                patch_byte: None,
-                patch_offset: None,
-                description: "Persistent memory feature flag (monitoring only)",
-            },
-        ],
-        _ => vec![],
+    // Only for versions that have a known signature
+    if version.signature().is_none() {
+        return vec![];
     }
-}
 
+    vec![
+        UnifiedPatchPattern {
+            feature: FeatureType::PersistentMemory,
+            patch_type: PatchType::Memory,
+            search_pattern: b"tengu_swinburne_dune",
+            replace_pattern: None,
+            patch_byte: None,
+            patch_offset: None,
+            description: "Persistent memory feature flag (monitoring only)",
+        },
+    ]
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_toolsearch_patches() {
+    fn test_toolsearch_patches_supported() {
         let version = ClaudeVersion { major: 2, minor: 1, patch: 72 };
         let patches = get_toolsearch_patches(&version);
-        assert!(!patches.is_empty());
-        assert_eq!(patches[0].feature, FeatureType::ToolSearch);
-        
-        // 验证文件补丁使用等长替换
-        let file_patch = patches.iter().find(|p| p.patch_type == PatchType::File).unwrap();
-        assert_eq!(file_patch.replace_pattern, Some(b"true/*           */".as_slice()));
+        assert_eq!(patches.len(), 3); // 1 file + 2 memory
+        assert_eq!(patches[0].patch_type, PatchType::File);
+        assert_eq!(patches[1].patch_type, PatchType::Memory);
+        assert_eq!(patches[2].patch_type, PatchType::Memory);
+
+        // Verify equal-length file patch
+        let file_patch = &patches[0];
+        assert_eq!(file_patch.search_pattern.len(), file_patch.replace_pattern.unwrap().len());
     }
 
     #[test]
-    fn test_ultrathink_patches() {
+    fn test_toolsearch_patches_unsupported() {
+        let version = ClaudeVersion { major: 3, minor: 0, patch: 0 };
+        let patches = get_toolsearch_patches(&version);
+        assert!(patches.is_empty());
+    }
+
+    #[test]
+    fn test_ultrathink_no_patches() {
         let version = ClaudeVersion { major: 2, minor: 1, patch: 72 };
-        let patches = get_ultrathink_patches(&version);
-        assert!(patches.is_empty());  // UltraThink 现在通过 ToolSearch 启用，无独立补丁
+        let patches = get_feature_patches(FeatureType::UltraThink, &version);
+        assert!(patches.is_empty());
     }
 }

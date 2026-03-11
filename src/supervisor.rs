@@ -178,7 +178,8 @@ fn apply_unified_memory_patches(pid: u32, cli_type: &CliType) {
     
     // 检查文件补丁是否已应用，如果已应用则跳过内存补丁
     if let Ok(patch_path) = get_patchable_path() {
-        let version = ClaudeVersion::from_string("2.1.72").unwrap_or(ClaudeVersion { major: 2, minor: 1, patch: 72 });
+        let version_str = get_claude_version_string_for_patch().unwrap_or_else(|| "2.1.72".to_string());
+        let version = ClaudeVersion::from_string(&version_str).unwrap_or(ClaudeVersion { major: 2, minor: 1, patch: 72 });
         let patches = get_feature_patches(FeatureType::ToolSearch, &version);
         
         let file_already_patched = patches.iter()
@@ -197,6 +198,16 @@ fn apply_unified_memory_patches(pid: u32, cli_type: &CliType) {
         }),
         None => return,
     };
+
+    // Skip memory patches if version is not supported
+    if !version.is_supported() {
+        tracing::warn!(
+            "Claude CLI {}.{}.{} is not in supported versions ({}), skipping memory patches",
+            version.major, version.minor, version.patch,
+            ClaudeVersion::supported_versions_str()
+        );
+        return;
+    }
     
     let patcher = match RuntimePatcher::new(pid) {
         Ok(p) => p,

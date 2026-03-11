@@ -40,6 +40,15 @@ fn execute_apply_patch() -> Result<()> {
     println!("📂 Claude CLI 文件: {} ({})", patch_path.display(), type_label);
     
     let version = get_claude_version();
+
+    if !version.is_supported() {
+        println!("❌ Claude CLI {}.{}.{} is not in supported versions ({}).",
+            version.major, version.minor, version.patch,
+            ClaudeVersion::supported_versions_str());
+        println!("   Patches cannot be applied to this version.");
+        return Ok(());
+    }
+
     let patches = get_feature_patches(FeatureType::ToolSearch, &version);
     
     for patch in patches.iter().filter(|p| p.patch_type == PatchType::File) {
@@ -70,12 +79,14 @@ fn execute_patch_status() {
         _ => "Unknown",
     };
 
-    println!("📊 补丁状态:");
-    println!("   Claude 版本: {}", format_version(&get_claude_version()));
-    println!("   安装类型: {}", type_label);
-    println!("   文件: {}", patch_path.display());
-
     let version = get_claude_version();
+    println!("📊 补丁状态:");
+    println!("   Claude version: {}", format_version(&version));
+    println!("   Supported versions: {}", ClaudeVersion::supported_versions_str());
+    println!("   Version supported: {}", if version.is_supported() { "Yes" } else { "No" });
+    println!("   Install type: {}", type_label);
+    println!("   File: {}", patch_path.display());
+
     let patches = get_feature_patches(FeatureType::ToolSearch, &version);
 
     let mut patched = false;
