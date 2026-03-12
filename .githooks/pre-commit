@@ -1,0 +1,26 @@
+#!/bin/bash
+# Pre-commit hook: Ensure README is updated when version changes
+
+set -e
+
+# Check if this commit touches Cargo.toml version
+if git diff --cached Cargo.toml | grep -q '^+version ='; then
+    # This is a version bump commit
+    echo "📦 Version bump detected"
+    
+    # Check if README.md is also being updated
+    if ! git diff --cached --name-only | grep -q "README.md"; then
+        echo ""
+        echo "⚠️  WARNING: Version bumped but README.md not updated!"
+        echo ""
+        echo "Please ensure:"
+        echo "  1. README.md 'Supported Versions' table reflects current Claude versions"
+        echo "  2. Run 'aiw patch status' to verify supported versions"
+        echo "  3. Add README.md to this commit if needed"
+        echo ""
+        echo "To skip this check (not recommended): git commit --no-verify"
+        exit 1
+    fi
+fi
+
+exit 0

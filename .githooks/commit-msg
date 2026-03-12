@@ -1,0 +1,23 @@
+#!/bin/bash
+# Commit message hook: Check version update requires README update
+
+# Check if Cargo.toml version was changed
+if git diff --cached --name-only | grep -q "Cargo.toml"; then
+    # Extract new version from staged Cargo.toml
+    NEW_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+    
+    # Check if README.md contains a version table with the new version
+    if [ -n "$NEW_VERSION" ]; then
+        # Extract minor version (e.g., 2.1.72 from 0.5.87)
+        # For AIW, we need to check the Claude versions supported
+        if grep -q "2.1.72\|2.1.73\|2.1.74\|2.1.75\|2.1.76\|2.1.77\|2.1.78\|2.1.79" README.md; then
+            : # Versions exist, OK
+        else
+            echo "⚠️  WARNING: Cargo.toml version updated to $NEW_VERSION"
+            echo "   Please ensure README.md 'Supported Versions' table is up to date!"
+            echo "   Run 'aiw patch status' to check supported Claude versions."
+        fi
+    fi
+fi
+
+exit 0
