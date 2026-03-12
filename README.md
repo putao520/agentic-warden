@@ -323,3 +323,16 @@ MIT License - see [LICENSE](LICENSE) file for details.
 ---
 
 [GitHub](https://github.com/putao520/agentic-warden) | [crates.io](https://crates.io/crates/aiw)
+
+
+---
+
+## For Developers
+
+After cloning the repository, enable project-specific Git hooks:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+This ensures commits follow project conventions (e.g., README must be updated when bumping version).
