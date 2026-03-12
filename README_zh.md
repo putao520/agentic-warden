@@ -201,60 +201,41 @@ aiw pwait <PID>
 
 ## 补丁管理
 
-AIW 内置统一补丁框架，解锁仅限官方 API 使用的功能，使其在第三方 Provider 上也可用。
-
-### 可用补丁
-
-| 功能 | 描述 | 解锁方式 |
-|-----|------|---------|
-| **ToolSearch** | 工具搜索功能 | 文件 + 内存补丁 |
-| **UltraThink** | 扩展思考模式 | 文件 + 内存补丁 |
-| **WebSearch** | 地区限制绕过 | 文件 + 内存补丁 |
-
-### 补丁命令
+AIW 支持文件补丁和内存补丁来解锁 Claude 功能：
 
 ```bash
-# 列出所有可用补丁
-aiw patch list
-
 # 查看补丁状态
 aiw patch status
 
-# 应用文件补丁（npm 安装）
-aiw patch apply toolsearch
-aiw patch apply all
+# 应用文件补丁（持久化，推荐）
+aiw patch apply
 
 # 还原补丁
-aiw patch restore <feature>
+aiw patch restore
 ```
 
-### 补丁工作原理
+**补丁类型**：
+- **文件补丁**：修改磁盘上的 Claude CLI 二进制文件（重启后保持）
+- **内存补丁**：文件未修补时运行时自动应用
 
-**文件补丁**（npm 安装）：
-- 修改磁盘上的 Claude CLI JavaScript 文件
-- 重启后保持
-- `aiw update` 后自动应用
+**支持的安装方式**：
+- Native binary (ELF/Mach-O): `~/.local/bin/claude`
+- npm 安装: `npm install -g @anthropic-ai/claude-code`
 
-**内存补丁**（所有安装方式）：
-- 启动 AI CLI 时运行时应用
-- 适用于 npm 和 cargo 安装
-- 每次运行 `aiw claude` 自动应用
+**解锁的功能**：
+- ToolSearch（工具搜索功能）
+- UltraThink（扩展思考模式）
+- WebSearch（地区限制绕过）
 
-### 补丁策略
+**支持的版本**：
 
-补丁系统确保功能在**任何 Provider**（官方或第三方）上都能正常工作：
+| 版本 | Linux | macOS | Windows |
+|---------|-------|-------|---------|
+| 2.1.72 | ✅ | ✅ | ✅ |
+| 2.1.73 | ✅ | ✅ | ✅ |
+| 2.1.74 | ✅ | ✅ | ✅ |
 
-```javascript
-// 原始代码
-if (cL()==="firstParty") { enableFeature(); }
-
-// 补丁后（始终启用）
-if (cL()!=="!irstParty") { enableFeature(); }
-```
-
-这确保了：
-- ✅ 官方 API (`cL()="firstParty"`): `"firstParty"!=="!irstParty"` → `true`
-- ✅ 第三方 API (`cL()="glm"`): `"glm"!=="!irstParty"` → `true`
+运行 `aiw patch status` 检查你的版本是否支持。
 
 ## 更新
 
@@ -329,3 +310,15 @@ MIT License - 详见 [LICENSE](LICENSE) 文件
 ---
 
 [GitHub](https://github.com/putao520/agentic-warden) | [crates.io](https://crates.io/crates/aiw)
+
+---
+
+## 开发者设置
+
+克隆仓库后，启用项目专用的 Git hooks：
+
+```bash
+git config core.hooksPath .githooks
+```
+
+这确保提交遵循项目规范（例如：更新版本时必须同步更新 README）。
