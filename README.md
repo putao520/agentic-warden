@@ -110,6 +110,16 @@ aiw patch restore
 - Native binary (ELF/Mach-O): `~/.local/bin/claude`
 - npm installation: `npm install -g @anthropic-ai/claude-code`
 
+**Supported Versions**:
+
+| Version | Linux | macOS | Windows |
+|---------|-------|-------|---------|
+| 2.1.72 | ✅ | ✅ | ✅ |
+| 2.1.73 | ✅ | ✅ | ✅ |
+| 2.1.74 | ✅ | ✅ | ✅ |
+
+Run `aiw patch status` to check if your version is supported.
+
 **What Gets Unlocked**:
 - ToolSearch (web search functionality)
 - UltraThink (extended thinking modes)
