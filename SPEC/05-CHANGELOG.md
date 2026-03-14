@@ -1,8 +1,14 @@
 # Change Log - v0.x
 
 ## Version Information
-- Current version: v0.5.88
+- Current version: v0.5.90
 - Latest planned: v0.3.0
+## [v0.5.90] - 2026-03-14
+
+### Changed
+- 修复 CI 跨平台编译配置
+- 使用原生 Windows runner 构建 Windows 版本，避免交叉编译依赖问题
+
 - Start date: 2025-11-08
 - Last updated: 2025-11-19
 
