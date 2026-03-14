@@ -163,7 +163,7 @@ impl MemoryPatcher for PlatformMemoryPatcher {
                 buf.len(),
                 Some(&mut bytes_read),
             )
-            .as_bool();
+            .is_ok();
 
             if !success {
                 return Err(PatchError::ReadFailed {
@@ -204,7 +204,7 @@ impl MemoryPatcher for PlatformMemoryPatcher {
                 data.len(),
                 Some(&mut bytes_written),
             )
-            .as_bool();
+            .is_ok();
 
             if !success {
                 return Err(PatchError::WriteFailed {

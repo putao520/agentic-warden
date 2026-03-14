@@ -1,8 +1,13 @@
 # Change Log - v0.x
 
 ## Version Information
-- Current version: v0.5.93
+- Current version: v0.5.94
 - Latest planned: v0.3.0
+## [v0.5.94] - 2026-03-14
+
+### Fixed
+- 修复 Windows crate API 变化导致的 .as_bool() 方法不存在问题
+
 ## [v0.5.93] - 2026-03-14
 
 ### Fixed
