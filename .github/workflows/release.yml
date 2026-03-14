@@ -59,9 +59,6 @@ jobs:
   build-windows:
     name: Build Windows x64
     runs-on: windows-latest
-    defaults:
-      run:
-        shell: msys2 {0}
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -88,11 +85,10 @@ jobs:
       run: cargo build --release
 
     - name: Prepare artifact
-      shell: bash
       run: |
-        mkdir -p artifacts
-        cp target/release/aiw.exe artifacts/aiw-windows-x64.exe
-        ls -lah artifacts/
+        mkdir artifacts
+        copy target\release\aiw.exe artifacts\aiw-windows-x64.exe
+        dir artifacts
 
     - name: Upload binary artifact
       uses: actions/upload-artifact@v4

@@ -1,8 +1,13 @@
 # Change Log - v0.x
 
 ## Version Information
-- Current version: v0.5.91
+- Current version: v0.5.92
 - Latest planned: v0.3.0
+## [v0.5.92] - 2026-03-14
+
+### Fixed
+- 修复 Windows 构建的 shell 配置
+
 ## [v0.5.91] - 2026-03-14
 
 ### Fixed
