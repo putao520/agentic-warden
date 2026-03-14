@@ -1,7 +1,7 @@
 # Change Log - v0.x
 
 ## Version Information
-- Current version: v0.5.96
+- Current version: v0.5.97
 - Latest planned: v0.3.0
 ## [v0.5.96] - 2026-03-14
 
