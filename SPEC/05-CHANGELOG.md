@@ -1,10 +1,36 @@
 # Change Log - v0.x
 
 ## Version Information
-- Current version: v0.5.61
+- Current version: v0.5.88
 - Latest planned: v0.3.0
 - Start date: 2025-11-08
 - Last updated: 2025-11-19
+
+---
+
+
+## v0.5.88 - Claude CLI 2.1.75/2.1.76 支持 (🟢 Released, 2025-03-14)
+
+### 🆕 New Features
+
+**Claude CLI 补丁支持扩展**:
+- ✅ 添加 Claude CLI 2.1.75 版本补丁支持（4 平台）
+- ✅ 添加 Claude CLI 2.1.76 版本补丁支持（4 平台）
+
+**提取的特征码**:
+| 版本 | Linux x64 | Linux ARM64 | Darwin ARM64 | Windows x64 |
+|------|-----------|-------------|--------------|-------------|
+| 2.1.75 | `BL()` | `B8()` | `B8()` | `Bf()` |
+| 2.1.76 | `QL()` | `Q8()` | `Q8()` | `cf()` |
+
+### 📁 Implementation
+
+**修改文件**:
+- `src/patcher/versions.rs` - 添加 2.1.75 和 2.1.76 的 VersionEntry 条目
+
+**测试验证**:
+- ✅ 所有 7 个单元测试通过
+- ✅ 编译检查通过
 
 ---
 

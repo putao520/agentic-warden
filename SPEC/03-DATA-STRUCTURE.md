@@ -1,7 +1,7 @@
 # Data Structure Design - v0.x.x
 
 ## Version Information
-- Current data version: v0.5.61
+- Current data version: v0.5.88
 - Last updated: 2025-11-12
 - Based on: Initial development (v0.1.0)
 

@@ -1,7 +1,7 @@
-# API Design - v0.5.61
+# API Design - v0.5.88
 
 ## Version Information
-- API version: v0.5.61
+- API version: v0.5.88
 - Base URL: N/A (CLI application)
 - Last updated: 2025-11-12
 - Based on: Initial development (v0.1.0)
