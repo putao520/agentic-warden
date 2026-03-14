@@ -1,8 +1,14 @@
 # Change Log - v0.x
 
 ## Version Information
-- Current version: v0.5.95
+- Current version: v0.5.96
 - Latest planned: v0.3.0
+## [v0.5.96] - 2026-03-14
+
+### Changed
+- 暂时禁用 Windows 构建 (ort-sys 链接问题)
+- 仅发布 Linux x64 版本
+
 ## [v0.5.95] - 2026-03-14
 
 ### Fixed
