@@ -15,47 +15,85 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        target:
-          - x86_64-unknown-linux-musl
-          - x86_64-pc-windows-gnu
+        include:
+          - target: x86_64-unknown-linux-musl
+            artifact_name: aiw-linux-x64
+            binary_name: aiw
+          - target: x86_64-pc-windows-gnu
+            artifact_name: aiw-windows-x64
+            binary_name: aiw.exe
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
 
     - name: Install Rust targets
       run: |
         rustup target add x86_64-unknown-linux-musl
         rustup target add x86_64-pc-windows-gnu
+        # Install cross-compilation tools
+        sudo apt-get update
+        sudo apt-get install -y musl-tools mingw-w64
 
-    - name: Build with Docker
+    - name: Install zig for cross-compilation
       run: |
-        docker build -f Dockerfile.build -t aiw-builder:latest .
-        docker run --rm \
-          -v "$(pwd):/workspace" \
-          aiw-builder:latest \
-          sh -c "rustup target add ${{ matrix.target }} && cargo build --release --target ${{ matrix.target }}"
+        # Install zig (provides better cross-compilation support)
+        wget -q https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz
+        tar -xf zig-linux-x86_64-0.13.0.tar.xz
+        sudo mv zig-linux-x86_64-0.13.0 /opt/zig
+        export PATH="/opt/zig:$PATH"
+        echo "/opt/zig" >> $GITHUB_PATH
 
-    - name: Verify binary
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Cache cargo index
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Cache cargo build
+      uses: actions/cache@v4
+      with:
+        path: target
+        key: ${{ runner.os }}-cargo-build-target-${{ matrix.target }}
+
+    - name: Build x86_64-unknown-linux-musl
+      if: matrix.target == 'x86_64-unknown-linux-musl'
+      run: |
+        export PATH="/opt/zig:$PATH"
+        cargo install cargo-zigbuild
+        cargo zigbuild --release --target x86_64-unknown-linux-musl
+
+    - name: Build x86_64-pc-windows-gnu
+      if: matrix.target == 'x86_64-pc-windows-gnu'
+      run: |
+        export PATH="/opt/zig:$PATH"
+        cargo install cargo-zigbuild
+        cargo zigbuild --release --target x86_64-pc-windows-gnu
+
+    - name: Prepare artifact
       run: |
         if [ "${{ matrix.target }}" = "x86_64-pc-windows-gnu" ]; then
-          OUTPUT_PATH="target/${{ matrix.target }}/release/aiw.exe"
+          OUTPUT_DIR="target/x86_64-pc-windows-gnu/release"
+          OUTPUT_FILE="aiw.exe"
         else
-          OUTPUT_PATH="target/${{ matrix.target }}/release/aiw"
+          OUTPUT_DIR="target/x86_64-unknown-linux-musl/release"
+          OUTPUT_FILE="aiw"
         fi
-        file "$OUTPUT_PATH"
-        ls -lah "$OUTPUT_PATH"
-        echo "✅ Binary built successfully"
+        mkdir -p artifacts
+        cp "$OUTPUT_DIR/$OUTPUT_FILE" "artifacts/${{ matrix.artifact_name }}"
+        file "artifacts/${{ matrix.artifact_name }}"
+        ls -lah "artifacts/"
 
     - name: Upload binary artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: aiw-binary-${{ matrix.target }}
-        path: |
-          target/${{ matrix.target }}/release/aiw
-          target/${{ matrix.target }}/release/aiw.exe
+        name: ${{ matrix.artifact_name }}
+        path: artifacts/${{ matrix.artifact_name }}
         retention-days: 1
 
   # Job 2: 准备NPM包并发布
@@ -76,16 +114,23 @@ jobs:
     - name: Create bin directory
       run: mkdir -p bin
 
-    - name: Download all binaries
+    - name: Download Linux binary
       uses: actions/download-artifact@v4
       with:
-        path: ./binaries
+        name: aiw-linux-x64
+        path: bin/
+
+    - name: Download Windows binary
+      uses: actions/download-artifact@v4
+      with:
+        name: aiw-windows-x64
+        path: bin/
 
     - name: Prepare binaries for NPM
       run: |
-        # 复制二进制到bin/ (musl静态编译，兼容所有Linux)
-        cp binaries/aiw-binary-x86_64-unknown-linux-musl/aiw bin/aiw-linux-x64
-        cp binaries/aiw-binary-x86_64-pc-windows-gnu/aiw.exe bin/aiw-windows-x64.exe
+        # 重命名文件以符合 npm 包约定
+        mv bin/aiw bin/aiw-linux-x64
+        mv bin/aiw.exe bin/aiw-windows-x64.exe
 
         # 设置可执行权限
         chmod +x bin/*
@@ -113,7 +158,6 @@ jobs:
 
     - name: Publish to NPM (OIDC Trusted Publishing)
       run: npm publish --access public
-      # No NPM_TOKEN needed - uses OIDC trusted publishing
 
     - name: 📢 Publish success notification
       if: success()
@@ -137,19 +181,20 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Download all binaries
+    - name: Download Linux binary
       uses: actions/download-artifact@v4
       with:
-        path: ./binaries
+        name: aiw-linux-x64
+        path: release-files/
 
-    - name: Prepare release files
+    - name: Download Windows binary
+      uses: actions/download-artifact@v4
+      with:
+        name: aiw-windows-x64
+        path: release-files/
+
+    - name: Generate checksums
       run: |
-        mkdir -p release-files
-        # 使用musl静态编译的Linux二进制
-        cp binaries/aiw-binary-x86_64-unknown-linux-musl/aiw release-files/aiw-linux-x64
-        cp binaries/aiw-binary-x86_64-pc-windows-gnu/aiw.exe release-files/aiw-windows-x64.exe
-
-        # 生成校验和
         cd release-files
         sha256sum * > SHA256SUMS
         cat SHA256SUMS

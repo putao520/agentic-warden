@@ -1,0 +1,35 @@
+# Multi-stage Dockerfile for cross-compiling aiw
+# Builds static binaries for musl Linux and Windows GNU
+
+FROM rust:1.83-alpine AS builder
+
+# Install cross-compilation tools
+RUN apk add --no-cache \
+    musl-dev \
+    mingw-w64-gcc \
+    pkgconfig \
+    openssl-dev \
+    openssl-libs-static \
+    sqlite-dev \
+    sqlite-static
+
+# Set up cross-compilation environment
+ENV RUSTFLAGS="-C target-feature=+crt-static"
+ENV MUSL_OPENSSL_DIR=/usr
+ENV MUSL_OPENSSL_LIB_DIR=/usr/lib
+ENV MUSL_OPENSSL_INCLUDE_DIR=/usr/include/openssl
+
+# Windows cross-compilation
+ENV PKG_CONFIG_x86_64_pc_windows_gnu=/usr/bin/x86_64-w64-mingw32-pkg-config
+ENV X86_64_PC_WINDOWS_GNU_OPENSSL_DIR=/usr/x86_64-w64-mingw32
+ENV X86_64_PC_WINDOWS_GNU_OPENSSL_LIB_DIR=/usr/x86_64-w64-mingw32/lib
+ENV X86_64_PC_WINDOWS_GNU_OPENSSL_INCLUDE_DIR=/usr/x86_64-w64-mingw32/include
+
+WORKDIR /workspace
+COPY . .
+
+# Install targets
+RUN rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu
+
+# Default: build for current platform
+CMD ["cargo", "build", "--release"]
