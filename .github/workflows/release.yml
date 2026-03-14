@@ -9,7 +9,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Job 1a: 构建 Linux x64 musl 二进制
+  # Job 1a: 构建 Linux x64 gnu 二进制 (ort-sys 需要 glibc)
   build-linux:
     name: Build Linux x64
     runs-on: ubuntu-latest
@@ -18,10 +18,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Install Rust target
-      run: rustup target add x86_64-unknown-linux-musl
-
-    - name: Install musl tools
-      run: sudo apt-get install -y musl-tools musl-dev
+      run: rustup target add x86_64-unknown-linux-gnu
 
     - name: Cache cargo registry
       uses: actions/cache@v4
@@ -39,18 +36,15 @@ jobs:
       uses: actions/cache@v4
       with:
         path: target
-        key: ${{ runner.os }}-cargo-build-musl
+        key: ${{ runner.os }}-cargo-build-gnu
 
-    - name: Build for Linux musl
-      run: |
-        # musl 静态编译需要设置特定的 RUSTFLAGS
-        RUSTFLAGS="-C target-feature=+crt-static" \
-        cargo build --release --target x86_64-unknown-linux-musl
+    - name: Build for Linux gnu
+      run: cargo build --release --target x86_64-unknown-linux-gnu
 
     - name: Prepare artifact
       run: |
         mkdir -p artifacts
-        cp target/x86_64-unknown-linux-musl/release/aiw artifacts/aiw-linux-x64
+        cp target/x86_64-unknown-linux-gnu/release/aiw artifacts/aiw-linux-x64
         file artifacts/aiw-linux-x64
         ls -lah artifacts/
 
@@ -61,10 +55,13 @@ jobs:
         path: artifacts/aiw-linux-x64
         retention-days: 1
 
-  # Job 1b: 构建 Windows x64 二进制 (原生构建，避免交叉编译)
+  # Job 1b: 构建 Windows x64 MSVC 二进制 (ort-sys 需要 MSVC)
   build-windows:
     name: Build Windows x64
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -85,9 +82,9 @@ jobs:
       uses: actions/cache@v4
       with:
         path: target
-        key: ${{ runner.os }}-cargo-build-windows
+        key: ${{ runner.os }}-cargo-build-msvc
 
-    - name: Build for Windows
+    - name: Build for Windows MSVC
       run: cargo build --release
 
     - name: Prepare artifact

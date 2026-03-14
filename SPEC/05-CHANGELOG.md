@@ -1,8 +1,15 @@
 # Change Log - v0.x
 
 ## Version Information
-- Current version: v0.5.90
+- Current version: v0.5.91
 - Latest planned: v0.3.0
+## [v0.5.91] - 2026-03-14
+
+### Fixed
+- 修复 CI 构建配置以支持 ort-sys 依赖
+- Linux 使用 glibc 目标 (ort-sys 需要)
+- Windows 使用 MSVC 工具链 (ort-sys 需要)
+
 ## [v0.5.90] - 2026-03-14
 
 ### Changed
