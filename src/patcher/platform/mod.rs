@@ -72,17 +72,19 @@ impl MemPerm {
             PAGE_NOACCESS, PAGE_READONLY, PAGE_READWRITE, PAGE_WRITECOPY,
         };
 
-        match prot & 0xFF {
-            PAGE_NOACCESS => Self::new(false, false, false),
-            PAGE_READONLY => Self::new(true, false, false),
-            PAGE_READWRITE => Self::new(true, true, false),
-            PAGE_WRITECOPY => Self::new(true, true, false),
-            PAGE_EXECUTE => Self::new(false, false, true),
-            PAGE_EXECUTE_READ => Self::new(true, false, true),
-            PAGE_EXECUTE_READWRITE => Self::new(true, true, true),
-            PAGE_EXECUTE_WRITECOPY => Self::new(true, true, true),
-            _ => Self::new(false, false, false),
-        }
+        // 将 u32 转换为 PAGE_PROTECTION_FLAGS 进行匹配
+        let prot_flags = unsafe { std::mem::transmute::<u32, windows::Win32::System::Memory::PAGE_PROTECTION_FLAGS>(prot) };
+
+        // 检查各个标志位
+        let read = prot == PAGE_READONLY.0 || prot == PAGE_READWRITE.0
+            || prot == PAGE_EXECUTE_READ.0 || prot == PAGE_EXECUTE_READWRITE.0
+            || prot == PAGE_WRITECOPY.0 || prot == PAGE_EXECUTE_WRITECOPY.0;
+        let write = prot == PAGE_READWRITE.0 || prot == PAGE_EXECUTE_READWRITE.0
+            || prot == PAGE_WRITECOPY.0 || prot == PAGE_EXECUTE_WRITECOPY.0;
+        let execute = prot == PAGE_EXECUTE.0 || prot == PAGE_EXECUTE_READ.0
+            || prot == PAGE_EXECUTE_READWRITE.0 || prot == PAGE_EXECUTE_WRITECOPY.0;
+
+        Self::new(read, write, execute)
     }
 }
 

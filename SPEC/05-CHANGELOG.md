@@ -1,8 +1,14 @@
 # Change Log - v0.x
 
 ## Version Information
-- Current version: v0.5.92
+- Current version: v0.5.93
 - Latest planned: v0.3.0
+## [v0.5.93] - 2026-03-14
+
+### Fixed
+- 修复 Windows MSVC 编译类型错误
+- 修复 PAGE_PROTECTION_FLAGS 强类型枚举比较问题
+
 ## [v0.5.92] - 2026-03-14
 
 ### Fixed
