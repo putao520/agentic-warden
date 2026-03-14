@@ -9,10 +9,10 @@ use crate::patcher::error::{PatchError, PatchResult};
 use crate::patcher::platform::{MemoryPatcher, MemoryRegion, MemPerm};
 use std::ptr;
 use tracing::{debug, trace, warn};
-use windows::Win32::Foundation::{CloseHandle, HANDLE};
+use windows::Win32::Foundation::{CloseHandle, HANDLE, WIN32_ERROR};
 use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
 use windows::Win32::System::Memory::{
-    MemoryBasicInformation, VirtualQueryEx, PAGE_EXECUTE_READWRITE, PAGE_READWRITE,
+    MEMORY_BASIC_INFORMATION, MEM_COMMIT, PAGE_EXECUTE_READWRITE, PAGE_READWRITE, VirtualQueryEx,
 };
 use windows::Win32::System::Threading::{
     OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ, PROCESS_VM_WRITE,
@@ -35,7 +35,11 @@ impl PlatformMemoryPatcher {
                 pid,
             )
             .map_err(|e| {
-                if e.code().is_not_found() {
+                // 检查是否是 "进程不存在" 错误
+                let error_code = WIN32_ERROR(e.code().0 as u32);
+                if error_code.0 == windows::Win32::Foundation::ERROR_INVALID_PARAMETER.0
+                    || error_code.0 == windows::Win32::Foundation::ERROR_ACCESS_DENIED.0
+                {
                     PatchError::ProcessNotFound { pid }
                 } else {
                     PatchError::PermissionDenied {
@@ -64,12 +68,12 @@ impl PlatformMemoryPatcher {
 
         unsafe {
             loop {
-                let mut mem_info: MemoryBasicInformation = std::mem::zeroed();
+                let mut mem_info: MEMORY_BASIC_INFORMATION = std::mem::zeroed();
                 let result = VirtualQueryEx(
                     self.handle,
-                    address as *const _,
+                    Some(address as *const _),
                     &mut mem_info,
-                    std::mem::size_of::<MemoryBasicInformation>(),
+                    std::mem::size_of::<MEMORY_BASIC_INFORMATION>(),
                 );
 
                 if result == 0 {
@@ -92,7 +96,7 @@ impl PlatformMemoryPatcher {
                 let region_end = region_start.wrapping_add(region_size);
 
                 // 跳过保留区域
-                if mem_info.State == windows::Win32::System::Memory::MEM_COMMIT {
+                if mem_info.State == MEM_COMMIT {
                     let perms = MemPerm::from_win_prot(mem_info.Protect.0);
                     let is_readable = perms.read;
                     let is_writable = perms.write;

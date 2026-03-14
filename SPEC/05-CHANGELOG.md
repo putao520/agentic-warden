@@ -1,8 +1,16 @@
 # Change Log - v0.x
 
 ## Version Information
-- Current version: v0.5.94
+- Current version: v0.5.95
 - Latest planned: v0.3.0
+## [v0.5.95] - 2026-03-14
+
+### Fixed
+- 修复 Windows crate 0.54 API 兼容性问题
+- 更新 MemoryBasicInformation 为 MEMORY_BASIC_INFORMATION
+- 修复 VirtualQueryEx 参数类型
+- 修复错误检查方法
+
 ## [v0.5.94] - 2026-03-14
 
 ### Fixed
