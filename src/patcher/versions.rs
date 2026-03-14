@@ -325,6 +325,110 @@ const VERSION_DB: &[(u32, u32, u32, VersionEntry)] = &[
             },
         ],
     }),
+    (2, 1, 75, VersionEntry {
+        platforms: &[
+            // Linux x64
+            PlatformSignature {
+                platform: Platform::LinuxX64,
+                fn_name: "BL",
+                file_search: b"BL()===\"firstParty\"",
+                file_replace: b"true/*           */",
+                mem_search: b"BL()===\"firstParty\"",
+                mem_patch_byte: b'!',
+                mem_patch_offset: 7,
+                mem_str_search: b"firstParty",
+                mem_str_patch_byte: b'!',
+            },
+            // Linux arm64
+            PlatformSignature {
+                platform: Platform::LinuxArm64,
+                fn_name: "B8",
+                file_search: b"B8()===\"firstParty\"",
+                file_replace: b"true/*           */",
+                mem_search: b"B8()===\"firstParty\"",
+                mem_patch_byte: b'!',
+                mem_patch_offset: 7,
+                mem_str_search: b"firstParty",
+                mem_str_patch_byte: b'!',
+            },
+            // Windows x64
+            PlatformSignature {
+                platform: Platform::Win32X64,
+                fn_name: "Bf",
+                file_search: b"Bf()===\"firstParty\"",
+                file_replace: b"true/*           */",
+                mem_search: b"Bf()===\"firstParty\"",
+                mem_patch_byte: b'!',
+                mem_patch_offset: 7,
+                mem_str_search: b"firstParty",
+                mem_str_patch_byte: b'!',
+            },
+            // macOS (Apple Silicon)
+            PlatformSignature {
+                platform: Platform::DarwinArm64,
+                fn_name: "B8",
+                file_search: b"B8()===\"firstParty\"",
+                file_replace: b"true/*           */",
+                mem_search: b"B8()===\"firstParty\"",
+                mem_patch_byte: b'!',
+                mem_patch_offset: 7,
+                mem_str_search: b"firstParty",
+                mem_str_patch_byte: b'!',
+            },
+        ],
+    }),
+    (2, 1, 76, VersionEntry {
+        platforms: &[
+            // Linux x64
+            PlatformSignature {
+                platform: Platform::LinuxX64,
+                fn_name: "QL",
+                file_search: b"QL()===\"firstParty\"",
+                file_replace: b"true/*           */",
+                mem_search: b"QL()===\"firstParty\"",
+                mem_patch_byte: b'!',
+                mem_patch_offset: 7,
+                mem_str_search: b"firstParty",
+                mem_str_patch_byte: b'!',
+            },
+            // Linux arm64
+            PlatformSignature {
+                platform: Platform::LinuxArm64,
+                fn_name: "Q8",
+                file_search: b"Q8()===\"firstParty\"",
+                file_replace: b"true/*           */",
+                mem_search: b"Q8()===\"firstParty\"",
+                mem_patch_byte: b'!',
+                mem_patch_offset: 7,
+                mem_str_search: b"firstParty",
+                mem_str_patch_byte: b'!',
+            },
+            // Windows x64
+            PlatformSignature {
+                platform: Platform::Win32X64,
+                fn_name: "cf",
+                file_search: b"cf()===\"firstParty\"",
+                file_replace: b"true/*           */",
+                mem_search: b"cf()===\"firstParty\"",
+                mem_patch_byte: b'!',
+                mem_patch_offset: 7,
+                mem_str_search: b"firstParty",
+                mem_str_patch_byte: b'!',
+            },
+            // macOS (Apple Silicon)
+            PlatformSignature {
+                platform: Platform::DarwinArm64,
+                fn_name: "Q8",
+                file_search: b"Q8()===\"firstParty\"",
+                file_replace: b"true/*           */",
+                mem_search: b"Q8()===\"firstParty\"",
+                mem_patch_byte: b'!',
+                mem_patch_offset: 7,
+                mem_str_search: b"firstParty",
+                mem_str_patch_byte: b'!',
+            },
+        ],
+    }),
 ];
 
 /// Look up signature by version tuple and platform
