@@ -1,8 +1,15 @@
 # Change Log - v0.x
 
 ## Version Information
-- Current version: v0.5.98
+- Current version: v0.5.99
 - Latest planned: v0.3.0
+## [v0.5.99] - 2026-03-18
+
+### Fixed
+- 修正 Windows 版本支持说明
+- 2.1.77 和 2.1.78 Windows 原生二进制未发布到 GCS
+- Windows 用户需使用 npm 安装 Node.js 版本
+
 ## [v0.5.98] - 2026-03-18
 
 ### Added
