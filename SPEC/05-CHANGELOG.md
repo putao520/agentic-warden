@@ -1,8 +1,14 @@
 # Change Log - v0.x
 
 ## Version Information
-- Current version: v0.5.97
+- Current version: v0.5.98
 - Latest planned: v0.3.0
+## [v0.5.98] - 2026-03-18
+
+### Added
+- 支持 Claude CLI 2.1.77 (Linux, macOS)
+- 支持 Claude CLI 2.1.78 (Linux, macOS)
+
 ## [v0.5.96] - 2026-03-14
 
 ### Changed

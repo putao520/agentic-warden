@@ -119,6 +119,8 @@ aiw patch restore
 | 2.1.74 | ✅ | ✅ | ✅ |
 | 2.1.75 | ✅ | ✅ | ✅ |
 | 2.1.76 | ✅ | ✅ | ✅ |
+| 2.1.77 | ✅ | ✅ | ❌ |
+| 2.1.78 | ✅ | ✅ | ❌ |
 
 Run `aiw patch status` to check if your version is supported.
 

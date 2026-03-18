@@ -429,6 +429,86 @@ const VERSION_DB: &[(u32, u32, u32, VersionEntry)] = &[
             },
         ],
     }),
+    (2, 1, 77, VersionEntry {
+        platforms: &[
+            // Linux x64
+            PlatformSignature {
+                platform: Platform::LinuxX64,
+                fn_name: "gDH",
+                file_search: b"gDH()==\"firstParty\"",
+                file_replace: b"true/*           */",
+                mem_search: b"gDH()==\"firstParty\"",
+                mem_patch_byte: b'!',
+                mem_patch_offset: 7,
+                mem_str_search: b"firstParty",
+                mem_str_patch_byte: b'!',
+            },
+            // macOS (Apple Silicon)
+            PlatformSignature {
+                platform: Platform::DarwinArm64,
+                fn_name: "U6_",
+                file_search: b"U6_()==\"firstParty\"",
+                file_replace: b"true/*           */",
+                mem_search: b"U6_()==\"firstParty\"",
+                mem_patch_byte: b'!',
+                mem_patch_offset: 7,
+                mem_str_search: b"firstParty",
+                mem_str_patch_byte: b'!',
+            },
+            // macOS (Intel)
+            PlatformSignature {
+                platform: Platform::DarwinX64,
+                fn_name: "Rk",
+                file_search: b"Rk()==\"firstParty\"",
+                file_replace: b"true/*           */",
+                mem_search: b"Rk()==\"firstParty\"",
+                mem_patch_byte: b'!',
+                mem_patch_offset: 7,
+                mem_str_search: b"firstParty",
+                mem_str_patch_byte: b'!',
+            },
+        ],
+    }),
+    (2, 1, 78, VersionEntry {
+        platforms: &[
+            // Linux x64
+            PlatformSignature {
+                platform: Platform::LinuxX64,
+                fn_name: "sDH",
+                file_search: b"sDH()==\"firstParty\"",
+                file_replace: b"true/*           */",
+                mem_search: b"sDH()==\"firstParty\"",
+                mem_patch_byte: b'!',
+                mem_patch_offset: 7,
+                mem_str_search: b"firstParty",
+                mem_str_patch_byte: b'!',
+            },
+            // macOS (Apple Silicon)
+            PlatformSignature {
+                platform: Platform::DarwinArm64,
+                fn_name: "_7_",
+                file_search: b"_7_()==\"firstParty\"",
+                file_replace: b"true/*           */",
+                mem_search: b"_7_()==\"firstParty\"",
+                mem_patch_byte: b'!',
+                mem_patch_offset: 7,
+                mem_str_search: b"firstParty",
+                mem_str_patch_byte: b'!',
+            },
+            // macOS (Intel)
+            PlatformSignature {
+                platform: Platform::DarwinX64,
+                fn_name: "HMH",
+                file_search: b"HMH()==\"firstParty\"",
+                file_replace: b"true/*           */",
+                mem_search: b"HMH()==\"firstParty\"",
+                mem_patch_byte: b'!',
+                mem_patch_offset: 7,
+                mem_str_search: b"firstParty",
+                mem_str_patch_byte: b'!',
+            },
+        ],
+    }),
 ];
 
 /// Look up signature by version tuple and platform
