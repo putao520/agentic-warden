@@ -1897,6 +1897,47 @@ aiw patch status
 aiw patch restore
 ```
 
+### REQ-026: Claude CLI AntiTelemetry 补丁系统
+**Status**: 🟢 Done
+**Priority**: P1 (High)
+**Version**: v0.5.99
+**Related**: ARCH-014
+
+**Description**:
+Agentic-Warden MUST provide an AntiTelemetry patch system for Claude CLI that truncates the client-side telemetry reporting channel by rewriting the `/api/event_logging/v2/batch` endpoint path to `/api/event_logging/v2/xxxxx` (equal-length 27-byte literal replacement), causing the reporting endpoint to 404 and silently fail. This blocks CC v2.1.195's espionage behavior of reporting machine fingerprints / device info / IP / project info.
+
+**Acceptance Criteria**:
+- [x] Patch the literal `/api/event_logging/v2/batch` (27 bytes) -> `/api/event_logging/v2/xxxxx` (27 bytes, equal-length)
+- [x] Literal replacement mode (`use_regex=false`) via `UnifiedPatchPattern` with `search_pattern` + `replace_pattern` (no `patch_byte`/`patch_offset`)
+- [x] Support both file patch (persistent) and memory patch (runtime)
+- [x] `PatchAction::DisableTelemetry` CLI command (`aiw patch disable-telemetry`)
+- [x] `apply_literal_memory_patch` on `RuntimePatcher` for literal memory replacement (equal-length enforcement)
+- [x] `get_antitelemetry_patches` registry function generates file + memory patch patterns
+- [x] `execute_apply_patch` applies both max-token and anti-telemetry file patches (independent, one failure doesn't affect the other)
+- [x] `execute_patch_status` reports anti-telemetry patch status
+- [x] Startup-time auto-trigger in supervisor (both `execute_cli_internal` and `start_interactive_cli` paths) applies anti-telemetry memory patch after max-token patch
+- [x] Cross-version stable (API path literal, not minified variable name)
+- [x] Equal-length replacement iron law: 27 -> 27 bytes (no offset shift)
+
+**Technical Constraints**:
+- `search_pattern` and `replace_pattern` MUST be equal length (27 bytes) to avoid shifting subsequent offsets
+- Memory patch uses `apply_literal_memory_patch` (search_pattern -> replace_pattern integral overwrite), NOT `patch_byte`/`patch_offset`
+- AntiTelemetry patch is independent of max-token patch: one failing does not block the other
+- `use_regex=false` (literal mode, not regex mode)
+- Memory patch scans all readable regions for the literal, writes on first hit
+
+**CLI Usage**:
+```bash
+# Disable telemetry (truncate event_logging endpoint)
+aiw patch disable-telemetry
+
+# Apply all patches (max-token + anti-telemetry)
+aiw patch apply
+
+# Check patch status (both max-token and anti-telemetry)
+aiw patch status
+```
+
 ## 已废弃需求 (Deprecated)
 
 > **废弃原因**: Google Drive 云存储集成已禁用，push/pull 命令不可用。自 v0.5.19 起标记为 Disabled。

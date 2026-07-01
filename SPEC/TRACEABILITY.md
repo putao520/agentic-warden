@@ -529,6 +529,26 @@ This matrix provides complete traceability from:
 
 ---
 
+### REQ-026: Claude CLI AntiTelemetry 补丁系统
+
+**Status**: 🟢 Done
+
+**Implementation Files**:
+- `src/patcher/mod.rs` — 补丁系统入口（导出 `get_feature_patches`）
+- `src/patcher/types.rs` — `FeatureType::AntiTelemetry` + `UnifiedPatchPattern`（Cow + `use_regex=false` 字面量模式）
+- `src/patcher/registry.rs` — `get_antitelemetry_patches` 生成 file + memory patch 模式（`/api/event_logging/v2/batch` -> `/api/event_logging/v2/xxxxx`，27 字节等长）
+- `src/patcher/file.rs` — 文件补丁应用（字面量匹配 + `replace_pattern` 整段替换）
+- `src/patcher/runtime.rs` — `apply_literal_memory_patch`（字面量内存替换，等长校验，命中首个匹配即写入）
+- `src/patcher/error.rs` — 补丁错误类型（`PatchError::PatternNotFound`）
+- `src/patcher/platform/*.rs` — 平台适配（Unix/macOS/Windows 内存读写）
+- `src/commands/patch.rs` — `execute_disable_telemetry` + `execute_apply_patch`（max-token + anti-telemetry 独立应用）+ `execute_patch_status`（anti-telemetry 状态检查）
+- `src/commands/parser.rs` — `PatchAction::DisableTelemetry`
+- `src/supervisor.rs` — `apply_max_context_tokens_patches`（max-token 后追加 anti-telemetry 内存补丁）+ `apply_antitelemetry_memory_patch_background`（`start_interactive_cli` 后台线程路径）
+
+**Notes**: AntiTelemetry patch 通过字面量替换截断 CC 客户端上报通道：`/api/event_logging/v2/batch` -> `/api/event_logging/v2/xxxxx`（27 字节等长），让上报端点 404 静默失败。阻断 CC v2.1.195 上报机器指纹/设备信息/IP/项目信息的间谍行为。与 max-token patch 独立（一个失败不影响另一个），跨版本稳定（API 路径字面量，非 minified 变量名）。支持文件补丁（持久化）和内存补丁（运行时），启动时自动触发。
+
+---
+
 ## Cross-Cutting Concerns
 
 ### Security
@@ -538,6 +558,7 @@ This matrix provides complete traceability from:
 | 进程命名空间隔离 | REQ-001 | `src/core/process_tree.rs`, `src/core/shared_map.rs` |
 | Max-Token 补丁验证 | REQ-025 | `src/patcher/versions.rs`, `MAX_CONTEXT_TOKENS_SEARCH_REGEX` 通用正则 + `validate_max_context_tokens` 6 位数校验 |
 
+| AntiTelemetry 上报截断 | REQ-026 | `src/patcher/registry.rs`, `get_antitelemetry_patches` 字面量替换 `/api/event_logging/v2/batch` -> `/api/event_logging/v2/xxxxx`（27 字节等长） |
 ### Performance
 | Concern | Related REQs | Implementation |
 |---------|-------------|----------------|
@@ -552,6 +573,7 @@ This matrix provides complete traceability from:
 | 统一错误类型 | All | `src/error.rs` (thiserror + anyhow) |
 | Provider 领域错误 | REQ-002 | `src/provider/error.rs` |
 | 补丁错误 | REQ-025 | `src/patcher/error.rs` |
+| AntiTelemetry 补丁错误 | REQ-026 | `src/patcher/error.rs`, `PatchError::PatternNotFound`（字面量未找到/replace_pattern 缺失/长度不一致） |
 | 退出码分类 | API | SPEC/04-API-DESIGN.md#Error-Codes |
 
 ---
@@ -578,6 +600,7 @@ This matrix provides complete traceability from:
 - [x] All critical paths have test coverage
 - [x] REQ-009 fully implemented (interactive mode)
 - [x] REQ-025 max-token patcher system (通用正则跨版本，已验证 2.1.195；firstParty patch 已彻底删除)
+- [x] REQ-026 anti-telemetry patcher system (字面量截断 event_logging 端点 -> 404，27 字节等长，跨版本稳定)
 - [x] Deprecated REQs (003, 010, 015) clearly marked with reasons
 - [x] No TODO/FIXME/stub in production code
 - [x] All test files mapped to corresponding REQs

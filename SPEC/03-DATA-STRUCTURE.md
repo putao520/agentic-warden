@@ -228,7 +228,8 @@ pub enum AiType {
 **Related Types** (src/patcher/types.rs):
 ```rust
 pub enum FeatureType {
-    MaxContextTokens,  // 唯一 variant（firstParty 系已删除）
+    MaxContextTokens,  // 可配置默认上下文窗口 + autoCompact 阈值（regex 模式）
+    AntiTelemetry,     // 截断 CC 客户端上报（event_logging 端点 -> 404，字面量模式）
 }
 
 pub struct UnifiedPatchPattern {
@@ -255,6 +256,13 @@ var YOt=200000,Pte=200000,Evi=20000,Wkd=32000,qkd=128000;
 ```
 var [a-zA-Z_$][a-zA-Z0-9_$]*=200000,[a-zA-Z_$][a-zA-Z0-9_$]*=200000,...
 ```
+
+**AntiTelemetry Patch Target** (Claude CLI telemetry endpoint literal):
+```
+/api/event_logging/v2/batch   ->   /api/event_logging/v2/xxxxx
+<---------- 27 bytes -------->    <---------- 27 bytes --------->
+```
+字面量等长替换（`use_regex=false`），让上报端点 404 静默失败。跨版本稳定（API 路径字面量，非 minified 变量名）。
 
 ---
 
