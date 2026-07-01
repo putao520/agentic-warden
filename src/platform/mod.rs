@@ -56,6 +56,13 @@ pub struct ChildResources {
 }
 
 #[cfg(unix)]
+impl Default for ChildResources {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(unix)]
 impl ChildResources {
     pub fn new() -> Self {
         ChildResources {}

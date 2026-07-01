@@ -14,7 +14,7 @@ use crate::{
     task_record::{TaskRecord, TaskStatus},
 };
 use anyhow::{anyhow, Context, Result};
-use chrono::{DateTime, Duration, TimeZone, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -173,7 +173,7 @@ impl AppState {
         });
 
         let mut snapshot: Vec<_> = flows.values().cloned().collect();
-        snapshot.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        snapshot.sort_by_key(|b| std::cmp::Reverse(b.updated_at));
         snapshot
     }
 
@@ -335,8 +335,9 @@ struct StoredOAuthState {
 }
 
 /// Synchronisation phases shown in the TUI.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SyncPhase {
+    #[default]
     Idle,
     Preparing,
     Authentication,
@@ -348,12 +349,6 @@ pub enum SyncPhase {
     Applying,
     Completed,
     Failed,
-}
-
-impl Default for SyncPhase {
-    fn default() -> Self {
-        SyncPhase::Idle
-    }
 }
 
 /// Transfer direction.
@@ -487,12 +482,18 @@ pub struct AuthDialog {
     pub status: AuthStatus,
 }
 
-impl AuthDialog {
-    pub fn new() -> Self {
+impl Default for AuthDialog {
+    fn default() -> Self {
         Self {
             auth_url: String::new(),
             status: AuthStatus::Waiting,
         }
+    }
+}
+
+impl AuthDialog {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 

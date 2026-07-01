@@ -22,6 +22,7 @@ use crate::error::ConfigError;
 #[derive(Debug)]
 pub struct CliOrderScreen {
     current_order: Vec<ExecutionEntry>,
+    #[expect(dead_code)]
     original_order: Vec<ExecutionEntry>,
     selected_index: usize,
     modified: bool,
@@ -156,7 +157,7 @@ impl CliOrderScreen {
 }
 
 pub fn run_cli_order_tui() -> Result<(), Box<dyn std::error::Error>> {
-    enable_raw_mode().map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+    enable_raw_mode().map_err(io::Error::other)?;
     let mut stdout = stdout();
     execute!(
         stdout,

@@ -104,7 +104,7 @@ pub fn finalize_for_entry(base: &PreparedTaskBase, cli_type: CliType, provider: 
         cli_type,
         prompt: base.prompt.clone(),
         args: os_args,
-        provider: provider,
+        provider,
         cwd: base.cwd.clone(),
         worktree_info: base.worktree_info.clone(),
     }

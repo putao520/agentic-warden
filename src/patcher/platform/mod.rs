@@ -7,9 +7,9 @@ use crate::patcher::error::PatchError;
 #[cfg_attr(target_os = "linux", path = "unix.rs")]
 #[cfg_attr(target_os = "macos", path = "macos.rs")]
 #[cfg_attr(windows, path = "windows.rs")]
-mod platform;
+mod native;
 
-pub use platform::PlatformMemoryPatcher;
+pub use native::PlatformMemoryPatcher;
 
 /// 内存区域信息
 #[derive(Debug, Clone)]

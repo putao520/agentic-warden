@@ -274,7 +274,7 @@ impl TextComponent {
             Some("warning") => StyleManager::warning(),
             Some("success") => StyleManager::success(),
             Some("muted") => StyleManager::muted(),
-            _ => StyleManager::default(),
+            _ => StyleManager::normal(),
         };
 
         let mut paragraph = Paragraph::new(text).style(style);

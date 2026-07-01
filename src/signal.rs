@@ -64,8 +64,8 @@ unsafe fn setup_signal_handlers_safe() {
         sigterm_action.sa_flags = libc::SA_RESTART;
 
         // Set signal handler
-        sigint_action.sa_sigaction = handler as usize;
-        sigterm_action.sa_sigaction = handler as usize;
+        sigint_action.sa_sigaction = handler as *const () as usize;
+        sigterm_action.sa_sigaction = handler as *const () as usize;
 
         // Clear signal mask
         let mut empty_set: libc::sigset_t = std::mem::zeroed();

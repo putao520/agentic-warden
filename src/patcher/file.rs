@@ -17,6 +17,34 @@ pub enum InstallationType {
     Unknown,
 }
 
+/// 在匹配文本中按顺序替换 `200000` 字面量为 `regex_replace_values` 中的值
+///
+/// 每出现一次 `200000`，消耗 `regex_replace_values` 的下一个值并替换为
+/// 该 6 位数值的 ASCII 字节（等长替换）。多余的 `200000` 保留不动。
+fn apply_regex_replace(matched: &[u8], replace_values: &[u32]) -> Vec<u8> {
+    use crate::patcher::versions::encode_max_context_tokens;
+    let needle = b"200000";
+    let mut out = Vec::with_capacity(matched.len());
+    let mut val_iter = replace_values.iter();
+    let mut i = 0;
+    while i + needle.len() <= matched.len() {
+        if &matched[i..i + needle.len()] == needle {
+            if let Some(&v) = val_iter.next() {
+                let enc = encode_max_context_tokens(v);
+                out.extend_from_slice(&enc);
+            } else {
+                out.extend_from_slice(needle);
+            }
+            i += needle.len();
+        } else {
+            out.push(matched[i]);
+            i += 1;
+        }
+    }
+    out.extend_from_slice(&matched[i..]);
+    out
+}
+
 /// 应用文件补丁
 pub fn apply_file_patch(
     file_path: &Path,
@@ -39,13 +67,19 @@ pub fn apply_file_patch(
     // 读取文件内容
     let content = fs::read(file_path)?;
 
-    // 查找所有匹配位置
-    let search_len = pattern.search_pattern.len();
+    if pattern.use_regex {
+        return apply_regex_file_patch(file_path, &content, pattern);
+    }
+
+    // 字面量模式：查找所有匹配位置
+    let search = pattern.search_pattern.as_ref();
+    let search_len = search.len();
     let mut positions: Vec<usize> = Vec::new();
     let mut start = 0;
     while start + search_len <= content.len() {
-        if let Some(pos) = content[start..].windows(search_len)
-            .position(|window| window == pattern.search_pattern)
+        if let Some(pos) = content[start..]
+            .windows(search_len)
+            .position(|window| window == search)
         {
             positions.push(start + pos);
             start = start + pos + search_len;
@@ -55,11 +89,14 @@ pub fn apply_file_patch(
     }
 
     if positions.is_empty() {
-        return Err(UnifiedPatchError::PatternNotFound(format!("{:?}", pattern.search_pattern)));
+        return Err(UnifiedPatchError::PatternNotFound(format!(
+            "{:?}",
+            pattern.search_pattern
+        )));
     }
 
     // 应用补丁（替换所有匹配）
-    let patched_content = if let Some(replace) = pattern.replace_pattern {
+    let patched_content = if let Some(replace) = pattern.replace_pattern.as_ref() {
         // 从后往前替换，避免偏移变化
         let mut new_content = content.clone();
         for &pos in positions.iter().rev() {
@@ -79,29 +116,76 @@ pub fn apply_file_patch(
         new_content
     } else {
         return Err(UnifiedPatchError::PatternNotFound(
-            "No replacement pattern or patch byte specified".to_string()
+            "No replacement pattern or patch byte specified".to_string(),
         ));
     };
 
-    // 写回文件（对二进制文件使用 rename 策略避免 "Text file busy"）
+    write_back(file_path, &patched_content)?;
+
+    Ok(UnifiedPatchResult::FilePatched {
+        path: file_path.display().to_string(),
+    })
+}
+
+/// regex 模式的文件补丁：扫描所有匹配，按 regex_replace_values 替换其中的数字
+fn apply_regex_file_patch(
+    file_path: &Path,
+    content: &[u8],
+    pattern: &UnifiedPatchPattern,
+) -> Result<UnifiedPatchResult> {
+    let regex_str = std::str::from_utf8(pattern.search_pattern.as_ref())
+        .map_err(|e| UnifiedPatchError::Other(format!("invalid regex utf-8: {}", e)))?;
+    let re = regex::bytes::Regex::new(regex_str)
+        .map_err(|e| UnifiedPatchError::Other(format!("invalid regex: {}", e)))?;
+
+    let replace_values = pattern.regex_replace_values.clone().unwrap_or_default();
+
+    // 收集所有匹配（从后往前应用以保持偏移稳定）
+    let matches: Vec<_> = re.find_iter(content).collect();
+    if matches.is_empty() {
+        return Err(UnifiedPatchError::PatternNotFound(format!(
+            "regex {:?} did not match",
+            regex_str
+        )));
+    }
+
+    let mut new_content = content.to_vec();
+    for m in matches.iter().rev() {
+        let matched_bytes = &content[m.start()..m.end()];
+        let replaced = apply_regex_replace(matched_bytes, &replace_values);
+        // 等长替换（regex 只替换 200000→6位数，长度不变）
+        let span_len = m.end() - m.start();
+        if replaced.len() == span_len {
+            new_content[m.start()..m.end()].copy_from_slice(&replaced);
+        } else {
+            // 长度不一致（理论上不应发生），用 splice 兜底
+            new_content.splice(m.start()..m.end(), replaced);
+        }
+    }
+
+    write_back(file_path, &new_content)?;
+
+    Ok(UnifiedPatchResult::FilePatched {
+        path: file_path.display().to_string(),
+    })
+}
+
+/// 写回文件（对二进制文件使用 rename 策略避免 "Text file busy"）
+fn write_back(file_path: &Path, content: &[u8]) -> Result<()> {
     if is_binary_file(file_path) {
         let tmp_path = PathBuf::from(format!("{}.aiw-tmp", file_path.display()));
-        fs::write(&tmp_path, &patched_content)?;
+        fs::write(&tmp_path, content)?;
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
             if let Ok(metadata) = fs::metadata(file_path) {
                 let _ = fs::set_permissions(&tmp_path, metadata.permissions());
             }
         }
         fs::rename(&tmp_path, file_path)?;
     } else {
-        fs::write(file_path, &patched_content)?;
+        fs::write(file_path, content)?;
     }
-
-    Ok(UnifiedPatchResult::FilePatched {
-        path: file_path.display().to_string(),
-    })
+    Ok(())
 }
 
 /// 检查文件是否已应用补丁
@@ -110,13 +194,34 @@ pub fn is_file_patched(
     pattern: &UnifiedPatchPattern,
 ) -> Result<bool> {
     let content = fs::read(file_path)?;
-    
+
+    if pattern.use_regex {
+        return is_file_patched_regex(&content, pattern);
+    }
+
+    let search = pattern.search_pattern.as_ref();
     // 检查是否包含原始模式（未补丁）
-    let has_original = content
-        .windows(pattern.search_pattern.len())
-        .any(|window| window == pattern.search_pattern);
-    
+    let has_original = content.windows(search.len()).any(|window| window == search);
+
     Ok(!has_original)
+}
+
+/// regex 模式下的「已补丁」判定：匹配到的文本里是否还有 200000
+///
+/// 未补丁 = 匹配文本包含 200000；已补丁 = 匹配文本不含 200000
+/// （替换后变成 500000 等其他 6 位数）。
+fn is_file_patched_regex(content: &[u8], pattern: &UnifiedPatchPattern) -> Result<bool> {
+    let regex_str = std::str::from_utf8(pattern.search_pattern.as_ref())
+        .map_err(|e| UnifiedPatchError::Other(format!("invalid regex utf-8: {}", e)))?;
+    let re = regex::bytes::Regex::new(regex_str)
+        .map_err(|e| UnifiedPatchError::Other(format!("invalid regex: {}", e)))?;
+
+    // 未补丁的匹配：仍含 200000
+    let has_unpatched = re
+        .find_iter(content)
+        .any(|m| m.as_bytes().windows(6).any(|w| w == b"200000"));
+
+    Ok(!has_unpatched)
 }
 
 /// 获取 Claude CLI 文件路径（npm 安装）
@@ -263,27 +368,9 @@ pub fn restore_from_backup(file_path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_variable_length_replacement() {
-        // 测试不同长度的替换
-        let content = b"if(cL()==\"firstParty\"){enabled()}".to_vec();
-        let search_pattern = b"cL()==\"firstParty\"";
-        let replace_pattern = b"true";
-        
-        // 模拟补丁应用
-        let found_pos = content.windows(search_pattern.len())
-            .position(|window| window == search_pattern)
-            .unwrap();
-        
-        let mut new_content = Vec::with_capacity(content.len());
-        new_content.extend_from_slice(&content[..found_pos]);
-        new_content.extend_from_slice(replace_pattern);
-        new_content.extend_from_slice(&content[found_pos + search_pattern.len()..]);
-        
-        let result = String::from_utf8_lossy(&new_content);
-        assert_eq!(result, "if(true){enabled()}");
-    }
+    use crate::patcher::types::PatchType;
+    use crate::patcher::versions::{ClaudeVersion, MAX_CONTEXT_TOKENS_SEARCH_REGEX};
+    use std::borrow::Cow;
 
     #[test]
     fn test_claude_cli_path() {
@@ -291,5 +378,64 @@ mod tests {
         let result = get_claude_cli_path();
         // 结果取决于系统是否有 claude 命令
         assert!(result.is_ok() || result.is_err());
+    }
+
+    #[test]
+    fn test_regex_replace_swaps_200000() {
+        let matched = b"var YOt=200000,Pte=200000,Evi=20000,Wkd=32000,qkd=128000;";
+        let out = apply_regex_replace(matched, &[500000, 500000]);
+        let s = String::from_utf8(out).unwrap();
+        assert_eq!(
+            s,
+            "var YOt=500000,Pte=500000,Evi=20000,Wkd=32000,qkd=128000;"
+        );
+        // 等长替换
+        assert_eq!(s.len(), matched.len());
+    }
+
+    #[test]
+    fn test_apply_regex_file_patch_writes_target_values() {
+        // 构造临时二进制内容并验证 regex 文件补丁逻辑
+        let tmp = std::env::temp_dir().join("aiw_regex_patch_test.bin");
+        let original = b"...upperLimit-1}var YOt=200000,Pte=200000,Evi=20000,Wkd=32000,qkd=128000;var BE=E(()=>{";
+        std::fs::write(&tmp, original).unwrap();
+
+        let pattern = UnifiedPatchPattern {
+            feature: crate::patcher::types::FeatureType::MaxContextTokens,
+            patch_type: PatchType::File,
+            search_pattern: Cow::Borrowed(MAX_CONTEXT_TOKENS_SEARCH_REGEX.as_bytes()),
+            replace_pattern: None,
+            patch_byte: None,
+            patch_offset: None,
+            description: Cow::Borrowed("test"),
+            use_regex: true,
+            regex_replace_values: Some(vec![500000, 300000]),
+        };
+
+        let res = apply_file_patch(&tmp, &pattern);
+        assert!(res.is_ok(), "{:?}", res);
+
+        let patched = std::fs::read(&tmp).unwrap();
+        let s = String::from_utf8_lossy(&patched);
+        assert!(s.contains("var YOt=500000,Pte=300000,Evi=20000,Wkd=32000,qkd=128000;"));
+        // 等长：总长度不变
+        assert_eq!(patched.len(), original.len());
+
+        // 已补丁判定
+        let patched_flag = is_file_patched(&tmp, &pattern).unwrap();
+        assert!(patched_flag);
+
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn test_get_max_context_tokens_patches_via_registry() {
+        let v = ClaudeVersion {
+            major: 2,
+            minor: 1,
+            patch: 195,
+        };
+        let patches = crate::patcher::registry::get_max_context_tokens_patches(&v, 500000, 500000);
+        assert_eq!(patches.len(), 2);
     }
 }

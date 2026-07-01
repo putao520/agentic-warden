@@ -42,12 +42,12 @@ pub fn parse_marketplace_source(input: &str) -> MarketResult<(MarketplaceSourceC
                 .trim_start_matches('/')
                 .trim_end_matches(".git")
                 .to_string();
-            let name = repo.split('/').last().unwrap_or("market").to_string();
+            let name = repo.split('/').next_back().unwrap_or("market").to_string();
             return Ok((MarketplaceSourceConfig::Github { repo }, name));
         }
         let name = url
             .path_segments()
-            .and_then(|s| s.last())
+            .and_then(|mut s| s.next_back())
             .unwrap_or("remote-marketplace")
             .trim_end_matches(".json")
             .to_string();
@@ -60,7 +60,7 @@ pub fn parse_marketplace_source(input: &str) -> MarketResult<(MarketplaceSourceC
     }
 
     if input.split('/').count() == 2 {
-        let name = input.split('/').last().unwrap_or("market").to_string();
+        let name = input.split('/').next_back().unwrap_or("market").to_string();
         return Ok((
             MarketplaceSourceConfig::Github {
                 repo: input.to_string(),
@@ -113,7 +113,7 @@ pub async fn load_sources() -> MarketResult<HashMap<String, Box<dyn MarketSource
     Ok(map)
 }
 
-pub async fn fetch_plugin_metadata(source: &Box<dyn MarketSource>) -> MarketResult<Vec<PluginMetadata>> {
+pub async fn fetch_plugin_metadata(source: &dyn MarketSource) -> MarketResult<Vec<PluginMetadata>> {
     let marketplace = source.fetch_marketplace().await?;
     let mut metadata = Vec::new();
     for entry in marketplace.plugins.iter() {
@@ -135,7 +135,7 @@ pub async fn fetch_plugin_metadata(source: &Box<dyn MarketSource>) -> MarketResu
 }
 
 pub async fn fetch_plugin_detail(
-    source: &Box<dyn MarketSource>,
+    source: &dyn MarketSource,
     plugin_name: &str,
 ) -> MarketResult<PluginFetchResult> {
     let marketplace = source.fetch_marketplace().await?;
@@ -155,7 +155,7 @@ pub async fn fetch_plugin_detail(
 }
 
 pub async fn fetch_plugin_entry(
-    source: &Box<dyn MarketSource>,
+    source: &dyn MarketSource,
     plugin_name: &str,
 ) -> MarketResult<(MarketplacePluginEntry, PluginManifest)> {
     let marketplace = source.fetch_marketplace().await?;

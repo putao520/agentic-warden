@@ -21,8 +21,6 @@ use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::io::{self, IsTerminal};
 use std::path::PathBuf;
-use std::path::Path;
-use std::process::Command as StdCommand;
 use std::process::{ExitStatus, Stdio};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -31,7 +29,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub enum Never {}
 
 impl std::fmt::Display for Never {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {}
     }
 }
@@ -69,274 +67,78 @@ fn get_cli_command(cli_type: &CliType) -> Result<String, ProcessError> {
         ))),
     }
 }
-/// Apply Claude ToolSearch patch for npm installation
-/// 
-/// For npm-installed Claude CLI, we use sed to directly modify the JavaScript file.
-/// This is a one-time modification that persists across restarts.
-fn apply_npm_claude_patch() -> anyhow::Result<()> {
-    use std::fs;
-    
-    // 找到 claude 命令路径
-    let claude_path = StdCommand::new("which")
-        .arg("claude")
-        .output()
-        .map_err(|e| anyhow::anyhow!("Failed to find claude command: {}", e))?;
-    
-    if !claude_path.status.success() {
-        return Err(anyhow::anyhow!("claude command not found"));
-    }
-    
-    let claude_cli = String::from_utf8_lossy(&claude_path.stdout).trim().to_string();
-    tracing::debug!("Found claude at: {}", claude_cli);
-    
-    // 读取 claude 脚本内容
-    let script_content = fs::read_to_string(claude_cli)
-        .map_err(|e| anyhow::anyhow!("Failed to read claude script: {}", e))?;
-    
-    // 检查是否是 npm 安装（检查是否包含 node_modules 路径）
-    if !script_content.contains("node_modules") {
-        tracing::debug!("Claude is not npm-installed, skipping file patch");
-        return Err(anyhow::anyhow!("Not npm installation"));
-    }
-    
-    // 提取 node_modules 路径
-    let pnpm_path = script_content
-        .lines()
-        .filter_map(|line| {
-            if line.contains("node_modules/@anthropic-ai/claude-code") {
-                Some(line.trim())
-            } else {
-                None
-            }
-        })
-        .last()
-        .ok_or_else(|| anyhow::anyhow!("Could not find node_modules path"))?;
-    
-    // 解析 basedir
-    let basedir = pnpm_path
-        .split("basedir=")
-        .nth(1)
-        .and_then(|s| s.split_whitespace().next())
-        .ok_or_else(|| anyhow::anyhow!("Could not parse basedir"))?;
-        
-    // 展开环境变量
-    let basedir = shellexpand::env(basedir)
-        .map_err(|e| anyhow::anyhow!("Failed to expand basedir: {}", e))?;
-    
-    let cli_js_path = Path::new(basedir.as_ref())
-        .join("cli.js");
-    
-    tracing::debug!("Claude cli.js path: {:?}", cli_js_path);
-    
-    if !cli_js_path.exists() {
-        return Err(anyhow::anyhow!("cli.js not found at {:?}", cli_js_path));
-    }
-    
-    // 读取 cli.js 内容
-    let mut js_content = fs::read_to_string(&cli_js_path)
-        .map_err(|e| anyhow::anyhow!("Failed to read cli.js: {}", e))?;
-    
-    // 检查是否已经补丁过
-    if js_content.contains("O8()!==\"firstParty\"") {
-        // Already patched, silent
-        return Ok(());
-    }
-    
-    // 检查是否包含目标模式
-    if !js_content.contains("O8()===\"firstParty\"") {
-        tracing::debug!("Target pattern not found in cli.js, may be different version");
-        return Err(anyhow::anyhow!("Target pattern not found"));
-    }
-    
-    // 应用补丁：将 O8()==="firstParty" 改为 O8()!=="firstParty"
-    js_content = js_content.replace("O8()===\"firstParty\"", "O8()!==\"firstParty\"");
-    
-    // 写回文件
-    fs::write(&cli_js_path, js_content)
-        .map_err(|e| anyhow::anyhow!("Failed to write patched cli.js: {}", e))?;
-    
-    eprintln!("✅ Claude ToolSearch unlocked");
-    Ok(())
-}
-
-/// Apply Claude ToolSearch patch
+/// Apply max-context-tokens memory patches for Claude CLI
 ///
-/// This is a best-effort operation - failure should not break the normal flow.
-
-/// Apply unified memory patches for all features
-fn apply_unified_memory_patches(pid: u32, cli_type: &CliType) {
-    use crate::patcher::RuntimePatcher;
-    use crate::patcher::types::{PatchType, FeatureType};
+/// 通过通用 regex 匹配 Claude CLI 内存中的常量块
+/// `var X=200000,Y=200000,...`，把两个 200000 等长替换为配置值。
+///
+/// 此操作是 best-effort：失败不影响主流程。
+/// 如果文件补丁已应用（常量块已是目标值），则跳过内存补丁避免重复。
+fn apply_max_context_tokens_patches(pid: u32, cli_type: &CliType) {
+    use crate::patcher::types::PatchType;
     use crate::patcher::registry::get_feature_patches;
     use crate::patcher::versions::ClaudeVersion;
     use crate::patcher::{get_patchable_path, is_file_patched};
-    
+
     // Only patch Claude CLI
     if !matches!(cli_type, CliType::Claude) {
         return;
     }
-    
+
+    // 读配置获取 max_tokens / auto_compact
+    let cfg = crate::config::PatchConfig::load().unwrap_or_default();
+    let max_tokens = cfg.max_context_tokens;
+    let auto_compact = cfg.auto_compact_window;
+
     // 检查文件补丁是否已应用，如果已应用则跳过内存补丁
     if let Ok(patch_path) = get_patchable_path() {
-        let version_str = get_claude_version_string_for_patch().unwrap_or_else(|| "2.1.72".to_string());
-        let version = ClaudeVersion::from_string(&version_str).unwrap_or(ClaudeVersion { major: 2, minor: 1, patch: 72 });
-        let patches = get_feature_patches(FeatureType::ToolSearch, &version);
-        
-        let file_already_patched = patches.iter()
+        let version_str =
+            get_claude_version_string_for_patch().unwrap_or_else(|| "2.1.195".to_string());
+        let version = ClaudeVersion::from_string(&version_str).unwrap_or(ClaudeVersion {
+            major: 2,
+            minor: 1,
+            patch: 195,
+        });
+        let patches = get_feature_patches(crate::patcher::types::FeatureType::MaxContextTokens, &version);
+
+        let file_already_patched = patches
+            .iter()
             .filter(|p| p.patch_type == PatchType::File)
             .any(|p| is_file_patched(&patch_path, p).unwrap_or(false));
-        
+
         if file_already_patched {
-            // 文件补丁已应用，跳过内存补丁避免重复
+            tracing::debug!(
+                "max-context-tokens file patch already applied, skipping memory patch"
+            );
             return;
         }
     }
-    // Get version
-    let version = match get_claude_version_string_for_patch() {
-        Some(v) => ClaudeVersion::from_string(&v).unwrap_or_else(|| ClaudeVersion {
-            major: 2, minor: 1, patch: 72
-        }),
-        None => return,
-    };
 
-    // Skip memory patches if version is not supported
-    if !version.is_supported() {
-        tracing::warn!(
-            "Claude CLI {}.{}.{} is not in supported versions ({}), skipping memory patches",
-            version.major, version.minor, version.patch,
-            ClaudeVersion::supported_versions_str()
-        );
-        return;
-    }
-    
     let patcher = match RuntimePatcher::new(pid) {
         Ok(p) => p,
         Err(_) => return,
     };
-    
-    let features = vec![
-        FeatureType::ToolSearch,
-        FeatureType::UltraThink,
-        FeatureType::WebSearch,
-    ];
-    
-    for feature in features {
-        let patches = get_feature_patches(feature, &version);
-        let memory_patches: Vec<_> = patches
-            .iter()
-            .filter(|p| p.patch_type == PatchType::Memory)
-            .collect();
-        
-        for patch in memory_patches {
-            // Apply memory patch (non-blocking, failure doesn't affect main flow)
-            let _ = apply_memory_patch_inline(&patcher, patch, pid);
+
+    match patcher.apply_max_context_tokens_patch(max_tokens, auto_compact) {
+        Ok(_addr) => {
+            eprintln!(
+                "✅ MaxContextTokens unlocked (max_tokens={}, auto_compact={})",
+                max_tokens, auto_compact
+            );
+        }
+        Err(e) => {
+            tracing::debug!("max-context-tokens memory patch failed: {}", e);
         }
     }
 }
-
-/// Apply a single memory patch (inline implementation)
-fn apply_memory_patch_inline(
-    patcher: &RuntimePatcher,
-    patch: &crate::patcher::types::UnifiedPatchPattern,
-    pid: u32,
-) -> anyhow::Result<()> {
-    use std::time::Duration;
-    use std::thread;
-
-    eprintln!("[AIW_MEM_PATCH] Applying memory patch: {}", patch.description);
-    eprintln!("[AIW_MEM_PATCH] PID: {}, Pattern: {:?}", pid, std::str::from_utf8(patch.search_pattern));
-    
-    let retries = [
-        Duration::from_millis(100),
-        Duration::from_millis(200),
-        Duration::from_millis(500),
-    ];
-    
-    for delay in retries {
-        thread::sleep(delay);
-        
-        // Try to find and patch the pattern
-        if let Ok(Some(addr)) = patcher.search_pattern(patch.search_pattern) {
-            if let (Some(patch_byte), Some(offset)) = (patch.patch_byte, patch.patch_offset) {
-                let patch_addr = addr + offset;
-                if patcher.write_memory(patch_addr, &[patch_byte]).is_ok() {
-                    eprintln!("[AIW_MEM_PATCH] SUCCESS: Patched at {:#x}", patch_addr);
-                    tracing::debug!("Memory patch applied: {}", patch.description);
-                    return Ok(());
-                }
-            }
-        }
-    }
-    
-    eprintln!("[AIW_MEM_PATCH] FAILED: {}", patch.description);
-    Err(anyhow::anyhow!("Memory patch failed: {}", patch.description))
-}
-
 
 fn get_claude_version_string_for_patch() -> Option<String> {
     use std::process::Command;
-    
-    let output = Command::new("claude")
-        .arg("--version")
-        .output()
-        .ok()?;
-    
+
+    let output = Command::new("claude").arg("--version").output().ok()?;
+
     let version_str = String::from_utf8_lossy(&output.stdout);
     Some(version_str.split_whitespace().next()?.to_string())
-}
-/// 
-/// Strategy:
-/// 1. For npm installation: patch the JavaScript file directly (one-time, persistent)
-/// 2. For native/cargo installation: use runtime memory patch (applied each launch)
-fn apply_claude_toolsearch_patch(pid: u32) -> anyhow::Result<()> {
-    // 首先尝试文件补丁（针对 npm 安装）
-    if let Ok(()) = apply_npm_claude_patch() {
-        return Ok(());
-    }
-    
-    // 文件补丁失败或不是 npm 安装，使用运行时补丁
-    tracing::debug!("File patch not applicable, using runtime memory patch");
-    apply_runtime_memory_patch(pid)
-}
-
-/// Apply runtime memory patch for native/cargo installations
-fn apply_runtime_memory_patch(pid: u32) -> anyhow::Result<()> {
-    use std::time::Duration;
-
-    let patcher = RuntimePatcher::new(pid)?;
-
-    // 重试策略：最多 5 次，间隔逐渐增加
-    let retries = [
-        Duration::from_millis(100),
-        Duration::from_millis(200),
-        Duration::from_millis(500),
-        Duration::from_millis(1000),
-        Duration::from_millis(2000),
-    ];
-
-    let mut last_error = None;
-
-    for (i, delay) in retries.iter().enumerate() {
-        if i > 0 {
-            tracing::debug!("Waiting {:?} before retry (attempt {}/{})", delay, i + 1, retries.len());
-            std::thread::sleep(*delay);
-        }
-
-        match patcher.apply_claude_toolsearch_patch() {
-            Ok(_addr) => {
-                eprintln!("✅ Claude ToolSearch unlocked");
-                return Ok(());
-            }
-            Err(e) => {
-                tracing::debug!("Runtime patch attempt {}/{} failed", i + 1, retries.len());
-                last_error = Some(e);
-            }
-        }
-    }
-
-    let err = last_error.unwrap();
-    // Patch failed silently (non-critical)
-    Err(anyhow::anyhow!("Runtime patch failed after {} retries: {}", retries.len(), err))
 }
 
 /// Output handling strategy for CLI execution
@@ -349,6 +151,7 @@ enum OutputStrategy {
     /// Capture stdout to buffer with display control
     CaptureWithDisplay(Arc<Mutex<Vec<u8>>>, Arc<Mutex<ScrollingDisplay>>),
     /// Legacy capture mode (for backward compatibility)
+    #[allow(dead_code)]
     Capture(Arc<Mutex<Vec<u8>>>),
     /// Capture stdout and stderr without mirroring output
     CaptureAll(Arc<Mutex<Vec<u8>>>, Arc<Mutex<Vec<u8>>>),
@@ -672,9 +475,9 @@ async fn execute_cli_internal<S: TaskStorage>(
         .id()
         .ok_or_else(|| io::Error::other("Failed to get child PID"))?;
 
-    // Apply unified memory patches for all features (Claude only)
+    // Apply max-context-tokens memory patches for Claude CLI
     if matches!(cli_type, CliType::Claude) {
-        apply_unified_memory_patches(child_pid, cli_type);
+        apply_max_context_tokens_patches(child_pid, cli_type);
     }
 
     let log_path = match generate_log_path(child_pid) {
@@ -973,7 +776,8 @@ async fn execute_cli_internal<S: TaskStorage>(
 /// - Uses system temp directory (cross-platform)
 /// - Creates directory with restrictive permissions (0700 on Unix)
 /// - Ensures logs are only accessible by the current user
-/// Set up an isolated CODEX_HOME for third-party providers.
+///
+///   Set up an isolated CODEX_HOME for third-party providers.
 ///
 /// Codex CLI prioritizes OAuth tokens from `~/.codex/auth.json` over the
 /// `OPENAI_API_KEY` environment variable. When using a third-party provider,
@@ -1538,9 +1342,16 @@ pub fn start_interactive_cli<S: TaskStorage>(
                 // Apply runtime patch
                 match RuntimePatcher::new(child_pid) {
                     Ok(patcher) => {
-                        match patcher.apply_claude_toolsearch_patch() {
+                        let cfg = crate::config::PatchConfig::load().unwrap_or_default();
+                        match patcher.apply_max_context_tokens_patch(
+                            cfg.max_context_tokens,
+                            cfg.auto_compact_window,
+                        ) {
                             Ok(addr) => {
-                                eprintln!("✅ ToolSearch unlocked (patch at 0x{:x})", addr);
+                                eprintln!(
+                                    "✅ MaxContextTokens unlocked (patch at 0x{:x})",
+                                    addr
+                                );
                             }
                             Err(_) => {
                                 // Patch failed - could be wrong version or pattern not found

@@ -110,25 +110,27 @@ graph TB
 **Rust Implementation**:
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProviderConfig {
-    pub schema: String,
-    pub version: String,
-    pub format_version: u32,
+pub struct ProvidersConfig {
+    pub schema: Option<String>,
     pub providers: HashMap<String, Provider>,
     pub default_provider: String,
-    pub settings: ProviderSettings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Provider {
-    pub name: String,
-    pub description: String,
-    pub compatible_with: Vec<AiType>,
+    pub enabled: bool,           // default: true
+    pub scenario: Option<String>,
+    pub compatible_with: Option<Vec<AiType>>,
     pub env: HashMap<String, String>,
-    pub builtin: bool,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    pub metadata: HashMap<String, serde_json::Value>,
+    pub disabled_until: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum AiType {
+    Codex,
+    Claude,
+    Gemini,
+    Auto,
 }
 ```
 
@@ -199,6 +201,63 @@ pub struct Provider {
 
 ---
 
+#### DATA-008: Patch Configuration
+**Version**: v0.5.99+
+**Related Requirements**: REQ-025
+**Storage Location**: `~/.aiw/patch.json`
+
+**Schema Definition**:
+```json
+{
+  "max_context_tokens": 500000,
+  "auto_compact_window": 500000
+}
+```
+
+**Field Definitions**:
+| 字段 | 类型 | 默认值 | 约束 | 说明 |
+|------|------|--------|------|------|
+| `max_context_tokens` | u32 | 500000 | 100000~999999 (6 位十进制) | Claude CLI 默认上下文窗口上限（patch `YOt` 常量） |
+| `auto_compact_window` | u32 | 500000 | 100000~999999 (6 位十进制) | autoCompact 触发阈值（patch `Pte` 常量） |
+
+**Validation Rules**:
+- `validate_max_context_tokens(n)` 强制 6 位十进制数（100000~999999），保证等长替换不破坏二进制偏移
+- `encode_max_context_tokens(n)` 编码为 6 字节 ASCII（如 `500000` → `b"500000"`）
+- serde 默认值函数：旧配置缺字段时用默认 500000
+
+**Related Types** (src/patcher/types.rs):
+```rust
+pub enum FeatureType {
+    MaxContextTokens,  // 唯一 variant（firstParty 系已删除）
+}
+
+pub struct UnifiedPatchPattern {
+    pub feature: FeatureType,
+    pub patch_type: PatchType,                              // File | Memory
+    pub search_pattern: Cow<'static, [u8]>,                 // regex 字节或字面量
+    pub replace_pattern: Option<Cow<'static, [u8]>>,        // None for regex mode
+    pub patch_byte: Option<u8>,
+    pub patch_offset: Option<usize>,
+    pub description: Cow<'static, str>,
+    pub use_regex: bool,                                    // true: search_pattern 作为 regex
+    pub regex_replace_values: Option<Vec<u32>>,             // 顺序替换匹配文本里的数字
+}
+```
+
+**Patch Target** (Claude CLI binary constant block):
+```
+var YOt=200000,Pte=200000,Evi=20000,Wkd=32000,qkd=128000;
+         ^^^^^^^      ^^^^^^^
+         max_context  auto_compact
+         _tokens      _window
+```
+通用正则 `MAX_CONTEXT_TOKENS_SEARCH_REGEX`（变量名无关，跨版本稳定）：
+```
+var [a-zA-Z_$][a-zA-Z0-9_$]*=200000,[a-zA-Z_$][a-zA-Z0-9_$]*=200000,...
+```
+
+---
+
 ### [v0] Runtime Data Models
 
 #### DATA-004: Task Registry Record
@@ -210,31 +269,36 @@ pub struct Provider {
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskRecord {
-    pub task_id: TaskId,
-    pub pid: u32,
-    pub root_parent_pid: u32,
-    pub ai_cli_type: Option<AiType>,
-    pub prompt: String,
-    pub provider: Option<String>,
+    pub started_at: DateTime<Utc>,
+    pub log_id: String,
+    pub log_path: String,
+    pub manager_pid: Option<u32>,
+    pub cleanup_reason: Option<String>,
     pub status: TaskStatus,
-    pub start_time: DateTime<Utc>,
-    pub end_time: Option<DateTime<Utc>>,
     pub result: Option<String>,
-    pub error: Option<String>,
-    pub command_line: String,
-    pub working_directory: PathBuf,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub exit_code: Option<i32>,
+    pub process_chain: Vec<u32>,
+    pub root_parent_pid: Option<u32>,
+    pub process_tree_depth: usize,
+    pub process_tree: Option<ProcessTreeInfo>,
+    pub ai_cli_process: Option<AiCliProcessInfo>,
+    pub task_id: Option<String>,
+    pub worktree_info: Option<WorktreeInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum TaskStatus {
-    Running,
+    Running,            // default
     CompletedButUnread,
-    Completed,
-    Failed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct TaskId(u64);
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorktreeInfo {
+    pub path: String,
+    pub branch: String,
+    pub commit: String,
+}
 ```
 
 **Shared Memory Layout**:
@@ -354,14 +418,14 @@ pub struct MCPTool {
     pub input_schema: serde_json::Value,
 }
 
-// Available tools
-pub const MCP_TOOLS: &[&str] = &[
-    "monitor_processes",
-    "get_process_tree",
-    "terminate_process",
-    "get_provider_status",
-    "start_ai_cli",
+// 基础工具（base_tools）
+const BASE_TOOLS: &[&str] = &[
+    "intelligent_route",    // 智能 MCP 路由
+    "get_method_schema",    // 获取 MCP 方法 schema
 ];
+
+// 动态工具通过 DynamicToolRegistry 在运行时注册
+// 包括 JS 编排工具和代理 MCP 工具
 ```
 
 ---

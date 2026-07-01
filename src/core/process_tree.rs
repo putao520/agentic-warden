@@ -498,7 +498,7 @@ fn get_parent_pid_windows(pid: u32) -> Result<Option<u32>, ProcessTreeError> {
 /// Unix-specific implementation using psutil
 #[cfg(unix)]
 fn get_parent_pid_unix(pid: u32) -> Result<Option<u32>, ProcessTreeError> {
-    let process = Process::new(pid.into())?;
+    let process = Process::new(pid)?;
     match process.ppid() {
         Ok(parent_pid_opt) => {
             // ppid() returns Option<u32>, already the correct type
@@ -549,11 +549,8 @@ fn get_process_name_windows(pid: u32) -> Option<String> {
 /// Unix process name implementation using psutil
 #[cfg(unix)]
 fn get_process_name_unix(pid: u32) -> Option<String> {
-    match Process::new(pid.into()) {
-        Ok(process) => match process.name() {
-            Ok(name) => Some(name),
-            Err(_) => None,
-        },
+    match Process::new(pid) {
+        Ok(process) => process.name().ok(),
         Err(_) => None,
     }
 }

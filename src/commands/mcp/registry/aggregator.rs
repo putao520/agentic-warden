@@ -19,11 +19,18 @@ pub struct RegistryAggregator {
     cache: Arc<RwLock<HashMap<CacheKey, CachedEntry>>>,
 }
 
+impl Default for RegistryAggregator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RegistryAggregator {
     pub fn new() -> Self {
-        let mut sources: Vec<Box<dyn RegistrySource>> = Vec::new();
-        sources.push(Box::new(OfficialRegistrySource::new()));
-        sources.push(Box::new(SmitherySource::new()));
+        let sources: Vec<Box<dyn RegistrySource>> = vec![
+            Box::new(OfficialRegistrySource::new()),
+            Box::new(SmitherySource::new()),
+        ];
         Self::with_sources(sources)
     }
 
@@ -151,14 +158,15 @@ impl RegistryAggregator {
         self.cache.write().await.clear();
     }
 
-    fn filtered_sources(&self, filter: Option<&str>) -> Vec<&Box<dyn RegistrySource>> {
+    fn filtered_sources(&self, filter: Option<&str>) -> Vec<&dyn RegistrySource> {
         match filter {
             Some(target) => self
                 .sources
                 .iter()
                 .filter(|src| src.source_id().eq_ignore_ascii_case(target))
+                .map(|b| b.as_ref())
                 .collect(),
-            None => self.sources.iter().collect(),
+            None => self.sources.iter().map(|b| b.as_ref()).collect(),
         }
     }
 }

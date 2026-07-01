@@ -130,8 +130,7 @@ impl App {
             let screen = match self.current_screen.create() {
                 Ok(screen) => screen,
                 Err(err) => {
-                    let io_err = std::io::Error::new(
-                        std::io::ErrorKind::Other,
+                    let io_err = std::io::Error::other(
                         format!("failed to create screen {}: {}", self.current_screen, err),
                     );
                     return Err(Box::new(io_err));
@@ -243,7 +242,7 @@ impl App {
     }
 
     fn render_title_bar(&self, frame: &mut ratatui::Frame, area: ratatui::layout::Rect) {
-        let title = format!("🚀 Agentic Warden - {}", self.current_screen.to_string());
+        let title = format!("🚀 Agentic Warden - {}", self.current_screen);
         let paragraph = Paragraph::new(title)
             .style(ratatui::style::Style::default().fg(ratatui::style::Color::Cyan))
             .block(ratatui::widgets::Block::default().borders(ratatui::widgets::Borders::ALL));

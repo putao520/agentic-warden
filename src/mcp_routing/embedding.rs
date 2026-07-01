@@ -1,5 +1,8 @@
 use anyhow::{anyhow, Result};
 
+/// Type alias for the embedding generator closure (keeps signatures readable).
+type EmbeddingGenerator = dyn Fn(&str) -> Vec<f32> + Send + Sync;
+
 /// Backend interface for embedding generation (allows mocking in tests).
 pub trait EmbeddingBackend: Send + Sync {
     fn dimension(&self) -> usize;
@@ -9,7 +12,7 @@ pub trait EmbeddingBackend: Send + Sync {
 /// Simple embedding backend that returns deterministic vectors for tests.
 pub struct MockEmbeddingBackend {
     dimension: usize,
-    generator: std::sync::Arc<dyn Fn(&str) -> Vec<f32> + Send + Sync>,
+    generator: std::sync::Arc<EmbeddingGenerator>,
 }
 
 impl MockEmbeddingBackend {

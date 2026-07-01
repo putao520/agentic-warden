@@ -131,11 +131,9 @@ impl AiCliCodeGenerator {
 
         eprintln!("   🔍 [CODEX] CLI registry created successfully");
 
-        // Create temporary files for input/output
+        // Create temporary file for input
         let prompt_file =
             std::env::temp_dir().join(format!("aiw_prompt_{}.txt", std::process::id()));
-        let output_file =
-            std::env::temp_dir().join(format!("aiw_output_{}.txt", std::process::id()));
 
         // Write prompt to temp file
         std::fs::write(&prompt_file, prompt).context("Failed to write prompt to temp file")?;

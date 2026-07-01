@@ -15,7 +15,7 @@ impl McpFilter for PluginMetadata {
     fn filter_mcp_plugins(plugins: Vec<PluginMetadata>) -> Vec<PluginMetadata> {
         plugins
             .into_iter()
-            .filter(|plugin| Self::is_mcp_plugin(plugin))
+            .filter(Self::is_mcp_plugin)
             .collect()
     }
 }

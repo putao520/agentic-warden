@@ -1,6 +1,7 @@
 //! 统一补丁框架核心类型定义
 
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
 /// 补丁类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -14,38 +15,25 @@ pub enum PatchType {
 /// 功能类型 - 每个需要补丁的功能
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum FeatureType {
-    /// ToolSearch 功能解锁
-    ToolSearch,
-    /// UltraThink/Effort 功能解锁
-    UltraThink,
-    /// AgentTeams 功能解锁
-    AgentTeams,
-    /// WebSearch 地区限制绕过
-    WebSearch,
-    /// 持久代理内存
-    PersistentMemory,
+    /// MaxContextTokens - 可配置默认上下文窗口 + autoCompact 阈值
+    ///
+    /// 通过 regex 通用模式匹配 Claude CLI 的常量块
+    /// `var X=200000,Y=200000,...`，把两个 200000 替换为配置值。
+    MaxContextTokens,
 }
 
 impl FeatureType {
     /// 获取功能的描述
     pub fn description(&self) -> &'static str {
         match self {
-            FeatureType::ToolSearch => "ToolSearch - 工具搜索功能解锁",
-            FeatureType::UltraThink => "UltraThink - 思考模式完整功能解锁",
-            FeatureType::AgentTeams => "AgentTeams - Agent 团队功能",
-            FeatureType::WebSearch => "WebSearch - 网络搜索地区限制绕过",
-            FeatureType::PersistentMemory => "PersistentMemory - 持久代理内存",
+            FeatureType::MaxContextTokens => "MaxContextTokens - 可配置默认上下文窗口 + autoCompact 阈值",
         }
     }
 
     /// 获取功能的简短名称
     pub fn short_name(&self) -> &'static str {
         match self {
-            FeatureType::ToolSearch => "toolsearch",
-            FeatureType::UltraThink => "ultrathink",
-            FeatureType::AgentTeams => "agentteams",
-            FeatureType::WebSearch => "websearch",
-            FeatureType::PersistentMemory => "persistent",
+            FeatureType::MaxContextTokens => "maxtokens",
         }
     }
 }
@@ -64,15 +52,33 @@ pub struct UnifiedPatchPattern {
     /// 补丁类型
     pub patch_type: PatchType,
     /// 搜索模式（字节序列或字符串）
-    pub search_pattern: &'static [u8],
+    ///
+    /// 当 `use_regex=true` 时，此字段存放 regex 字符串的字节表示，
+    /// 运行时通过 `regex::bytes::Regex` 编译并扫描。
+    pub search_pattern: Cow<'static, [u8]>,
     /// 替换模式（用于文件补丁）
-    pub replace_pattern: Option<&'static [u8]>,
+    ///
+    /// 当 `use_regex=true` 时为 None，替换值由 `regex_replace_values`
+    /// 在运行时动态构造（按顺序替换匹配文本里的数字字面量）。
+    pub replace_pattern: Option<Cow<'static, [u8]>>,
     /// 内存补丁：单个字节替换
     pub patch_byte: Option<u8>,
     /// 内存补丁：替换位置偏移
     pub patch_offset: Option<usize>,
     /// 描述
-    pub description: &'static str,
+    pub description: Cow<'static, str>,
+    /// 是否将 search_pattern 作为 regex 处理
+    ///
+    /// true 时 search_pattern 作为 regex 字符串，replace_pattern 为 None，
+    /// 通过 `regex_replace_values` 顺序替换匹配文本中的数字。
+    pub use_regex: bool,
+    /// regex 模式下的顺序替换值
+    ///
+    /// 例如匹配到 `var X=200000,Y=200000,...` 后，
+    /// `regex_replace_values=Some(vec![500000, 500000])` 会把
+    /// 第一个 200000 替换为 500000，第二个 200000 替换为 500000。
+    /// 仅在 `use_regex=true` 时生效。
+    pub regex_replace_values: Option<Vec<u32>>,
 }
 
 /// 补丁应用结果
@@ -163,11 +169,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_feature_type_descriptions() {
-        assert_eq!(FeatureType::ToolSearch.short_name(), "toolsearch");
-        assert_eq!(FeatureType::UltraThink.short_name(), "ultrathink");
-        assert_eq!(FeatureType::AgentTeams.short_name(), "agentteams");
-        assert_eq!(FeatureType::WebSearch.short_name(), "websearch");
-        assert_eq!(FeatureType::PersistentMemory.short_name(), "persistent");
+    fn test_max_context_tokens_description() {
+        assert!(FeatureType::MaxContextTokens
+            .description()
+            .contains("MaxContextTokens"));
+    }
+
+    #[test]
+    fn test_max_context_tokens_short_name() {
+        assert_eq!(FeatureType::MaxContextTokens.short_name(), "maxtokens");
+    }
+
+    #[test]
+    fn test_cow_pattern_construction() {
+        // 验证 Cow 字段可用字面量构造
+        let pattern = UnifiedPatchPattern {
+            feature: FeatureType::MaxContextTokens,
+            patch_type: PatchType::Memory,
+            search_pattern: b"var YOt=200000".as_ref().into(),
+            replace_pattern: None,
+            patch_byte: None,
+            patch_offset: None,
+            description: "test".into(),
+            use_regex: false,
+            regex_replace_values: None,
+        };
+        assert_eq!(pattern.search_pattern.as_ref(), b"var YOt=200000");
+        assert!(!pattern.use_regex);
     }
 }

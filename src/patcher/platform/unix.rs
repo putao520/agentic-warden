@@ -12,7 +12,6 @@ use tracing::trace;
 /// Unix 平台内存补丁器（Linux 专用）
 pub struct PlatformMemoryPatcher {
     pid: u32,
-    mem_file: Option<File>,
 }
 
 impl PlatformMemoryPatcher {
@@ -108,10 +107,7 @@ impl PlatformMemoryPatcher {
 
 impl MemoryPatcher for PlatformMemoryPatcher {
     fn new(pid: u32) -> Result<Self, PatchError> {
-        Ok(Self {
-            pid,
-            mem_file: None,
-        })
+        Ok(Self { pid })
     }
 
     fn process_exists(&self) -> bool {

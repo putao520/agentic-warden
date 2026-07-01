@@ -1,4 +1,4 @@
-# Requirements Specification - v0.1.0
+# Requirements Specification - v0.5.99
 
 ## Version Information
 - Current version: v0.5.88
@@ -596,7 +596,7 @@ mcp_call("git_status", {
 
 ### REQ-013: 动态JS编排工具系统
 
-**Priority**: High
+**Priority**: P1 (High)
 **Status**: 🟢 Done
 **Related**: REQ-012, ARCH-012
 **Version**: v0.2.0
@@ -783,8 +783,8 @@ regex = "1.10"              # 危险模式检测
 
 ### REQ-014: AI CLI任务生命周期管理和角色系统
 
-**Priority**: High
-**Status**: ✅ Done (Phase 1-4 Completed) [commit: a2cc2e2]
+**Priority**: P1 (High)
+**Status**: 🟢 Done (Phase 1-4 Completed) [commit: a2cc2e2]
 **Related**: ARCH-014
 **Version**: v0.2.0 → v0.6.x (Phase 4 已完成)
 
@@ -1105,24 +1105,24 @@ Agentic-Warden MUST meet performance criteria for process tracking and task mana
 | REQ-010 | 内存集成与语义搜索 | P1 | ❌ Deprecated | v0.1.0 | ARCH-010, DATA-003, API-005 | 功能已删除 |
 | REQ-011 | AI CLI 更新/安装管理 | P1 | 🟢 Done | v0.1.0 | ARCH-008, MODULE-002, API-004 | Update command implementation |
 | REQ-012 | 智能MCP路由系统 | P0 | 🟢 Done | v0.2.0 | ARCH-012, DATA-012, API-012 | Intelligent routing system design |
-| REQ-024 | OpenAI环境变量配置 | P0 | 🟢 Done | v5.1.1 | ARCH-013, API-013 | OpenAI environment variable configuration |
-| REQ-014 | AI CLI任务生命周期管理和角色系统 | P1 | ✅ Done | v0.2.0→v0.6.x | ARCH-014 | Phase 1-4 全部完成 [commit: a2cc2e2] |
+| REQ-024 | OpenAI环境变量配置 | P0 | 🟢 Done | v0.5.88 | ARCH-013, API-013 | OpenAI environment variable configuration |
+| REQ-014 | AI CLI任务生命周期管理和角色系统 | P1 | 🟢 Done | v0.2.0→v0.6.x | ARCH-014 | Phase 1-4 全部完成 [commit: a2cc2e2] |
 | REQ-015 | 简化的Google Drive OAuth授权流程 | P0 | ❌ Deprecated | v0.5.18 | ARCH-003, DATA-003 | Disabled since v0.5.19 |
-| REQ-016 | MCP仓库CLI - 多源聚合搜索与安装 | P1 | ✅ Done | v0.6.0 | ARCH-016, API-016 | MCP Registry CLI implementation |
+| REQ-016 | MCP仓库CLI - 多源聚合搜索与安装 | P1 | 🟢 Done | v0.6.0 | ARCH-017, API-017 | MCP Registry CLI implementation |
 | REQ-022 | Auto 模式 CLI+Provider 组合轮转 | P1 | 🟢 Done | v0.5.48+ | REQ-021, ARCH-021, DATA-022, DATA-023 | CLI+Provider rotation in auto mode |
 | REQ-023 | Git 仓库检查和 Worktree 管理 | P0 | 🟢 Done | v0.5.48+ | ARCH-023 | Git repository check and worktree management |
-| REQ-018 | MCP Browse 环境变量快速跳过 | P1 | 🟡 Design | v0.6.1 | ARCH-018 | Skip optional env vars feature |
-| REQ-019 | MCP Browse - 已安装MCP服务器查看 | P1 | 🟡 Design | v0.6.1 | ARCH-019, DATA-019 | View installed MCPs feature |
-| REQ-020 | MCP Browse - 已安装MCP环境变量编辑 | P1 | 🟡 Design | v0.6.1 | ARCH-020, DATA-020 | Edit env vars for installed MCPs |
+| REQ-018 | MCP Browse 环境变量快速跳过 | P1 | 🟢 Done | v0.6.1 | ARCH-018 | Skip optional env vars feature |
+| REQ-019 | MCP Browse - 已安装MCP服务器查看 | P1 | 🟢 Done | v0.6.1 | ARCH-019, DATA-019 | View installed MCPs feature |
+| REQ-020 | MCP Browse - 已安装MCP环境变量编辑 | P1 | 🟢 Done | v0.6.1 | ARCH-020, DATA-020 | Edit env vars for installed MCPs |
 | REQ-017 | AIW插件市场系统 | P1 | 🟡 Partial Implementation | v0.7.0 | ARCH-017, DATA-017, API-017 | Plugin marketplace system |
 
 ---
 
 ### REQ-016: MCP仓库CLI - 多源聚合搜索与安装
-**Status**: ✅ Done (手写代码)
+**Status**: 🟢 Done
 **Priority**: P1 (High)
 **Version**: v0.6.0
-**Related**: ARCH-015, API-015
+**Related**: ARCH-017, API-017
 
 **Description**:
 Agentic-Warden MUST provide CLI commands to search, install, and manage MCP servers from multiple registry sources (Official MCP Registry, Smithery.ai), with interactive selection and environment variable configuration to eliminate copy-paste friction.
@@ -1130,46 +1130,46 @@ Agentic-Warden MUST provide CLI commands to search, install, and manage MCP serv
 **Acceptance Criteria**:
 
 #### 6.1 多源聚合搜索
-- [ ] 支持官方MCP Registry (`registry.modelcontextprotocol.io/v0.1`)
-- [ ] 支持Smithery.ai Registry (`registry.smithery.ai`)
-- [ ] 可扩展的Source trait设计，支持未来添加更多源
-- [ ] 并行查询多源，合并去重结果
-- [ ] 结果按相关度和源优先级排序
-- [ ] `--source` 参数指定单一源查询
+- [x] 支持官方MCP Registry (`registry.modelcontextprotocol.io/v0.1`)
+- [x] 支持Smithery.ai Registry (`registry.smithery.ai`)
+- [x] 可扩展的Source trait设计，支持未来添加更多源
+- [x] 并行查询多源，合并去重结果
+- [x] 结果按相关度和源优先级排序
+- [x] `--source` 参数指定单一源查询
 
 #### 6.2 交互式选择安装
-- [ ] 搜索结果显示编号列表（#1, #2, #3...）
-- [ ] 用户输入编号直接安装，无需复制名称
-- [ ] 显示每个结果的来源标识（registry/smithery）
-- [ ] 显示服务器描述和类型（npm/uvx/docker）
-- [ ] 支持'q'退出选择
+- [x] 搜索结果显示编号列表（#1, #2, #3...）
+- [x] 用户输入编号直接安装，无需复制名称
+- [x] 显示每个结果的来源标识（registry/smithery）
+- [x] 显示服务器描述和类型（npm/uvx/docker）
+- [x] 支持'q'退出选择
 
 #### 6.3 环境变量交互式配置
-- [ ] 安装时自动检测必需的环境变量
-- [ ] 显示环境变量说明（description from registry）
-- [ ] 交互式提示用户输入值
-- [ ] 自动检测已存在的系统环境变量
-- [ ] 支持`--env KEY=VALUE`参数直接传入
-- [ ] 支持`--skip-env`跳过环境变量配置
-- [ ] 配置文件中使用`${ENV_VAR}`引用格式
+- [x] 安装时自动检测必需的环境变量
+- [x] 显示环境变量说明（description from registry）
+- [x] 交互式提示用户输入值
+- [x] 自动检测已存在的系统环境变量
+- [x] 支持`--env KEY=VALUE`参数直接传入
+- [x] 支持`--skip-env`跳过环境变量配置
+- [x] 配置文件中使用`${ENV_VAR}`引用格式
 
 #### 6.4 服务器类型自动检测
-- [ ] npm类型：生成`npx -y @scope/package`命令
-- [ ] uvx类型：生成`uvx package-name`命令
-- [ ] docker类型：生成`docker run image`命令
-- [ ] remote类型：直接使用远程URL
+- [x] npm类型：生成`npx -y @scope/package`命令
+- [x] uvx类型：生成`uvx package-name`命令
+- [x] docker类型：生成`docker run image`命令
+- [x] remote类型：直接使用远程URL
 
 #### 6.5 配置管理
-- [ ] 安装后自动写入`~/.aiw/mcp_servers.yaml`
-- [ ] 记录安装来源（source字段）
-- [ ] `aiw mcp list`列出已安装服务器
-- [ ] `aiw mcp remove <name>`移除服务器
-- [ ] `aiw mcp info <name>`查看详细信息
+- [x] 安装后自动写入`~/.aiw/mcp_servers.yaml`
+- [x] 记录安装来源（source字段）
+- [x] `aiw mcp list`列出已安装服务器
+- [x] `aiw mcp remove <name>`移除服务器
+- [x] `aiw mcp info <name>`查看详细信息
 
 #### 6.6 源配置（可选）
-- [ ] `~/.aiw/registry.yaml`配置源优先级和认证
-- [ ] Smithery API Key配置（可选，增强功能）
-- [ ] 源启用/禁用控制
+- [x] `~/.aiw/registry.yaml`配置源优先级和认证
+- [x] Smithery API Key配置（可选，增强功能）
+- [x] 源启用/禁用控制
 
 **CLI Commands**:
 ```bash
@@ -1395,7 +1395,7 @@ git2 = "0.18"          # Git仓库克隆
 ---
 
 ### REQ-018: MCP Browse 环境变量快速跳过
-**Status**: ✅ 已实现 (2025-12-26) [commit: 3a9f72a]
+**Status**: 🟢 Done (2025-12-26) [commit: 3a9f72a]
 **Priority**: P1 (High)
 **Version**: v0.6.1
 **Related**: ARCH-018, REQ-016
@@ -1404,12 +1404,12 @@ git2 = "0.18"          # Git仓库克隆
 Agentic-Warden MCP Browse TUI MUST support one-key skip for all remaining optional environment variables during interactive MCP installation. Users can quickly skip optional configuration steps without entering individual values.
 
 **Acceptance Criteria**:
-- [ ] In environment variable input dialog, display hint when optional variables remain
-- [ ] Pressing 'a' or 'A' key skips all remaining optional environment variables
-- [ ] Only works when current variable is optional (skip has no effect on required vars)
-- [ ] Returns to MCP installation with remaining required variables still collected
-- [ ] Behavior is intuitive and non-destructive (can still edit optional vars individually)
-- [ ] Unit test: test_env_input_skip_all_optional passes
+- [x] In environment variable input dialog, display hint when optional variables remain
+- [x] Pressing 'a' or 'A' key skips all remaining optional environment variables
+- [x] Only works when current variable is optional (skip has no effect on required vars)
+- [x] Returns to MCP installation with remaining required variables still collected
+- [x] Behavior is intuitive and non-destructive (can still edit optional vars individually)
+- [x] Unit test: test_env_input_skip_all_optional passes
 
 **Technical Constraints**:
 - Integration with existing `EnvInputState` in `src/commands/mcp/registry/browse.rs`
@@ -1420,7 +1420,7 @@ Agentic-Warden MCP Browse TUI MUST support one-key skip for all remaining option
 ---
 
 ### REQ-019: MCP Browse - 已安装MCP服务器查看
-**Status**: ✅ 已实现 (2025-12-26) [commit: 3a9f72a]
+**Status**: 🟢 Done (2025-12-26) [commit: 3a9f72a]
 **Priority**: P1 (High)
 **Version**: v0.6.1
 **Related**: ARCH-019, REQ-016, DATA-019
@@ -1429,17 +1429,17 @@ Agentic-Warden MCP Browse TUI MUST support one-key skip for all remaining option
 Agentic-Warden MCP Browse MUST support viewing, searching, and filtering installed MCP servers from `~/.aiw/mcp.json`. Users can browse their installed ecosystem without leaving the TUI.
 
 **Acceptance Criteria**:
-- [ ] New menu option "Installed MCPs" in Browse main screen (Press 'i')
-- [ ] Display list of installed MCP servers with name, description, enabled status
-- [ ] Search by name using '/' key (real-time filtering)
-- [ ] Filter by status (enabled/disabled) using keyboard
-- [ ] Show environment variable count per MCP
-- [ ] Press Enter on MCP to view detailed configuration
-- [ ] Details view shows: name, source, environment variables, command
-- [ ] Return to list with ESC key
-- [ ] Return to main Browse menu with ESC from list view
-- [ ] Handle empty list gracefully (no installed MCPs)
-- [ ] Integration test passes
+- [x] New menu option "Installed MCPs" in Browse main screen (Press 'i')
+- [x] Display list of installed MCP servers with name, description, enabled status
+- [x] Search by name using '/' key (real-time filtering)
+- [x] Filter by status (enabled/disabled) using keyboard
+- [x] Show environment variable count per MCP
+- [x] Press Enter on MCP to view detailed configuration
+- [x] Details view shows: name, source, environment variables, command
+- [x] Return to list with ESC key
+- [x] Return to main Browse menu with ESC from list view
+- [x] Handle empty list gracefully (no installed MCPs)
+- [x] Integration test passes
 
 **Data Structures**:
 ```rust
@@ -1469,7 +1469,7 @@ struct InstalledMcpScreen {
 ---
 
 ### REQ-020: MCP Browse - 已安装MCP环境变量编辑
-**Status**: ✅ 已实现 (2025-12-26) [commit: 3a9f72a]
+**Status**: 🟢 Done (2025-12-26) [commit: 3a9f72a]
 **Priority**: P1 (High)
 **Version**: v0.6.1
 **Related**: ARCH-020, REQ-019, DATA-020
@@ -1814,7 +1814,7 @@ Commit: abc123def456
 ### REQ-024: OpenAI 环境变量配置
 **Status**: 🟢 Done
 **Priority**: P0 (Critical)
-**Version**: v5.1.1
+**Version**: v0.5.88
 **Related**: ARCH-013, API-013
 
 **Description**:
@@ -1851,12 +1851,58 @@ OPENAI_ENDPOINT="https://api.openai.com/v1"
 OPENAI_MODEL="gpt-4"
 ```
 
+### REQ-025: Claude CLI Max-Token 补丁系统
+**Status**: 🟢 Done
+**Priority**: P1 (High)
+**Version**: v0.5.99
+**Related**: ARCH-014
+
+**Description**:
+Agentic-Warden MUST provide a max-token patch system for Claude CLI that overrides the default context window (`YOt`) and autoCompact threshold (`Pte`) constants via a version-agnostic regex, replacing the legacy firstParty patch (which broke CC's built-in relay station detection and China timezone detection, and has been fully removed).
+
+**Acceptance Criteria**:
+- [x] Patch the constant block `var X=200000,Y=200000,Z=20000,W=32000,Q=128000;` via generic regex (variable-name agnostic, cross-version stable)
+- [x] Equal-length replacement of two `200000` values (default context + autoCompact threshold) with configurable target (100000~999999, 6 digits)
+- [x] Default value: 500000 (configurable via CLI / config file)
+- [x] Support both file patch (persistent) and memory patch (runtime)
+- [x] `PatchAction::SetMaxTokens` CLI command with `--max-context-tokens` and `--auto-compact-window` options
+- [x] `PatchConfig` persistence to `~/.aiw/patch.json` with serde defaults
+- [x] `validate_max_context_tokens` enforces 6-digit range (100000~999999)
+- [x] Memory patch reads entire region (64MB cap) + regex scan in one pass (fixes cross-chunk miss)
+- [x] File patch auto-backup (`.aiw-backup`) + atomic rename for binary files
+- [x] Startup-time auto-trigger in supervisor for Claude CLI processes
+- [x] Cross-platform (Linux x64/arm64, macOS arm64/x64, Windows x64)
+- [x] firstParty patch fully removed (no `#[deprecated]`, no VERSION_DB, no legacy variants)
+
+**Technical Constraints**:
+- `MAX_CONTEXT_TOKENS_SEARCH_REGEX` MUST use `[a-zA-Z_$][a-zA-Z0-9_$]*` to wildcard minified variable names
+- Replacement MUST be equal-length (6-byte ASCII) to avoid shifting subsequent offsets
+- `UnifiedPatchPattern` uses `Cow<'static, [u8]>` + `use_regex`/`regex_replace_values` fields for runtime-constructed patterns
+- Regex compiled via `regex::bytes::Regex` (bytes mode, since target is binary)
+- `ClaudeVersion` struct retained for version detection display (cli_manager.rs), but signature lookup methods removed
+- max-token patch MUST NOT touch firstParty check logic (preserves CC's native relay/timezone detection)
+
+**CLI Usage**:
+```bash
+# Set max-token to 500000 (default context + autoCompact both)
+aiw patch set-max-tokens --max-context-tokens 500000
+
+# Set different values for context and autoCompact
+aiw patch set-max-tokens --max-context-tokens 500000 --auto-compact-window 300000
+
+# Check patch status
+aiw patch status
+
+# Restore from backup
+aiw patch restore
+```
+
 ## 已废弃需求 (Deprecated)
 
 > **废弃原因**: Google Drive 云存储集成已禁用，push/pull 命令不可用。自 v0.5.19 起标记为 Disabled。
 
 ### REQ-003: Google Drive 配置记录和同步
-**Status**: ❌ Disabled (v0.5.19+)
+**Status**: ❌ Deprecated (v0.5.19+)
 **Priority**: P1 (High)
 **Version**: v0.1.0
 **Related**: ARCH-003, DATA-003
@@ -1894,7 +1940,7 @@ OPENAI_MODEL="gpt-4"
 > **废弃原因**: Claude Code 会话历史集成功能已删除，相关 Hook 机制不再使用。
 
 ### REQ-010: Claude Code会话历史集成（Hook-Based）
-**Status**: 🟢 Done
+**Status**: ❌ Deprecated
 **Priority**: P1 (High)
 **Version**: v0.2.0
 **Related**: ARCH-010, DATA-010, API-010
@@ -2005,7 +2051,7 @@ search_history MCP tool
 > **废弃原因**: Google Drive OAuth public client 不再被 Google 支持，授权流程已禁用。自 v0.5.19 起标记为 Disabled。
 
 ### REQ-015: Google Drive OAuth授权流程
-**Status**: ❌ Disabled (v0.5.19+)
+**Status**: ❌ Deprecated (v0.5.19+)
 **Priority**: P0 (Critical)
 **Version**: v0.5.18
 **Related**: ARCH-003, DATA-003

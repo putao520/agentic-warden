@@ -1,26 +1,11 @@
 //! 运行时内存补丁实现
 //!
 //! 使用平台抽象层实现跨平台的进程内存读写，
-//! 用于在运行时修复程序 BUG 而不修改磁盘文件。
+//! 用于在运行时修改程序状态而不修改磁盘文件。
 
 use crate::patcher::error::{PatchError, PatchResult};
 use crate::patcher::platform::{MemoryPatcher, PlatformMemoryPatcher};
-use crate::patcher::versions::{ClaudeVersion, VersionSignature};
-use tracing::{debug, info, trace};
-
-/// Claude CLI firstParty 补丁
-///
-/// 由于代码混淆，函数名会随版本变化
-/// 当前已知: 2.1.71 及更早使用 O8(), 2.1.72+ 使用 cL()
-///
-/// 补丁目标：将 `XXX()==="firstParty"` 改为 `XXX()!=="firstParty"`
-/// 这会解锁所有被 firstParty 限制的功能（Tool Search, Artifacts 等）
-
-/// "firstParty" 完整字符串
-pub const PATTERN_FIRST_PARTY: &[u8] = b"firstParty";
-
-/// 补丁值: `!` (0x21) - 用于将 `===` 改为 `!==`
-pub const PATCH_BYTE_EXCLAMATION: u8 = 0x21;
+use tracing::{debug, info};
 
 /// 运行时内存补丁器
 ///
@@ -78,84 +63,45 @@ impl RuntimePatcher {
         Ok(None)
     }
 
-    /// 在内存区域中搜索所有字节模式出现的位置
-    fn search_all_patterns_in_region(
-        &self,
-        region: &crate::patcher::platform::MemoryRegion,
-        pattern: &[u8],
-    ) -> PatchResult<Vec<usize>> {
-        let mut results = Vec::new();
-
-        let region_size = region.end.saturating_sub(region.start);
-        if region_size < pattern.len() {
-            return Ok(results);
-        }
-
-        const MAX_READ_SIZE: usize = 16 * 1024 * 1024; // 16MB
-        let read_size = region_size.min(MAX_READ_SIZE);
-        let mut buffer = vec![0u8; read_size];
-
-        self.inner
-            .read_memory(region.start, &mut buffer)?;
-
-        for i in 0..=(buffer.len().saturating_sub(pattern.len())) {
-            if &buffer[i..i + pattern.len()] == pattern {
-                results.push(region.start + i);
-            }
-        }
-
-        Ok(results)
-    }
-
-    /// 读取指定地址周围的内存上下文
+    /// 应用 max-token 内存补丁
+    ///
+    /// 通过通用 regex 匹配 Claude CLI 内存中的常量块
+    /// `var X=200000,Y=200000,Z=20000,W=32000,Q=128000;`，把两个 200000
+    /// 等长替换为目标值。
+    ///
+    /// 通过变量名无关的 regex 通用匹配，跨版本稳定。对每个可读区域
+    /// 一次性读入（上限 64MB）后用 regex 整体扫描，pattern 跨 16MB
+    /// 块边界也能命中。
     ///
     /// # 参数
-    /// - `address`: 中心地址
-    /// - `size_before`: 要读取的前面字节数
-    /// - `size_after`: 要读取的后面字节数
-    fn read_context(
-        &self,
-        address: usize,
-        size_before: usize,
-        size_after: usize,
-    ) -> PatchResult<Vec<u8>> {
-        let start = address.saturating_sub(size_before);
-        let total_size = size_before + size_after + 1;
-        let mut buffer = vec![0u8; total_size];
-
-        self.inner.read_memory(start, &mut buffer)?;
-
-        Ok(buffer)
-    }
-
-    /// 应用单字节补丁
-    fn apply_byte_patch(&self, address: usize, new_byte: u8) -> PatchResult<()> {
-        // 先读取旧字节用于日志
-        let mut old_byte_buf = [0u8; 1];
-        self.inner
-            .read_memory(address, &mut old_byte_buf)?;
-        let _old_byte = old_byte_buf[0];
-
-        // 写入新字节
-        self.inner.write_memory(address, &[new_byte])?;
-
-        Ok(())
-    }
-
-    /// 应用 Claude CLI ToolSearch 补丁
-    ///
-    /// 此补丁修复 Claude CLI 中的工具搜索 BUG：
-    /// 将 `XXX()==="firstParty"` 改为 `XXX()!=="firstParty"`
-    ///
-    /// 由于代码混淆，函数名可能会变化（如 O8, cL 等）
-    /// 因此我们通过版本签名数据库查找对应模式
+    /// - `max_tokens`: 目标默认上下文窗口值（6 位数，100000~999999）
+    /// - `auto_compact`: autoCompact 阈值（6 位数，通常等于 max_tokens）
     ///
     /// # 返回
-    /// 成功时返回补丁应用的地址，失败返回错误
-    pub fn apply_claude_toolsearch_patch(&self) -> PatchResult<usize> {
+    /// 成功时返回首个 patch 应用的地址，失败返回错误
+    pub fn apply_max_context_tokens_patch(
+        &self,
+        max_tokens: u32,
+        auto_compact: u32,
+    ) -> PatchResult<usize> {
+        use crate::patcher::versions::{
+            encode_max_context_tokens, validate_max_context_tokens, MAX_CONTEXT_TOKENS_SEARCH_REGEX,
+        };
+
+        validate_max_context_tokens(max_tokens)
+            .map_err(|e| PatchError::PatternNotFound { pattern: e, hint: None })?;
+        validate_max_context_tokens(auto_compact)
+            .map_err(|e| PatchError::PatternNotFound { pattern: e, hint: None })?;
+
         if !self.process_exists() {
             return Err(PatchError::ProcessNotFound { pid: 0 });
         }
+
+        let re = regex::bytes::Regex::new(MAX_CONTEXT_TOKENS_SEARCH_REGEX)
+            .map_err(|e| PatchError::PatternNotFound {
+                pattern: format!("invalid regex: {}", e),
+                hint: None,
+            })?;
 
         let regions = self.inner.read_memory_maps()?;
         let readable_regions: Vec<_> = regions
@@ -164,39 +110,80 @@ impl RuntimePatcher {
             .collect();
 
         debug!(
-            "Searching {} readable memory regions for firstParty check pattern",
+            "Scanning {} readable regions for max-context-tokens constant block",
             readable_regions.len()
         );
 
-        // 尝试获取 Claude 版本并获取对应签名
-        let version = if let Ok(version_str) = self.get_claude_version() {
-            debug!("Detected Claude version: {}", version_str);
-            ClaudeVersion::from_string(&version_str)
-        } else {
-            debug!("Failed to detect version");
-            None
-        };
+        // 单区域上限 64MB，避免无界分配；regex 一次性扫描整区域以支持跨块匹配
+        const MAX_REGION_SCAN: usize = 64 * 1024 * 1024;
 
-        let signature = version.as_ref().and_then(|v| v.signature());
-
-        if let Some(sig) = signature {
-            debug!("Using known signature for function: {}", sig.fn_name);
-            match self.try_pattern(&readable_regions, sig) {
-                Ok(addr) => {
-                    info!("✅ Claude firstParty unlocked (using {} function)", sig.fn_name);
-                    return Ok(addr);
-                }
-                Err(_) => {
-                    debug!("Known signature failed, no fallback available");
-                }
+        for region in &readable_regions {
+            let region_size = region.end.saturating_sub(region.start);
+            if region_size < MAX_CONTEXT_TOKENS_SEARCH_REGEX.len() {
+                continue;
             }
-        } else {
-            debug!("No signature available for this version");
+            let scan_size = region_size.min(MAX_REGION_SCAN);
+            let mut buffer = vec![0u8; scan_size];
+            if self.inner.read_memory(region.start, &mut buffer).is_err() {
+                continue;
+            }
+
+            if let Some(m) = re.find(&buffer) {
+                let matched = &buffer[m.start()..m.end()];
+                // 在匹配文本中定位两个 200000 的偏移
+                let needle = b"200000";
+                let mut offsets: Vec<usize> = Vec::new();
+                let mut search_from = 0;
+                while search_from + needle.len() <= matched.len() {
+                    if let Some(pos) = matched[search_from..]
+                        .windows(needle.len())
+                        .position(|w| w == needle)
+                    {
+                        offsets.push(search_from + pos);
+                        search_from += pos + needle.len();
+                    } else {
+                        break;
+                    }
+                }
+
+                if offsets.len() < 2 {
+                    debug!(
+                        "matched constant block but found {} 200000 occurrences (need 2)",
+                        offsets.len()
+                    );
+                    continue;
+                }
+
+                let match_base = region.start + m.start();
+                let val1 = encode_max_context_tokens(max_tokens);
+                let val2 = encode_max_context_tokens(auto_compact);
+
+                let addr1 = match_base + offsets[0];
+                let addr2 = match_base + offsets[1];
+
+                // 验证原字节确为 200000
+                let mut verify = [0u8; 6];
+                if self.inner.read_memory(addr1, &mut verify).is_err() || &verify != needle {
+                    continue;
+                }
+                if self.inner.read_memory(addr2, &mut verify).is_err() || &verify != needle {
+                    continue;
+                }
+
+                self.inner.write_memory(addr1, &val1)?;
+                self.inner.write_memory(addr2, &val2)?;
+
+                info!(
+                    "✅ MaxContextTokens patched: max_tokens={} @ {:#x}, auto_compact={} @ {:#x}",
+                    max_tokens, addr1, auto_compact, addr2
+                );
+                return Ok(addr1);
+            }
         }
 
         Err(PatchError::PatternNotFound {
-            pattern: "No valid firstParty check pattern found".to_string(),
-            hint: Some("Claude version may be unsupported".to_string()),
+            pattern: "max-context-tokens constant block not found in memory".to_string(),
+            hint: Some("Claude version may not contain the expected constant block".to_string()),
         })
     }
 
@@ -249,97 +236,11 @@ impl RuntimePatcher {
     pub fn write_memory(&self, addr: usize, data: &[u8]) -> PatchResult<()> {
         self.inner.write_memory(addr, data)
     }
-
-    /// 获取 Claude CLI 版本
-    fn get_claude_version(&self) -> Result<String, PatchError> {
-        // 通过执行 claude --version 获取
-        use std::process::Command;
-        
-        let output = Command::new("claude")
-            .arg("--version")
-            .output()
-            .map_err(|_| PatchError::PatternNotFound {
-                pattern: "Failed to execute claude --version".to_string(),
-                hint: None,
-            })?;
-        
-        let version_str = String::from_utf8_lossy(&output.stdout);
-        // 格式: "2.1.72 (Claude Code)" 或类似
-        let version = version_str
-            .split_whitespace()
-            .next()
-            .unwrap_or("")
-            .to_string();
-        
-        if version.is_empty() {
-            return Err(PatchError::PatternNotFound {
-                pattern: "Could not parse version".to_string(),
-                hint: None,
-            });
-        }
-        
-        Ok(version)
-    }
-
-    /// 尝试使用指定的版本签名进行补丁
-    fn try_pattern(
-        &self,
-        regions: &[&crate::patcher::platform::MemoryRegion],
-        sig: &VersionSignature,
-    ) -> PatchResult<usize> {
-        for region in regions {
-            trace!(
-                "Searching region {:x}-{:x} ({} bytes)",
-                region.start,
-                region.end,
-                region.end.saturating_sub(region.start),
-            );
-
-            match self.search_pattern_in_region(region, sig.mem_search) {
-                Ok(Some(pattern_addr)) => {
-                    // 计算补丁位置
-                    let patch_addr = pattern_addr + sig.mem_patch_offset;
-
-                    // 验证这个位置确实是 =
-                    let mut verify_buf = [0u8; 1];
-                    self.inner.read_memory(patch_addr, &mut verify_buf)?;
-                    if verify_buf[0] != b'=' {
-                        return Err(PatchError::PatternNotFound {
-                            pattern: format!("Expected '=' at address {:x}, found 0x{:02x}",
-                                           patch_addr, verify_buf[0]),
-                            hint: None,
-                        });
-                    }
-
-                    debug!("Patching at {:x} (using {})", patch_addr, sig.fn_name);
-
-                    // 应用补丁：将 = 改为 !
-                    self.apply_byte_patch(patch_addr, sig.mem_patch_byte)?;
-
-                    return Ok(patch_addr);
-                }
-                Ok(None) => continue,
-                Err(_) => continue,
-            }
-        }
-
-        Err(PatchError::PatternNotFound {
-            pattern: String::from_utf8_lossy(sig.mem_search).to_string(),
-            hint: Some("Pattern not found in any readable region".to_string()),
-        })
-    }
-
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_pattern_constants() {
-        assert_eq!(PATTERN_FIRST_PARTY, b"firstParty");
-        assert_eq!(PATCH_BYTE_EXCLAMATION, 0x21);
-    }
 
     #[test]
     fn test_patcher_creation_invalid_pid() {
@@ -358,19 +259,14 @@ mod tests {
     }
 
     #[test]
-    fn test_search_pattern_lengths() {
-        assert_eq!(PATTERN_FIRST_PARTY.len(), 10);
+    fn test_max_context_tokens_patch_rejects_invalid_values() {
+        // 不依赖真实进程的纯逻辑校验路径
+        let pid = std::process::id();
+        let patcher = RuntimePatcher::new(pid).unwrap();
+        // 无效值在进入内存扫描前就被拒
+        let r = patcher.apply_max_context_tokens_patch(99999, 500000);
+        assert!(r.is_err());
+        let r = patcher.apply_max_context_tokens_patch(500000, 1000000);
+        assert!(r.is_err());
     }
-
-    #[test]
-    fn test_patch_pattern_constants() {
-        // 验证补丁模式常量
-        assert_eq!(PATTERN_FIRST_PARTY, b"firstParty");
-
-        // 验证模式的字符串表示
-        let pattern_str = std::str::from_utf8(PATTERN_FIRST_PARTY).unwrap();
-        assert_eq!(pattern_str, "firstParty");
-    }
-
-
 }

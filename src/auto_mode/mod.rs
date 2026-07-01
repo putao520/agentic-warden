@@ -89,6 +89,12 @@ pub struct CliCooldownManager {
     last_failure_times: Mutex<HashMap<CooldownKey, Instant>>,
 }
 
+impl Default for CliCooldownManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CliCooldownManager {
     pub fn new() -> Self {
         Self {
@@ -148,7 +154,7 @@ static COOLDOWN_MANAGER: std::sync::OnceLock<CliCooldownManager> = std::sync::On
 
 impl CliCooldownManager {
     pub fn global() -> &'static CliCooldownManager {
-        COOLDOWN_MANAGER.get_or_init(|| CliCooldownManager::new())
+        COOLDOWN_MANAGER.get_or_init(CliCooldownManager::new)
     }
 }
 

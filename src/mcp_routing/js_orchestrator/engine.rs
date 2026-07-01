@@ -176,6 +176,9 @@ impl BoaRuntimeInner {
     }
 }
 
+/// Type alias for context-aware job closures sent to the worker thread.
+type ContextJob = Box<dyn FnOnce(&mut BoaRuntimeInner) -> Result<()> + Send>;
+
 /// Commands sent to the runtime worker thread.
 enum RuntimeCommand {
     Execute {
@@ -183,7 +186,7 @@ enum RuntimeCommand {
         responder: oneshot::Sender<Result<serde_json::Value>>,
     },
     WithContext {
-        job: Box<dyn FnOnce(&mut BoaRuntimeInner) -> Result<()> + Send>,
+        job: ContextJob,
         responder: oneshot::Sender<Result<()>>,
     },
     Reset {
@@ -225,7 +228,7 @@ impl BoaRuntime {
             })
             .map_err(|_| anyhow!("Boa runtime worker unavailable"))?;
 
-        match timeout(self.security_config.timeout_duration(), async { rx.await }).await {
+        match timeout(self.security_config.timeout_duration(), rx).await {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err(anyhow!("Boa runtime worker dropped response")),
             Err(_) => {
@@ -355,17 +358,14 @@ impl Manager for BoaRuntimeManager {
         async move { BoaRuntime::with_security(config) }
     }
 
-    fn recycle(
+    #[allow(clippy::type_complexity)]
+    async fn recycle(
         &self,
         obj: &mut Self::Type,
         _metrics: &Metrics,
-    ) -> impl std::future::Future<Output = managed::RecycleResult<Self::Error>> + Send {
-        async move {
-            obj.reset()
-                .await
-                .map_err(|err| RecycleError::Backend(err.into()))?;
-            Ok(())
-        }
+    ) -> managed::RecycleResult<Self::Error> {
+        obj.reset().await.map_err(RecycleError::Backend)?;
+        Ok(())
     }
 }
 

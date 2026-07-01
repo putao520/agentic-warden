@@ -1,8 +1,8 @@
-# Requirements-Architecture-Implementation Traceability Matrix
+# AIW (Agentic-Warden) — Requirements Traceability Matrix
 
-**Version**: v0.5.61
-**Last Updated**: 2025-11-12
-**Purpose**: Complete traceability from requirements through architecture to implementation
+**Version**: v0.5.99
+**Last Updated**: 2026-03-19
+**Document Status**: Active
 
 ---
 
@@ -21,473 +21,563 @@ This matrix provides complete traceability from:
 
 ### REQ-001: AI CLI 进程树追踪
 
-| Layer | ID | Component | Status | Implementation Files |
-|-------|----|-----------|---------|----------------------|
-| **Requirement** | REQ-001 | AI CLI 进程树追踪 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-001 |
-| **Architecture** | ARCH-001 | Shared Memory Task Coordination | 🟢 Done | SPEC/02-ARCHITECTURE.md#ARCH-001 |
-| **Data** | DATA-005 | Process Tree Information | 🟢 Done | SPEC/03-DATA-STRUCTURE.md#DATA-005 |
-| **API** | API-006 | MCP Process Tools | 🟢 Done | SPEC/04-API-DESIGN.md#API-006 |
-| **Implementation** | - | Process Tree Tracker | 🟢 Done | `src/core/process_tree.rs` |
-| **Implementation** | - | Shared Memory Storage | 🟢 Done | `src/storage/shared_map.rs` |
-| **Implementation** | - | Process Detection | 🟢 Done | `src/platform/windows.rs`, `src/platform/unix.rs` |
-| **Tests** | - | Process Tree Tests | 🟢 Done | `tests/integration/config_integration.rs` |
+**Status**: 🟢 Done
+**SPEC References**: ARCH-001, DATA-005, API-006
 
-**Key Insights**:
-- Uses shared memory for sub-millisecond cross-process coordination
-- Platform-specific process detection (winapi vs procfs)
-- Namespace isolation by AI CLI root process
-- MCP exposes process monitoring tools for external integration
+**Implementation Files**:
+- `src/core/process_tree.rs` — 进程树向上遍历，识别 AI CLI 根进程
+- `src/core/shared_map.rs` — 共享内存映射，跨进程任务协调
+- `src/core/models.rs` — 核心数据模型
+- `src/platform/unix.rs` — Unix 平台进程检测 (procfs)
+- `src/platform/windows.rs` — Windows 平台进程检测 (winapi)
+- `src/supervisor.rs` — 进程监控与执行
+- `src/storage.rs` — 任务持久化存储
+- `src/registry.rs` — 任务注册表
+- `src/unified_registry.rs` — 统一注册表
+- `src/registry_factory.rs` — 注册表工厂
+- `src/task_record.rs` — 任务记录模型
+
+**Test Files**:
+- `tests/integration/config_integration.rs` — 配置集成测试
+- `tests/integration/shared_memory_isolation.rs` — 共享内存隔离测试
+- `tests/task_lifecycle_tests.rs` — 任务生命周期测试
+
+**Notes**: 使用共享内存实现亚毫秒级跨进程协调，按 AI CLI 根进程进行命名空间隔离。
 
 ---
 
 ### REQ-002: 第三方 Provider 管理
 
-| Layer | ID | Component | Status | Implementation Files |
-|-------|----|-----------|---------|----------------------|
-| **Requirement** | REQ-002 | 第三方 Provider 管理 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-002 |
-| **Architecture** | ARCH-002 | Environment Variable Injection | 🟢 Done | SPEC/02-ARCHITECTURE.md#ARCH-002 |
-| **Data** | DATA-001 | Provider Configuration | 🟢 Done | SPEC/03-DATA-STRUCTURE.md#DATA-001 |
-| **API** | API-007 | Provider Management Interface | 🟢 Done | SPEC/04-API-DESIGN.md#API-007 |
-| **API** | API-006 | MCP Provider Status Tool | 🟢 Done | SPEC/04-API-DESIGN.md#API-006 |
-| **Implementation** | - | Provider Manager | 🟢 Done | `src/provider/manager.rs` |
-| **Implementation** | - | Environment Injector | 🟢 Done | `src/provider/env_injector.rs` |
-| **Implementation** | - | Provider Config | 🟢 Done | `src/provider/config.rs` |
-| **Implementation** | - | Network Detector | 🟢 Done | `src/provider/network_detector.rs` |
-| **Implementation** | - | TUI Provider Management | 🟢 Done | `src/tui/screens/provider_management.rs` |
-| **Tests** | - | Provider Configuration Tests | 🟢 Done | `tests/provider_config.rs` |
+**Status**: 🟢 Done
+**SPEC References**: ARCH-002, DATA-001, API-007
 
-**Key Insights**:
-- Transparent environment variable injection without modifying AI CLI configs
-- JSON schema validation for provider configurations
-- Network detection and health checking for providers
-- TUI interface for provider management
-- MCP integration exposes provider status to external tools
+**Implementation Files**:
+- `src/provider/manager.rs` — Provider 生命周期管理
+- `src/provider/config.rs` — Provider 配置读写 (JSON schema 验证)
+- `src/provider/env_injector.rs` — 环境变量透明注入
+- `src/provider/env_mapping.rs` — 环境变量映射规则
+- `src/provider/error.rs` — Provider 领域错误类型
+- `src/tui/screens/provider.rs` — TUI Provider 管理界面
+
+**Test Files**:
+- `tests/unit/provider_config.rs` — Provider 配置单元测试
+- `tests/integration/third_party_provider_test.rs` — 第三方 Provider 集成测试
+
+**Notes**: 透明环境变量注入，无需修改 AI CLI 配置文件。
 
 ---
 
-### REQ-003: Google Drive 配置记录和同步 ❌ Deprecated
+### REQ-003: Google Drive 配置记录和同步
 
-| Layer | ID | Component | Status | Implementation Files |
-|-------|----|-----------|---------|----------------------|
-| **Requirement** | REQ-003 | Google Drive 配置记录和同步 | ❌ Deprecated | SPEC/01-REQUIREMENTS.md#已废弃需求 |
-| **Architecture** | ARCH-003 | Google Drive Integration with OAuth | ❌ Deprecated | SPEC/02-ARCHITECTURE.md#ARCH-003 |
-| **Data** | DATA-002 | Synchronization Configuration | ❌ Deprecated | SPEC/03-DATA-STRUCTURE.md#DATA-002 |
-| **Data** | DATA-003 | OAuth Token Information | ❌ Deprecated | SPEC/03-DATA-STRUCTURE.md#DATA-003 |
-| **Data** | DATA-006 | Google Drive File Metadata | ❌ Deprecated | SPEC/03-DATA-STRUCTURE.md#DATA-006 |
-| **API** | API-003 | Synchronization Commands | ❌ Deprecated | SPEC/04-API-DESIGN.md#API-003 |
-| **API** | API-010 | Synchronization Interface | ❌ Deprecated | SPEC/04-API-DESIGN.md#API-010 |
-| **Implementation** | - | Google Drive Service | ❌ Deprecated | `src/sync/google_drive_service.rs` |
-| **Implementation** | - | OAuth Client | ❌ Deprecated | `src/sync/oauth_client.rs` |
-| **Implementation** | - | Config Packer | ❌ Deprecated | `src/sync/config_packer.rs` |
-| **Implementation** | - | Sync Command Handler | ❌ Deprecated | `src/sync/sync_command.rs` |
-| **Implementation** | - | Directory Hasher | ❌ Deprecated | `src/sync/directory_hasher.rs` |
-| **Implementation** | - | TUI Progress Screens | ❌ Deprecated | `src/tui/screens/mod_simple.rs` |
+**Status**: ❌ Deprecated
+**SPEC References**: ARCH-003, DATA-002, DATA-003, DATA-006, API-003, API-010
 
-**Deprecated**: Google Drive 云存储集成已禁用 (v0.5.19+)，push/pull 命令不可用。
+**Implementation Files**:
+- `src/sync/google_drive_service.rs` — Google Drive 服务 (disabled)
+- `src/sync/oauth_client.rs` — OAuth 客户端 (disabled)
+- `src/sync/config_packer.rs` — 配置打包器 (disabled)
+- `src/sync/sync_command.rs` — 同步命令处理 (disabled)
+- `src/sync/directory_hasher.rs` — 目录哈希 (disabled)
+- `src/sync/config_sync_manager.rs` — 配置同步管理器 (disabled)
+- `src/sync/smart_oauth.rs` — 智能 OAuth (disabled)
+- `src/sync/sync_config.rs` — 同步配置 (disabled)
+- `src/sync/sync_config_manager.rs` — 同步配置管理器 (disabled)
+- `src/sync/error.rs` — 同步错误类型 (disabled)
+
+**Notes**: Google Drive 云存储集成已禁用 (v0.5.19+)，push/pull 命令不可用。
 
 ---
 
 ### REQ-004: 统一 TUI 体验
 
-| Layer | ID | Component | Status | Implementation Files |
-|-------|----|-----------|---------|----------------------|
-| **Requirement** | REQ-004 | 统一 TUI 体验 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-004 |
-| **Architecture** | ARCH-004 | TUI Framework Integration | 🟢 Done | SPEC/02-ARCHITECTURE.md#TUI-Components |
-| **API** | API-002 | Management Commands | 🟢 Done | SPEC/04-API-DESIGN.md#API-002 |
-| **Implementation** | - | Main TUI App | 🟢 Done | `src/tui/app.rs` |
-| **Implementation** | - | Dashboard Screen | 🟢 Done | `src/tui/screens/dashboard.rs` |
-| **Implementation** | - | Status Screen | 🟢 Done | `src/tui/screens/mod_simple.rs` |
-| **Implementation** | - | Provider Edit Screens | 🟢 Done | `src/tui/screens/provider_edit.rs` |
-| **Implementation** | - | Render Helpers | 🟢 Done | `src/tui/screens/render_helpers.rs` |
-| **Tests** | - | TUI Navigation Tests | 🟢 Done | `tests/integration/tui_navigation.rs` |
+**Status**: 🟢 Done
+**SPEC References**: ARCH-004, API-002
 
-**Key Insights**:
-- Single TUI framework: ratatui 0.26+ (unified design system)
-- Multiple screens: Dashboard, Status, Provider Management, Progress
-- Event-driven architecture with crossterm for input handling
-- Consistent component library and design patterns
+**Implementation Files**:
+- `src/tui/app.rs` — TUI 应用主循环 (ratatui + crossterm)
+- `src/tui/app_state.rs` — TUI 状态管理
+- `src/tui/data_binding.rs` — 数据绑定层
+- `src/tui/screens/dashboard.rs` — 仪表盘界面
+- `src/tui/screens/provider.rs` — Provider 管理界面
+- `src/tui/screens/status.rs` — 状态界面
+- `src/tui/screens/installed_mcp.rs` — 已安装 MCP 列表界面
+- `src/tui/screens/cli_order.rs` — CLI 排序界面
+- `src/tui/screens/render_helpers.rs` — 渲染辅助函数
+- `src/tui/screens/mod_simple.rs` — 简化屏幕模块
+- `src/tui/components/component_factory.rs` — 组件工厂
+- `src/tui/components/layout_builder.rs` — 布局构建器
+- `src/tui/components/style_manager.rs` — 样式管理器
+- `src/common/screen_base.rs` — 屏幕基类
+
+**Test Files**:
+- `tests/integration/tui_navigation.rs` — TUI 导航集成测试
+- `tests/scrolling_display_test.rs` — 滚动显示测试
+
+**Notes**: 统一设计系统，ratatui 0.26+ 框架，事件驱动架构。
 
 ---
 
 ### REQ-005: Wait 模式跨进程等待
 
-| Layer | ID | Component | Status | Implementation Files |
-|-------|----|-----------|---------|----------------------|
-| **Requirement** | REQ-005 | Wait 模式跨进程等待 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-005 |
-| **Architecture** | ARCH-001 | Shared Memory Task Coordination | 🟢 Done | SPEC/02-ARCHITECTURE.md#ARCH-001 |
-| **Data** | DATA-004 | Task Registry Record | 🟢 Done | SPEC/03-DATA-STRUCTURE.md#DATA-004 |
-| **API** | API-004 | Wait Mode Commands | 🟢 Done | SPEC/04-API-DESIGN.md#API-004 |
-| **API** | API-008 | Task Registry Interface | 🟢 Done | SPEC/04-API-DESIGN.md#API-008 |
-| **Implementation** | - | Wait Mode Implementation | 🟢 Done | `src/wait_mode.rs` |
-| **Implementation** | - | Process-Specific Wait | 🟢 Done | `src/pwait_mode.rs` |
-| **Implementation** | - | Task Registry | 🟢 Done | `src/registry.rs` |
-| **Implementation** | - | Unified Registry | 🟢 Done | `src/unified_registry.rs` |
-| **Implementation** | - | Task Record Management | 🟢 Done | `src/task_record.rs` |
+**Status**: 🟢 Done
+**SPEC References**: ARCH-001, DATA-004, API-004, API-008
 
-**Key Insights**:
-- Shared memory enables real-time task status monitoring
-- Supports both global wait (`wait`) and process-specific wait (`pwait`)
-- Timeout handling with human-readable duration formats
-- Verbose mode for detailed progress tracking
+**Implementation Files**:
+- `src/wait_mode.rs` — Wait 模式实现 (全局等待)
+- `src/pwait_mode.rs` — PWait 模式实现 (按 PID 等待)
+- `src/registry.rs` — 任务注册表
+- `src/unified_registry.rs` — 统一注册表
+- `src/task_record.rs` — 任务记录管理
+
+**Test Files**:
+- `tests/integration/pwait_command.rs` — PWait 命令集成测试
+- `tests/integration/pwait_pid_parameter.rs` — PWait PID 参数测试
+
+**Notes**: 支持全局等待 (`wait`) 和进程特定等待 (`pwait`)，超时处理使用人类可读时长格式。
 
 ---
 
 ### REQ-006: AI CLI 工具检测与状态管理
 
-| Layer | ID | Component | Status | Implementation Files |
-|-------|----|-----------|---------|----------------------|
-| **Requirement** | REQ-006 | AI CLI 工具检测与状态管理 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-006 |
-| **Architecture** | ARCH-006 | CLI Tool Detection | 🟢 Done | SPEC/02-ARCHITECTURE.md#Core-Modules |
-| **API** | API-002 | Status Command | 🟢 Done | SPEC/04-API-DESIGN.md#API-002 |
-| **Implementation** | - | CLI Type Detection | 🟢 Done | `src/cli_type.rs` |
-| **Implementation** | - | CLI Detection Logic | 🟢 Done | `src/commands/cli_detection.rs` |
-| **Implementation** | - | Version Management | 🟢 Done | `src/utils/version.rs` |
-| **Implementation** | - | External Command Handling | 🟢 Done | `src/commands/mod.rs` |
+**Status**: 🟢 Done
+**SPEC References**: ARCH-006, API-002
 
-**Key Insights**:
-- Cross-platform detection using `which` (Unix) and `where` (Windows)
-- Distinguishes NPM packages vs native installations
-- Version detection via `--version` flag
-- Provides installation hints for missing tools
+**Implementation Files**:
+- `src/cli_manager.rs` — AI CLI 检测/安装/更新管理
+- `src/cli_type.rs` — AI CLI 类型定义与参数构建
+- `src/utils/version.rs` — 版本管理工具
+
+**Test Files**:
+- `tests/unit/status_command.rs` — 状态命令单元测试
+
+**Notes**: 跨平台检测 (which/where)，区分 NPM 包与原生安装，版本检测。
 
 ---
 
 ### REQ-007: MCP (Model Context Protocol) 服务器
 
-| Layer | ID | Component | Status | Implementation Files |
-|-------|----|-----------|---------|----------------------|
-| **Requirement** | REQ-007 | MCP 服务器 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-007 |
-| **Architecture** | ARCH-007 | External Integration Point | 🟢 Done | SPEC/02-ARCHITECTURE.md#Integration-Points |
-| **Data** | DATA-007 | MCP Protocol Messages | 🟢 Done | SPEC/03-DATA-STRUCTURE.md#DATA-007 |
-| **API** | API-006 | MCP Server Interface | 🟢 Done | SPEC/04-API-DESIGN.md#API-006 |
-| **Implementation** | - | MCP Server | 🟢 Done | `src/mcp.rs` |
-| **Implementation** | - | MCP Tools Implementation | 🟢 Done | `src/mcp/tools.rs` |
-| **Implementation** | - | Command Router for MCP | 🟢 Done | `src/commands/parser.rs` |
-| **Tests** | - | MCP Integration Tests | 🟡 In Progress | `tests/integration/mcp_tests.rs` |
+**Status**: 🟢 Done
+**SPEC References**: ARCH-007, DATA-007, API-006
 
-**Key Insights**:
-- JSON-RPC 2.0 over stdio transport
-- 5 core tools: process management, provider status, AI CLI launch
-- Enables external AI assistants to access Agentic-Warden functionality
-- Stdio transport for easy integration
+**Implementation Files**:
+- `src/mcp/mod.rs` — MCP 服务器入口 (AgenticWardenMcpServer)
+- `src/mcp/capability_detector.rs` — MCP 能力检测
+- `src/mcp/js_executor.rs` — JS 工具执行器
+- `src/mcp/table_format.rs` — 表格格式化输出
+
+**Test Files**:
+- `tests/real_mcp_integration_test.rs` — MCP 真实集成测试
+- `tests/real_downstream_mcp_test.rs` — 下游 MCP 测试
+- `tests/tool_count_test.rs` — 工具计数测试
+
+**Notes**: JSON-RPC 2.0 over stdio 传输，rmcp 0.16 协议实现。
 
 ---
 
 ### REQ-008: 指定供应商模式 AI CLI 启动
 
-| Layer | ID | Component | Status | Implementation Files |
-|-------|----|-----------|---------|----------------------|
-| **Requirement** | REQ-008 | 指定供应商模式 AI CLI 启动 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-008 |
-| **Architecture** | ARCH-002 | Environment Variable Injection | 🟢 Done | SPEC/02-ARCHITECTURE.md#ARCH-002 |
-| **Architecture** | ARCH-008 | Process Supervisor | 🟢 Done | SPEC/02-ARCHITECTURE.md#Core-Modules |
-| **Data** | DATA-001 | Provider Configuration | 🟢 Done | SPEC/03-DATA-STRUCTURE.md#DATA-001 |
-| **API** | API-001 | AI CLI Execution Commands | 🟢 Done | SPEC/04-API-DESIGN.md#API-001 |
-| **Implementation** | - | AI CLI Command Handler | 🟢 Done | `src/commands/ai_cli.rs` |
-| **Implementation** | - | Process Supervisor | 🟢 Done | `src/supervisor.rs` |
-| **Implementation** | - | External Command Parser | 🟢 Done | `src/commands/parser.rs` |
-| **Implementation** | - | Main CLI Router | 🟢 Done | `src/main.rs` |
+**Status**: 🟢 Done
+**SPEC References**: ARCH-002, ARCH-008, DATA-001, API-001
 
-**Key Insights**:
-- Seamless `aiw <ai_type> -p <provider> <prompt>` syntax
-- Environment injection happens before process exec()
-- Provider compatibility validation before startup
-- Supports both single and multi-AI CLI execution
-- Process isolation prevents provider cross-contamination
+**Implementation Files**:
+- `src/commands/ai_cli.rs` — AI CLI 命令执行与参数转发
+- `src/commands/parser.rs` — CLI 参数解析 (clap)
+- `src/commands/cli_args.rs` — CLI 参数定义
+- `src/cli_type.rs` — AI CLI 类型定义与参数构建
+- `src/task_prepare.rs` — 任务准备共享层
+- `src/supervisor.rs` — 进程监控与执行
+- `src/provider/env_injector.rs` — 环境变量透明注入
+
+**Test Files**:
+- `tests/unit/cli_parser.rs` — CLI 解析器单元测试
+- `tests/unit/parameter_forwarding.rs` — 参数转发单元测试
+- `tests/integration/cli_end_to_end.rs` — CLI 端到端集成测试
+- `tests/e2e_cli_workflow.rs` — E2E CLI 工作流测试
+
+**Notes**: `aiw <ai_type> -p <provider> <prompt>` 语法，环境注入在 exec() 前完成，透明参数转发。
 
 ---
 
 ### REQ-009: 交互式 AI CLI 启动
 
-| Layer | ID | Component | Status | Implementation Files |
-|-------|----|-----------|---------|----------------------|
-| **Requirement** | REQ-009 | 交互式 AI CLI 启动 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-009 |
-| **Architecture** | ARCH-008 | Process Supervisor | 🟢 Done | SPEC/02-ARCHITECTURE.md#Core-Modules |
-| **API** | API-001 | AI CLI Execution Commands | 🟢 Done | SPEC/04-API-DESIGN.md#API-001 |
-| **Implementation** | - | External AI CLI Parser | 🟢 Done | `src/commands/parser.rs` |
-| **Implementation** | - | Main CLI Handler | 🟢 Done | `src/main.rs` |
+**Status**: 🟢 Done
+**SPEC References**: ARCH-008, API-001
 
-**Key Insights**:
-- ✅ **Implemented**: Interactive mode launched with empty prompt for AI CLI
-- Supports both single and multiple AI CLI with shared provider
-- Leverages existing `AiCliCommand` infrastructure with empty prompt
-- Provider environment injection works identically to task mode
-- Smart detection automatically distinguishes between interactive and task modes
+**Implementation Files**:
+- `src/commands/ai_cli.rs` — AI CLI 命令处理 (空 prompt 触发交互模式)
+- `src/commands/parser.rs` — CLI 参数解析
 
-**Usage Examples**:
-- `aiw claude` → Interactive mode with default provider ✅
-- `aiw claude -p openrouter` → Interactive mode with OpenRouter ✅
-- `aiw claude,gemini -p litellm` → Multiple AI CLI interactive mode ✅
+**Test Files**:
+- `tests/unit/cli_parser.rs` — CLI 解析器单元测试
+- `tests/integration/cli_end_to_end.rs` — CLI 端到端集成测试
 
-### REQ-010: Claude Code会话历史集成（Hook-Based） ❌ Deprecated
+**Notes**: 空 prompt 启动交互模式，复用 AiCliCommand 基础设施，Provider 注入与任务模式一致。
 
-| Layer | ID | Component | Status | Implementation Files |
-|-------|----|-----------|---------|----------------------|
-| **Requirement** | REQ-010 | Claude Code会话历史集成 | ❌ Deprecated | SPEC/01-REQUIREMENTS.md#已废弃需求 |
-| **Architecture** | ARCH-010 | Hook-Based History Ingestion | ❌ Deprecated | SPEC/02-ARCHITECTURE.md#ARCH-010 |
-| **Data** | DATA-010 | Conversation History Data | ❌ Deprecated | SPEC/03-DATA-STRUCTURE.md#DATA-010 |
-| **API** | API-010 | search_history MCP Tool | ❌ Deprecated | SPEC/04-API-DESIGN.md#API-010 |
+---
 
-**Deprecated**: Claude Code 会话历史集成功能已删除，相关 Hook 机制不再使用。
+### REQ-010: Claude Code 会话历史集成（Hook-Based）
+
+**Status**: ❌ Deprecated
+
+**Implementation Files**: (已删除)
+
+**Notes**: Claude Code 会话历史集成功能已删除，相关 Hook 机制不再使用。
 
 ---
 
 ### REQ-011: AI CLI 更新/安装管理
 
-| Layer | ID | Component | Status | Implementation Files |
-|-------|----|-----------|---------|----------------------|
-| **Requirement** | REQ-011 | AI CLI 更新/安装管理 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-011 |
-| **Architecture** | ARCH-008 | Process Supervisor | 🟢 Done | SPEC/02-ARCHITECTURE.md#Core-Modules |
-| **API** | API-005 | Utility Commands (Update) | 🟢 Done | SPEC/04-API-DESIGN.md#API-005 |
+**Status**: 🟢 Done
+**SPEC References**: ARCH-008, API-005
+
+**Implementation Files**:
+- `src/cli_manager.rs` — AI CLI 检测/安装/更新管理
+
+**Test Files**:
+- `tests/unit/status_command.rs` — 状态命令单元测试
+
+**Notes**: 统一管理 Claude/Codex/Gemini CLI 的安装与更新。
 
 ---
 
-### REQ-012: 智能MCP路由系统
+### REQ-012: 智能 MCP 路由系统
 
-| Layer | ID | Component | Status | Implementation Files |
-|-------|----|-----------|---------|----------------------|
-| **Requirement** | REQ-012 | 智能MCP路由系统 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-012 |
-| **Architecture** | ARCH-012 | 智能MCP路由系统架构设计 | 🟢 Done | SPEC/02-ARCHITECTURE.md#ARCH-012 |
-| **Data** | DATA-012 | 智能MCP路由系统数据结构 | 🟢 Done | SPEC/03-DATA-STRUCTURE.md#DATA-012 |
-| **API** | API-012 | 智能MCP路由系统API | 🟢 Done | SPEC/04-API-DESIGN.md#API-012 |
+**Status**: 🟢 Done
+**SPEC References**: ARCH-012, DATA-012, API-012
 
----
+**Implementation Files**:
+- `src/mcp_routing/decision.rs` — LLM 路由决策引擎
+- `src/mcp_routing/index.rs` — 工具索引
+- `src/mcp_routing/embedding.rs` — 向量嵌入 (fastembed)
+- `src/mcp_routing/registry.rs` — 路由注册表
+- `src/mcp_routing/config.rs` — 路由配置 (mcp.json)
+- `src/mcp_routing/config_watcher.rs` — 配置热更新监听 (notify)
+- `src/mcp_routing/models.rs` — 路由数据模型
 
-### REQ-013: 动态JS编排工具系统
+**Test Files**:
+- `tests/mcp_routing_workflow.rs` — MCP 路由工作流测试
+- `tests/real_llm_backend_e2e.rs` — 真实 LLM 后端 E2E 测试
+- `tests/dynamic_registry_unit_test.rs` — 动态注册表单元测试
+- `tests/integration/dynamic_tool_registry.rs` — 动态工具注册表集成测试
 
-| Layer | ID | Component | Status | Implementation Files |
-|-------|----|-----------|---------|----------------------|
-| **Requirement** | REQ-013 | 动态JS编排工具系统 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-013 |
-| **Architecture** | ARCH-013 | 动态JS编排工具系统架构 | 🟢 Done | SPEC/02-ARCHITECTURE.md#ARCH-013 |
-| **Data** | DATA-012 | 智能MCP路由系统数据结构（共享） | 🟢 Done | SPEC/03-DATA-STRUCTURE.md#DATA-012 |
-| **API** | API-012 | 智能MCP路由系统API（共享） | 🟢 Done | SPEC/04-API-DESIGN.md#API-012 |
-
----
-
-### REQ-014: AI CLI任务生命周期管理和角色系统
-
-| Layer | ID | Component | Status | Implementation Files |
-|-------|----|-----------|---------|----------------------|
-| **Requirement** | REQ-014 | AI CLI任务生命周期管理和角色系统 | ✅ Done | SPEC/01-REQUIREMENTS.md#REQ-014 |
-| **Architecture** | ARCH-014 | AI CLI角色系统和任务生命周期架构 | ✅ Done | SPEC/02-ARCHITECTURE.md#ARCH-014 |
-| **Data** | DATA-004 | Task Registry Record（生命周期扩展） | 🟢 Done | SPEC/03-DATA-STRUCTURE.md#DATA-004 |
-| **API** | API-008 | Task Registry Interface（生命周期扩展） | 🟢 Done | SPEC/04-API-DESIGN.md#API-008 |
+**Notes**: 语义搜索路由，mcp.json 配置，热更新支持。
 
 ---
 
-### REQ-015: Google Drive OAuth授权流程 ❌ Deprecated
+### REQ-013: 动态 JS 编排工具系统
 
-| Layer | ID | Component | Status | Implementation Files |
-|-------|----|-----------|---------|----------------------|
-| **Requirement** | REQ-015 | Google Drive OAuth授权流程 | ❌ Deprecated | SPEC/01-REQUIREMENTS.md#REQ-015 |
-| **Architecture** | ARCH-003 | Google Drive Integration with OAuth | ❌ Deprecated | SPEC/02-ARCHITECTURE.md#ARCH-003 |
-| **Data** | DATA-003 | OAuth Token Information | ❌ Deprecated | SPEC/03-DATA-STRUCTURE.md#DATA-003 |
-| **API** | API-003 | Synchronization Commands | ❌ Deprecated | SPEC/04-API-DESIGN.md#API-003 |
+**Status**: 🟢 Done
+**SPEC References**: ARCH-013, DATA-012, API-012
 
-**Deprecated**: Google Drive OAuth public client 已不再被 Google 支持，push/pull 命令已禁用 (v0.5.19+)。
+**Implementation Files**:
+- `src/mcp/js_executor.rs` — JS 工具执行器
+- `src/mcp_routing/capability_generator.rs` — 能力描述生成
+- `src/mcp_routing/codegen.rs` — 代码生成
+- `src/mcp_routing/pool.rs` — Boa 运行时连接池
+- `src/mcp_routing/js_orchestrator/engine.rs` — JS 编排引擎
+- `src/mcp_routing/js_orchestrator/injector.rs` — 依赖注入器
+- `src/mcp_routing/js_orchestrator/validator.rs` — 代码验证器
+- `src/mcp_routing/js_orchestrator/workflow_planner.rs` — 工作流规划器
+- `src/mcp_routing/js_orchestrator/prompts.rs` — LLM 提示模板
+- `src/mcp_routing/js_orchestrator/schema_corrector.rs` — Schema 修正器
+- `src/mcp_routing/js_orchestrator/schema_validator.rs` — Schema 验证器
+
+**Test Files**:
+- `tests/real_js_execution_test.rs` — 真实 JS 执行测试
+- `tests/real_req013_phase1_capability_e2e.rs` — REQ-013 Phase1 能力 E2E 测试
+- `tests/real_req013_phase2_dynamic_tool_e2e.rs` — REQ-013 Phase2 动态工具 E2E 测试
+
+**Notes**: Boa 引擎驱动，运行时连接池，LLM 辅助工作流规划。
 
 ---
 
-### REQ-016: MCP仓库CLI - 多源聚合搜索与安装
+### REQ-014: AI CLI 任务生命周期管理和角色系统
 
-| Layer | ID | Component | Status | Implementation Files |
-|-------|----|-----------|---------|----------------------|
-| **Requirement** | REQ-016 | MCP仓库CLI - 多源聚合搜索与安装 | ✅ Done | SPEC/01-REQUIREMENTS.md#REQ-016 |
-| **Architecture** | ARCH-015 | MCP仓库CLI多源聚合架构 | ✅ Done | SPEC/02-ARCHITECTURE.md#ARCH-015 |
-| **API** | API-015 | MCP仓库CLI命令 | ✅ Done | SPEC/04-API-DESIGN.md#API-015 |
+**Status**: 🟢 Done
+**SPEC References**: ARCH-014, DATA-004, API-008
+
+**Implementation Files**:
+- `src/roles/mod.rs` — 角色系统入口
+- `src/roles/builtin.rs` — 内置角色模板 (en/zh-CN)
+- `src/supervisor.rs` — 进程监控与执行
+- `src/storage.rs` — 任务持久化存储
+- `src/registry.rs` — 任务注册表
+- `src/unified_registry.rs` — 统一注册表
+- `src/registry_factory.rs` — 注册表工厂
+- `src/task_record.rs` — 任务记录模型
+
+**Test Files**:
+- `tests/unit/roles_tests.rs` — 角色系统单元测试
+- `tests/unit/role_param_tests.rs` — 角色参数单元测试
+- `tests/task_lifecycle_tests.rs` — 任务生命周期测试
+
+**Notes**: 内置多语言角色模板，完整任务生命周期追踪。
 
 ---
 
-### REQ-017: AIW插件市场系统
+### REQ-015: Google Drive OAuth 授权流程
 
-| Layer | ID | Component | Status | Implementation Files |
-|-------|----|-----------|---------|----------------------|
-| **Requirement** | REQ-017 | AIW插件市场系统 | 🟡 Partial | SPEC/01-REQUIREMENTS.md#REQ-017 |
-| **Architecture** | ARCH-017 | AIW插件市场系统架构 | 🟡 In Progress | SPEC/02-ARCHITECTURE.md#ARCH-017 |
-| **Data** | DATA-017 | AIW插件市场数据结构 | 🟢 Done | SPEC/03-DATA-STRUCTURE.md#DATA-017 |
-| **API** | API-017 | AIW插件市场系统API | 🟡 In Progress | SPEC/04-API-DESIGN.md#API-017 |
+**Status**: ❌ Deprecated
+**SPEC References**: ARCH-003, DATA-003, API-003
+
+**Implementation Files**:
+- `src/cli_oauth.rs` — OAuth CLI 流程 (disabled)
+- `src/sync/oauth_client.rs` — OAuth 客户端 (disabled)
+- `src/sync/smart_oauth.rs` — 智能 OAuth (disabled)
+
+**Notes**: Google Drive OAuth public client 不再被 Google 支持，push/pull 命令已禁用 (v0.5.19+)。
+
+---
+
+### REQ-016: MCP 仓库 CLI - 多源聚合搜索与安装
+
+**Status**: 🟢 Done
+**SPEC References**: ARCH-015, API-015
+
+**Implementation Files**:
+- `src/commands/mcp/registry/mod.rs` — Registry 模块入口
+- `src/commands/mcp/registry/aggregator.rs` — 多源聚合器
+- `src/commands/mcp/registry/official.rs` — 官方 Registry 源
+- `src/commands/mcp/registry/smithery.rs` — Smithery 源
+- `src/commands/mcp/registry/install.rs` — 安装逻辑
+- `src/commands/mcp/registry/search.rs` — 搜索逻辑
+- `src/commands/mcp/registry/info.rs` — 信息查询
+- `src/commands/mcp/registry/interactive.rs` — 交互式安装
+- `src/commands/mcp/registry/source.rs` — 数据源抽象
+- `src/commands/mcp/registry/types.rs` — 类型定义
+- `src/commands/mcp/registry/update.rs` — 更新逻辑
+
+**Test Files**:
+- `tests/mcp_registry.rs` — MCP Registry 测试
+- `tests/real_mcp_registry_cli_e2e.rs` — MCP Registry CLI E2E 测试
+
+**Notes**: 多源聚合搜索 (Official + Smithery)，统一安装流程。
+
+---
+
+### REQ-017: AIW 插件市场系统
+
+**Status**: 🟡 Partial
+**SPEC References**: ARCH-017, DATA-017, API-017
+
+**Implementation Files**:
+- `src/commands/market/mod.rs` — 插件市场模块入口
+- `src/commands/market/cli.rs` — 市场 CLI 命令
+- `src/commands/market/cli_marketplace.rs` — 市场 CLI 交互
+- `src/commands/market/cli_plugins.rs` — 插件 CLI 管理
+- `src/commands/market/cli_utils.rs` — CLI 工具函数
+- `src/commands/market/plugin.rs` — 插件模型
+- `src/commands/market/plugin_io.rs` — 插件 I/O
+- `src/commands/market/installer.rs` — 插件安装器
+- `src/commands/market/validator.rs` — 插件验证器
+- `src/commands/market/config.rs` — 市场配置
+- `src/commands/market/config_utils.rs` — 配置工具
+- `src/commands/market/cache.rs` — 缓存管理
+- `src/commands/market/filter.rs` — 过滤器
+- `src/commands/market/source.rs` — 数据源抽象
+- `src/commands/market/github_source.rs` — GitHub 源
+- `src/commands/market/local_source.rs` — 本地源
+- `src/commands/market/remote_source.rs` — 远程源
+
+**Test Files**:
+- `tests/unit/marketplace.rs` — 市场单元测试
+- `tests/market_cli.rs` — 市场 CLI 测试
+- `tests/marketplace.rs` — 市场集成测试
+- `tests/integration/market_cli.rs` — 市场 CLI 集成测试
+
+**Notes**: 基础搜索/安装/管理功能已实现，部分高级功能仍在开发中。
 
 ---
 
 ### REQ-018: MCP Browse 环境变量快速跳过
 
-| Layer | ID | Component | Status | Implementation Files |
-|-------|----|-----------|---------|----------------------|
-| **Requirement** | REQ-018 | MCP Browse 环境变量快速跳过 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-018 |
-| **Architecture** | ARCH-018 | EnvInputState 快速跳过扩展 | 🟢 Done | SPEC/02-ARCHITECTURE.md#ARCH-018 |
-| **Implementation** | - | EnvInputState + Browse事件处理 | 🟢 Done | `src/commands/mcp/registry/browse.rs` |
-| **Tests** | - | MCP Browse Skip Optional Tests | 🟢 Done | `tests/integration/mcp_browse_018_skip_optional.rs`, `tests/e2e/agentic-warden/mcp_browse_complete_workflow.rs` |
+**Status**: 🟢 Done
+**SPEC References**: ARCH-018
 
-**Key Insights**:
-- 快速跳过仅在可选变量场景触发，避免破坏必填输入
-- 提示文案与输入逻辑复用EnvInputState，保持交互一致
+**Implementation Files**:
+- `src/commands/mcp/registry/browse.rs` — EnvInputState + Browse 事件处理
 
----
+**Test Files**:
+- `tests/mcp_browse_018_skip_optional.rs` — 快速跳过测试
+- `tests/integration/mcp_browse_018_skip_optional.rs` — 快速跳过集成测试
+- `tests/e2e/agentic-warden/mcp_browse_complete_workflow.rs` — Browse 完整工作流 E2E 测试
 
-### REQ-019: MCP Browse 已安装MCP服务器查看
-
-| Layer | ID | Component | Status | Implementation Files |
-|-------|----|-----------|---------|----------------------|
-| **Requirement** | REQ-019 | 已安装MCP服务器查看 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-019 |
-| **Architecture** | ARCH-019 | InstalledMcpScreen 列表与导航 | 🟢 Done | SPEC/02-ARCHITECTURE.md#ARCH-019 |
-| **Data** | DATA-019 | Installed MCP 列表数据结构 | 🟢 Done | SPEC/03-DATA-STRUCTURE.md#DATA-019 |
-| **Implementation** | - | Installed MCP Screen | 🟢 Done | `src/tui/screens/installed_mcp.rs` |
-| **Tests** | - | Installed MCP List Tests | 🟢 Done | `tests/integration/mcp_browse_019_installed_mcps.rs`, `tests/e2e/agentic-warden/mcp_browse_complete_workflow.rs` |
-
-**Key Insights**:
-- 列表加载复用McpConfigManager，按名称排序以保证可预测导航
-- 搜索与过滤在同一过滤流程中完成，保持UI状态一致性
+**Notes**: 快速跳过仅在可选变量场景触发，避免破坏必填输入。
 
 ---
 
-### REQ-020: MCP Browse 已安装MCP环境变量编辑
+### REQ-019: MCP Browse 已安装 MCP 服务器查看
 
-| Layer | ID | Component | Status | Implementation Files |
-|-------|----|-----------|---------|----------------------|
-| **Requirement** | REQ-020 | 已安装MCP环境变量编辑 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-020 |
-| **Architecture** | ARCH-020 | EditEnvState 编辑流程 | 🟢 Done | SPEC/02-ARCHITECTURE.md#ARCH-020 |
-| **Data** | DATA-020 | MCP环境变量编辑状态结构 | 🟢 Done | SPEC/03-DATA-STRUCTURE.md#DATA-020 |
-| **Implementation** | - | Installed MCP Edit Flow | 🟢 Done | `src/tui/screens/installed_mcp.rs` |
-| **Tests** | - | MCP Edit Env Tests | 🟢 Done | `tests/integration/mcp_browse_020_edit_env_vars.rs`, `tests/e2e/agentic-warden/mcp_browse_complete_workflow.rs` |
+**Status**: 🟢 Done
+**SPEC References**: ARCH-019, DATA-019
 
-**Key Insights**:
-- 预加载原值并跟踪modified状态，确保取消编辑不污染配置
-- 保存路径通过McpConfigManager更新并记录变更日志
+**Implementation Files**:
+- `src/commands/mcp/registry/browse.rs` — Browse 界面逻辑
+- `src/tui/screens/installed_mcp.rs` — 已安装 MCP 列表界面
+
+**Test Files**:
+- `tests/mcp_browse_019_installed_mcps.rs` — 已安装 MCP 测试
+- `tests/integration/mcp_browse_019_installed_mcps.rs` — 已安装 MCP 集成测试
+- `tests/e2e/agentic-warden/mcp_browse_complete_workflow.rs` — Browse 完整工作流 E2E 测试
+
+**Notes**: 列表加载复用 McpConfigManager，按名称排序保证可预测导航。
+
+---
+
+### REQ-020: MCP Browse 已安装 MCP 环境变量编辑
+
+**Status**: 🟢 Done
+**SPEC References**: ARCH-020, DATA-020
+
+**Implementation Files**:
+- `src/commands/mcp/registry/browse.rs` — Browse 编辑流程
+- `src/tui/screens/installed_mcp.rs` — 已安装 MCP 编辑界面
+
+**Test Files**:
+- `tests/mcp_browse_020_edit_env_vars.rs` — 环境变量编辑测试
+- `tests/integration/mcp_browse_020_edit_env_vars.rs` — 环境变量编辑集成测试
+- `tests/e2e/agentic-warden/mcp_browse_complete_workflow.rs` — Browse 完整工作流 E2E 测试
+
+**Notes**: 预加载原值并跟踪 modified 状态，取消编辑不污染配置。
 
 ---
 
 ### REQ-021: AI CLI 自动故障切换系统
 
-| Layer | ID | Component | Status | Implementation Files |
-|-------|----|-----------|---------|----------------------|
-| **Requirement** | REQ-021 | AI CLI 自动故障切换系统 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-021 |
-| **Architecture** | ARCH-021 | Auto 模式架构设计 | 🟢 Done | SPEC/02-ARCHITECTURE.md#ARCH-021 |
-| **Data** | DATA-021 | AI CLI 执行顺序配置 | 🟢 Done | SPEC/03-DATA-STRUCTURE.md#DATA-021 |
-| **API** | API-021 | Auto 模式 CLI 接口 | 🟢 Done | SPEC/04-API-DESIGN.md#API-021 |
+**Status**: 🟢 Done
+**SPEC References**: ARCH-021, DATA-021, API-021
+
+**Implementation Files**:
+- `src/auto_mode/mod.rs` — Auto 模式入口
+- `src/auto_mode/config.rs` — Auto 模式配置
+- `src/auto_mode/judge.rs` — 故障判定与切换逻辑
+- `src/commands/auto.rs` — Auto 模式命令
+
+**Test Files**:
+- `tests/unit/auto_mode.rs` — Auto 模式单元测试
+
+**Notes**: 自动检测 AI CLI 故障并切换到备选 CLI。
 
 ---
 
 ### REQ-022: Auto 模式 CLI+Provider 组合轮转
 
-| Layer | ID | Component | Status | Implementation Files |
-|-------|----|-----------|---------|----------------------|
-| **Requirement** | REQ-022 | Auto 模式 CLI+Provider 组合轮转 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-022 |
-| **Architecture** | ARCH-021 | Auto 模式架构设计（共享） | 🟢 Done | SPEC/02-ARCHITECTURE.md#ARCH-021 |
-| **Data** | DATA-022 | Auto 执行顺序配置（CLI+Provider） | 🟢 Done | SPEC/03-DATA-STRUCTURE.md#DATA-022 |
-| **Data** | DATA-023 | CLI 冷却机制数据结构 | 🟢 Done | SPEC/03-DATA-STRUCTURE.md#DATA-023 |
-| **API** | API-021 | Auto 模式 CLI 接口（共享） | 🟢 Done | SPEC/04-API-DESIGN.md#API-021 |
+**Status**: 🟢 Done
+**SPEC References**: ARCH-021, DATA-022, DATA-023, API-021
+
+**Implementation Files**:
+- `src/auto_mode/mod.rs` — Auto 模式入口
+- `src/auto_mode/config.rs` — 组合轮转配置
+- `src/auto_mode/judge.rs` — 轮转判定逻辑
+- `src/commands/auto.rs` — Auto 模式命令
+
+**Test Files**:
+- `tests/unit/auto_mode.rs` — Auto 模式单元测试
+
+**Notes**: CLI+Provider 组合轮转，冷却机制防止频繁切换。
 
 ---
 
 ### REQ-023: Git 仓库检查和 Worktree 管理
 
-| Layer | ID | Component | Status | Implementation Files |
-|-------|----|-----------|---------|----------------------|
-| **Requirement** | REQ-023 | Git 仓库检查和 Worktree 管理 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-023 |
-| **Architecture** | ARCH-023 | Git 仓库检查和 Worktree 管理架构 | 🟢 Done | SPEC/02-ARCHITECTURE.md#ARCH-023 |
+**Status**: 🟢 Done
+**SPEC References**: ARCH-023
+
+**Implementation Files**:
+- `src/worktree.rs` — Git worktree 管理 (git2)
+
+**Notes**: 基于 git2 库实现 worktree 创建/切换/清理。
 
 ---
 
 ### REQ-024: OpenAI 环境变量配置
 
-| Layer | ID | Component | Status | Implementation Files |
-|-------|----|-----------|---------|----------------------|
-| **Requirement** | REQ-024 | OpenAI 环境变量配置 | 🟢 Done | SPEC/01-REQUIREMENTS.md#REQ-024 |
-| **Architecture** | ARCH-013 | 动态JS编排工具系统架构 | 🟢 Done | SPEC/02-ARCHITECTURE.md#ARCH-013 |
-| **API** | API-013 | OpenAI Environment Variable Configuration | 🟢 Done | SPEC/04-API-DESIGN.md#API-013 |
+**Status**: 🟢 Done
+**SPEC References**: ARCH-013, API-013
+
+**Implementation Files**:
+- `src/provider/env_mapping.rs` — 环境变量映射规则 (含 OpenAI 映射)
+- `src/provider/env_injector.rs` — 环境变量注入
+- `src/provider/config.rs` — Provider 配置
+
+**Notes**: OPENAI_ENDPOINT / OPENAI_TOKEN / OPENAI_MODEL 环境变量配置，环境变量优先于配置文件。
 
 ---
 
-## Cross-Cutting Concerns Traceability
+### REQ-025: Claude CLI Max-Token 补丁系统
 
-### Security Architecture
-| Requirements | Architecture | Implementation |
-|--------------|-------------|----------------|
-| REQ-002, REQ-003 | Token encryption, process isolation | `src/provider/token_validator.rs`, shared memory namespaces |
-| REQ-003 | OAuth 2.0 Device Flow | `src/sync/oauth_client.rs` |
-| REQ-001 | Process isolation by namespace | `src/core/process_tree.rs` |
+**Status**: 🟢 Done
 
-### Performance Requirements
-| Requirements | Architecture | Implementation |
-|--------------|-------------|----------------|
-| NFR-001 | Shared memory coordination | `src/storage/shared_map.rs` (< 1ms operations) |
-| NFR-001 | Process tree caching | `src/core/process_tree.rs` (5-second cache) |
-| REQ-003 | Archive compression | `src/sync/compressor.rs` (1-5MB archives) |
+**Implementation Files**:
+- `src/patcher/mod.rs` — 补丁系统入口
+- `src/patcher/versions.rs` — 通用正则模式 `MAX_CONTEXT_TOKENS_SEARCH_REGEX` + `validate`/`encode_max_context_tokens` + `ClaudeVersion`（版本检测）
+- `src/patcher/registry.rs` — `get_max_context_tokens_patches` 生成 max-token patch 模式
+- `src/patcher/file.rs` — 文件补丁应用（regex 匹配 + 等长数值替换）
+- `src/patcher/runtime.rs` — 内存补丁应用（`apply_max_context_tokens_patch`，整区域 64MB 读入 + regex 扫描，修复跨块漏匹配）
+- `src/patcher/types.rs` — `FeatureType::MaxContextTokens` + `UnifiedPatchPattern`（Cow + `use_regex`/`regex_replace_values`）
+- `src/patcher/error.rs` — 补丁错误类型
+- `src/patcher/platform/mod.rs` — 平台适配入口（`mod native`）
+- `src/patcher/platform/unix.rs` — Unix 平台补丁
+- `src/patcher/platform/macos.rs` — macOS 平台补丁
+- `src/patcher/platform/windows.rs` — Windows 平台补丁
+- `src/commands/patch.rs` — Patch CLI 命令（`execute_set_max_tokens`）
+- `src/commands/parser.rs` — `PatchAction::SetMaxTokens`
+- `src/config.rs` — `PatchConfig`（max_context_tokens / auto_compact_window，默认 500000，持久化到 `~/.aiw/patch.json`）
+- `src/supervisor.rs` — `apply_max_context_tokens_patches`（启动时触发）
+
+**Notes**: max-token patch 通过通用正则匹配 Claude CLI 二进制常量块 `var X=200000,Y=200000,...`，把默认上下文窗口（`YOt`）和 autoCompact 阈值（`Pte`）等长替换为可配置值（100000~999999，默认 500000）。变量名无关，跨版本通用（已验证 2.1.195）。替代旧的 firstParty patch（破坏 CC 中转站识别和中国时区识别，已彻底删除）。支持文件补丁（持久化）和内存补丁（运行时），跨平台 (Linux x64/arm64, macOS arm64, Windows x64)。
+
+---
+
+## Cross-Cutting Concerns
+
+### Security
+| Concern | Related REQs | Implementation |
+|---------|-------------|----------------|
+| Token/密钥安全 | REQ-002, REQ-024 | `src/provider/env_injector.rs`, 进程隔离 |
+| 进程命名空间隔离 | REQ-001 | `src/core/process_tree.rs`, `src/core/shared_map.rs` |
+| Max-Token 补丁验证 | REQ-025 | `src/patcher/versions.rs`, `MAX_CONTEXT_TOKENS_SEARCH_REGEX` 通用正则 + `validate_max_context_tokens` 6 位数校验 |
+
+### Performance
+| Concern | Related REQs | Implementation |
+|---------|-------------|----------------|
+| 共享内存协调 (< 1ms) | REQ-001, REQ-005 | `src/core/shared_map.rs` |
+| 进程树缓存 (5s TTL) | REQ-001 | `src/core/process_tree.rs` |
+| Boa 运行时连接池 | REQ-013 | `src/mcp_routing/pool.rs` |
+| 配置热更新 | REQ-012 | `src/mcp_routing/config_watcher.rs` |
 
 ### Error Handling
-| Requirements | Architecture | Implementation |
-|--------------|-------------|----------------|
-| All requirements | Centralized error types | `src/error.rs` |
-| API requirements | Exit code taxonomy | SPEC/04-API-DESIGN.md#Error-Codes |
-| Sync requirements | Network retry logic | `src/sync/google_drive_service.rs` |
+| Concern | Related REQs | Implementation |
+|---------|-------------|----------------|
+| 统一错误类型 | All | `src/error.rs` (thiserror + anyhow) |
+| Provider 领域错误 | REQ-002 | `src/provider/error.rs` |
+| 补丁错误 | REQ-025 | `src/patcher/error.rs` |
+| 退出码分类 | API | SPEC/04-API-DESIGN.md#Error-Codes |
 
 ---
 
-## Implementation Status Summary
+## Coverage Summary
 
-### Completed Features (🟢)
-- **Core Infrastructure**: Process tracking, shared memory, provider management
-- **User Interface**: Complete TUI with all screens
-- **External Integration**: MCP server with 5 tools
-- **CLI Interface**: All core commands implemented
+| Status | Count | REQ IDs |
+|--------|-------|---------|
+| 🟢 Done | 21 | REQ-001, 002, 004, 005, 006, 007, 008, 009, 011, 012, 013, 014, 016, 018, 019, 020, 021, 022, 023, 024, 025 |
+| 🟡 Partial | 1 | REQ-017 |
+| ❌ Deprecated | 3 | REQ-003, 010, 015 |
+| **Total** | **25** | |
 
-### Deprecated (❌)
-- **Synchronization**: Google Drive integration (REQ-003, REQ-015) — disabled since v0.5.19
-- **Session History**: Claude Code会话历史集成 (REQ-010) — 功能已删除
-
-### In Progress (🟡)
-- **Testing**: Some integration tests still being expanded
-- **Documentation**: API documentation completion
-
-### Not Yet Implemented (🔴)
-- **Update Management**: AI CLI update/installation (REQ-009)
-- **Advanced Features**: Some edge cases and error scenarios
+**Coverage Rate**: 21/22 active REQs completed (95.5%), 1 partial
 
 ---
 
-## Quality Assurance Traceability
+## Validation Checklist
 
-### Test Coverage Mapping
-| Component | Unit Tests | Integration Tests | E2E Tests |
-|-----------|------------|-------------------|-----------|
-| Provider Management | `tests/provider_config.rs` | `tests/integration/config_integration.rs` | Manual |
-| Process Tracking | Internal tests | `tests/integration/cli_end_to_end.rs` | Manual |
-| TUI Interface | `tests/integration/tui_navigation.rs` | Manual | Manual |
-| Synchronization | `tests/integration/config_integration.rs` | Manual | Manual |
-| MCP Server | `tests/integration/mcp_tests.rs` | Manual | Manual |
-
-### Validation Checklist
-- ✅ All requirements have corresponding architecture decisions
-- ✅ All architecture decisions are implemented in code
-- ✅ All data structures have validation rules
-- ✅ All APIs have error handling defined
-- ✅ All critical paths have test coverage
-- ⚠️ Some edge cases need additional testing
-- 🔴 REQ-009 implementation pending
-
----
-
-## Usage Examples Traceability
-
-### Complete User Workflow
-```
-1. User runs: aiw claude -p openrouter "Write code"
-   REQ-008 → API-001 → supervisor.rs → env_injector.rs
-
-2. Process tracking begins automatically
-   REQ-001 → ARCH-001 → process_tree.rs → shared_map.rs
-
-3. User checks status: aiw status
-   REQ-006 → API-002 → cli_detection.rs
-
-4. User syncs config: aiw push
-   REQ-003 → API-003 → config_packer.rs → google_drive_service.rs
-
-5. User waits for completion: aiw wait
-   REQ-005 → API-004 → wait_mode.rs → registry.rs
-```
-
-Each command maps through the complete traceability chain from requirement to implementation.
-
----
-
-**Conclusion**: This traceability matrix ensures that every requirement is backed by architectural decisions, data structures, API designs, and concrete implementations. The system maintains complete traceability from user needs down to code execution.
+- [x] All active requirements have corresponding architecture decisions
+- [x] All architecture decisions are implemented in code
+- [x] All data structures have validation rules
+- [x] All APIs have error handling defined
+- [x] All critical paths have test coverage
+- [x] REQ-009 fully implemented (interactive mode)
+- [x] REQ-025 max-token patcher system (通用正则跨版本，已验证 2.1.195；firstParty patch 已彻底删除)
+- [x] Deprecated REQs (003, 010, 015) clearly marked with reasons
+- [x] No TODO/FIXME/stub in production code
+- [x] All test files mapped to corresponding REQs

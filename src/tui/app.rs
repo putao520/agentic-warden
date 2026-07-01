@@ -31,16 +31,11 @@ impl TuiApp {
     /// 启动TUI应用
     pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         let mut app = App::new();
-        loop {
-            match app.run()? {
-                Some(ExternalScreen::McpBrowse) => {
-                    // Launch MCP Browse TUI (async function)
-                    Self::run_async(crate::commands::mcp::registry::browse::execute(None))?;
-                    // After MCP Browse exits, continue with our TUI
-                    app = App::new();
-                }
-                None => break,
-            }
+        while let Some(ExternalScreen::McpBrowse) = app.run()? {
+            // Launch MCP Browse TUI (async function)
+            Self::run_async(crate::commands::mcp::registry::browse::execute(None))?;
+            // After MCP Browse exits, continue with our TUI
+            app = App::new();
         }
         Ok(())
     }
@@ -53,18 +48,13 @@ impl TuiApp {
         if let Some(screen) = initial_screen.clone() {
             app.set_initial_screen(screen);
         }
-        loop {
-            match app.run()? {
-                Some(ExternalScreen::McpBrowse) => {
-                    // Launch MCP Browse TUI (async function)
-                    Self::run_async(crate::commands::mcp::registry::browse::execute(None))?;
-                    // After MCP Browse exits, recreate app with initial screen
-                    app = App::new();
-                    if let Some(screen) = initial_screen.clone() {
-                        app.set_initial_screen(screen);
-                    }
-                }
-                None => break,
+        while let Some(ExternalScreen::McpBrowse) = app.run()? {
+            // Launch MCP Browse TUI (async function)
+            Self::run_async(crate::commands::mcp::registry::browse::execute(None))?;
+            // After MCP Browse exits, recreate app with initial screen
+            app = App::new();
+            if let Some(screen) = initial_screen.clone() {
+                app.set_initial_screen(screen);
             }
         }
         Ok(())

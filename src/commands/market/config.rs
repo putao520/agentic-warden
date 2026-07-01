@@ -127,14 +127,14 @@ impl ConfigStore {
             MarketError::with_source(
                 MarketErrorCode::ConfigWriteFailed,
                 "Failed to resolve config paths",
-                err.into(),
+                err,
             )
         })?;
         paths.ensure_dirs().map_err(|err| {
             MarketError::with_source(
                 MarketErrorCode::ConfigWriteFailed,
                 "Failed to create config directories",
-                err.into(),
+                err,
             )
         })?;
         let settings_path = paths.config_dir.join("settings.json");

@@ -611,7 +611,7 @@ fn draw_list_panel(f: &mut Frame, state: &mut BrowserState, area: Rect) {
 
             // Single line: icon + name + downloads
             let line = Line::from(vec![
-                Span::styled(format!("{}", type_icon), Style::default()),
+                Span::styled(type_icon.to_string(), Style::default()),
                 Span::styled(src_icon, Style::default().fg(src_color)),
                 Span::raw(" "),
                 Span::styled(
@@ -969,7 +969,7 @@ fn draw_env_input_dialog(f: &mut Frame, state: &mut BrowserState, area: Rect) {
             // Variable name
             let name_line = Line::from(vec![
                 Span::styled(
-                    format!("{}", spec.name),
+                    spec.name.to_string(),
                     Style::default()
                         .fg(colors::PRIMARY)
                         .add_modifier(Modifier::BOLD),
