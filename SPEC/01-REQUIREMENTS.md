@@ -2025,6 +2025,50 @@ aiw patch status
 aiw patch apply
 ```
 
+### REQ-028: Claude CLI AntiPromptBias 补丁系统
+**Status**: 🟢 Done
+**Priority**: P1 (High)
+**Version**: v0.5.99
+**Related**: ARCH-014
+
+**Description**:
+Agentic-Warden MUST provide an AntiPromptBias patch system for Claude CLI that eliminates the Provider context prompt injected into third-party (non-first-party API) user sessions. CC v2.1.195 injects a `**Provider context:** This session is not using Anthropic's first-party API. WebSearch may be unavailable, \`/feedback\` is unavailable, and some features behave differently...` prompt when `g7()` (the non-firstParty gate) returns true, making the model aware of provider differences and potentially biasing its behavior. This patch rewrites the injection condition `if(g7())` (63-byte literal: `if(g7())n.push("**Provider context:** This session is not using`) to `if(0   )` (63-byte literal: `if(0   )n.push("**Provider context:** This session is not using`, space-padded equal-length), so the condition is always false and the Provider context prompt is never injected — the model no longer perceives provider differences. Only this one prompt injection is skipped; other firstParty gates (OAuth, capability detection, model selection, etc.) are untouched.
+
+**Acceptance Criteria**:
+- [x] Patch: `if(g7())n.push("**Provider context:** This session is not using` (63 bytes) -> `if(0   )n.push("**Provider context:** This session is not using` (63 bytes, equal-length, space-padded)
+- [x] Condition-level patch (rewrites the `if` condition, not the prompt string itself)
+- [x] Literal replacement mode (`use_regex=false`) via `UnifiedPatchPattern` with `search_pattern` + `replace_pattern`
+- [x] Support both file patch (persistent) and memory patch (runtime)
+- [x] `PatchAction::DisablePromptBias` CLI command (`aiw patch disable-prompt-bias`)
+- [x] `get_antipromptbias_patches` registry function generates 2 patch patterns (file + memory)
+- [x] `FeatureType::AntiPromptBias` variant added to `FeatureType` enum (description + short_name="antipromptbias")
+- [x] `execute_apply_patch` applies max-token + anti-telemetry + anti-spy + anti-prompt-bias file patches (four independent, one failure doesn't affect the others)
+- [x] `execute_patch_status` reports anti-prompt-bias patch status
+- [x] Startup-time auto-trigger in supervisor (both `execute_cli_internal` and `start_interactive_cli` paths) applies anti-prompt-bias memory patch after anti-spy patch
+- [x] Cross-version stable (prompt literal, not minified variable name)
+- [x] Equal-length replacement iron law: 63 -> 63 bytes
+- [x] Only skips this one Provider context prompt, does NOT touch other firstParty gates (OAuth/capability/model selection)
+
+**Technical Constraints**:
+- `search_pattern` and `replace_pattern` MUST be equal length (63 bytes) to avoid shifting subsequent offsets
+- `if(g7())` (7 bytes) -> `if(0   )` (7 bytes, 3 spaces padding), bytes after the condition stay identical
+- Memory patch uses `apply_literal_memory_patch` (search_pattern -> replace_pattern integral overwrite)
+- AntiPromptBias patch is independent of max-token / AntiTelemetry / AntiSpy patches: one failing does not block the others
+- `use_regex=false` (literal mode, not regex mode)
+- Only patches the `if(g7())` condition for this specific Provider context prompt push; does NOT modify `g7()` itself or any other firstParty gate logic
+
+**CLI Usage**:
+```bash
+# Disable provider context prompt bias (skip Provider context prompt for 3P)
+aiw patch disable-prompt-bias
+
+# Apply all patches (max-token + anti-telemetry + anti-spy + anti-prompt-bias)
+aiw patch apply
+
+# Check patch status (all four patches)
+aiw patch status
+```
+
 ## 已废弃需求 (Deprecated)
 
 > **废弃原因**: Google Drive 云存储集成已禁用，push/pull 命令不可用。自 v0.5.19 起标记为 Disabled。

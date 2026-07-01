@@ -8,8 +8,8 @@ use std::borrow::Cow;
 
 /// Get patches for a feature based on version signature
 ///
-/// 目前支持 MaxContextTokens 与 AntiTelemetry 两种功能；保留 version 参数
-/// 以兼容调用方签名（regex/字面量均不依赖版本签名）。
+/// 目前支持 MaxContextTokens / AntiTelemetry / AntiSpy / AntiPromptBias 四种功能；
+/// 保留 version 参数以兼容调用方签名（regex/字面量均不依赖版本签名）。
 pub fn get_feature_patches(
     feature: FeatureType,
     version: &ClaudeVersion,
@@ -20,6 +20,7 @@ pub fn get_feature_patches(
         }
         FeatureType::AntiTelemetry => get_antitelemetry_patches(),
         FeatureType::AntiSpy => get_antispy_patches(),
+        FeatureType::AntiPromptBias => get_antipromptbias_patches(),
     }
 }
 
@@ -197,6 +198,56 @@ pub fn get_antispy_patches() -> Vec<UnifiedPatchPattern> {
             patch_byte: None,
             patch_offset: None,
             description: Cow::Borrowed("AntiSpy memory patch: Hsp() relay detection -> null"),
+            use_regex: false,
+            regex_replace_values: None,
+        },
+    ]
+}
+
+/// 生成 AntiPromptBias patch 模式
+///
+/// 消除 CC 给第三方用户注入的 Provider context 提示词偏见：
+/// 把 `if(g7())n.push("**Provider context:...")` 改成 `if(0   )n.push("**Provider context:...")`
+/// 让条件永远 false → Provider context prompt 不注入，模型不感知 provider 差异，行为更一致。
+/// 只跳过这一条 prompt，不影响其他 firstParty 门控（OAuth/能力/模型选择等照常）。
+///
+/// 等长字面量替换（`use_regex=false`）：search 与 replace 均 63 字节，
+/// `if(g7())`（7 字节）→ `if(0   )`（7 字节，空格填充）。
+/// 跨版本稳定（prompt 字面量，非 minified 变量名）。
+///
+/// 返回文件补丁与内存补丁各一份。
+pub fn get_antipromptbias_patches() -> Vec<UnifiedPatchPattern> {
+    let search = b"if(g7())n.push(\"**Provider context:** This session is not using";
+    let replace = b"if(0   )n.push(\"**Provider context:** This session is not using";
+    assert_eq!(
+        search.len(),
+        replace.len(),
+        "antipromptbias patch must be equal length"
+    );
+    vec![
+        UnifiedPatchPattern {
+            feature: FeatureType::AntiPromptBias,
+            patch_type: PatchType::File,
+            search_pattern: Cow::Owned(search.to_vec()),
+            replace_pattern: Some(Cow::Owned(replace.to_vec())),
+            patch_byte: None,
+            patch_offset: None,
+            description: Cow::Borrowed(
+                "AntiPromptBias file patch: skip Provider context prompt for 3P",
+            ),
+            use_regex: false,
+            regex_replace_values: None,
+        },
+        UnifiedPatchPattern {
+            feature: FeatureType::AntiPromptBias,
+            patch_type: PatchType::Memory,
+            search_pattern: Cow::Owned(search.to_vec()),
+            replace_pattern: Some(Cow::Owned(replace.to_vec())),
+            patch_byte: None,
+            patch_offset: None,
+            description: Cow::Borrowed(
+                "AntiPromptBias memory patch: skip Provider context prompt for 3P",
+            ),
             use_regex: false,
             regex_replace_values: None,
         },
@@ -414,5 +465,80 @@ mod tests {
         assert_eq!(patches.len(), 4);
         assert!(patches.iter().all(|p| !p.use_regex));
         assert!(patches.iter().all(|p| p.feature == FeatureType::AntiSpy));
+    }
+
+    #[test]
+    fn test_antipromptbias_patches_structure() {
+        let patches = get_antipromptbias_patches();
+        assert_eq!(patches.len(), 2); // 1 file + 1 memory
+
+        let file_count = patches
+            .iter()
+            .filter(|p| p.patch_type == PatchType::File)
+            .count();
+        let mem_count = patches
+            .iter()
+            .filter(|p| p.patch_type == PatchType::Memory)
+            .count();
+        assert_eq!(file_count, 1);
+        assert_eq!(mem_count, 1);
+
+        for p in &patches {
+            assert_eq!(p.feature, FeatureType::AntiPromptBias);
+            assert!(!p.use_regex);
+            assert!(p.regex_replace_values.is_none());
+            assert!(p.patch_byte.is_none());
+            assert!(p.patch_offset.is_none());
+            assert!(p.replace_pattern.is_some());
+        }
+    }
+
+    #[test]
+    fn test_antipromptbias_patches_equal_length() {
+        // 等长替换铁律：search 与 replace 必须等长，否则会破坏二进制偏移
+        let patches = get_antipromptbias_patches();
+        for p in &patches {
+            let s = p.search_pattern.as_ref();
+            let r = p.replace_pattern.as_ref().unwrap();
+            assert_eq!(s.len(), r.len(), "antipromptbias patch must be equal length");
+        }
+    }
+
+    #[test]
+    fn test_antipromptbias_patch_63_bytes() {
+        // AntiPromptBias patch: 63 字节 search → 63 字节 replace
+        let patches = get_antipromptbias_patches();
+        for p in &patches {
+            let search: &[u8] = p.search_pattern.as_ref();
+            let replace: &[u8] = p.replace_pattern.as_ref().unwrap().as_ref();
+            assert_eq!(search.len(), 63);
+            assert_eq!(replace.len(), 63);
+            assert_eq!(
+                search,
+                &b"if(g7())n.push(\"**Provider context:** This session is not using"[..]
+            );
+            assert_eq!(
+                replace,
+                &b"if(0   )n.push(\"**Provider context:** This session is not using"[..]
+            );
+            // 只改 if 条件，后续 prompt 字面量保持不变
+            assert!(search.starts_with(b"if(g7())"));
+            assert!(replace.starts_with(b"if(0   )"));
+            // 条件之后的字节序列必须完全一致
+            assert_eq!(&search[7..], &replace[7..]);
+        }
+    }
+
+    #[test]
+    fn test_antipromptbias_via_get_feature_patches() {
+        let version = ClaudeVersion {
+            major: 2,
+            minor: 1,
+            patch: 195,
+        };
+        let patches = get_feature_patches(FeatureType::AntiPromptBias, &version);
+        assert_eq!(patches.len(), 2);
+        assert!(patches.iter().all(|p| !p.use_regex));
+        assert!(patches.iter().all(|p| p.feature == FeatureType::AntiPromptBias));
     }
 }

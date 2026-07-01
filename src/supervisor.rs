@@ -79,7 +79,8 @@ fn get_cli_command(cli_type: &CliType) -> Result<String, ProcessError> {
 /// 与 max-token patch 独立，一个失败不影响另一个。
 ///
 /// 最后应用 AntiSpy 内存补丁（时区+中转站识别失明），
-/// 三个 patch 独立，一个失败不影响另一个。
+/// 以及 AntiPromptBias 内存补丁（消除 Provider context 提示词偏见），
+/// 四个 patch 独立，一个失败不影响另一个。
 fn apply_max_context_tokens_patches(pid: u32, cli_type: &CliType) {
     use crate::patcher::registry::get_feature_patches;
     use crate::patcher::types::{FeatureType, PatchType};
@@ -169,12 +170,28 @@ fn apply_max_context_tokens_patches(pid: u32, cli_type: &CliType) {
             }
         }
     }
+
+    // AntiPromptBias 内存补丁（独立于 max-token / AntiTelemetry / AntiSpy，一个失败不影响另一个）
+    let antipromptbias_patches = get_feature_patches(FeatureType::AntiPromptBias, &version);
+    for patch in antipromptbias_patches
+        .iter()
+        .filter(|p| p.patch_type == PatchType::Memory)
+    {
+        match patcher.apply_literal_memory_patch(patch) {
+            Ok(_addr) => {
+                eprintln!("✅ AntiPromptBias applied (Provider context prompt -> skipped)");
+            }
+            Err(e) => {
+                tracing::debug!("anti-prompt-bias memory patch failed: {}", e);
+            }
+        }
+    }
 }
 
-/// 在后台线程中应用 AntiTelemetry + AntiSpy 内存补丁（用于 start_interactive_cli 路径）
+/// 在后台线程中应用 AntiTelemetry + AntiSpy + AntiPromptBias 内存补丁（用于 start_interactive_cli 路径）
 ///
-/// 与 max-token patch 独立：max-token 失败不影响 anti-telemetry/anti-spy 尝试。
-/// 三个 patch 独立，一个失败不影响另一个。此操作是 best-effort，失败仅记日志，不影响主流程。
+/// 与 max-token patch 独立：max-token 失败不影响 anti-telemetry/anti-spy/anti-prompt-bias 尝试。
+/// 四个 patch 独立，一个失败不影响另一个。此操作是 best-effort，失败仅记日志，不影响主流程。
 fn apply_antitelemetry_memory_patch_background(patcher: &RuntimePatcher) {
     use crate::patcher::registry::get_feature_patches;
     use crate::patcher::types::{FeatureType, PatchType};
@@ -211,6 +228,22 @@ fn apply_antitelemetry_memory_patch_background(patcher: &RuntimePatcher) {
         match patcher.apply_literal_memory_patch(patch) {
             Ok(_addr) => {
                 eprintln!("✅ AntiSpy applied (timezone + relay detection -> null)");
+            }
+            Err(_) => {
+                // Silent failure - best-effort
+            }
+        }
+    }
+
+    // AntiPromptBias 内存补丁（独立于 AntiTelemetry / AntiSpy，一个失败不影响另一个）
+    let antipromptbias_patches = get_feature_patches(FeatureType::AntiPromptBias, &version);
+    for patch in antipromptbias_patches
+        .iter()
+        .filter(|p| p.patch_type == PatchType::Memory)
+    {
+        match patcher.apply_literal_memory_patch(patch) {
+            Ok(_addr) => {
+                eprintln!("✅ AntiPromptBias applied (Provider context prompt -> skipped)");
             }
             Err(_) => {
                 // Silent failure - best-effort

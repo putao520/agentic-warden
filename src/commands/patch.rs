@@ -8,7 +8,10 @@
 use crate::patcher::{
     apply_file_patch, detect_installation, get_patchable_path, is_file_patched,
     restore_from_backup, InstallationType,
-    registry::{get_antispy_patches, get_antitelemetry_patches, get_feature_patches},
+    registry::{
+        get_antipromptbias_patches, get_antispy_patches, get_antitelemetry_patches,
+        get_feature_patches,
+    },
     types::{FeatureType, PatchType},
     versions::{validate_max_context_tokens, ClaudeVersion},
 };
@@ -42,6 +45,9 @@ pub async fn execute_patch_command(action: PatchAction) -> Result<()> {
         }
         PatchAction::DisableSpy => {
             execute_disable_spy()?;
+        }
+        PatchAction::DisablePromptBias => {
+            execute_disable_prompt_bias()?;
         }
     }
     Ok(())
@@ -127,6 +133,18 @@ fn execute_apply_patch(
         }
     }
 
+    // AntiPromptBias 文件补丁（独立于 max-token / AntiTelemetry / AntiSpy，一个失败不影响另一个）
+    let antipromptbias_patches = get_antipromptbias_patches();
+    for patch in antipromptbias_patches
+        .iter()
+        .filter(|p| p.patch_type == PatchType::File)
+    {
+        match apply_file_patch(&patch_path, patch) {
+            Ok(_) => println!("   ✅ {}", patch.description),
+            Err(e) => println!("   ❌ 失败: {}", e),
+        }
+    }
+
     println!("✅ 补丁应用完成!");
     Ok(())
 }
@@ -172,6 +190,28 @@ fn execute_disable_spy() -> Result<()> {
         }
     }
     println!("✅ AntiSpy patch 应用完成（时区+中转站识别已失明）");
+    Ok(())
+}
+
+/// 消除 Provider context 提示词偏见（第三方不再被注入"功能有差异"提示）
+fn execute_disable_prompt_bias() -> Result<()> {
+    let patch_path = get_patchable_path()?;
+    let install_type = detect_installation().ok();
+    let type_label = match &install_type {
+        Some(InstallationType::Npm { .. }) => "npm (JS)",
+        Some(InstallationType::NativeBinary { .. }) => "NativeBinary",
+        _ => "Unknown",
+    };
+    println!("📂 Claude CLI 文件: {} ({})", patch_path.display(), type_label);
+
+    let patches = get_antipromptbias_patches();
+    for patch in patches.iter().filter(|p| p.patch_type == PatchType::File) {
+        match apply_file_patch(&patch_path, patch) {
+            Ok(_) => println!("   ✅ {}", patch.description),
+            Err(e) => println!("   ❌ 失败: {}", e),
+        }
+    }
+    println!("✅ AntiPromptBias patch 应用完成（Provider context 偏见已消除）");
     Ok(())
 }
 
@@ -249,6 +289,23 @@ fn execute_patch_status() {
     }
     if !antispy_patched {
         println!("   ❌ AntiSpy 补丁未应用");
+    }
+
+    // AntiPromptBias 状态检查
+    let antipromptbias_patches = get_antipromptbias_patches();
+    let mut antipromptbias_patched = false;
+    for patch in antipromptbias_patches
+        .iter()
+        .filter(|p| p.patch_type == PatchType::File)
+    {
+        if let Ok(true) = is_file_patched(&patch_path, patch) {
+            println!("   ✅ AntiPromptBias 补丁已应用");
+            antipromptbias_patched = true;
+            break;
+        }
+    }
+    if !antipromptbias_patched {
+        println!("   ❌ AntiPromptBias 补丁未应用");
     }
 }
 

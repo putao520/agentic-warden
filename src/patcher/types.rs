@@ -34,6 +34,14 @@ pub enum FeatureType {
     ///
     /// 不碰 `$Sn()`（保留 firstParty 专属功能）。跨版本稳定（函数体字面量）。
     AntiSpy,
+    /// AntiPromptBias - 消除 Provider context 提示词偏见（第三方不再被注入"功能有差异"提示）
+    ///
+    /// 通过等长字面量替换把第三方用户的 Provider context prompt 注入条件
+    /// `if(g7())` 改成 `if(0   )`，让条件永远 false → 该条 prompt 不注入，
+    /// 模型不感知 provider 差异，行为更一致。
+    /// 只跳过这一条 prompt，不影响其他 firstParty 门控（OAuth/能力/模型选择等照常）。
+    /// 跨版本稳定（prompt 字面量，非 minified 变量名）。
+    AntiPromptBias,
 }
 
 impl FeatureType {
@@ -43,6 +51,9 @@ impl FeatureType {
             FeatureType::MaxContextTokens => "MaxContextTokens - 可配置默认上下文窗口 + autoCompact 阈值",
             FeatureType::AntiTelemetry => "AntiTelemetry - 截断客户端上报（event_logging → 404）",
             FeatureType::AntiSpy => "AntiSpy - 时区+中转站识别失明（本地识别全 null）",
+            FeatureType::AntiPromptBias => {
+                "AntiPromptBias - 消除 Provider context 提示词偏见（if(g7())→if(0)）"
+            }
         }
     }
 
@@ -52,6 +63,7 @@ impl FeatureType {
             FeatureType::MaxContextTokens => "maxtokens",
             FeatureType::AntiTelemetry => "antitelemetry",
             FeatureType::AntiSpy => "antispy",
+            FeatureType::AntiPromptBias => "antipromptbias",
         }
     }
 }
@@ -232,6 +244,25 @@ mod tests {
     fn test_antispy_distinct_from_others() {
         assert_ne!(FeatureType::AntiSpy, FeatureType::MaxContextTokens);
         assert_ne!(FeatureType::AntiSpy, FeatureType::AntiTelemetry);
+    }
+
+    #[test]
+    fn test_antipromptbias_description() {
+        assert!(FeatureType::AntiPromptBias
+            .description()
+            .contains("AntiPromptBias"));
+    }
+
+    #[test]
+    fn test_antipromptbias_short_name() {
+        assert_eq!(FeatureType::AntiPromptBias.short_name(), "antipromptbias");
+    }
+
+    #[test]
+    fn test_antipromptbias_distinct_from_others() {
+        assert_ne!(FeatureType::AntiPromptBias, FeatureType::MaxContextTokens);
+        assert_ne!(FeatureType::AntiPromptBias, FeatureType::AntiTelemetry);
+        assert_ne!(FeatureType::AntiPromptBias, FeatureType::AntiSpy);
     }
 
     #[test]

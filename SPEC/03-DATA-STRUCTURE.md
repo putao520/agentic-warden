@@ -231,6 +231,7 @@ pub enum FeatureType {
     MaxContextTokens,  // 可配置默认上下文窗口 + autoCompact 阈值（regex 模式）
     AntiTelemetry,     // 截断 CC 客户端上报（event_logging 端点 -> 404，字面量模式）
     AntiSpy,           // 时区+中转站识别失明（KIt->UTC, Hsp->null，函数级 patch）
+    AntiPromptBias,    // 消除 Provider context 提示词偏见（if(g7())->if(0   )，条件级 patch）
 }
 
 pub struct UnifiedPatchPattern {
@@ -278,6 +279,14 @@ Patch 2 (relay detection, 47 bytes):
   <------------- 47 bytes -------------->
 ```
 函数级等长字面量替换（`use_regex=false`）：Patch 1 把 `KIt()` 时区识别永远返回 UTC（注释填充 JS 合法），真实时区不泄露，`cnTZ` 永远 false；Patch 2 把 `Hsp()` 中转站识别永远返回 null（空格填充），`known`/`labKw`/`cnTZ`/`host` 全 null。不碰 `$Sn()`（保留 firstParty 专属功能）。跨版本稳定（函数体字面量，非 minified 变量名）。
+
+**AntiPromptBias Patch Target** (Claude CLI Provider context prompt injection condition):
+```
+if(g7())n.push("**Provider context:** This session is not using
+  ->  if(0   )n.push("**Provider context:** This session is not using
+<----------------------- 63 bytes ---------------------->
+```
+条件级等长字面量替换（`use_regex=false`）：把 `if(g7())`（7 字节，第三方用户门控为 true 时注入 Provider context prompt）改成 `if(0   )`（7 字节空格填充，永远 false）→ Provider context prompt 不注入，模型不感知 provider 差异，行为更一致。只跳过这一条 prompt，不影响其他 firstParty 门控（OAuth/能力/模型选择等照常）。跨版本稳定（prompt 字面量，非 minified 变量名）。
 
 ---
 
