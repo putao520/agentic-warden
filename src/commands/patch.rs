@@ -8,7 +8,7 @@
 use crate::patcher::{
     apply_file_patch, detect_installation, get_patchable_path, is_file_patched,
     restore_from_backup, InstallationType,
-    registry::get_feature_patches,
+    registry::{get_antitelemetry_patches, get_feature_patches},
     types::{FeatureType, PatchType},
     versions::{validate_max_context_tokens, ClaudeVersion},
 };
@@ -34,6 +34,9 @@ pub async fn execute_patch_command(action: PatchAction) -> Result<()> {
         } => {
             execute_set_max_tokens(max_context_tokens, auto_compact_window)?;
         }
+        PatchAction::DisableTelemetry => {
+            execute_disable_telemetry()?;
+        }
     }
     Ok(())
 }
@@ -56,9 +59,25 @@ fn execute_apply_patch() -> Result<()> {
     );
 
     let version = get_claude_version();
-    let patches = get_feature_patches(FeatureType::MaxContextTokens, &version);
 
-    for patch in patches.iter().filter(|p| p.patch_type == PatchType::File) {
+    // max-token 文件补丁
+    let max_token_patches = get_feature_patches(FeatureType::MaxContextTokens, &version);
+    for patch in max_token_patches
+        .iter()
+        .filter(|p| p.patch_type == PatchType::File)
+    {
+        match apply_file_patch(&patch_path, patch) {
+            Ok(_) => println!("   ✅ {}", patch.description),
+            Err(e) => println!("   ❌ 失败: {}", e),
+        }
+    }
+
+    // AntiTelemetry 文件补丁（独立于 max-token，一个失败不影响另一个）
+    let antitelemetry_patches = get_antitelemetry_patches();
+    for patch in antitelemetry_patches
+        .iter()
+        .filter(|p| p.patch_type == PatchType::File)
+    {
         match apply_file_patch(&patch_path, patch) {
             Ok(_) => println!("   ✅ {}", patch.description),
             Err(e) => println!("   ❌ 失败: {}", e),
@@ -66,6 +85,28 @@ fn execute_apply_patch() -> Result<()> {
     }
 
     println!("✅ 补丁应用完成!");
+    Ok(())
+}
+
+/// 禁用 CC 客户端上报（截断 event_logging 端点）
+fn execute_disable_telemetry() -> Result<()> {
+    let patch_path = get_patchable_path()?;
+    let install_type = detect_installation().ok();
+    let type_label = match &install_type {
+        Some(InstallationType::Npm { .. }) => "npm (JS)",
+        Some(InstallationType::NativeBinary { .. }) => "NativeBinary",
+        _ => "Unknown",
+    };
+    println!("📂 Claude CLI 文件: {} ({})", patch_path.display(), type_label);
+
+    let patches = get_antitelemetry_patches();
+    for patch in patches.iter().filter(|p| p.patch_type == PatchType::File) {
+        match apply_file_patch(&patch_path, patch) {
+            Ok(_) => println!("   ✅ {}", patch.description),
+            Err(e) => println!("   ❌ 失败: {}", e),
+        }
+    }
+    println!("✅ AntiTelemetry patch 应用完成（上报已截断）");
     Ok(())
 }
 
@@ -109,6 +150,23 @@ fn execute_patch_status() {
     }
     if !patched {
         println!("   ❌ max-token 补丁未应用");
+    }
+
+    // AntiTelemetry 状态检查
+    let antitelemetry_patches = get_antitelemetry_patches();
+    let mut antitelemetry_patched = false;
+    for patch in antitelemetry_patches
+        .iter()
+        .filter(|p| p.patch_type == PatchType::File)
+    {
+        if let Ok(true) = is_file_patched(&patch_path, patch) {
+            println!("   ✅ AntiTelemetry 补丁已应用");
+            antitelemetry_patched = true;
+            break;
+        }
+    }
+    if !antitelemetry_patched {
+        println!("   ❌ AntiTelemetry 补丁未应用");
     }
 }
 

@@ -8,7 +8,8 @@ use std::borrow::Cow;
 
 /// Get patches for a feature based on version signature
 ///
-/// 目前仅 MaxContextTokens 一种功能；保留 feature 参数以兼容调用方签名。
+/// 目前支持 MaxContextTokens 与 AntiTelemetry 两种功能；保留 version 参数
+/// 以兼容调用方签名（regex/字面量均不依赖版本签名）。
 pub fn get_feature_patches(
     feature: FeatureType,
     version: &ClaudeVersion,
@@ -17,6 +18,7 @@ pub fn get_feature_patches(
         FeatureType::MaxContextTokens => {
             get_max_context_tokens_patches(version, 500000, 500000)
         }
+        FeatureType::AntiTelemetry => get_antitelemetry_patches(),
     }
 }
 
@@ -72,6 +74,44 @@ pub fn get_max_context_tokens_patches(
             ),
             use_regex: true,
             regex_replace_values: Some(vec![max_tokens, auto_compact]),
+        },
+    ]
+}
+
+/// 生成 AntiTelemetry patch 模式
+///
+/// 截断 CC 事件上报：`/api/event_logging/v2/batch` → `/api/event_logging/v2/xxxxx`
+/// 等长 27 字节字面量替换，让端点 404，上报静默失败。跨版本稳定（API 路径字面量）。
+///
+/// 返回文件补丁与内存补丁各一份，内存补丁同样用 `replace_pattern` 整段字面量
+/// 替换（不依赖 patch_byte/patch_offset）。
+pub fn get_antitelemetry_patches() -> Vec<UnifiedPatchPattern> {
+    vec![
+        UnifiedPatchPattern {
+            feature: FeatureType::AntiTelemetry,
+            patch_type: PatchType::File,
+            search_pattern: Cow::Borrowed(b"/api/event_logging/v2/batch"),
+            replace_pattern: Some(Cow::Borrowed(b"/api/event_logging/v2/xxxxx")),
+            patch_byte: None,
+            patch_offset: None,
+            description: Cow::Borrowed(
+                "AntiTelemetry file patch: event_logging endpoint -> 404",
+            ),
+            use_regex: false,
+            regex_replace_values: None,
+        },
+        UnifiedPatchPattern {
+            feature: FeatureType::AntiTelemetry,
+            patch_type: PatchType::Memory,
+            search_pattern: Cow::Borrowed(b"/api/event_logging/v2/batch"),
+            replace_pattern: Some(Cow::Borrowed(b"/api/event_logging/v2/xxxxx")),
+            patch_byte: None,
+            patch_offset: None,
+            description: Cow::Borrowed(
+                "AntiTelemetry memory patch: event_logging endpoint -> 404",
+            ),
+            use_regex: false,
+            regex_replace_values: None,
         },
     ]
 }
@@ -134,5 +174,66 @@ mod tests {
         let patches = get_feature_patches(FeatureType::MaxContextTokens, &version);
         assert_eq!(patches.len(), 2);
         assert!(patches.iter().all(|p| p.use_regex));
+    }
+
+    #[test]
+    fn test_antitelemetry_patches_structure() {
+        let patches = get_antitelemetry_patches();
+        assert_eq!(patches.len(), 2); // 1 file + 1 memory
+
+        let file_patch = patches
+            .iter()
+            .find(|p| p.patch_type == PatchType::File)
+            .expect("file patch present");
+        let mem_patch = patches
+            .iter()
+            .find(|p| p.patch_type == PatchType::Memory)
+            .expect("memory patch present");
+
+        for p in [&file_patch, &mem_patch] {
+            assert_eq!(p.feature, FeatureType::AntiTelemetry);
+            assert!(!p.use_regex);
+            assert!(p.regex_replace_values.is_none());
+            assert!(p.patch_byte.is_none());
+            assert!(p.patch_offset.is_none());
+            // 等长替换铁律：27 -> 27
+            let search: &[u8] = p.search_pattern.as_ref();
+            let replace: &[u8] = p
+                .replace_pattern
+                .as_ref()
+                .map(|c| c.as_ref())
+                .expect("replace_pattern present for antitelemetry");
+            assert_eq!(search.len(), 27);
+            assert_eq!(replace.len(), 27);
+            assert_eq!(search, &b"/api/event_logging/v2/batch"[..]);
+            assert_eq!(replace, &b"/api/event_logging/v2/xxxxx"[..]);
+        }
+    }
+
+    #[test]
+    fn test_antitelemetry_via_get_feature_patches() {
+        let version = ClaudeVersion {
+            major: 2,
+            minor: 1,
+            patch: 195,
+        };
+        let patches = get_feature_patches(FeatureType::AntiTelemetry, &version);
+        assert_eq!(patches.len(), 2);
+        assert!(patches.iter().all(|p| !p.use_regex));
+    }
+
+    #[test]
+    fn test_antitelemetry_patches_equal_length() {
+        // 等长替换铁律：search 与 replace 必须等长，否则会破坏二进制偏移
+        let patches = get_antitelemetry_patches();
+        for p in &patches {
+            let s = p.search_pattern.as_ref();
+            let r = p.replace_pattern.as_ref().unwrap();
+            assert_eq!(
+                s.len(),
+                r.len(),
+                "antitelemetry patch must be equal length"
+            );
+        }
     }
 }

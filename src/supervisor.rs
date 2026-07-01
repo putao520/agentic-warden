@@ -73,10 +73,13 @@ fn get_cli_command(cli_type: &CliType) -> Result<String, ProcessError> {
 /// `var X=200000,Y=200000,...`，把两个 200000 等长替换为配置值。
 ///
 /// 此操作是 best-effort：失败不影响主流程。
-/// 如果文件补丁已应用（常量块已是目标值），则跳过内存补丁避免重复。
+/// 如果文件补丁已应用（常量块已是目标值），则跳过 max-token 内存补丁避免重复。
+///
+/// 随后应用 AntiTelemetry 内存补丁（截断 event_logging 端点），
+/// 与 max-token patch 独立，一个失败不影响另一个。
 fn apply_max_context_tokens_patches(pid: u32, cli_type: &CliType) {
-    use crate::patcher::types::PatchType;
     use crate::patcher::registry::get_feature_patches;
+    use crate::patcher::types::{FeatureType, PatchType};
     use crate::patcher::versions::ClaudeVersion;
     use crate::patcher::{get_patchable_path, is_file_patched};
 
@@ -90,44 +93,93 @@ fn apply_max_context_tokens_patches(pid: u32, cli_type: &CliType) {
     let max_tokens = cfg.max_context_tokens;
     let auto_compact = cfg.auto_compact_window;
 
-    // 检查文件补丁是否已应用，如果已应用则跳过内存补丁
-    if let Ok(patch_path) = get_patchable_path() {
-        let version_str =
-            get_claude_version_string_for_patch().unwrap_or_else(|| "2.1.195".to_string());
-        let version = ClaudeVersion::from_string(&version_str).unwrap_or(ClaudeVersion {
-            major: 2,
-            minor: 1,
-            patch: 195,
-        });
-        let patches = get_feature_patches(crate::patcher::types::FeatureType::MaxContextTokens, &version);
-
-        let file_already_patched = patches
-            .iter()
-            .filter(|p| p.patch_type == PatchType::File)
-            .any(|p| is_file_patched(&patch_path, p).unwrap_or(false));
-
-        if file_already_patched {
-            tracing::debug!(
-                "max-context-tokens file patch already applied, skipping memory patch"
-            );
-            return;
-        }
-    }
-
     let patcher = match RuntimePatcher::new(pid) {
         Ok(p) => p,
         Err(_) => return,
     };
 
-    match patcher.apply_max_context_tokens_patch(max_tokens, auto_compact) {
-        Ok(_addr) => {
-            eprintln!(
-                "✅ MaxContextTokens unlocked (max_tokens={}, auto_compact={})",
-                max_tokens, auto_compact
-            );
+    let version_str =
+        get_claude_version_string_for_patch().unwrap_or_else(|| "2.1.195".to_string());
+    let version = ClaudeVersion::from_string(&version_str).unwrap_or(ClaudeVersion {
+        major: 2,
+        minor: 1,
+        patch: 195,
+    });
+
+    // 检查 max-token 文件补丁是否已应用，如果已应用则跳过 max-token 内存补丁
+    let max_token_file_patched = get_patchable_path()
+        .ok()
+        .and_then(|patch_path| {
+            let patches = get_feature_patches(FeatureType::MaxContextTokens, &version);
+            patches
+                .iter()
+                .filter(|p| p.patch_type == PatchType::File)
+                .any(|p| is_file_patched(&patch_path, p).unwrap_or(false))
+                .then_some(())
+        })
+        .is_some();
+
+    if max_token_file_patched {
+        tracing::debug!("max-context-tokens file patch already applied, skipping memory patch");
+    } else {
+        match patcher.apply_max_context_tokens_patch(max_tokens, auto_compact) {
+            Ok(_addr) => {
+                eprintln!(
+                    "✅ MaxContextTokens unlocked (max_tokens={}, auto_compact={})",
+                    max_tokens, auto_compact
+                );
+            }
+            Err(e) => {
+                tracing::debug!("max-context-tokens memory patch failed: {}", e);
+            }
         }
-        Err(e) => {
-            tracing::debug!("max-context-tokens memory patch failed: {}", e);
+    }
+
+    // AntiTelemetry 内存补丁（独立于 max-token，一个失败不影响另一个）
+    let antitelemetry_patches = get_feature_patches(FeatureType::AntiTelemetry, &version);
+    for patch in antitelemetry_patches
+        .iter()
+        .filter(|p| p.patch_type == PatchType::Memory)
+    {
+        match patcher.apply_literal_memory_patch(patch) {
+            Ok(_addr) => {
+                eprintln!("✅ AntiTelemetry applied (event_logging endpoint -> 404)");
+            }
+            Err(e) => {
+                tracing::debug!("anti-telemetry memory patch failed: {}", e);
+            }
+        }
+    }
+}
+
+/// 在后台线程中应用 AntiTelemetry 内存补丁（用于 start_interactive_cli 路径）
+///
+/// 与 max-token patch 独立：max-token 失败不影响 anti-telemetry 尝试。
+/// 此操作是 best-effort，失败仅记日志，不影响主流程。
+fn apply_antitelemetry_memory_patch_background(patcher: &RuntimePatcher) {
+    use crate::patcher::registry::get_feature_patches;
+    use crate::patcher::types::{FeatureType, PatchType};
+    use crate::patcher::versions::ClaudeVersion;
+
+    let antitelemetry_patches = get_feature_patches(
+        FeatureType::AntiTelemetry,
+        &ClaudeVersion {
+            major: 2,
+            minor: 1,
+            patch: 195,
+        },
+    );
+    for patch in antitelemetry_patches
+        .iter()
+        .filter(|p| p.patch_type == PatchType::Memory)
+    {
+        match patcher.apply_literal_memory_patch(patch) {
+            Ok(_addr) => {
+                eprintln!("✅ AntiTelemetry applied (event_logging endpoint -> 404)");
+            }
+            Err(_) => {
+                // Silent failure - best-effort
+            }
         }
     }
 }
@@ -1358,6 +1410,9 @@ pub fn start_interactive_cli<S: TaskStorage>(
                                 // Silent failure since user might not need this feature
                             }
                         }
+
+                        // AntiTelemetry 内存补丁（独立于 max-token）
+                        apply_antitelemetry_memory_patch_background(&patcher);
                     }
                     Err(_) => {
                         // Process might have already exited or other error

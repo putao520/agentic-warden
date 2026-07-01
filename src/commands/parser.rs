@@ -62,6 +62,10 @@ pub enum PatchAction {
         #[arg(long, value_name = "N")]
         auto_compact_window: Option<u32>,
     },
+
+    /// 禁用 CC 客户端上报（截断 event_logging 端点）
+    #[command(name = "disable-telemetry")]
+    DisableTelemetry,
 }
 
 /// 配置管理动作

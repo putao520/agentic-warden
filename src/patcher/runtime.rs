@@ -188,6 +188,69 @@ impl RuntimePatcher {
     }
 
 
+    /// 应用字面量内存 patch（search_pattern → replace_pattern 整段替换）
+    ///
+    /// 用于 AntiTelemetry 等字面量 patch：在进程内存中找到 `search_pattern`，
+    /// 用 `replace_pattern` 整段覆盖写入。要求 search 与 replace 等长，
+    /// 避免破坏二进制偏移。命中首个匹配即返回地址。
+    ///
+    /// # 参数
+    /// - `pattern`: 补丁模式（必须提供等长的 search_pattern 与 replace_pattern）
+    ///
+    /// # 返回
+    /// 成功时返回写入的起始地址，失败返回错误
+    pub fn apply_literal_memory_patch(
+        &self,
+        pattern: &crate::patcher::types::UnifiedPatchPattern,
+    ) -> PatchResult<usize> {
+        if !self.process_exists() {
+            return Err(PatchError::ProcessNotFound { pid: 0 });
+        }
+
+        let search = pattern.search_pattern.as_ref();
+        let replace = pattern.replace_pattern.as_ref().ok_or_else(|| {
+            PatchError::PatternNotFound {
+                pattern: "replace_pattern required for literal memory patch".to_string(),
+                hint: None,
+            }
+        })?;
+
+        if search.len() != replace.len() {
+            return Err(PatchError::PatternNotFound {
+                pattern: format!(
+                    "literal patch must be equal length: search={}, replace={}",
+                    search.len(),
+                    replace.len()
+                ),
+                hint: None,
+            });
+        }
+
+        // 在所有可读区域中搜索字面量模式
+        let regions = self.inner.read_memory_maps()?;
+        let readable_regions: Vec<_> = regions.iter().filter(|r| r.is_readable).collect();
+
+        for region in readable_regions {
+            match self.search_pattern_in_region(region, search) {
+                Ok(Some(addr)) => {
+                    self.inner.write_memory(addr, replace)?;
+                    info!(
+                        "✅ AntiTelemetry patched: endpoint -> 404 @ {:#x}",
+                        addr
+                    );
+                    return Ok(addr);
+                }
+                Ok(None) => continue,
+                Err(_) => continue,
+            }
+        }
+
+        Err(PatchError::PatternNotFound {
+            pattern: String::from_utf8_lossy(search).to_string(),
+            hint: Some("Pattern not found in any readable region".to_string()),
+        })
+    }
+
     /// 在内存中搜索字节模式
     ///
     /// # 参数
@@ -267,6 +330,51 @@ mod tests {
         let r = patcher.apply_max_context_tokens_patch(99999, 500000);
         assert!(r.is_err());
         let r = patcher.apply_max_context_tokens_patch(500000, 1000000);
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_literal_memory_patch_rejects_missing_replace_pattern() {
+        use crate::patcher::types::{FeatureType, UnifiedPatchPattern};
+        use std::borrow::Cow;
+
+        let pid = std::process::id();
+        let patcher = RuntimePatcher::new(pid).unwrap();
+        let pattern = UnifiedPatchPattern {
+            feature: FeatureType::AntiTelemetry,
+            patch_type: crate::patcher::types::PatchType::Memory,
+            search_pattern: Cow::Borrowed(b"/api/event_logging/v2/batch"),
+            replace_pattern: None, // 缺失 replace_pattern
+            patch_byte: None,
+            patch_offset: None,
+            description: Cow::Borrowed("test missing replace"),
+            use_regex: false,
+            regex_replace_values: None,
+        };
+        // 缺 replace_pattern 应返回错误（不应命中 "not found" 而是参数校验错误）
+        let r = patcher.apply_literal_memory_patch(&pattern);
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_literal_memory_patch_rejects_unequal_length() {
+        use crate::patcher::types::{FeatureType, UnifiedPatchPattern};
+        use std::borrow::Cow;
+
+        let pid = std::process::id();
+        let patcher = RuntimePatcher::new(pid).unwrap();
+        let pattern = UnifiedPatchPattern {
+            feature: FeatureType::AntiTelemetry,
+            patch_type: crate::patcher::types::PatchType::Memory,
+            search_pattern: Cow::Borrowed(b"/api/event_logging/v2/batch"),
+            replace_pattern: Some(Cow::Borrowed(b"short")), // 长度不一致
+            patch_byte: None,
+            patch_offset: None,
+            description: Cow::Borrowed("test unequal length"),
+            use_regex: false,
+            regex_replace_values: None,
+        };
+        let r = patcher.apply_literal_memory_patch(&pattern);
         assert!(r.is_err());
     }
 }

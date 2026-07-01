@@ -20,6 +20,12 @@ pub enum FeatureType {
     /// 通过 regex 通用模式匹配 Claude CLI 的常量块
     /// `var X=200000,Y=200000,...`，把两个 200000 替换为配置值。
     MaxContextTokens,
+    /// AntiTelemetry - 截断 CC 客户端上报（event_logging 端点 → 404）
+    ///
+    /// 通过字面量替换把 `/api/event_logging/v2/batch` 改成
+    /// `/api/event_logging/v2/xxxxx`，让上报端点 404 静默失败。
+    /// 跨版本稳定（API 路径字面量）。
+    AntiTelemetry,
 }
 
 impl FeatureType {
@@ -27,6 +33,7 @@ impl FeatureType {
     pub fn description(&self) -> &'static str {
         match self {
             FeatureType::MaxContextTokens => "MaxContextTokens - 可配置默认上下文窗口 + autoCompact 阈值",
+            FeatureType::AntiTelemetry => "AntiTelemetry - 截断客户端上报（event_logging → 404）",
         }
     }
 
@@ -34,6 +41,7 @@ impl FeatureType {
     pub fn short_name(&self) -> &'static str {
         match self {
             FeatureType::MaxContextTokens => "maxtokens",
+            FeatureType::AntiTelemetry => "antitelemetry",
         }
     }
 }
@@ -178,6 +186,26 @@ mod tests {
     #[test]
     fn test_max_context_tokens_short_name() {
         assert_eq!(FeatureType::MaxContextTokens.short_name(), "maxtokens");
+    }
+
+    #[test]
+    fn test_antitelemetry_description() {
+        assert!(FeatureType::AntiTelemetry
+            .description()
+            .contains("AntiTelemetry"));
+    }
+
+    #[test]
+    fn test_antitelemetry_short_name() {
+        assert_eq!(FeatureType::AntiTelemetry.short_name(), "antitelemetry");
+    }
+
+    #[test]
+    fn test_antitelemetry_distinct_from_max_context_tokens() {
+        assert_ne!(
+            FeatureType::AntiTelemetry,
+            FeatureType::MaxContextTokens
+        );
     }
 
     #[test]
