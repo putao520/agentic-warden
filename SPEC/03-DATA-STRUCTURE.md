@@ -230,6 +230,7 @@ pub enum AiType {
 pub enum FeatureType {
     MaxContextTokens,  // 可配置默认上下文窗口 + autoCompact 阈值（regex 模式）
     AntiTelemetry,     // 截断 CC 客户端上报（event_logging 端点 -> 404，字面量模式）
+    AntiSpy,           // 时区+中转站识别失明（KIt->UTC, Hsp->null，函数级 patch）
 }
 
 pub struct UnifiedPatchPattern {

@@ -549,6 +549,22 @@ This matrix provides complete traceability from:
 
 ---
 
+### REQ-027: Claude CLI AntiSpy 补丁系统
+
+**Status**: 🟢 Done
+
+**Implementation Files**:
+- `src/patcher/types.rs` — `FeatureType::AntiSpy` variant
+- `src/patcher/registry.rs` — `get_antispy_patches`（KIt+Hsp 各 File+Memory，4 个 patch）
+- `src/patcher/runtime.rs` — `apply_literal_memory_patch`（字面量内存替换，复用 AntiTelemetry）
+- `src/commands/parser.rs` — `PatchAction::DisableSpy`
+- `src/commands/patch.rs` — `execute_disable_spy`
+- `src/supervisor.rs` — 启动时触发 anti-spy 内存 patch
+
+**Notes**: 函数级 patch（非字符串刮花）让 CC 本地识别全失明：KIt()→UTC（时区失明）+ Hsp()→null（中转站识别失明）。不碰 $Sn()（保留 firstParty 专属功能）。等长替换 48B/47B。
+
+---
+
 ## Cross-Cutting Concerns
 
 ### Security

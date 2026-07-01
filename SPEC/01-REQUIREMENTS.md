@@ -1938,6 +1938,93 @@ aiw patch apply
 aiw patch status
 ```
 
+### REQ-027: Claude CLI AntiSpy 补丁系统
+**Status**: 🟢 Done
+**Priority**: P1 (High)
+**Version**: v0.5.99
+**Related**: ARCH-014
+
+**Description**:
+Agentic-Warden MUST provide an AntiSpy patch system for Claude CLI that blinds CC's local environment detection by rewriting two function-level literals: (1) `KIt()` returns `Intl.DateTimeFormat().resolvedOptions().timeZone` (48 bytes) -> `"UTC"/*` + 39 dots + `*/` (48 bytes, comment-padded, JS-legal), forcing timezone to always return UTC so the real timezone never leaks and `cnTZ` is always false; (2) `Hsp()` relay-station detection `function Hsp(){if($Sn())return null;let e=Asp()` (47 bytes) -> `function Hsp(){return null;         let e=Asp()` (47 bytes, space-padded), forcing `Hsp()` to always return null so `known`/`labKw`/`cnTZ`/`host` are all null. This blocks CC v2.1.195's local espionage behavior of fingerprinting user timezone and relay station.
+
+**Acceptance Criteria**:
+- [x] Patch 1 (timezone): `Intl.DateTimeFormat().resolvedOptions().timeZone` (48 bytes) -> `"UTC"` + comment padding (48 bytes, equal-length)
+- [x] Patch 2 (relay): `function Hsp(){if($Sn())return null;let e=Asp()` (47 bytes) -> `function Hsp(){return null;         let e=Asp()` (47 bytes, equal-length)
+- [x] Function-level patch (rewrites function body logic, not string scraping)
+- [x] Literal replacement mode (`use_regex=false`) via `UnifiedPatchPattern` with `search_pattern` + `replace_pattern`
+- [x] Support both file patch (persistent) and memory patch (runtime)
+- [x] `PatchAction::DisableSpy` CLI command (`aiw patch disable-spy`)
+- [x] `get_antispy_patches` registry function generates 4 patch patterns (KIt file+memory, Hsp file+memory)
+- [x] `FeatureType::AntiSpy` variant added to `FeatureType` enum (description + short_name="antispy")
+- [x] `execute_apply_patch` applies max-token + anti-telemetry + anti-spy file patches (three independent, one failure doesn't affect the others)
+- [x] `execute_patch_status` reports anti-spy patch status
+- [x] Startup-time auto-trigger in supervisor (both `execute_cli_internal` and `start_interactive_cli` paths) applies anti-spy memory patch after anti-telemetry patch
+- [x] Cross-version stable (function body literal, not minified variable name)
+- [x] Equal-length replacement iron law: 48 -> 48 bytes (timezone) and 47 -> 47 bytes (relay)
+- [x] Does NOT touch `$Sn()` function (preserves firstParty-specific features: `_u()`/`NY()`/OAuth)
+
+**Technical Constraints**:
+- `search_pattern` and `replace_pattern` MUST be equal length (48 bytes for timezone, 47 bytes for relay) to avoid shifting subsequent offsets
+- Memory patch uses `apply_literal_memory_patch` (search_pattern -> replace_pattern integral overwrite)
+- AntiSpy patch is independent of max-token / AntiTelemetry patches: one failing does not block the others
+- `use_regex=false` (literal mode, not regex mode)
+- Timezone replace uses JS comment syntax `/* ... */` to stay JS-legal while padding to equal length
+- Relay replace uses space padding to stay JS-legal while padding to equal length
+- MUST NOT patch `$Sn()` (used by `_u()`/`NY()`/OAuth firstParty features)
+
+**CLI Usage**:
+```bash
+# Disable spy (blind timezone + relay detection)
+aiw patch disable-spy
+
+# Apply all patches (max-token + anti-telemetry + anti-spy)
+aiw patch apply
+
+# Check patch status (all three patches)
+aiw patch status
+```
+
+### REQ-027: Claude CLI AntiSpy 补丁系统
+**Status**: 🟢 Done
+**Priority**: P1 (High)
+**Version**: v0.5.99
+**Related**: ARCH-014
+
+**Description**:
+Agentic-Warden MUST provide an AntiSpy patch system that blinds Claude CLI's local environment detection (timezone + relay station identification), preventing CC from profiling users as China/relay-station users for differential treatment.
+
+**Acceptance Criteria**:
+- [x] Patch `KIt()` timezone function: `Intl.DateTimeFormat().resolvedOptions().timeZone` → `"UTC"/*...*/` (48B equal-length, comment-padded)
+- [x] Patch `Hsp()` relay detection function: `function Hsp(){if($Sn())return null;` → `function Hsp(){return null;         ` (47B equal-length, space-padded)
+- [x] Timezone always returns UTC, real timezone never leaks
+- [x] Relay detection returns null (known/labKw/cnTZ/host all null)
+- [x] System prompt date format stays `2026-07-01` (cnTZ false, no `/` conversion)
+- [x] `PatchAction::DisableSpy` CLI command
+- [x] Startup-time auto-trigger in supervisor (after max-token + AntiTelemetry)
+- [x] Does NOT touch `$Sn()` (preserves firstParty exclusive features: OAuth, feature gates)
+- [x] Does NOT touch ICU timezone database `Asia/Shanghai` (preserves timezone calculation)
+- [x] Function-level patch (not string scraping) — patches function body logic
+
+**Technical Constraints**:
+- Patches MUST be equal-length (48B/47B) to avoid shifting binary offsets
+- `KIt()` patch uses comment padding `/*...*/` (JS-legal, ignored by parser)
+- `Hsp()` patch uses space padding (JS-legal whitespace)
+- `UnifiedPatchPattern` uses `Cow::Owned` for runtime-constructed patterns
+- `apply_literal_memory_patch` handles literal memory replacement
+- Three patches independent: max-token / AntiTelemetry / AntiSpy
+
+**CLI Usage**:
+```bash
+# Disable CC local detection (timezone + relay station)
+aiw patch disable-spy
+
+# Check patch status
+aiw patch status
+
+# Apply all patches (max-token + anti-telemetry + anti-spy)
+aiw patch apply
+```
+
 ## 已废弃需求 (Deprecated)
 
 > **废弃原因**: Google Drive 云存储集成已禁用，push/pull 命令不可用。自 v0.5.19 起标记为 Disabled。
