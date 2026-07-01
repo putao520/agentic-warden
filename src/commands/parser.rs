@@ -66,6 +66,10 @@ pub enum PatchAction {
     /// 禁用 CC 客户端上报（截断 event_logging 端点）
     #[command(name = "disable-telemetry")]
     DisableTelemetry,
+
+    /// 禁用 CC 本地识别（时区+中转站失明）
+    #[command(name = "disable-spy")]
+    DisableSpy,
 }
 
 /// 配置管理动作

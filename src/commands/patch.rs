@@ -8,7 +8,7 @@
 use crate::patcher::{
     apply_file_patch, detect_installation, get_patchable_path, is_file_patched,
     restore_from_backup, InstallationType,
-    registry::{get_antitelemetry_patches, get_feature_patches},
+    registry::{get_antispy_patches, get_antitelemetry_patches, get_feature_patches},
     types::{FeatureType, PatchType},
     versions::{validate_max_context_tokens, ClaudeVersion},
 };
@@ -36,6 +36,9 @@ pub async fn execute_patch_command(action: PatchAction) -> Result<()> {
         }
         PatchAction::DisableTelemetry => {
             execute_disable_telemetry()?;
+        }
+        PatchAction::DisableSpy => {
+            execute_disable_spy()?;
         }
     }
     Ok(())
@@ -84,6 +87,18 @@ fn execute_apply_patch() -> Result<()> {
         }
     }
 
+    // AntiSpy 文件补丁（独立于 max-token / AntiTelemetry，一个失败不影响另一个）
+    let antispy_patches = get_antispy_patches();
+    for patch in antispy_patches
+        .iter()
+        .filter(|p| p.patch_type == PatchType::File)
+    {
+        match apply_file_patch(&patch_path, patch) {
+            Ok(_) => println!("   ✅ {}", patch.description),
+            Err(e) => println!("   ❌ 失败: {}", e),
+        }
+    }
+
     println!("✅ 补丁应用完成!");
     Ok(())
 }
@@ -107,6 +122,28 @@ fn execute_disable_telemetry() -> Result<()> {
         }
     }
     println!("✅ AntiTelemetry patch 应用完成（上报已截断）");
+    Ok(())
+}
+
+/// 禁用 CC 本地识别（时区+中转站失明）
+fn execute_disable_spy() -> Result<()> {
+    let patch_path = get_patchable_path()?;
+    let install_type = detect_installation().ok();
+    let type_label = match &install_type {
+        Some(InstallationType::Npm { .. }) => "npm (JS)",
+        Some(InstallationType::NativeBinary { .. }) => "NativeBinary",
+        _ => "Unknown",
+    };
+    println!("📂 Claude CLI 文件: {} ({})", patch_path.display(), type_label);
+
+    let patches = get_antispy_patches();
+    for patch in patches.iter().filter(|p| p.patch_type == PatchType::File) {
+        match apply_file_patch(&patch_path, patch) {
+            Ok(_) => println!("   ✅ {}", patch.description),
+            Err(e) => println!("   ❌ 失败: {}", e),
+        }
+    }
+    println!("✅ AntiSpy patch 应用完成（时区+中转站识别已失明）");
     Ok(())
 }
 
@@ -167,6 +204,23 @@ fn execute_patch_status() {
     }
     if !antitelemetry_patched {
         println!("   ❌ AntiTelemetry 补丁未应用");
+    }
+
+    // AntiSpy 状态检查
+    let antispy_patches = get_antispy_patches();
+    let mut antispy_patched = false;
+    for patch in antispy_patches
+        .iter()
+        .filter(|p| p.patch_type == PatchType::File)
+    {
+        if let Ok(true) = is_file_patched(&patch_path, patch) {
+            println!("   ✅ AntiSpy 补丁已应用");
+            antispy_patched = true;
+            break;
+        }
+    }
+    if !antispy_patched {
+        println!("   ❌ AntiSpy 补丁未应用");
     }
 }
 

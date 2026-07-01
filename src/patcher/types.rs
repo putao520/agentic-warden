@@ -26,6 +26,14 @@ pub enum FeatureType {
     /// `/api/event_logging/v2/xxxxx`，让上报端点 404 静默失败。
     /// 跨版本稳定（API 路径字面量）。
     AntiTelemetry,
+    /// AntiSpy - 时区+中转站识别失明（KIt→UTC, Hsp→null）
+    ///
+    /// 通过函数级等长字面量替换让 CC 本地识别全失明：
+    /// - `KIt()` → 返回 `"UTC"`：时区永远返回 UTC，真实时区不泄露
+    /// - `Hsp()` → 返回 `null`：中转站识别返回 null，known/labKw/cnTZ/host 全 null
+    ///
+    /// 不碰 `$Sn()`（保留 firstParty 专属功能）。跨版本稳定（函数体字面量）。
+    AntiSpy,
 }
 
 impl FeatureType {
@@ -34,6 +42,7 @@ impl FeatureType {
         match self {
             FeatureType::MaxContextTokens => "MaxContextTokens - 可配置默认上下文窗口 + autoCompact 阈值",
             FeatureType::AntiTelemetry => "AntiTelemetry - 截断客户端上报（event_logging → 404）",
+            FeatureType::AntiSpy => "AntiSpy - 时区+中转站识别失明（本地识别全 null）",
         }
     }
 
@@ -42,6 +51,7 @@ impl FeatureType {
         match self {
             FeatureType::MaxContextTokens => "maxtokens",
             FeatureType::AntiTelemetry => "antitelemetry",
+            FeatureType::AntiSpy => "antispy",
         }
     }
 }
@@ -206,6 +216,22 @@ mod tests {
             FeatureType::AntiTelemetry,
             FeatureType::MaxContextTokens
         );
+    }
+
+    #[test]
+    fn test_antispy_description() {
+        assert!(FeatureType::AntiSpy.description().contains("AntiSpy"));
+    }
+
+    #[test]
+    fn test_antispy_short_name() {
+        assert_eq!(FeatureType::AntiSpy.short_name(), "antispy");
+    }
+
+    #[test]
+    fn test_antispy_distinct_from_others() {
+        assert_ne!(FeatureType::AntiSpy, FeatureType::MaxContextTokens);
+        assert_ne!(FeatureType::AntiSpy, FeatureType::AntiTelemetry);
     }
 
     #[test]
