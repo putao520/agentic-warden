@@ -19,8 +19,11 @@ use anyhow::Result;
 /// 执行补丁命令
 pub async fn execute_patch_command(action: PatchAction) -> Result<()> {
     match action {
-        PatchAction::Apply => {
-            execute_apply_patch()?;
+        PatchAction::Apply {
+            max_context_tokens,
+            auto_compact_window,
+        } => {
+            execute_apply_patch(max_context_tokens, auto_compact_window)?;
         }
         PatchAction::Status => {
             execute_patch_status();
@@ -44,8 +47,16 @@ pub async fn execute_patch_command(action: PatchAction) -> Result<()> {
     Ok(())
 }
 
-/// 应用文件补丁（max-token：配置默认上下文窗口 + autoCompact 阈值）
-fn execute_apply_patch() -> Result<()> {
+/// 应用文件补丁（max-token + anti-telemetry + anti-spy）
+///
+/// CLI 参数覆盖配置文件值并持久化（与 set-max-tokens 行为一致）：
+/// - 只指定 `--max-context-tokens` 时，`auto_compact_window` 跟齐
+/// - 两个参数都指定时，分别设置
+/// - 都不指定时，使用配置文件默认值（或 500000）
+fn execute_apply_patch(
+    max_context_tokens: Option<u32>,
+    auto_compact_window: Option<u32>,
+) -> Result<()> {
     let patch_path = get_patchable_path()?;
     let install_type = detect_installation().ok();
     let type_label = match &install_type {
@@ -55,7 +66,24 @@ fn execute_apply_patch() -> Result<()> {
     };
     println!("📂 Claude CLI 文件: {} ({})", patch_path.display(), type_label);
 
-    let cfg = PatchConfig::load().unwrap_or_default();
+    // 读配置默认值（或默认 500000），CLI 参数覆盖
+    let mut cfg = PatchConfig::load().unwrap_or_default();
+    if let Some(mt) = max_context_tokens {
+        validate_max_context_tokens(mt).map_err(|e| anyhow::anyhow!(e))?;
+        cfg.max_context_tokens = mt;
+        // 只指定 max 时 auto 跟齐
+        if auto_compact_window.is_none() {
+            cfg.auto_compact_window = mt;
+        }
+    }
+    if let Some(ac) = auto_compact_window {
+        validate_max_context_tokens(ac).map_err(|e| anyhow::anyhow!(e))?;
+        cfg.auto_compact_window = ac;
+    }
+    // 持久化用户选择（与 set-max-tokens 一致）
+    if max_context_tokens.is_some() || auto_compact_window.is_some() {
+        let _ = cfg.save();
+    }
     println!(
         "🔧 max_context_tokens={}, auto_compact_window={}",
         cfg.max_context_tokens, cfg.auto_compact_window
@@ -274,8 +302,8 @@ fn execute_set_max_tokens(
         cfg.max_context_tokens, cfg.auto_compact_window
     );
 
-    // 立即应用文件补丁
-    execute_apply_patch()
+    // 立即应用文件补丁（配置已持久化，传 None 用配置值）
+    execute_apply_patch(None, None)
 }
 
 /// 获取 Claude 版本

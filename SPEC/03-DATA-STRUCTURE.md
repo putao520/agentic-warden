@@ -265,6 +265,20 @@ var [a-zA-Z_$][a-zA-Z0-9_$]*=200000,[a-zA-Z_$][a-zA-Z0-9_$]*=200000,...
 ```
 字面量等长替换（`use_regex=false`），让上报端点 404 静默失败。跨版本稳定（API 路径字面量，非 minified 变量名）。
 
+**AntiSpy Patch Targets** (Claude CLI function-level literals):
+```
+Patch 1 (timezone, 48 bytes):
+  Intl.DateTimeFormat().resolvedOptions().timeZone
+  ->  "UTC"/*<39 dots>*/
+  <-------------- 48 bytes -------------->
+
+Patch 2 (relay detection, 47 bytes):
+  function Hsp(){if($Sn())return null;let e=Asp()
+  ->  function Hsp(){return null;         let e=Asp()
+  <------------- 47 bytes -------------->
+```
+函数级等长字面量替换（`use_regex=false`）：Patch 1 把 `KIt()` 时区识别永远返回 UTC（注释填充 JS 合法），真实时区不泄露，`cnTZ` 永远 false；Patch 2 把 `Hsp()` 中转站识别永远返回 null（空格填充），`known`/`labKw`/`cnTZ`/`host` 全 null。不碰 `$Sn()`（保留 firstParty 专属功能）。跨版本稳定（函数体字面量，非 minified 变量名）。
+
 ---
 
 ### [v0] Runtime Data Models

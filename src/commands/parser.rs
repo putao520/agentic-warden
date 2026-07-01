@@ -43,8 +43,15 @@ pub enum RolesAction {
 /// 补丁管理动作
 #[derive(Subcommand, Debug, Clone)]
 pub enum PatchAction {
-    /// 应用文件补丁（max-token：配置默认上下文窗口 + autoCompact 阈值）
-    Apply,
+    /// 应用文件补丁（max-token + anti-telemetry + anti-spy）
+    Apply {
+        /// 默认上下文窗口上限（6 位数，100000~999999，默认 500000）
+        #[arg(long, value_name = "N")]
+        max_context_tokens: Option<u32>,
+        /// autoCompact 阈值（6 位数，100000~999999，默认等于 max_context_tokens）
+        #[arg(long, value_name = "N")]
+        auto_compact_window: Option<u32>,
+    },
 
     /// 查看补丁状态
     Status,

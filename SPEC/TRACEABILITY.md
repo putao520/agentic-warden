@@ -554,14 +554,18 @@ This matrix provides complete traceability from:
 **Status**: 🟢 Done
 
 **Implementation Files**:
-- `src/patcher/types.rs` — `FeatureType::AntiSpy` variant
-- `src/patcher/registry.rs` — `get_antispy_patches`（KIt+Hsp 各 File+Memory，4 个 patch）
-- `src/patcher/runtime.rs` — `apply_literal_memory_patch`（字面量内存替换，复用 AntiTelemetry）
+- `src/patcher/mod.rs` — 补丁系统入口（导出 `get_feature_patches`）
+- `src/patcher/types.rs` — `FeatureType::AntiSpy` + `UnifiedPatchPattern`（Cow + `use_regex=false` 字面量模式）
+- `src/patcher/registry.rs` — `get_antispy_patches` 生成 4 个 patch 模式（KIt file+memory, Hsp file+memory）
+- `src/patcher/file.rs` — 文件补丁应用（字面量匹配 + `replace_pattern` 整段替换）
+- `src/patcher/runtime.rs` — `apply_literal_memory_patch`（字面量内存替换，等长校验，命中首个匹配即写入）
+- `src/patcher/error.rs` — 补丁错误类型（`PatchError::PatternNotFound`）
+- `src/patcher/platform/*.rs` — 平台适配（Unix/macOS/Windows 内存读写）
+- `src/commands/patch.rs` — `execute_disable_spy` + `execute_apply_patch`（max-token + anti-telemetry + anti-spy 独立应用）+ `execute_patch_status`（anti-spy 状态检查）
 - `src/commands/parser.rs` — `PatchAction::DisableSpy`
-- `src/commands/patch.rs` — `execute_disable_spy`
-- `src/supervisor.rs` — 启动时触发 anti-spy 内存 patch
+- `src/supervisor.rs` — `apply_max_context_tokens_patches`（anti-telemetry 后追加 anti-spy 内存补丁）+ `apply_antitelemetry_memory_patch_background`（`start_interactive_cli` 后台线程路径，anti-telemetry 后追加 anti-spy）
 
-**Notes**: 函数级 patch（非字符串刮花）让 CC 本地识别全失明：KIt()→UTC（时区失明）+ Hsp()→null（中转站识别失明）。不碰 $Sn()（保留 firstParty 专属功能）。等长替换 48B/47B。
+**Notes**: AntiSpy patch 通过函数级等长字面量替换让 CC 本地识别全失明：(1) `KIt()` 时区识别 `Intl.DateTimeFormat().resolvedOptions().timeZone`（48 字节）-> `"UTC"/*` + 39 个 `.` + `*/`（48 字节注释填充），时区永远返回 UTC，真实时区不泄露，`cnTZ` 永远 false；(2) `Hsp()` 中转站识别 `function Hsp(){if($Sn())return null;let e=Asp()`（47 字节）-> `function Hsp(){return null;         let e=Asp()`（47 字节空格填充），`Hsp()` 永远返回 null，`known`/`labKw`/`cnTZ`/`host` 全 null。不碰 `$Sn()`（保留 firstParty 专属功能）。与 max-token / AntiTelemetry patch 独立（一个失败不影响另一个），跨版本稳定（函数体字面量，非 minified 变量名）。支持文件补丁（持久化）和内存补丁（运行时），启动时自动触发。
 
 ---
 
@@ -575,6 +579,7 @@ This matrix provides complete traceability from:
 | Max-Token 补丁验证 | REQ-025 | `src/patcher/versions.rs`, `MAX_CONTEXT_TOKENS_SEARCH_REGEX` 通用正则 + `validate_max_context_tokens` 6 位数校验 |
 
 | AntiTelemetry 上报截断 | REQ-026 | `src/patcher/registry.rs`, `get_antitelemetry_patches` 字面量替换 `/api/event_logging/v2/batch` -> `/api/event_logging/v2/xxxxx`（27 字节等长） |
+| AntiSpy 本地识别失明 | REQ-027 | `src/patcher/registry.rs`, `get_antispy_patches` 函数级字面量替换 KIt()→UTC（48 字节）+ Hsp()→null（47 字节） |
 ### Performance
 | Concern | Related REQs | Implementation |
 |---------|-------------|----------------|
@@ -590,6 +595,7 @@ This matrix provides complete traceability from:
 | Provider 领域错误 | REQ-002 | `src/provider/error.rs` |
 | 补丁错误 | REQ-025 | `src/patcher/error.rs` |
 | AntiTelemetry 补丁错误 | REQ-026 | `src/patcher/error.rs`, `PatchError::PatternNotFound`（字面量未找到/replace_pattern 缺失/长度不一致） |
+| AntiSpy 补丁错误 | REQ-027 | `src/patcher/error.rs`, `PatchError::PatternNotFound`（字面量未找到/replace_pattern 缺失/长度不一致） |
 | 退出码分类 | API | SPEC/04-API-DESIGN.md#Error-Codes |
 
 ---
@@ -617,6 +623,7 @@ This matrix provides complete traceability from:
 - [x] REQ-009 fully implemented (interactive mode)
 - [x] REQ-025 max-token patcher system (通用正则跨版本，已验证 2.1.195；firstParty patch 已彻底删除)
 - [x] REQ-026 anti-telemetry patcher system (字面量截断 event_logging 端点 -> 404，27 字节等长，跨版本稳定)
+- [x] REQ-027 anti-spy patcher system (函数级字面量替换 KIt()→UTC + Hsp()→null，48/47 字节等长，跨版本稳定，不碰 $Sn())
 - [x] Deprecated REQs (003, 010, 015) clearly marked with reasons
 - [x] No TODO/FIXME/stub in production code
 - [x] All test files mapped to corresponding REQs
