@@ -246,65 +246,113 @@ fn execute_patch_status() {
     let patches = get_feature_patches(FeatureType::MaxContextTokens, &version);
 
     let mut patched = false;
+    let mut skipped = false;
     for patch in patches.iter().filter(|p| p.patch_type == PatchType::File) {
-        if let Ok(true) = is_file_patched(&patch_path, patch) {
-            println!("   ✅ max-token 补丁已应用");
-            patched = true;
-            break;
+        match is_file_patched(&patch_path, patch) {
+            Ok(true) => {
+                println!("   ✅ max-token 补丁已应用");
+                patched = true;
+                break;
+            }
+            Ok(false) => continue,
+            Err(_) => {
+                skipped = true;
+                break;
+            }
         }
     }
-    if !patched {
+    if patched {
+        // 已在上面打印
+    } else if skipped {
+        println!("   ⚪ max-token 无需 patch（目标不存在）");
+    } else {
         println!("   ❌ max-token 补丁未应用");
     }
 
     // AntiTelemetry 状态检查
     let antitelemetry_patches = get_antitelemetry_patches();
     let mut antitelemetry_patched = false;
+    let mut antitelemetry_skipped = false;
     for patch in antitelemetry_patches
         .iter()
         .filter(|p| p.patch_type == PatchType::File)
     {
-        if let Ok(true) = is_file_patched(&patch_path, patch) {
-            println!("   ✅ AntiTelemetry 补丁已应用");
-            antitelemetry_patched = true;
-            break;
+        match is_file_patched(&patch_path, patch) {
+            Ok(true) => {
+                println!("   ✅ AntiTelemetry 补丁已应用");
+                antitelemetry_patched = true;
+                break;
+            }
+            Ok(false) => continue,
+            Err(_) => {
+                antitelemetry_skipped = true;
+                break;
+            }
         }
     }
-    if !antitelemetry_patched {
+    if antitelemetry_patched {
+        // 已在上面打印
+    } else if antitelemetry_skipped {
+        println!("   ⚪ AntiTelemetry 无需 patch（目标不存在）");
+    } else {
         println!("   ❌ AntiTelemetry 补丁未应用");
     }
 
     // AntiSpy 状态检查
     let antispy_patches = get_antispy_patches();
     let mut antispy_patched = false;
+    let mut antispy_skipped = false;
     for patch in antispy_patches
         .iter()
         .filter(|p| p.patch_type == PatchType::File)
     {
-        if let Ok(true) = is_file_patched(&patch_path, patch) {
-            println!("   ✅ AntiSpy 补丁已应用");
-            antispy_patched = true;
-            break;
+        match is_file_patched(&patch_path, patch) {
+            Ok(true) => {
+                println!("   ✅ AntiSpy 补丁已应用");
+                antispy_patched = true;
+                break;
+            }
+            Ok(false) => continue,
+            Err(_) => {
+                antispy_skipped = true;
+                break;
+            }
         }
     }
-    if !antispy_patched {
+    if antispy_patched {
+        // 已在上面打印
+    } else if antispy_skipped {
+        println!("   ⚪ AntiSpy 无需 patch（目标不存在）");
+    } else {
         println!("   ❌ AntiSpy 补丁未应用");
     }
 
     // AntiPromptBias 状态检查
     let antipromptbias_patches = get_antipromptbias_patches();
     let mut antipromptbias_patched = false;
+    let mut antipromptbias_skipped = false;
     for patch in antipromptbias_patches
         .iter()
         .filter(|p| p.patch_type == PatchType::File)
     {
-        if let Ok(true) = is_file_patched(&patch_path, patch) {
-            println!("   ✅ AntiPromptBias 补丁已应用");
-            antipromptbias_patched = true;
-            break;
+        match is_file_patched(&patch_path, patch) {
+            Ok(true) => {
+                println!("   ✅ AntiPromptBias 补丁已应用");
+                antipromptbias_patched = true;
+                break;
+            }
+            Ok(false) => continue,
+            Err(_) => {
+                antipromptbias_skipped = true;
+                break;
+            }
         }
     }
-    if !antipromptbias_patched {
+    if antipromptbias_patched {
+        // 已在上面打印
+    } else if antipromptbias_skipped {
+        println!("   ⚪ AntiPromptBias 无需 patch（目标不存在）");
+    } else {
         println!("   ❌ AntiPromptBias 补丁未应用");
     }
 }

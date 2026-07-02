@@ -156,12 +156,19 @@ fn apply_max_context_tokens_patches(pid: u32, cli_type: &CliType) {
     }
 
     // AntiSpy 内存补丁（独立于 max-token / AntiTelemetry，一个失败不影响另一个）
+    // 逃生口短路 patch 是 regex 字面量模式（use_regex=true），时区 patch 是字面量模式；
+    // 按 patch.use_regex 分发到对应方法，两类 patch 都能正确处理。
     let antispy_patches = get_feature_patches(FeatureType::AntiSpy, &version);
     for patch in antispy_patches
         .iter()
         .filter(|p| p.patch_type == PatchType::Memory)
     {
-        match patcher.apply_literal_memory_patch(patch) {
+        let result = if patch.use_regex {
+            patcher.apply_regex_literal_memory_patch(patch)
+        } else {
+            patcher.apply_literal_memory_patch(patch)
+        };
+        match result {
             Ok(_addr) => {
                 eprintln!("✅ AntiSpy applied (timezone + relay detection -> null)");
             }
@@ -172,12 +179,18 @@ fn apply_max_context_tokens_patches(pid: u32, cli_type: &CliType) {
     }
 
     // AntiPromptBias 内存补丁（独立于 max-token / AntiTelemetry / AntiSpy，一个失败不影响另一个）
+    // regex 字面量模式（use_regex=true），分发到 apply_regex_literal_memory_patch。
     let antipromptbias_patches = get_feature_patches(FeatureType::AntiPromptBias, &version);
     for patch in antipromptbias_patches
         .iter()
         .filter(|p| p.patch_type == PatchType::Memory)
     {
-        match patcher.apply_literal_memory_patch(patch) {
+        let result = if patch.use_regex {
+            patcher.apply_regex_literal_memory_patch(patch)
+        } else {
+            patcher.apply_literal_memory_patch(patch)
+        };
+        match result {
             Ok(_addr) => {
                 eprintln!("✅ AntiPromptBias applied (Provider context prompt -> skipped)");
             }
@@ -220,12 +233,18 @@ fn apply_antitelemetry_memory_patch_background(patcher: &RuntimePatcher) {
     }
 
     // AntiSpy 内存补丁（独立于 AntiTelemetry，一个失败不影响另一个）
+    // 按 patch.use_regex 分发：逃生口短路 patch 走 regex 方法，时区 patch 走字面量方法。
     let antispy_patches = get_feature_patches(FeatureType::AntiSpy, &version);
     for patch in antispy_patches
         .iter()
         .filter(|p| p.patch_type == PatchType::Memory)
     {
-        match patcher.apply_literal_memory_patch(patch) {
+        let result = if patch.use_regex {
+            patcher.apply_regex_literal_memory_patch(patch)
+        } else {
+            patcher.apply_literal_memory_patch(patch)
+        };
+        match result {
             Ok(_addr) => {
                 eprintln!("✅ AntiSpy applied (timezone + relay detection -> null)");
             }
@@ -236,12 +255,18 @@ fn apply_antitelemetry_memory_patch_background(patcher: &RuntimePatcher) {
     }
 
     // AntiPromptBias 内存补丁（独立于 AntiTelemetry / AntiSpy，一个失败不影响另一个）
+    // regex 字面量模式（use_regex=true），分发到 apply_regex_literal_memory_patch。
     let antipromptbias_patches = get_feature_patches(FeatureType::AntiPromptBias, &version);
     for patch in antipromptbias_patches
         .iter()
         .filter(|p| p.patch_type == PatchType::Memory)
     {
-        match patcher.apply_literal_memory_patch(patch) {
+        let result = if patch.use_regex {
+            patcher.apply_regex_literal_memory_patch(patch)
+        } else {
+            patcher.apply_literal_memory_patch(patch)
+        };
+        match result {
             Ok(_addr) => {
                 eprintln!("✅ AntiPromptBias applied (Provider context prompt -> skipped)");
             }
