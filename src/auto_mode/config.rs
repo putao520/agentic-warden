@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Value};
 
 use crate::auto_mode::{default_execution_entries, ExecutionEntry};
-use crate::cli_type::CliType;
 use crate::error::ConfigError;
 use crate::utils::config_paths::ConfigPaths;
 

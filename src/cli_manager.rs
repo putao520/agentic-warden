@@ -387,7 +387,7 @@ impl CliToolDetector {
         // Try winget first (available on Windows 10+ by default)
         println!("  Trying winget...");
         let winget_result = Command::new("winget")
-            .args(&[
+            .args([
                 "install",
                 "OpenJS.NodeJS",
                 "--accept-package-agreements",
@@ -405,7 +405,7 @@ impl CliToolDetector {
         // Fallback to chocolatey
         println!("  Trying chocolatey...");
         let choco_result = Command::new("choco")
-            .args(&["install", "nodejs", "-y"])
+            .args(["install", "nodejs", "-y"])
             .status();
 
         match choco_result {
@@ -579,24 +579,16 @@ async fn update_aiw() -> Result<bool> {
 
 /// Check patch compatibility after update and show hint
 fn check_patch_compatibility() {
-    use crate::patcher::versions::ClaudeVersion;
-
     let version = match get_claude_version_from_string() {
         Ok(v) => v,
         Err(_) => return,
     };
 
-    if version.is_supported() {
-        println!("\n💡 Claude CLI {}.{}.{} is in supported versions ({}).",
-            version.major, version.minor, version.patch,
-            ClaudeVersion::supported_versions_str());
-        println!("   Run `aiw patch apply` to apply patches, or `aiw patch status` to check.");
-    } else {
-        println!("\n⚠️  Claude CLI {}.{}.{} is not in supported versions ({}).",
-            version.major, version.minor, version.patch,
-            ClaudeVersion::supported_versions_str());
-        println!("   Patches are NOT applied. Wait for AIW update to support this version.");
-    }
+    println!(
+        "\n💡 Claude CLI {}.{}.{} detected.",
+        version.major, version.minor, version.patch
+    );
+    println!("   Run `aiw patch status` to check max-token patch state.");
 }
 fn get_claude_version_from_string() -> anyhow::Result<ClaudeVersion> {
     use std::process::Command;

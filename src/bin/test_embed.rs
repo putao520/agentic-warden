@@ -20,7 +20,7 @@ fn main() {
     let query = &embeddings[0];
     let norm_q: f32 = query.iter().map(|x| x * x).sum::<f32>().sqrt();
 
-    for (i, (text, emb)) in texts.iter().zip(embeddings.iter()).enumerate() {
+    for (i, (_, emb)) in texts.iter().zip(embeddings.iter()).enumerate() {
         let norm: f32 = emb.iter().map(|x| x * x).sum::<f32>().sqrt();
         eprintln!(
             "Text {}: dim={}, norm={:.4}, first5={:.4?}",

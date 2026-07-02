@@ -313,7 +313,7 @@ impl ProviderManager {
     /// List all providers
     pub fn list_providers(&self) -> Vec<(&String, &Provider)> {
         let mut providers: Vec<_> = self.providers_config.providers.iter().collect();
-        providers.sort_by(|(name_a, _), (name_b, _)| name_a.cmp(name_b));
+        providers.sort_by_key(|(name_a, _)| name_a.as_str());
         providers
     }
 

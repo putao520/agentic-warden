@@ -11,7 +11,7 @@ use anyhow::Error;
 use chrono::{DateTime, Utc};
 
 use crate::mcp_routing::js_orchestrator::{BoaRuntimePool, McpFunctionInjector};
-use crate::mcp_routing::registry::{DynamicToolRegistry, RegisteredTool, RegistryConfig};
+use crate::mcp_routing::registry::{DynamicToolRegistry, RegisteredTool};
 use crate::mcp_routing::{
     models::{IntelligentRouteRequest, IntelligentRouteResponse},
     IntelligentRouter,
@@ -29,9 +29,9 @@ use rmcp::{
         GetPromptRequestParams, GetPromptResult, GetTaskInfoParams, GetTaskPayloadResult,
         GetTaskResult, GetTaskResultParams, Implementation, InitializeRequestParams,
         InitializeResult, ListPromptsResult, ListTasksResult, LoggingLevel,
-        LoggingMessageNotificationParam, Meta, PaginatedRequestParams, PromptMessage,
+        LoggingMessageNotificationParam, PaginatedRequestParams, PromptMessage,
         PromptMessageRole, ServerCapabilities, TaskStatus as RmcpTaskStatus,
-        TasksCapability, TaskSupport, Tool, ToolExecution,
+        TasksCapability, Tool,
     },
     service::{RequestContext, RoleServer},
     tool, Json, ServiceExt,
@@ -613,7 +613,7 @@ impl AgenticWardenMcpServer {
 
   
         // Initialize conversation history store
-        let db_path = Self::get_history_db_path()
+        let _db_path = Self::get_history_db_path()
             .map_err(|e| format!("Failed to get history DB path: {e}"))?;
         let boa_pool = Arc::new(
             BoaRuntimePool::new()
@@ -957,7 +957,7 @@ impl ServerHandler for AgenticWardenMcpServer {
                         .js_executor
                         .execute(&js_tool, input)
                         .await
-                        .map_err(|err| Self::map_js_tool_error(err))?;
+                        .map_err(Self::map_js_tool_error)?;
 
                     self.tool_registry.record_execution(&request.name).await;
                     eprintln!(
@@ -1113,7 +1113,7 @@ impl ServerHandler for AgenticWardenMcpServer {
                 "6. Never assume a task is done without checking its status via manage_task.\n",
                 "7. If the user asked you to do something that involves background tasks, your job is not done until ALL tasks have completed and you have reported the results.\n",
                 "8. start_task returns log_file in status_message. Use manage_task with action='logs' to check real-time progress at any time."
-            ).to_string().into()),
+            ).to_string()),
         })
     }
 

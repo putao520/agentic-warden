@@ -150,20 +150,17 @@ impl ConfigPacker {
     /// Simple glob pattern matching (supports * and ? wildcards)
     fn matches_glob(text: &str, pattern: &str) -> bool {
         // Convert glob pattern to regex pattern
-        let regex_pattern = pattern
+        let _regex_pattern = pattern
             .replace('.', r"\.")
             .replace('?', ".")
             .replace('*', ".*");
 
         // Simple starts_with/ends_with optimization for common patterns
-        if pattern.starts_with('*') && pattern.ends_with('*') {
-            let middle = &pattern[1..pattern.len() - 1];
-            return text.contains(middle);
-        } else if pattern.starts_with('*') {
-            let suffix = &pattern[1..];
+        if let Some(rest) = pattern.strip_prefix('*').and_then(|p| p.strip_suffix('*')) {
+            return text.contains(rest);
+        } else if let Some(suffix) = pattern.strip_prefix('*') {
             return text.ends_with(suffix);
-        } else if pattern.ends_with('*') {
-            let prefix = &pattern[..pattern.len() - 1];
+        } else if let Some(prefix) = pattern.strip_suffix('*') {
             return text.starts_with(prefix);
         }
 
@@ -444,6 +441,7 @@ impl ConfigPacker {
     }
 
     /// Pack skills directory, only including SKILL.md files
+    #[allow(dead_code)]
     fn pack_skills_directory<W: Write>(
         &self,
         tar: &mut Builder<W>,

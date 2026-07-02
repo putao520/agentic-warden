@@ -122,7 +122,7 @@ impl DashboardScreen {
 
     fn collect_running_tasks(&self) -> (Vec<TaskSummary>, usize) {
         let mut snapshots = self.app_state.tasks_snapshot();
-        snapshots.sort_by(|a, b| b.record.started_at.cmp(&a.record.started_at));
+        snapshots.sort_by_key(|b| std::cmp::Reverse(b.record.started_at));
         let total_running = snapshots
             .iter()
             .filter(|snapshot| matches!(snapshot.status, TaskUiState::Running))

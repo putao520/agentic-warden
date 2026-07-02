@@ -68,7 +68,7 @@ impl StatusFilter {
 enum ViewMode {
     List,
     Details(usize),
-    Edit(EditEnvState),
+    Edit(Box<EditEnvState>),
 }
 
 pub struct InstalledMcpScreen {
@@ -218,7 +218,7 @@ impl InstalledMcpScreen {
 
         let env_specs = build_env_specs(&item);
         let edit_state = EditEnvState::new(item.name.clone(), env_specs, item.env.clone());
-        self.view = ViewMode::Edit(edit_state);
+        self.view = ViewMode::Edit(Box::new(edit_state));
         self.search_mode = false;
         Ok(())
     }

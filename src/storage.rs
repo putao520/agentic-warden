@@ -188,22 +188,20 @@ impl TaskStorage for InProcessStorage {
                 let pid = *entry.key();
                 let record = entry.value();
 
-                // 如果进程已不存在
-                if !is_process_alive(pid) {
-                    // 如果任务未标记完成，补标记
-                    if record.status == TaskStatus::Running {
-                        return Some((pid, CleanupReason::ProcessExited));
-                    }
+                // 如果进程已不存在且任务未标记完成，补标记
+                if !is_process_alive(pid) && record.status == TaskStatus::Running {
+                    return Some((pid, CleanupReason::ProcessExited));
                 }
 
                 // 如果记录太旧（超过12小时）
                 let age = now.signed_duration_since(record.started_at);
-                if age > max_age {
-                    if record.status == TaskStatus::Running && is_process_alive(pid) {
-                        // 尝试终止
-                        let _ = terminate_process(pid);
-                        return Some((pid, CleanupReason::Timeout));
-                    }
+                if age > max_age
+                    && record.status == TaskStatus::Running
+                    && is_process_alive(pid)
+                {
+                    // 尝试终止
+                    let _ = terminate_process(pid);
+                    return Some((pid, CleanupReason::Timeout));
                 }
 
                 None

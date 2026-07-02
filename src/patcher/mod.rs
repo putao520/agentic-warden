@@ -1,6 +1,7 @@
 //! # 统一补丁框架
 //!
-//! 支持文件补丁和内存补丁两种模式，按版本管理不同 Claude CLI 版本的补丁。
+//! 支持文件补丁和内存补丁两种模式，通过通用 regex 跨版本匹配 Claude CLI
+//! 常量块，无需维护版本签名数据库。
 //!
 //! ## 补丁类型
 //!
@@ -9,11 +10,7 @@
 //!
 //! ## 功能类型
 //!
-//! - `ToolSearch`: 工具搜索功能解锁
-//! - `UltraThink`: 思考模式完整功能解锁
-//! - `AgentTeams`: Agent 团队功能
-//! - `WebSearch`: 网络搜索地区限制绕过
-//! - `PersistentMemory`: 持久代理内存
+//! - `MaxContextTokens`: 可配置默认上下文窗口 + autoCompact 阈值
 
 pub mod error;
 pub mod file;

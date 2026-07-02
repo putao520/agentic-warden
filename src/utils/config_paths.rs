@@ -34,9 +34,9 @@ impl UserConfig {
     /// 获取用户角色目录（支持 ~ 展开）
     pub fn get_user_roles_dir(&self) -> Option<PathBuf> {
         self.user_roles_dir.as_ref().map(|dir| {
-            if dir.starts_with("~/") {
+            if let Some(rest) = dir.strip_prefix("~/") {
                 if let Some(home) = dirs::home_dir() {
-                    return home.join(&dir[2..]);
+                    return home.join(rest);
                 }
             }
             PathBuf::from(dir)

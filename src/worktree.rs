@@ -59,7 +59,7 @@ pub(crate) fn create_worktree(repo_path: &PathBuf) -> Result<(PathBuf, String, S
 
     let status = std::process::Command::new("git")
         .args(["worktree", "add", "-b"])
-        .arg(&format!("aiw-worktree-{}", worktree_id))
+        .arg(format!("aiw-worktree-{}", worktree_id))
         .arg(&worktree_path)
         .arg(&commit_hash)
         .current_dir(repo_path)

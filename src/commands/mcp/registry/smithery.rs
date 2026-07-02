@@ -16,6 +16,12 @@ pub struct SmitherySource {
     api_key: Option<String>,
 }
 
+impl Default for SmitherySource {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SmitherySource {
     pub fn new() -> Self {
         let api_key = std::env::var("SMITHERY_API_KEY").ok();

@@ -38,7 +38,7 @@ impl BuildInfo {
 /// 获取 Git 提交哈希
 fn get_git_hash() -> String {
     Command::new("git")
-        .args(&["rev-parse", "--short", "HEAD"])
+        .args(["rev-parse", "--short", "HEAD"])
         .output()
         .ok()
         .and_then(|output| String::from_utf8(output.stdout).ok())

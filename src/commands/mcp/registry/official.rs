@@ -15,6 +15,12 @@ pub struct OfficialRegistrySource {
     base_url: String,
 }
 
+impl Default for OfficialRegistrySource {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OfficialRegistrySource {
     pub fn new() -> Self {
         Self::with_base_url(DEFAULT_BASE_URL, None)

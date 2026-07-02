@@ -43,14 +43,44 @@ pub enum RolesAction {
 /// 补丁管理动作
 #[derive(Subcommand, Debug, Clone)]
 pub enum PatchAction {
-    /// 应用文件补丁（解锁所有功能）
-    Apply,
+    /// 应用文件补丁（max-token + anti-telemetry + anti-spy + anti-prompt-bias）
+    Apply {
+        /// 默认上下文窗口上限（6 位数，100000~999999，默认 500000）
+        #[arg(long, value_name = "N")]
+        max_context_tokens: Option<u32>,
+        /// autoCompact 阈值（6 位数，100000~999999，默认等于 max_context_tokens）
+        #[arg(long, value_name = "N")]
+        auto_compact_window: Option<u32>,
+    },
 
     /// 查看补丁状态
     Status,
 
     /// 还原文件补丁
     Restore,
+
+    /// 设置 max-token patch（默认上下文 + autoCompact 阈值）
+    #[command(name = "set-max-tokens")]
+    SetMaxTokens {
+        /// 默认上下文窗口上限（6 位数，100000~999999）
+        #[arg(long, value_name = "N")]
+        max_context_tokens: Option<u32>,
+        /// autoCompact 阈值（6 位数，100000~999999）
+        #[arg(long, value_name = "N")]
+        auto_compact_window: Option<u32>,
+    },
+
+    /// 禁用 CC 客户端上报（截断 event_logging 端点）
+    #[command(name = "disable-telemetry")]
+    DisableTelemetry,
+
+    /// 禁用 CC 本地识别（时区+中转站失明）
+    #[command(name = "disable-spy")]
+    DisableSpy,
+
+    /// 消除 Provider context 提示词偏见（第三方不再被注入"功能有差异"提示）
+    #[command(name = "disable-prompt-bias")]
+    DisablePromptBias,
 }
 
 /// 配置管理动作
@@ -471,7 +501,7 @@ pub fn parse_cli_args(tokens: &[String]) -> Result<ParsedCliArgs, String> {
     // Pass 2: parse remaining tokens into cli_args and prompt
     let mut iter2 = remaining.iter().peekable();
 
-    while let Some((idx, token)) = iter2.next() {
+    while let Some((_idx, token)) = iter2.next() {
         if token == "--" {
             prompt.extend(iter2.map(|(_, t)| t.clone()));
             break;

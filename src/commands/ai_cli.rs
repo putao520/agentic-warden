@@ -8,6 +8,7 @@ use crate::registry_factory::create_cli_registry;
 use crate::supervisor;
 use crate::task_prepare::{self, TaskParams};
 use anyhow::{anyhow, Result};
+#[cfg(test)]
 use std::path::PathBuf;
 use std::process::ExitCode;
 

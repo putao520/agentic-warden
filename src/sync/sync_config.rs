@@ -17,19 +17,10 @@ use std::path::{Path, PathBuf};
 const SYNC_FILE_NAME: &str = "sync.json";
 
 /// Combined sync configuration and state persisted on disk.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SyncData {
     pub config: SyncConfig,
     pub state: SyncState,
-}
-
-impl Default for SyncData {
-    fn default() -> Self {
-        Self {
-            config: SyncConfig::default(),
-            state: SyncState::default(),
-        }
-    }
 }
 
 /// Sync configuration describing what should be synchronised.

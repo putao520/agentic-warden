@@ -1,4 +1,4 @@
-# Requirements Specification - v0.1.0
+# Requirements Specification - v0.5.99
 
 ## Version Information
 - Current version: v0.5.88
@@ -596,7 +596,7 @@ mcp_call("git_status", {
 
 ### REQ-013: 动态JS编排工具系统
 
-**Priority**: High
+**Priority**: P1 (High)
 **Status**: 🟢 Done
 **Related**: REQ-012, ARCH-012
 **Version**: v0.2.0
@@ -783,8 +783,8 @@ regex = "1.10"              # 危险模式检测
 
 ### REQ-014: AI CLI任务生命周期管理和角色系统
 
-**Priority**: High
-**Status**: ✅ Done (Phase 1-4 Completed) [commit: a2cc2e2]
+**Priority**: P1 (High)
+**Status**: 🟢 Done (Phase 1-4 Completed) [commit: a2cc2e2]
 **Related**: ARCH-014
 **Version**: v0.2.0 → v0.6.x (Phase 4 已完成)
 
@@ -1105,24 +1105,24 @@ Agentic-Warden MUST meet performance criteria for process tracking and task mana
 | REQ-010 | 内存集成与语义搜索 | P1 | ❌ Deprecated | v0.1.0 | ARCH-010, DATA-003, API-005 | 功能已删除 |
 | REQ-011 | AI CLI 更新/安装管理 | P1 | 🟢 Done | v0.1.0 | ARCH-008, MODULE-002, API-004 | Update command implementation |
 | REQ-012 | 智能MCP路由系统 | P0 | 🟢 Done | v0.2.0 | ARCH-012, DATA-012, API-012 | Intelligent routing system design |
-| REQ-024 | OpenAI环境变量配置 | P0 | 🟢 Done | v5.1.1 | ARCH-013, API-013 | OpenAI environment variable configuration |
-| REQ-014 | AI CLI任务生命周期管理和角色系统 | P1 | ✅ Done | v0.2.0→v0.6.x | ARCH-014 | Phase 1-4 全部完成 [commit: a2cc2e2] |
+| REQ-024 | OpenAI环境变量配置 | P0 | 🟢 Done | v0.5.88 | ARCH-013, API-013 | OpenAI environment variable configuration |
+| REQ-014 | AI CLI任务生命周期管理和角色系统 | P1 | 🟢 Done | v0.2.0→v0.6.x | ARCH-014 | Phase 1-4 全部完成 [commit: a2cc2e2] |
 | REQ-015 | 简化的Google Drive OAuth授权流程 | P0 | ❌ Deprecated | v0.5.18 | ARCH-003, DATA-003 | Disabled since v0.5.19 |
-| REQ-016 | MCP仓库CLI - 多源聚合搜索与安装 | P1 | ✅ Done | v0.6.0 | ARCH-016, API-016 | MCP Registry CLI implementation |
+| REQ-016 | MCP仓库CLI - 多源聚合搜索与安装 | P1 | 🟢 Done | v0.6.0 | ARCH-017, API-017 | MCP Registry CLI implementation |
 | REQ-022 | Auto 模式 CLI+Provider 组合轮转 | P1 | 🟢 Done | v0.5.48+ | REQ-021, ARCH-021, DATA-022, DATA-023 | CLI+Provider rotation in auto mode |
 | REQ-023 | Git 仓库检查和 Worktree 管理 | P0 | 🟢 Done | v0.5.48+ | ARCH-023 | Git repository check and worktree management |
-| REQ-018 | MCP Browse 环境变量快速跳过 | P1 | 🟡 Design | v0.6.1 | ARCH-018 | Skip optional env vars feature |
-| REQ-019 | MCP Browse - 已安装MCP服务器查看 | P1 | 🟡 Design | v0.6.1 | ARCH-019, DATA-019 | View installed MCPs feature |
-| REQ-020 | MCP Browse - 已安装MCP环境变量编辑 | P1 | 🟡 Design | v0.6.1 | ARCH-020, DATA-020 | Edit env vars for installed MCPs |
+| REQ-018 | MCP Browse 环境变量快速跳过 | P1 | 🟢 Done | v0.6.1 | ARCH-018 | Skip optional env vars feature |
+| REQ-019 | MCP Browse - 已安装MCP服务器查看 | P1 | 🟢 Done | v0.6.1 | ARCH-019, DATA-019 | View installed MCPs feature |
+| REQ-020 | MCP Browse - 已安装MCP环境变量编辑 | P1 | 🟢 Done | v0.6.1 | ARCH-020, DATA-020 | Edit env vars for installed MCPs |
 | REQ-017 | AIW插件市场系统 | P1 | 🟡 Partial Implementation | v0.7.0 | ARCH-017, DATA-017, API-017 | Plugin marketplace system |
 
 ---
 
 ### REQ-016: MCP仓库CLI - 多源聚合搜索与安装
-**Status**: ✅ Done (手写代码)
+**Status**: 🟢 Done
 **Priority**: P1 (High)
 **Version**: v0.6.0
-**Related**: ARCH-015, API-015
+**Related**: ARCH-017, API-017
 
 **Description**:
 Agentic-Warden MUST provide CLI commands to search, install, and manage MCP servers from multiple registry sources (Official MCP Registry, Smithery.ai), with interactive selection and environment variable configuration to eliminate copy-paste friction.
@@ -1130,46 +1130,46 @@ Agentic-Warden MUST provide CLI commands to search, install, and manage MCP serv
 **Acceptance Criteria**:
 
 #### 6.1 多源聚合搜索
-- [ ] 支持官方MCP Registry (`registry.modelcontextprotocol.io/v0.1`)
-- [ ] 支持Smithery.ai Registry (`registry.smithery.ai`)
-- [ ] 可扩展的Source trait设计，支持未来添加更多源
-- [ ] 并行查询多源，合并去重结果
-- [ ] 结果按相关度和源优先级排序
-- [ ] `--source` 参数指定单一源查询
+- [x] 支持官方MCP Registry (`registry.modelcontextprotocol.io/v0.1`)
+- [x] 支持Smithery.ai Registry (`registry.smithery.ai`)
+- [x] 可扩展的Source trait设计，支持未来添加更多源
+- [x] 并行查询多源，合并去重结果
+- [x] 结果按相关度和源优先级排序
+- [x] `--source` 参数指定单一源查询
 
 #### 6.2 交互式选择安装
-- [ ] 搜索结果显示编号列表（#1, #2, #3...）
-- [ ] 用户输入编号直接安装，无需复制名称
-- [ ] 显示每个结果的来源标识（registry/smithery）
-- [ ] 显示服务器描述和类型（npm/uvx/docker）
-- [ ] 支持'q'退出选择
+- [x] 搜索结果显示编号列表（#1, #2, #3...）
+- [x] 用户输入编号直接安装，无需复制名称
+- [x] 显示每个结果的来源标识（registry/smithery）
+- [x] 显示服务器描述和类型（npm/uvx/docker）
+- [x] 支持'q'退出选择
 
 #### 6.3 环境变量交互式配置
-- [ ] 安装时自动检测必需的环境变量
-- [ ] 显示环境变量说明（description from registry）
-- [ ] 交互式提示用户输入值
-- [ ] 自动检测已存在的系统环境变量
-- [ ] 支持`--env KEY=VALUE`参数直接传入
-- [ ] 支持`--skip-env`跳过环境变量配置
-- [ ] 配置文件中使用`${ENV_VAR}`引用格式
+- [x] 安装时自动检测必需的环境变量
+- [x] 显示环境变量说明（description from registry）
+- [x] 交互式提示用户输入值
+- [x] 自动检测已存在的系统环境变量
+- [x] 支持`--env KEY=VALUE`参数直接传入
+- [x] 支持`--skip-env`跳过环境变量配置
+- [x] 配置文件中使用`${ENV_VAR}`引用格式
 
 #### 6.4 服务器类型自动检测
-- [ ] npm类型：生成`npx -y @scope/package`命令
-- [ ] uvx类型：生成`uvx package-name`命令
-- [ ] docker类型：生成`docker run image`命令
-- [ ] remote类型：直接使用远程URL
+- [x] npm类型：生成`npx -y @scope/package`命令
+- [x] uvx类型：生成`uvx package-name`命令
+- [x] docker类型：生成`docker run image`命令
+- [x] remote类型：直接使用远程URL
 
 #### 6.5 配置管理
-- [ ] 安装后自动写入`~/.aiw/mcp_servers.yaml`
-- [ ] 记录安装来源（source字段）
-- [ ] `aiw mcp list`列出已安装服务器
-- [ ] `aiw mcp remove <name>`移除服务器
-- [ ] `aiw mcp info <name>`查看详细信息
+- [x] 安装后自动写入`~/.aiw/mcp_servers.yaml`
+- [x] 记录安装来源（source字段）
+- [x] `aiw mcp list`列出已安装服务器
+- [x] `aiw mcp remove <name>`移除服务器
+- [x] `aiw mcp info <name>`查看详细信息
 
 #### 6.6 源配置（可选）
-- [ ] `~/.aiw/registry.yaml`配置源优先级和认证
-- [ ] Smithery API Key配置（可选，增强功能）
-- [ ] 源启用/禁用控制
+- [x] `~/.aiw/registry.yaml`配置源优先级和认证
+- [x] Smithery API Key配置（可选，增强功能）
+- [x] 源启用/禁用控制
 
 **CLI Commands**:
 ```bash
@@ -1395,7 +1395,7 @@ git2 = "0.18"          # Git仓库克隆
 ---
 
 ### REQ-018: MCP Browse 环境变量快速跳过
-**Status**: ✅ 已实现 (2025-12-26) [commit: 3a9f72a]
+**Status**: 🟢 Done (2025-12-26) [commit: 3a9f72a]
 **Priority**: P1 (High)
 **Version**: v0.6.1
 **Related**: ARCH-018, REQ-016
@@ -1404,12 +1404,12 @@ git2 = "0.18"          # Git仓库克隆
 Agentic-Warden MCP Browse TUI MUST support one-key skip for all remaining optional environment variables during interactive MCP installation. Users can quickly skip optional configuration steps without entering individual values.
 
 **Acceptance Criteria**:
-- [ ] In environment variable input dialog, display hint when optional variables remain
-- [ ] Pressing 'a' or 'A' key skips all remaining optional environment variables
-- [ ] Only works when current variable is optional (skip has no effect on required vars)
-- [ ] Returns to MCP installation with remaining required variables still collected
-- [ ] Behavior is intuitive and non-destructive (can still edit optional vars individually)
-- [ ] Unit test: test_env_input_skip_all_optional passes
+- [x] In environment variable input dialog, display hint when optional variables remain
+- [x] Pressing 'a' or 'A' key skips all remaining optional environment variables
+- [x] Only works when current variable is optional (skip has no effect on required vars)
+- [x] Returns to MCP installation with remaining required variables still collected
+- [x] Behavior is intuitive and non-destructive (can still edit optional vars individually)
+- [x] Unit test: test_env_input_skip_all_optional passes
 
 **Technical Constraints**:
 - Integration with existing `EnvInputState` in `src/commands/mcp/registry/browse.rs`
@@ -1420,7 +1420,7 @@ Agentic-Warden MCP Browse TUI MUST support one-key skip for all remaining option
 ---
 
 ### REQ-019: MCP Browse - 已安装MCP服务器查看
-**Status**: ✅ 已实现 (2025-12-26) [commit: 3a9f72a]
+**Status**: 🟢 Done (2025-12-26) [commit: 3a9f72a]
 **Priority**: P1 (High)
 **Version**: v0.6.1
 **Related**: ARCH-019, REQ-016, DATA-019
@@ -1429,17 +1429,17 @@ Agentic-Warden MCP Browse TUI MUST support one-key skip for all remaining option
 Agentic-Warden MCP Browse MUST support viewing, searching, and filtering installed MCP servers from `~/.aiw/mcp.json`. Users can browse their installed ecosystem without leaving the TUI.
 
 **Acceptance Criteria**:
-- [ ] New menu option "Installed MCPs" in Browse main screen (Press 'i')
-- [ ] Display list of installed MCP servers with name, description, enabled status
-- [ ] Search by name using '/' key (real-time filtering)
-- [ ] Filter by status (enabled/disabled) using keyboard
-- [ ] Show environment variable count per MCP
-- [ ] Press Enter on MCP to view detailed configuration
-- [ ] Details view shows: name, source, environment variables, command
-- [ ] Return to list with ESC key
-- [ ] Return to main Browse menu with ESC from list view
-- [ ] Handle empty list gracefully (no installed MCPs)
-- [ ] Integration test passes
+- [x] New menu option "Installed MCPs" in Browse main screen (Press 'i')
+- [x] Display list of installed MCP servers with name, description, enabled status
+- [x] Search by name using '/' key (real-time filtering)
+- [x] Filter by status (enabled/disabled) using keyboard
+- [x] Show environment variable count per MCP
+- [x] Press Enter on MCP to view detailed configuration
+- [x] Details view shows: name, source, environment variables, command
+- [x] Return to list with ESC key
+- [x] Return to main Browse menu with ESC from list view
+- [x] Handle empty list gracefully (no installed MCPs)
+- [x] Integration test passes
 
 **Data Structures**:
 ```rust
@@ -1469,7 +1469,7 @@ struct InstalledMcpScreen {
 ---
 
 ### REQ-020: MCP Browse - 已安装MCP环境变量编辑
-**Status**: ✅ 已实现 (2025-12-26) [commit: 3a9f72a]
+**Status**: 🟢 Done (2025-12-26) [commit: 3a9f72a]
 **Priority**: P1 (High)
 **Version**: v0.6.1
 **Related**: ARCH-020, REQ-019, DATA-020
@@ -1814,7 +1814,7 @@ Commit: abc123def456
 ### REQ-024: OpenAI 环境变量配置
 **Status**: 🟢 Done
 **Priority**: P0 (Critical)
-**Version**: v5.1.1
+**Version**: v0.5.88
 **Related**: ARCH-013, API-013
 
 **Description**:
@@ -1851,12 +1851,235 @@ OPENAI_ENDPOINT="https://api.openai.com/v1"
 OPENAI_MODEL="gpt-4"
 ```
 
+### REQ-025: Claude CLI Max-Token 补丁系统
+**Status**: 🟢 Done
+**Priority**: P1 (High)
+**Version**: v0.5.99
+**Related**: ARCH-014
+
+**Description**:
+Agentic-Warden MUST provide a max-token patch system for Claude CLI that overrides the default context window (`YOt`) and autoCompact threshold (`Pte`) constants via a version-agnostic regex, replacing the legacy firstParty patch (which broke CC's built-in relay station detection and China timezone detection, and has been fully removed).
+
+**Acceptance Criteria**:
+- [x] Patch the constant block `var X=200000,Y=200000,Z=20000,W=32000,Q=128000;` via generic regex (variable-name agnostic, cross-version stable)
+- [x] Equal-length replacement of two `200000` values (default context + autoCompact threshold) with configurable target (100000~999999, 6 digits)
+- [x] Default value: 500000 (configurable via CLI / config file)
+- [x] Support both file patch (persistent) and memory patch (runtime)
+- [x] `PatchAction::SetMaxTokens` CLI command with `--max-context-tokens` and `--auto-compact-window` options
+- [x] `PatchConfig` persistence to `~/.aiw/patch.json` with serde defaults
+- [x] `validate_max_context_tokens` enforces 6-digit range (100000~999999)
+- [x] Memory patch reads entire region (64MB cap) + regex scan in one pass (fixes cross-chunk miss)
+- [x] File patch auto-backup (`.aiw-backup`) + atomic rename for binary files
+- [x] Startup-time auto-trigger in supervisor for Claude CLI processes
+- [x] Cross-platform (Linux x64/arm64, macOS arm64/x64, Windows x64)
+- [x] firstParty patch fully removed (no `#[deprecated]`, no VERSION_DB, no legacy variants)
+
+**Technical Constraints**:
+- `MAX_CONTEXT_TOKENS_SEARCH_REGEX` MUST use `[a-zA-Z_$][a-zA-Z0-9_$]*` to wildcard minified variable names
+- Replacement MUST be equal-length (6-byte ASCII) to avoid shifting subsequent offsets
+- `UnifiedPatchPattern` uses `Cow<'static, [u8]>` + `use_regex`/`regex_replace_values` fields for runtime-constructed patterns
+- Regex compiled via `regex::bytes::Regex` (bytes mode, since target is binary)
+- `ClaudeVersion` struct retained for version detection display (cli_manager.rs), but signature lookup methods removed
+- max-token patch MUST NOT touch firstParty check logic (preserves CC's native relay/timezone detection)
+
+**CLI Usage**:
+```bash
+# Set max-token to 500000 (default context + autoCompact both)
+aiw patch set-max-tokens --max-context-tokens 500000
+
+# Set different values for context and autoCompact
+aiw patch set-max-tokens --max-context-tokens 500000 --auto-compact-window 300000
+
+# Check patch status
+aiw patch status
+
+# Restore from backup
+aiw patch restore
+```
+
+### REQ-026: Claude CLI AntiTelemetry 补丁系统
+**Status**: 🟢 Done
+**Priority**: P1 (High)
+**Version**: v0.5.99
+**Related**: ARCH-014
+
+**Description**:
+Agentic-Warden MUST provide an AntiTelemetry patch system for Claude CLI that truncates the client-side telemetry reporting channel by rewriting the `/api/event_logging/v2/batch` endpoint path to `/api/event_logging/v2/xxxxx` (equal-length 27-byte literal replacement), causing the reporting endpoint to 404 and silently fail. This blocks CC v2.1.195's espionage behavior of reporting machine fingerprints / device info / IP / project info.
+
+**Acceptance Criteria**:
+- [x] Patch the literal `/api/event_logging/v2/batch` (27 bytes) -> `/api/event_logging/v2/xxxxx` (27 bytes, equal-length)
+- [x] Literal replacement mode (`use_regex=false`) via `UnifiedPatchPattern` with `search_pattern` + `replace_pattern` (no `patch_byte`/`patch_offset`)
+- [x] Support both file patch (persistent) and memory patch (runtime)
+- [x] `PatchAction::DisableTelemetry` CLI command (`aiw patch disable-telemetry`)
+- [x] `apply_literal_memory_patch` on `RuntimePatcher` for literal memory replacement (equal-length enforcement)
+- [x] `get_antitelemetry_patches` registry function generates file + memory patch patterns
+- [x] `execute_apply_patch` applies both max-token and anti-telemetry file patches (independent, one failure doesn't affect the other)
+- [x] `execute_patch_status` reports anti-telemetry patch status
+- [x] Startup-time auto-trigger in supervisor (both `execute_cli_internal` and `start_interactive_cli` paths) applies anti-telemetry memory patch after max-token patch
+- [x] Cross-version stable (API path literal, not minified variable name)
+- [x] Equal-length replacement iron law: 27 -> 27 bytes (no offset shift)
+
+**Technical Constraints**:
+- `search_pattern` and `replace_pattern` MUST be equal length (27 bytes) to avoid shifting subsequent offsets
+- Memory patch uses `apply_literal_memory_patch` (search_pattern -> replace_pattern integral overwrite), NOT `patch_byte`/`patch_offset`
+- AntiTelemetry patch is independent of max-token patch: one failing does not block the other
+- `use_regex=false` (literal mode, not regex mode)
+- Memory patch scans all readable regions for the literal, writes on first hit
+
+**CLI Usage**:
+```bash
+# Disable telemetry (truncate event_logging endpoint)
+aiw patch disable-telemetry
+
+# Apply all patches (max-token + anti-telemetry)
+aiw patch apply
+
+# Check patch status (both max-token and anti-telemetry)
+aiw patch status
+```
+
+### REQ-027: Claude CLI AntiSpy 补丁系统
+**Status**: 🟢 Done
+**Priority**: P1 (High)
+**Version**: v0.5.99
+**Related**: ARCH-014
+
+**Description**:
+Agentic-Warden MUST provide an AntiSpy patch system for Claude CLI that blinds CC's local environment detection via two patches: (1) **escape-hatch short-circuit** (cross-version, regex-literal mode): patch the `_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL` check `if(<OBJ>._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0` (55 bytes) -> `if(1)` + 50 spaces (55 bytes, equal-length), so `fu()`/`vrt()`/`Eu()` always return true (firstParty assumed). `<OBJ>` is the config object name, varies across versions (`Oe` in 195-197, `Pe` in 198), matched by regex `[a-zA-Z_$][a-zA-Z0-9_$]*`; `_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL` is the stable literal anchor (CC's official escape-hatch env var, parsed by `st()`). This one-shot silences 30+ `fu()` call sites' espionage: relay-station identity reporting (custom_base_url flag), attribution header discrimination (cch=00000), tool-set filtering, ToolSearch gating, model-override gating. CC v2.1.198 removed the exposed `Hsp()` explicit probe (Asia/Shanghai timezone + base64 host list Qup/Zup + labKw/cnTZ fields); identification fell back to `Cot()`/`fu()` host comparison, which the escape-hatch patch neutralizes. (2) **timezone blinding** (literal mode): `KIt()` returns `Intl.DateTimeFormat().resolvedOptions().timeZone` (48 bytes) -> `"UTC"/*` + 39 dots + `*/` (48 bytes, comment-padded, JS-legal), forcing timezone to always return UTC so the real timezone never leaks and `cnTZ` is always false. The escape-hatch patch works alongside AntiTelemetry to also close the backup reverse-enabled reporting channels (request UUID / traceparent / error reporting).
+
+**Acceptance Criteria**:
+- [x] Patch A (escape-hatch short-circuit): `if(<OBJ>._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0` (55 bytes) -> `if(1)` + 50 spaces (55 bytes, equal-length)
+- [x] Patch B (timezone): `Intl.DateTimeFormat().resolvedOptions().timeZone` (48 bytes) -> `"UTC"` + comment padding (48 bytes, equal-length)
+- [x] Cross-version regex-literal mode: `<OBJ>` (config object name `Oe`/`Pe`) matched by `[a-zA-Z_$][a-zA-Z0-9_$]*`, `_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL` stable anchor
+- [x] Escape-hatch short-circuit makes `fu()`/`vrt()`/`Eu()` always return true (firstParty assumed), silencing 30+ espionage call sites
+- [x] Timezone always returns UTC, real timezone never leaks, `cnTZ` always false
+- [x] Literal replacement mode for timezone (`use_regex=false`); regex-literal mode for escape-hatch (`use_regex=true` with integral overwrite) via `UnifiedPatchPattern`
+- [x] Support both file patch (persistent) and memory patch (runtime)
+- [x] `PatchAction::DisableSpy` CLI command (`aiw patch disable-spy`)
+- [x] `get_antispy_patches` registry function generates 4 patch patterns (escape-hatch file+memory, KIt timezone file+memory)
+- [x] `FeatureType::AntiSpy` variant added to `FeatureType` enum (description + short_name="antispy")
+- [x] `execute_apply_patch` applies max-token + anti-telemetry + anti-spy file patches (three independent, one failure doesn't affect the others)
+- [x] `execute_patch_status` reports anti-spy patch status
+- [x] Startup-time auto-trigger in supervisor (both `execute_cli_internal` and `start_interactive_cli` paths) applies anti-spy memory patch after anti-telemetry patch
+- [x] Cross-version stable across 2.1.195-198 (escape-hatch via regex object-name wildcard, timezone via function-body literal)
+- [x] Equal-length replacement iron law: 55 -> 55 bytes (escape-hatch) and 48 -> 48 bytes (timezone)
+- [x] Works alongside AntiTelemetry to close backup reverse-enabled reporting channels (request UUID / traceparent / error reporting)
+
+**Technical Constraints**:
+- Timezone `search_pattern`/`replace_pattern` MUST be equal length (48 bytes); escape-hatch regex match MUST equal replace length (55 bytes) to avoid shifting subsequent offsets
+- Escape-hatch uses regex-literal mode (`use_regex=true`, integral overwrite): regex matches `if(<OBJ>._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0`, replace is runtime-constructed `if(1)` + 50 spaces (55 bytes)
+- `<OBJ>` config object name matched by regex `[a-zA-Z_$][a-zA-Z0-9_$]*` (varies: `Oe` in 195-197, `Pe` in 198); `_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL` is the stable literal anchor
+- Timezone uses literal mode (`use_regex=false`), JS comment `/* ... */` padding to stay JS-legal
+- Memory patch uses `apply_literal_memory_patch` (search_pattern -> replace_pattern integral overwrite)
+- AntiSpy patch is independent of max-token / AntiTelemetry patches: one failing does not block the others
+- Escape-hatch works alongside AntiTelemetry: AntiTelemetry kills the forward reporting endpoint, escape-hatch closes the reverse-enabled backup channels (request UUID / traceparent / error reporting)
+- CC v2.1.198 removed the exposed `Hsp()` explicit probe (Asia/Shanghai timezone + base64 host list Qup/Zup + labKw/cnTZ); identification fell back to `Cot()`/`fu()` host comparison — escape-hatch neutralizes this
+
+**CLI Usage**:
+```bash
+# Disable spy (blind timezone + relay detection)
+aiw patch disable-spy
+
+# Apply all patches (max-token + anti-telemetry + anti-spy)
+aiw patch apply
+
+# Check patch status (all three patches)
+aiw patch status
+```
+
+### REQ-027: Claude CLI AntiSpy 补丁系统
+**Status**: 🟢 Done
+**Priority**: P1 (High)
+**Version**: v0.5.99
+**Related**: ARCH-014
+
+**Description**:
+Agentic-Warden MUST provide an AntiSpy patch system that blinds Claude CLI's local environment detection (timezone + escape-hatch short-circuit), preventing CC from profiling users as China/relay-station users for differential treatment. CC v2.1.198 removed the exposed `Hsp()` explicit probe (Asia/Shanghai timezone + base64 host list Qup/Zup + labKw/cnTZ); identification fell back to `Cot()`/`fu()` host comparison, neutralized by the escape-hatch patch.
+
+**Acceptance Criteria**:
+- [x] Patch A (escape-hatch short-circuit): `if(<OBJ>._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0` (55B) → `if(1)` + 50 spaces (55B equal-length)
+- [x] Patch B (timezone): `KIt()` `Intl.DateTimeFormat().resolvedOptions().timeZone` → `"UTC"/*...*/` (48B equal-length, comment-padded)
+- [x] Cross-version regex object-name wildcard: `<OBJ>` = `Oe` (195-197) / `Pe` (198), matched by `[a-zA-Z_$][a-zA-Z0-9_$]*`
+- [x] Escape-hatch makes `fu()`/`vrt()`/`Eu()` always return true, silencing 30+ espionage call sites (relay-station identity reporting, attribution header discrimination, tool-set filtering, ToolSearch gating, model-override gating)
+- [x] Timezone always returns UTC, real timezone never leaks, `cnTZ` always false
+- [x] System prompt date format stays `2026-07-01` (cnTZ false, no `/` conversion)
+- [x] `PatchAction::DisableSpy` CLI command
+- [x] Startup-time auto-trigger in supervisor (after max-token + AntiTelemetry)
+- [x] Does NOT touch `$Sn()` (preserves firstParty exclusive features: OAuth, feature gates)
+- [x] Does NOT touch ICU timezone database `Asia/Shanghai` (preserves timezone calculation)
+- [x] Escape-hatch works alongside AntiTelemetry to close backup reverse-enabled reporting channels (request UUID / traceparent / error reporting)
+- [x] Function-level / condition-level patch (not string scraping)
+
+**Technical Constraints**:
+- Patches MUST be equal-length (escape-hatch 55B / timezone 48B) to avoid shifting binary offsets
+- Escape-hatch uses regex-literal mode (`use_regex=true`, integral overwrite): regex matches `if(<OBJ>._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0`, replace runtime-constructed `if(1)` + 50 spaces (55B)
+- `KIt()` patch uses comment padding `/*...*/` (JS-legal, ignored by parser)
+- `UnifiedPatchPattern` uses `Cow::Owned` for runtime-constructed patterns (escape-hatch replace built at runtime)
+- `apply_literal_memory_patch` handles literal memory replacement
+- Four patches independent: max-token / AntiTelemetry / AntiSpy(escape-hatch + timezone) / AntiPromptBias
+
+**CLI Usage**:
+```bash
+# Disable CC local detection (timezone + relay station)
+aiw patch disable-spy
+
+# Check patch status
+aiw patch status
+
+# Apply all patches (max-token + anti-telemetry + anti-spy)
+aiw patch apply
+```
+
+### REQ-028: Claude CLI AntiPromptBias 补丁系统
+**Status**: 🟢 Done
+**Priority**: P1 (High)
+**Version**: v0.5.99
+**Related**: ARCH-014
+
+**Description**:
+Agentic-Warden MUST provide an AntiPromptBias patch system for Claude CLI that eliminates the Provider context prompt injected into third-party (non-first-party API) user sessions. CC v2.1.195 injects a `**Provider context:** This session is not using Anthropic's first-party API. WebSearch may be unavailable, \`/feedback\` is unavailable, and some features behave differently...` prompt when `g7()` (the non-firstParty gate) returns true, making the model aware of provider differences and potentially biasing its behavior. This patch rewrites the injection condition `if(g7())` (63-byte literal: `if(g7())n.push("**Provider context:** This session is not using`) to `if(0   )` (63-byte literal: `if(0   )n.push("**Provider context:** This session is not using`, space-padded equal-length), so the condition is always false and the Provider context prompt is never injected — the model no longer perceives provider differences. Only this one prompt injection is skipped; other firstParty gates (OAuth, capability detection, model selection, etc.) are untouched.
+
+**Acceptance Criteria**:
+- [x] Patch: `if(g7())n.push("**Provider context:** This session is not using` (63 bytes) -> `if(0   )n.push("**Provider context:** This session is not using` (63 bytes, equal-length, space-padded)
+- [x] Condition-level patch (rewrites the `if` condition, not the prompt string itself)
+- [x] Literal replacement mode (`use_regex=false`) via `UnifiedPatchPattern` with `search_pattern` + `replace_pattern`
+- [x] Support both file patch (persistent) and memory patch (runtime)
+- [x] `PatchAction::DisablePromptBias` CLI command (`aiw patch disable-prompt-bias`)
+- [x] `get_antipromptbias_patches` registry function generates 2 patch patterns (file + memory)
+- [x] `FeatureType::AntiPromptBias` variant added to `FeatureType` enum (description + short_name="antipromptbias")
+- [x] `execute_apply_patch` applies max-token + anti-telemetry + anti-spy + anti-prompt-bias file patches (four independent, one failure doesn't affect the others)
+- [x] `execute_patch_status` reports anti-prompt-bias patch status
+- [x] Startup-time auto-trigger in supervisor (both `execute_cli_internal` and `start_interactive_cli` paths) applies anti-prompt-bias memory patch after anti-spy patch
+- [x] Cross-version stable (prompt literal, not minified variable name)
+- [x] Equal-length replacement iron law: 63 -> 63 bytes
+- [x] Only skips this one Provider context prompt, does NOT touch other firstParty gates (OAuth/capability/model selection)
+
+**Technical Constraints**:
+- `search_pattern` and `replace_pattern` MUST be equal length (63 bytes) to avoid shifting subsequent offsets
+- `if(g7())` (7 bytes) -> `if(0   )` (7 bytes, 3 spaces padding), bytes after the condition stay identical
+- Memory patch uses `apply_literal_memory_patch` (search_pattern -> replace_pattern integral overwrite)
+- AntiPromptBias patch is independent of max-token / AntiTelemetry / AntiSpy patches: one failing does not block the others
+- `use_regex=false` (literal mode, not regex mode)
+- Only patches the `if(g7())` condition for this specific Provider context prompt push; does NOT modify `g7()` itself or any other firstParty gate logic
+
+**CLI Usage**:
+```bash
+# Disable provider context prompt bias (skip Provider context prompt for 3P)
+aiw patch disable-prompt-bias
+
+# Apply all patches (max-token + anti-telemetry + anti-spy + anti-prompt-bias)
+aiw patch apply
+
+# Check patch status (all four patches)
+aiw patch status
+```
+
 ## 已废弃需求 (Deprecated)
 
 > **废弃原因**: Google Drive 云存储集成已禁用，push/pull 命令不可用。自 v0.5.19 起标记为 Disabled。
 
 ### REQ-003: Google Drive 配置记录和同步
-**Status**: ❌ Disabled (v0.5.19+)
+**Status**: ❌ Deprecated (v0.5.19+)
 **Priority**: P1 (High)
 **Version**: v0.1.0
 **Related**: ARCH-003, DATA-003
@@ -1894,7 +2117,7 @@ OPENAI_MODEL="gpt-4"
 > **废弃原因**: Claude Code 会话历史集成功能已删除，相关 Hook 机制不再使用。
 
 ### REQ-010: Claude Code会话历史集成（Hook-Based）
-**Status**: 🟢 Done
+**Status**: ❌ Deprecated
 **Priority**: P1 (High)
 **Version**: v0.2.0
 **Related**: ARCH-010, DATA-010, API-010
@@ -2005,7 +2228,7 @@ search_history MCP tool
 > **废弃原因**: Google Drive OAuth public client 不再被 Google 支持，授权流程已禁用。自 v0.5.19 起标记为 Disabled。
 
 ### REQ-015: Google Drive OAuth授权流程
-**Status**: ❌ Disabled (v0.5.19+)
+**Status**: ❌ Deprecated (v0.5.19+)
 **Priority**: P0 (Critical)
 **Version**: v0.5.18
 **Related**: ARCH-003, DATA-003

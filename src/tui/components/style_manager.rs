@@ -67,12 +67,12 @@ impl StyleManager {
             "running" | "active" | "online" | "connected" => Self::success(),
             "failed" | "error" | "offline" | "disconnected" => Self::error(),
             "warning" | "pending" | "waiting" => Self::warning(),
-            _ => Self::default(),
+            _ => Self::normal(),
         }
     }
 
-    /// Create default style
-    pub fn default() -> Style {
+    /// Create default style (plain, no styling)
+    pub fn normal() -> Style {
         Style::default()
     }
 

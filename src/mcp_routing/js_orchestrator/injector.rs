@@ -117,7 +117,7 @@ impl McpFunctionInjector {
         args: &[JsValue],
         context: &mut Context,
     ) -> JsResult<(String, String, Value)> {
-        let server_value = args.get(0).cloned().unwrap_or_else(JsValue::undefined);
+        let server_value = args.first().cloned().unwrap_or_else(JsValue::undefined);
         let tool_value = args.get(1).cloned().unwrap_or_else(JsValue::undefined);
         let payload_value = args.get(2).cloned();
 

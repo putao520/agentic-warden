@@ -128,7 +128,7 @@ impl RoleManager {
                     .unwrap_or_else(|| base_dir.display().to_string()),
                 source: err
                     .into_io_error()
-                    .unwrap_or_else(|| io::Error::new(io::ErrorKind::Other, "walkdir error")),
+                    .unwrap_or_else(|| io::Error::other("walkdir error")),
             })?;
 
             if !entry.file_type().is_file() {
@@ -245,7 +245,7 @@ impl RoleManager {
             let (description_part, content_part) = raw.split_at(idx);
             let content = content_part
                 .trim_start_matches(DESCRIPTION_CONTENT_DELIMITER)
-                .trim_start_matches(|c| c == '\n' || c == '\r')
+                .trim_start_matches(['\n', '\r'])
                 .trim()
                 .to_string();
 

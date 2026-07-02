@@ -17,35 +17,66 @@ pub enum InstallationType {
     Unknown,
 }
 
-/// 应用文件补丁
-pub fn apply_file_patch(
-    file_path: &Path,
-    pattern: &UnifiedPatchPattern,
-) -> Result<UnifiedPatchResult> {
-    // NativeBinary 补丁前自动备份（仅首次）
-    let backup_path = PathBuf::from(format!("{}.aiw-backup", file_path.display()));
-    if !backup_path.exists() {
-        // 检测是否为二进制文件（非文本）
-        if is_binary_file(file_path) {
-            fs::copy(file_path, &backup_path).map_err(|e| {
-                UnifiedPatchError::FileError(std::io::Error::new(
-                    e.kind(),
-                    format!("备份失败 {}: {}", file_path.display(), e),
-                ))
-            })?;
+/// 在匹配文本中按顺序替换 `200000` 字面量为 `regex_replace_values` 中的值
+///
+/// 每出现一次 `200000`，消耗 `regex_replace_values` 的下一个值并替换为
+/// 该 6 位数值的 ASCII 字节（等长替换）。多余的 `200000` 保留不动。
+fn apply_regex_replace(matched: &[u8], replace_values: &[u32]) -> Vec<u8> {
+    use crate::patcher::versions::encode_max_context_tokens;
+    let needle = b"200000";
+    let mut out = Vec::with_capacity(matched.len());
+    let mut val_iter = replace_values.iter();
+    let mut i = 0;
+    while i + needle.len() <= matched.len() {
+        if &matched[i..i + needle.len()] == needle {
+            if let Some(&v) = val_iter.next() {
+                let enc = encode_max_context_tokens(v);
+                out.extend_from_slice(&enc);
+            } else {
+                out.extend_from_slice(needle);
+            }
+            i += needle.len();
+        } else {
+            out.push(matched[i]);
+            i += 1;
         }
     }
+    out.extend_from_slice(&matched[i..]);
+    out
+}
 
-    // 读取文件内容
-    let content = fs::read(file_path)?;
+/// NativeBinary 补丁前自动备份（仅首次，且仅对二进制文件）。
+/// 非二进制文件无备份动作。
+fn ensure_binary_backup(file_path: &Path) -> Result<()> {
+    let backup_path = backup_path_for(file_path);
+    if !backup_path.exists() && is_binary_file(file_path) {
+        fs::copy(file_path, &backup_path).map_err(|e| {
+            UnifiedPatchError::FileError(std::io::Error::new(
+                e.kind(),
+                format!("备份失败 {}: {}", file_path.display(), e),
+            ))
+        })?;
+    }
+    Ok(())
+}
 
-    // 查找所有匹配位置
-    let search_len = pattern.search_pattern.len();
-    let mut positions: Vec<usize> = Vec::new();
+/// 备份路径 SSOT：`<file>.aiw-backup`。
+///
+/// 统一备份路径格式，消除 `ensure_binary_backup` 与 `restore_from_backup`
+/// 各自拼接 `format!("{}.aiw-backup", ...)` 的重复。
+fn backup_path_for(file_path: &Path) -> PathBuf {
+    PathBuf::from(format!("{}.aiw-backup", file_path.display()))
+}
+
+/// 在 `content` 中收集 `search` 的所有起始偏移（无重叠）。
+fn find_all_literal_positions(content: &[u8], search: &[u8]) -> Vec<usize> {
+    let search_len = search.len();
+    let mut positions = Vec::new();
     let mut start = 0;
     while start + search_len <= content.len() {
-        if let Some(pos) = content[start..].windows(search_len)
-            .position(|window| window == pattern.search_pattern)
+        if let Some(pos) = content[start..]
+            .windows(search_len)
+            .position(|window| window == search)
         {
             positions.push(start + pos);
             start = start + pos + search_len;
@@ -53,55 +84,191 @@ pub fn apply_file_patch(
             break;
         }
     }
+    positions
+}
 
+/// 构造「文件已补丁」结果（统一返回值构造，消除 `apply_file_patch` 与
+/// `apply_regex_file_patch` 重复构造 `UnifiedPatchResult::FilePatched`）。
+fn file_patched_result(file_path: &Path) -> UnifiedPatchResult {
+    UnifiedPatchResult::FilePatched {
+        path: file_path.display().to_string(),
+    }
+}
+
+/// 用 `replace`（整段覆盖）从后往前替换 `positions` 处的匹配，等长替换。
+fn apply_replace_to_positions(
+    content: &[u8],
+    positions: &[usize],
+    search_len: usize,
+    replace: &[u8],
+) -> Vec<u8> {
+    let mut new_content = content.to_vec();
+    for &pos in positions.iter().rev() {
+        let mut result = Vec::with_capacity(new_content.len());
+        result.extend_from_slice(&new_content[..pos]);
+        result.extend_from_slice(replace);
+        result.extend_from_slice(&new_content[pos + search_len..]);
+        new_content = result;
+    }
+    new_content
+}
+
+/// 用单字节 `patch_byte`（偏移 `offset`）替换所有匹配位置。
+fn apply_patch_byte_to_positions(
+    content: &[u8],
+    positions: &[usize],
+    patch_byte: u8,
+    offset: usize,
+) -> Vec<u8> {
+    let mut new_content = content.to_vec();
+    for &pos in positions {
+        new_content[pos + offset] = patch_byte;
+    }
+    new_content
+}
+
+/// 应用文件补丁
+pub fn apply_file_patch(
+    file_path: &Path,
+    pattern: &UnifiedPatchPattern,
+) -> Result<UnifiedPatchResult> {
+    ensure_binary_backup(file_path)?;
+
+    // 读取文件内容
+    let content = fs::read(file_path)?;
+
+    if pattern.use_regex {
+        return apply_regex_file_patch(file_path, &content, pattern);
+    }
+
+    // 字面量模式：查找所有匹配位置
+    let search = pattern.search_pattern.as_ref();
+    let positions = find_all_literal_positions(&content, search);
     if positions.is_empty() {
-        return Err(UnifiedPatchError::PatternNotFound(format!("{:?}", pattern.search_pattern)));
+        return Err(UnifiedPatchError::PatternNotFound(format!(
+            "{:?}",
+            pattern.search_pattern
+        )));
     }
 
     // 应用补丁（替换所有匹配）
-    let patched_content = if let Some(replace) = pattern.replace_pattern {
-        // 从后往前替换，避免偏移变化
-        let mut new_content = content.clone();
-        for &pos in positions.iter().rev() {
-            let mut result = Vec::with_capacity(new_content.len());
-            result.extend_from_slice(&new_content[..pos]);
-            result.extend_from_slice(replace);
-            result.extend_from_slice(&new_content[pos + search_len..]);
-            new_content = result;
+    let patched_content = match (pattern.replace_pattern.as_ref(), pattern.patch_byte, pattern.patch_offset) {
+        (Some(replace), _, _) => {
+            apply_replace_to_positions(&content, &positions, search.len(), replace.as_ref())
         }
-        new_content
-    } else if let (Some(patch_byte), Some(offset)) = (pattern.patch_byte, pattern.patch_offset) {
-        // 单字节修补所有匹配
-        let mut new_content = content.clone();
-        for &pos in &positions {
-            new_content[pos + offset] = patch_byte;
+        (None, Some(patch_byte), Some(offset)) => {
+            apply_patch_byte_to_positions(&content, &positions, patch_byte, offset)
         }
-        new_content
-    } else {
-        return Err(UnifiedPatchError::PatternNotFound(
-            "No replacement pattern or patch byte specified".to_string()
-        ));
+        (None, _, _) => {
+            return Err(UnifiedPatchError::PatternNotFound(
+                "No replacement pattern or patch byte specified".to_string(),
+            ));
+        }
     };
 
-    // 写回文件（对二进制文件使用 rename 策略避免 "Text file busy"）
+    write_back(file_path, &patched_content)?;
+
+    Ok(file_patched_result(file_path))
+}
+
+/// regex 字面量替换模式：用 `replace_pattern` 整段覆盖每个匹配文本（要求等长）。
+/// 从后往前应用以保持偏移稳定。
+fn apply_regex_literal_replace(
+    content: &[u8],
+    matches: &[regex::bytes::Match<'_>],
+    replace: &[u8],
+) -> Result<Vec<u8>> {
+    let mut new_content = content.to_vec();
+    for m in matches.iter().rev() {
+        let span_len = m.end() - m.start();
+        if replace.len() != span_len {
+            return Err(UnifiedPatchError::Other(format!(
+                "regex literal patch must be equal length: match={}, replace={}",
+                span_len,
+                replace.len()
+            )));
+        }
+        new_content[m.start()..m.end()].copy_from_slice(replace);
+    }
+    Ok(new_content)
+}
+
+/// regex 数字替换模式：按 `regex_replace_values` 替换每个匹配中的 200000
+/// （等长 6 位）。长度异常时用 splice 兜底。
+fn apply_regex_numeric_replace(
+    content: &[u8],
+    matches: &[regex::bytes::Match<'_>],
+    replace_values: &[u32],
+) -> Vec<u8> {
+    let mut new_content = content.to_vec();
+    for m in matches.iter().rev() {
+        let matched_bytes = &content[m.start()..m.end()];
+        let replaced = apply_regex_replace(matched_bytes, replace_values);
+        let span_len = m.end() - m.start();
+        if replaced.len() == span_len {
+            new_content[m.start()..m.end()].copy_from_slice(&replaced);
+        } else {
+            new_content.splice(m.start()..m.end(), replaced);
+        }
+    }
+    new_content
+}
+
+/// regex 模式的文件补丁
+///
+/// 两种子模式（见 `UnifiedPatchPattern.replace_pattern` 文档）：
+/// - `replace_pattern=None`：regex 数字替换模式，扫描所有匹配，按
+///   `regex_replace_values` 替换其中的 200000 数字字面量（等长 6 位）。
+/// - `replace_pattern=Some`：regex 字面量替换模式，regex 匹配后用
+///   `replace_pattern` 整段覆盖匹配文本（要求等长，跨版本 patch 点用）。
+fn apply_regex_file_patch(
+    file_path: &Path,
+    content: &[u8],
+    pattern: &UnifiedPatchPattern,
+) -> Result<UnifiedPatchResult> {
+    let regex_str = std::str::from_utf8(pattern.search_pattern.as_ref())
+        .map_err(|e| UnifiedPatchError::Other(format!("invalid regex utf-8: {}", e)))?;
+    let re = regex::bytes::Regex::new(regex_str)
+        .map_err(|e| UnifiedPatchError::Other(format!("invalid regex: {}", e)))?;
+
+    // 收集所有匹配（从后往前应用以保持偏移稳定）
+    let matches: Vec<_> = re.find_iter(content).collect();
+    if matches.is_empty() {
+        return Err(UnifiedPatchError::PatternNotFound(format!(
+            "regex {:?} did not match",
+            regex_str
+        )));
+    }
+
+    let new_content = match pattern.replace_pattern.as_ref() {
+        Some(replace) => apply_regex_literal_replace(content, &matches, replace.as_ref())?,
+        None => {
+            let replace_values = pattern.regex_replace_values.clone().unwrap_or_default();
+            apply_regex_numeric_replace(content, &matches, &replace_values)
+        }
+    };
+
+    write_back(file_path, &new_content)?;
+
+    Ok(file_patched_result(file_path))
+}
+
+/// 写回文件（对二进制文件使用 rename 策略避免 "Text file busy"）
+fn write_back(file_path: &Path, content: &[u8]) -> Result<()> {
     if is_binary_file(file_path) {
         let tmp_path = PathBuf::from(format!("{}.aiw-tmp", file_path.display()));
-        fs::write(&tmp_path, &patched_content)?;
+        fs::write(&tmp_path, content)?;
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
             if let Ok(metadata) = fs::metadata(file_path) {
                 let _ = fs::set_permissions(&tmp_path, metadata.permissions());
             }
         }
         fs::rename(&tmp_path, file_path)?;
     } else {
-        fs::write(file_path, &patched_content)?;
+        fs::write(file_path, content)?;
     }
-
-    Ok(UnifiedPatchResult::FilePatched {
-        path: file_path.display().to_string(),
-    })
+    Ok(())
 }
 
 /// 检查文件是否已应用补丁
@@ -110,13 +277,45 @@ pub fn is_file_patched(
     pattern: &UnifiedPatchPattern,
 ) -> Result<bool> {
     let content = fs::read(file_path)?;
-    
+
+    if pattern.use_regex {
+        return is_file_patched_regex(&content, pattern);
+    }
+
+    let search = pattern.search_pattern.as_ref();
     // 检查是否包含原始模式（未补丁）
-    let has_original = content
-        .windows(pattern.search_pattern.len())
-        .any(|window| window == pattern.search_pattern);
-    
+    let has_original = content.windows(search.len()).any(|window| window == search);
+
     Ok(!has_original)
+}
+
+/// regex 模式下的「已补丁」判定
+///
+/// 两种子模式：
+/// - `replace_pattern=Some`（regex 字面量替换模式）：匹配到的文本等于
+///   `replace_pattern` 则已补丁，否则未补丁。
+/// - `replace_pattern=None`（regex 数字替换模式）：匹配到的文本里是否还有
+///   200000。未补丁 = 含 200000；已补丁 = 不含 200000（替换后变成 500000 等）。
+fn is_file_patched_regex(content: &[u8], pattern: &UnifiedPatchPattern) -> Result<bool> {
+    let regex_str = std::str::from_utf8(pattern.search_pattern.as_ref())
+        .map_err(|e| UnifiedPatchError::Other(format!("invalid regex utf-8: {}", e)))?;
+    let re = regex::bytes::Regex::new(regex_str)
+        .map_err(|e| UnifiedPatchError::Other(format!("invalid regex: {}", e)))?;
+
+    if let Some(replace) = pattern.replace_pattern.as_ref() {
+        // regex 字面量替换模式：所有匹配都等于 replace_pattern 才算已补丁
+        let has_unpatched = re
+            .find_iter(content)
+            .any(|m| m.as_bytes() != replace.as_ref());
+        return Ok(!has_unpatched);
+    }
+
+    // regex 数字替换模式：未补丁的匹配仍含 200000
+    let has_unpatched = re
+        .find_iter(content)
+        .any(|m| m.as_bytes().windows(6).any(|w| w == b"200000"));
+
+    Ok(!has_unpatched)
 }
 
 /// 获取 Claude CLI 文件路径（npm 安装）
@@ -141,37 +340,26 @@ pub fn get_claude_cli_path() -> Result<std::path::PathBuf> {
 /// 检测 Claude CLI 安装类型
 pub fn detect_installation() -> Result<InstallationType> {
     let claude_path = get_claude_cli_path()?;
-    
+
     // 解析符号链接
     let real_path = fs::canonicalize(&claude_path).unwrap_or(claude_path.clone());
-    
+
     // 读取文件头 4 字节判断类型
     let header = fs::read(&real_path)
         .map(|data| data.iter().take(4).copied().collect::<Vec<u8>>())
         .unwrap_or_default();
-    
+
     if header.len() < 4 {
         return Ok(InstallationType::Unknown);
     }
-    
-    match &header[..4] {
-        // ELF magic: 0x7f 'E' 'L' 'F'
-        [0x7f, 0x45, 0x4c, 0x46] => {
-            Ok(InstallationType::NativeBinary { binary_path: real_path })
-        }
-        // Mach-O magic (32-bit and 64-bit, both endianness)
-        [0xfe, 0xed, 0xfa, 0xce] | [0xfe, 0xed, 0xfa, 0xcf] |
-        [0xce, 0xfa, 0xed, 0xfe] | [0xcf, 0xfa, 0xed, 0xfe] => {
-            Ok(InstallationType::NativeBinary { binary_path: real_path })
-        }
-        // Shebang (#!) — npm shell 脚本
-        [0x23, 0x21, ..] => {
-            match parse_npm_js_path(&real_path) {
-                Ok(js_path) => Ok(InstallationType::Npm { js_path }),
-                Err(_) => Ok(InstallationType::Unknown),
-            }
-        }
-        _ => Ok(InstallationType::Unknown),
+
+    match classify_magic_bytes(&header) {
+        MagicKind::NativeBinary => Ok(InstallationType::NativeBinary { binary_path: real_path }),
+        MagicKind::Shebang => match parse_npm_js_path(&real_path) {
+            Ok(js_path) => Ok(InstallationType::Npm { js_path }),
+            Err(_) => Ok(InstallationType::Unknown),
+        },
+        MagicKind::Unknown => Ok(InstallationType::Unknown),
     }
 }
 
@@ -230,23 +418,51 @@ pub fn is_npm_installation() -> Result<bool> {
     }
 }
 
+/// 文件头 4 字节 magic 分类（统一 magic bytes SSOT，消除 `detect_installation`
+/// 与 `is_binary_file` 的重复匹配）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MagicKind {
+    /// ELF / Mach-O 原生二进制
+    NativeBinary,
+    /// `#!` shebang（npm shell 脚本）
+    Shebang,
+    /// 未知 / 无法识别
+    Unknown,
+}
+
+/// 按 magic bytes 前 4 字节分类文件类型。
+///
+/// - ELF: `7f 45 4c 46`
+/// - Mach-O: `fe ed fa ce/cf` 及小端反转 `ce/cf fa ed fe`
+/// - Shebang: `23 21` (`#!`)
+fn classify_magic_bytes(header: &[u8]) -> MagicKind {
+    if header.len() < 4 {
+        return MagicKind::Unknown;
+    }
+    match &header[..4] {
+        // ELF magic: 0x7f 'E' 'L' 'F'
+        [0x7f, 0x45, 0x4c, 0x46] => MagicKind::NativeBinary,
+        // Mach-O magic (32-bit and 64-bit, both endianness)
+        [0xfe, 0xed, 0xfa, 0xce]
+        | [0xfe, 0xed, 0xfa, 0xcf]
+        | [0xce, 0xfa, 0xed, 0xfe]
+        | [0xcf, 0xfa, 0xed, 0xfe] => MagicKind::NativeBinary,
+        // Shebang (#!) — npm shell 脚本
+        [0x23, 0x21, ..] => MagicKind::Shebang,
+        _ => MagicKind::Unknown,
+    }
+}
+
 /// 检测文件是否为二进制文件（通过 magic bytes）
 fn is_binary_file(path: &Path) -> bool {
     fs::read(path)
-        .map(|data| {
-            if data.len() < 4 { return false; }
-            matches!(&data[..4],
-                [0x7f, 0x45, 0x4c, 0x46] |  // ELF
-                [0xfe, 0xed, 0xfa, 0xce] | [0xfe, 0xed, 0xfa, 0xcf] |  // Mach-O
-                [0xce, 0xfa, 0xed, 0xfe] | [0xcf, 0xfa, 0xed, 0xfe]    // Mach-O reversed
-            )
-        })
+        .map(|data| classify_magic_bytes(&data) == MagicKind::NativeBinary)
         .unwrap_or(false)
 }
 
 /// 从备份恢复文件
 pub fn restore_from_backup(file_path: &Path) -> Result<()> {
-    let backup_path = PathBuf::from(format!("{}.aiw-backup", file_path.display()));
+    let backup_path = backup_path_for(file_path);
     if !backup_path.exists() {
         return Err(UnifiedPatchError::FileError(
             std::io::Error::new(
@@ -263,27 +479,9 @@ pub fn restore_from_backup(file_path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_variable_length_replacement() {
-        // 测试不同长度的替换
-        let content = b"if(cL()==\"firstParty\"){enabled()}".to_vec();
-        let search_pattern = b"cL()==\"firstParty\"";
-        let replace_pattern = b"true";
-        
-        // 模拟补丁应用
-        let found_pos = content.windows(search_pattern.len())
-            .position(|window| window == search_pattern)
-            .unwrap();
-        
-        let mut new_content = Vec::with_capacity(content.len());
-        new_content.extend_from_slice(&content[..found_pos]);
-        new_content.extend_from_slice(replace_pattern);
-        new_content.extend_from_slice(&content[found_pos + search_pattern.len()..]);
-        
-        let result = String::from_utf8_lossy(&new_content);
-        assert_eq!(result, "if(true){enabled()}");
-    }
+    use crate::patcher::types::PatchType;
+    use crate::patcher::versions::{ClaudeVersion, MAX_CONTEXT_TOKENS_SEARCH_REGEX};
+    use std::borrow::Cow;
 
     #[test]
     fn test_claude_cli_path() {
@@ -291,5 +489,158 @@ mod tests {
         let result = get_claude_cli_path();
         // 结果取决于系统是否有 claude 命令
         assert!(result.is_ok() || result.is_err());
+    }
+
+    #[test]
+    fn test_regex_replace_swaps_200000() {
+        let matched = b"var YOt=200000,Pte=200000,Evi=20000,Wkd=32000,qkd=128000;";
+        let out = apply_regex_replace(matched, &[500000, 500000]);
+        let s = String::from_utf8(out).unwrap();
+        assert_eq!(
+            s,
+            "var YOt=500000,Pte=500000,Evi=20000,Wkd=32000,qkd=128000;"
+        );
+        // 等长替换
+        assert_eq!(s.len(), matched.len());
+    }
+
+    #[test]
+    fn test_apply_regex_file_patch_writes_target_values() {
+        // 构造临时二进制内容并验证 regex 文件补丁逻辑
+        let tmp = std::env::temp_dir().join("aiw_regex_patch_test.bin");
+        let original = b"...upperLimit-1}var YOt=200000,Pte=200000,Evi=20000,Wkd=32000,qkd=128000;var BE=E(()=>{";
+        std::fs::write(&tmp, original).unwrap();
+
+        let pattern = UnifiedPatchPattern {
+            feature: crate::patcher::types::FeatureType::MaxContextTokens,
+            patch_type: PatchType::File,
+            search_pattern: Cow::Borrowed(MAX_CONTEXT_TOKENS_SEARCH_REGEX.as_bytes()),
+            replace_pattern: None,
+            patch_byte: None,
+            patch_offset: None,
+            description: Cow::Borrowed("test"),
+            use_regex: true,
+            regex_replace_values: Some(vec![500000, 300000]),
+        };
+
+        let res = apply_file_patch(&tmp, &pattern);
+        assert!(res.is_ok(), "{:?}", res);
+
+        let patched = std::fs::read(&tmp).unwrap();
+        let s = String::from_utf8_lossy(&patched);
+        assert!(s.contains("var YOt=500000,Pte=300000,Evi=20000,Wkd=32000,qkd=128000;"));
+        // 等长：总长度不变
+        assert_eq!(patched.len(), original.len());
+
+        // 已补丁判定
+        let patched_flag = is_file_patched(&tmp, &pattern).unwrap();
+        assert!(patched_flag);
+
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn test_get_max_context_tokens_patches_via_registry() {
+        let v = ClaudeVersion {
+            major: 2,
+            minor: 1,
+            patch: 195,
+        };
+        let patches = crate::patcher::registry::get_max_context_tokens_patches(&v, 500000, 500000);
+        assert_eq!(patches.len(), 2);
+    }
+
+    #[test]
+    fn test_apply_regex_file_patch_literal_replace() {
+        // regex 字面量替换模式（use_regex=true + replace_pattern=Some）：
+        // 用 AntiPromptBias 的 pattern 验证 apply_file_patch + is_file_patched
+        let tmp = std::env::temp_dir().join("aiw_regex_literal_patch_test.bin");
+        // 198 样本：if(dX())n.push("**Provider context:** This session is not using
+        let original: Vec<u8> = [
+            &b"...prefix..."[..],
+            br#"if(dX())n.push("**Provider context:** This session is not using 3P."#,
+            &b"...suffix..."[..],
+        ]
+        .concat();
+        std::fs::write(&tmp, &original).unwrap();
+
+        let pattern = UnifiedPatchPattern {
+            feature: crate::patcher::types::FeatureType::AntiPromptBias,
+            patch_type: PatchType::File,
+            search_pattern: Cow::Borrowed(
+                br#"if\([a-zA-Z_$][a-zA-Z0-9_$]*\(\)\)n\.push\("\*\*Provider context:\*\* This session is not using"#,
+            ),
+            replace_pattern: Some(Cow::Borrowed(
+                br#"if(0   )n.push("**Provider context:** This session is not using"#,
+            )),
+            patch_byte: None,
+            patch_offset: None,
+            description: Cow::Borrowed("test regex literal replace"),
+            use_regex: true,
+            regex_replace_values: None,
+        };
+
+        // 未补丁前：is_file_patched 返回 false
+        assert!(!is_file_patched(&tmp, &pattern).unwrap());
+
+        let res = apply_file_patch(&tmp, &pattern);
+        assert!(res.is_ok(), "{:?}", res);
+
+        let patched = std::fs::read(&tmp).unwrap();
+        // 等长：总长度不变（63B → 63B）
+        assert_eq!(patched.len(), original.len());
+        // 已替换为 if(0   )
+        assert!(String::from_utf8_lossy(&patched).contains("if(0   )n.push"));
+        // 原 if(dX()) 已不存在
+        assert!(!String::from_utf8_lossy(&patched).contains("if(dX())"));
+
+        // 已补丁判定：true
+        assert!(is_file_patched(&tmp, &pattern).unwrap());
+
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn test_apply_regex_file_patch_literal_replace_antispy_escape() {
+        // 逃生口 patch regex 字面量替换：if(Oe.xxx)return!0 → if(1) + 50空格
+        let tmp = std::env::temp_dir().join("aiw_regex_escape_patch_test.bin");
+        let original: Vec<u8> = [
+            &b"function isFp(){"[..],
+            &b"if(Oe._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0"[..],
+            &b";return!1}"[..],
+        ]
+        .concat();
+        std::fs::write(&tmp, &original).unwrap();
+
+        let pattern = UnifiedPatchPattern {
+            feature: crate::patcher::types::FeatureType::AntiSpy,
+            patch_type: PatchType::File,
+            search_pattern: Cow::Borrowed(
+                br"if\([a-zA-Z_$][a-zA-Z0-9_$]*\._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL\)return!0",
+            ),
+            replace_pattern: Some({
+                let mut v = Vec::with_capacity(55);
+                v.extend_from_slice(b"if(1)");
+                v.extend(std::iter::repeat_n(b' ', 50));
+                Cow::Owned(v)
+            }),
+            patch_byte: None,
+            patch_offset: None,
+            description: Cow::Borrowed("test escape hatch"),
+            use_regex: true,
+            regex_replace_values: None,
+        };
+
+        assert!(!is_file_patched(&tmp, &pattern).unwrap());
+        let res = apply_file_patch(&tmp, &pattern);
+        assert!(res.is_ok(), "{:?}", res);
+
+        let patched = std::fs::read(&tmp).unwrap();
+        assert_eq!(patched.len(), original.len(), "equal length 55->55");
+        assert!(String::from_utf8_lossy(&patched).contains("if(1)"));
+        assert!(!String::from_utf8_lossy(&patched).contains("if(Oe._CLAUDE_CODE"));
+        assert!(is_file_patched(&tmp, &pattern).unwrap());
+
+        let _ = std::fs::remove_file(&tmp);
     }
 }

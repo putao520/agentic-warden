@@ -409,6 +409,7 @@ impl IntelligentRouter {
         request: &IntelligentRouteRequest,
         embed: &[f32],
     ) -> Result<IntelligentRouteResponse> {
+        let _ = embed; // reserved for future vector-based orchestration hints
         eprintln!("   🔍 [DEBUG] try_orchestrate started");
 
         // BUG FIX #1: For orchestration, pass ALL tools to LLM planner, not just top vector matches
@@ -419,7 +420,7 @@ impl IntelligentRouter {
                 .iter()
                 .map(|(key, tool_def)| {
                     let parts: Vec<&str> = key.split("::").collect();
-                    let server = parts.get(0).map(|s| s.to_string()).unwrap_or_default();
+                    let server = parts.first().map(|s| s.to_string()).unwrap_or_default();
                     let tool_name = parts.get(1).map(|s| s.to_string()).unwrap_or_default();
                     let description = tool_def
                         .description
@@ -552,7 +553,7 @@ impl IntelligentRouter {
             message,
             confidence: 1.0,
             selected_tool: Some(SelectedRoute {
-                mcp_server: mcp_server.into(),
+                mcp_server,
                 tool_name: orchestrated_tool.name.clone(),
                 arguments: Value::Object(Default::default()),
                 rationale: orchestrated_tool.description.clone(),

@@ -82,8 +82,8 @@ impl DialogState {
 
     /// Render using ONLY ratatui standard components: Clear, Block, Paragraph
     pub fn render(&self, frame: &mut Frame, area: Rect) {
-        let width = area.width.min(70).max(30);
-        let height = area.height.min(14).max(8);
+        let width = area.width.clamp(30, 70);
+        let height = area.height.clamp(8, 14);
         let dialog_area = Rect {
             x: area.x + (area.width.saturating_sub(width)) / 2,
             y: area.y + (area.height.saturating_sub(height)) / 2,
@@ -184,7 +184,7 @@ impl DialogState {
                 DialogResult::Closed
             }
             // 数字键直接选择对应的按钮
-            KeyCode::Char('1') if self.buttons.len() >= 1 => {
+            KeyCode::Char('1') if !self.buttons.is_empty() => {
                 self.selected = 0;
                 self.selection_result()
             }
@@ -362,8 +362,7 @@ impl InputState {
     fn prev_grapheme(&self) -> usize {
         self.value[..self.cursor]
             .char_indices()
-            .rev()
-            .next()
+            .next_back()
             .map(|(idx, _)| idx)
             .unwrap_or(0)
     }
@@ -381,12 +380,14 @@ impl InputState {
 
 /// Progress state - renders using ONLY ratatui standard components
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ProgressState {
     title: String,
     progress: u16,
     message: Option<String>,
 }
 
+#[allow(dead_code)]
 impl ProgressState {
     pub fn new(title: String) -> Self {
         Self {

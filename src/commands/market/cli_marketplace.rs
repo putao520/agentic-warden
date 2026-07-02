@@ -62,7 +62,7 @@ async fn marketplace_list() -> MarketResult<()> {
             .unwrap_or_else(|| "never".to_string());
         let plugin_count = match build_source(name, entry) {
             Ok(source) => {
-                if let Ok(plugins) = crate::commands::market::cli_utils::fetch_plugin_metadata(&source).await {
+                if let Ok(plugins) = crate::commands::market::cli_utils::fetch_plugin_metadata(source.as_ref()).await {
                     let mcp_count = PluginMetadata::filter_mcp_plugins(plugins.clone()).len();
                     format!("{} plugins ({} MCP-compatible)", plugins.len(), mcp_count)
                 } else {

@@ -26,7 +26,7 @@ pub async fn browse_plugins(
                 continue;
             }
         }
-        plugins.extend(fetch_plugin_metadata(source).await?);
+        plugins.extend(fetch_plugin_metadata(source.as_ref()).await?);
     }
 
     let mut filtered = PluginMetadata::filter_mcp_plugins(plugins);
@@ -72,7 +72,7 @@ pub async fn search_plugins(query: String, market: Option<String>) -> MarketResu
                 continue;
             }
         }
-        plugins.extend(fetch_plugin_metadata(source).await?);
+        plugins.extend(fetch_plugin_metadata(source.as_ref()).await?);
     }
     let query_lower = query.to_lowercase();
     let results: Vec<PluginMetadata> = PluginMetadata::filter_mcp_plugins(plugins)
@@ -107,7 +107,7 @@ pub async fn plugin_info(plugin: String) -> MarketResult<()> {
             "Marketplace not found",
         )
     })?;
-    let result = fetch_plugin_detail(source, &name).await?;
+    let result = fetch_plugin_detail(source.as_ref(), &name).await?;
     let detail = build_plugin_detail(result.entry, result.manifest, &result.root)?;
     print_full_detail(&detail, &marketplace)
 }
@@ -121,7 +121,7 @@ pub async fn plugin_install(plugin: String, env_vars: Vec<String>, skip_env: boo
             "Marketplace not found",
         )
     })?;
-    let (entry, manifest) = fetch_plugin_entry(source, &name).await?;
+    let (entry, manifest) = fetch_plugin_entry(source.as_ref(), &name).await?;
     let detail = PluginDetail {
         entry,
         manifest,

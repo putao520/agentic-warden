@@ -128,7 +128,7 @@ impl StatusScreen {
         groups
             .into_iter()
             .map(|(key, mut tasks)| {
-                tasks.sort_by(|a, b| b.record.started_at.cmp(&a.record.started_at));
+                tasks.sort_by_key(|b| std::cmp::Reverse(b.record.started_at));
                 let label = match key {
                     GroupKey::Manager(pid) => format!("Manager PID {pid}"),
                     GroupKey::Root(pid) => format!("Parent PID {pid}"),
@@ -273,21 +273,22 @@ impl StatusScreen {
             let started_local: DateTime<Local> = DateTime::from(record.started_at);
             let completed_local = record.completed_at.map(DateTime::<Local>::from);
 
-            let mut lines = Vec::new();
-            lines.push(detail_line("PID", task.pid.to_string()));
-            lines.push(detail_line(
-                "Status",
-                match record.status {
-                    TaskStatus::Running => "Running",
-                    TaskStatus::CompletedButUnread => "Completed",
-                }
-                .to_string(),
-            ));
-            lines.push(detail_line(
-                "Started",
-                started_local.format("%Y-%m-%d %H:%M:%S").to_string(),
-            ));
-            lines.push(detail_line("Elapsed", Self::format_elapsed(record)));
+            let mut lines = vec![
+                detail_line("PID", task.pid.to_string()),
+                detail_line(
+                    "Status",
+                    match record.status {
+                        TaskStatus::Running => "Running",
+                        TaskStatus::CompletedButUnread => "Completed",
+                    }
+                    .to_string(),
+                ),
+                detail_line(
+                    "Started",
+                    started_local.format("%Y-%m-%d %H:%M:%S").to_string(),
+                ),
+                detail_line("Elapsed", Self::format_elapsed(record)),
+            ];
             if let Some(completed) = completed_local {
                 lines.push(detail_line(
                     "Completed",

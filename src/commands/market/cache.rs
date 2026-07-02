@@ -20,7 +20,7 @@ impl MarketCacheManager {
             MarketError::with_source(
                 MarketErrorCode::ConfigWriteFailed,
                 "Failed to resolve config paths",
-                err.into(),
+                err,
             )
         })?;
         let cache_root = paths.config_dir.join("cache");

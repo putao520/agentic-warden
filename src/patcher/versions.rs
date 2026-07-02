@@ -1,103 +1,54 @@
-//! Claude CLI version signature database
+//! Claude CLI 版本工具与 max-token patch 常量
 //!
-//! Each verified version has its patch signatures stored here.
-//! Add new versions ONLY after verifying the patch patterns work.
-//!
-//! Signatures are platform-specific, as different operating systems may have
-//! different function names due to minification variations.
+//! 提供 ClaudeVersion 类型（用于显示版本号）以及 MaxContextTokens patch
+//! 所需的通用 regex / 校验 / 编码工具。max-token patch 通过变量名无关的
+//! regex 通用匹配 Claude CLI 常量块，跨版本稳定，无需维护版本签名数据库。
 
-/// Supported platforms for Claude CLI
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Platform {
-    LinuxX64,
-    LinuxArm64,
-    Win32X64,
-    Win32Arm64,
-    DarwinX64,
-    DarwinArm64,
-}
+/// 通用 max-token patch 模式：变量名无关，跨版本稳定
+///
+/// 匹配 Claude CLI 二进制中的常量块，以前两个 `=200000` 锚定，
+/// 后续到 `;` 前任意内容（元素个数可变）：
+///
+/// - 195/196: `var X=200000,Y=200000,Z=20000,W=32000,Q=128000;`（5 元素）
+/// - 197: `var X=200000,Y=200000,Z=20000,W=32000,Q=128000,FIi;`（6 元素，末尾无值变量）
+/// - 198: `var X=200000,Y=200000,Z=32000,Q=128000;`（4 元素，无 20000）
+///
+/// 两个 200000 分别是：
+/// - 第一个：默认 context token 上限（如 `YOt`）
+/// - 第二个：autoCompact 阈值（如 `Pte`）
+///
+/// 变量名因 minification 跨版本可能变化，故用 `[a-zA-Z_$][a-zA-Z0-9_$]*`
+/// 通配。`[^;]*;` 兜底 197 的无值变量 `FIi` 和 198 的 4 元素。等长替换
+/// （6 位十进制数）只改前两个 200000，多余元素保留不动，不破坏后续偏移。
+pub const MAX_CONTEXT_TOKENS_SEARCH_REGEX: &str =
+    r"var [a-zA-Z_$][a-zA-Z0-9_$]*=200000,[a-zA-Z_$][a-zA-Z0-9_$]*=200000[^;]*;";
 
-impl Platform {
-    /// Detect the current platform at compile time
-    pub fn detect() -> Self {
-        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-        return Platform::LinuxX64;
-        #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-        return Platform::LinuxArm64;
-        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-        return Platform::Win32X64;
-        #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
-        return Platform::Win32Arm64;
-        #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-        return Platform::DarwinX64;
-        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-        return Platform::DarwinArm64;
-
-        // Fallback for unsupported platforms (should not happen in practice)
-        #[cfg(not(any(
-            all(target_os = "linux", target_arch = "x86_64"),
-            all(target_os = "linux", target_arch = "aarch64"),
-            all(target_os = "windows", target_arch = "x86_64"),
-            all(target_os = "windows", target_arch = "aarch64"),
-            all(target_os = "macos", target_arch = "x86_64"),
-            all(target_os = "macos", target_arch = "aarch64"),
-        )))]
-        compile_error!("Unsupported platform for Claude CLI patching");
+/// 校验 max_tokens 值合法（6 位十进制数，100000~999999，保证等长替换）
+///
+/// 200000→500000 都是 6 字节，等长替换不破坏二进制后续偏移。
+/// 值必须落在 [100000, 999999] 区间，否则替换后会改变长度。
+pub fn validate_max_context_tokens(n: u32) -> Result<(), String> {
+    if !(100000..=999999).contains(&n) {
+        return Err(format!(
+            "max_context_tokens must be 6 digits (100000~999999), got {}",
+            n
+        ));
     }
+    Ok(())
 }
 
-impl std::fmt::Display for Platform {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", platform_short_name(*self))
-    }
+/// 将 6 位数值编码为 6 字节 ASCII（不带校验，调用方需先 validate）
+pub fn encode_max_context_tokens(n: u32) -> [u8; 6] {
+    let mut buf = [0u8; 6];
+    let s = format!("{}", n);
+    let b = s.as_bytes();
+    // 取最后 6 位 ASCII
+    let start = b.len().saturating_sub(6);
+    buf.copy_from_slice(&b[start..]);
+    buf
 }
 
-/// Get short name for a platform
-fn platform_short_name(platform: Platform) -> &'static str {
-    match platform {
-        Platform::LinuxX64 => "linux-x64",
-        Platform::LinuxArm64 => "linux-arm64",
-        Platform::Win32X64 => "win32-x64",
-        Platform::Win32Arm64 => "win32-arm64",
-        Platform::DarwinX64 => "darwin-x64",
-        Platform::DarwinArm64 => "darwin-arm64",
-    }
-}
-
-/// Patch signatures for a specific platform
-#[derive(Debug, Clone)]
-pub struct PlatformSignature {
-    /// Platform this signature applies to
-    pub platform: Platform,
-    /// The function name used in firstParty check
-    pub fn_name: &'static str,
-    /// File patch: search pattern
-    pub file_search: &'static [u8],
-    /// File patch: replace pattern (must be same length)
-    pub file_replace: &'static [u8],
-    /// Memory patch: search pattern
-    pub mem_search: &'static [u8],
-    /// Memory patch: byte to write
-    pub mem_patch_byte: u8,
-    /// Memory patch: offset
-    pub mem_patch_offset: usize,
-    /// Memory patch: string search pattern
-    pub mem_str_search: &'static [u8],
-    /// Memory patch: string replacement byte
-    pub mem_str_patch_byte: u8,
-}
-
-/// Version signatures with platform support
-#[derive(Debug, Clone)]
-pub struct VersionEntry {
-    /// Platform-specific signatures
-    pub platforms: &'static [PlatformSignature],
-}
-
-/// Legacy alias for backward compatibility
-pub type VersionSignature = PlatformSignature;
-
-/// Claude CLI version
+/// Claude CLI 版本号（仅用于显示，不参与 patch 签名查找）
 #[derive(Debug, Clone)]
 pub struct ClaudeVersion {
     pub major: u32,
@@ -123,402 +74,6 @@ impl ClaudeVersion {
             None
         }
     }
-
-    /// Look up the signature for this version and current platform
-    pub fn signature(&self) -> Option<&'static PlatformSignature> {
-        get_signature(self.major, self.minor, self.patch, Platform::detect())
-    }
-
-    /// Look up the signature for a specific platform
-    pub fn signature_for_platform(&self, platform: Platform) -> Option<&'static PlatformSignature> {
-        get_signature(self.major, self.minor, self.patch, platform)
-    }
-
-    /// Check if this version has verified patch signatures for the current platform
-    pub fn is_supported(&self) -> bool {
-        self.signature().is_some()
-    }
-
-    /// Check if this version has verified patch signatures for a specific platform
-    pub fn is_supported_on_platform(&self, platform: Platform) -> bool {
-        self.signature_for_platform(platform).is_some()
-    }
-
-    /// List all supported version strings with platforms
-    pub fn supported_versions_str() -> String {
-        let mut result = Vec::new();
-        for (ma, mi, pa, entry) in VERSION_DB {
-            for sig in entry.platforms {
-                result.push(format!("{}.{}.{} ({})", ma, mi, pa, platform_short_name(sig.platform)));
-            }
-        }
-        result.join(", ")
-    }
-
-    /// Get all platforms supported for this version
-    pub fn supported_platforms(&self) -> Vec<Platform> {
-        VERSION_DB
-            .iter()
-            .find(|(ma, mi, pa, _)| *ma == self.major && *mi == self.minor && *pa == self.patch)
-            .map(|(_, _, _, entry)| entry.platforms.iter().map(|sig| sig.platform).collect())
-            .unwrap_or_default()
-    }
-}
-
-/// Version signature database
-/// Format: (major, minor, patch, VersionEntry)
-/// Add new entries ONLY after verifying patch patterns against the actual binary
-const VERSION_DB: &[(u32, u32, u32, VersionEntry)] = &[
-    (2, 1, 72, VersionEntry {
-        platforms: &[
-            // Linux x64
-            PlatformSignature {
-                platform: Platform::LinuxX64,
-                fn_name: "cL",
-                file_search: b"cL()===\"firstParty\"",
-                file_replace: b"true/*           */",
-                mem_search: b"cL()===\"firstParty\"",
-                mem_patch_byte: b'!',
-                mem_patch_offset: 7,
-                mem_str_search: b"firstParty",
-                mem_str_patch_byte: b'!',
-            },
-            // Linux arm64
-            PlatformSignature {
-                platform: Platform::LinuxArm64,
-                fn_name: "F8",
-                file_search: b"F8()===\"firstParty\"",
-                file_replace: b"true/*           */",
-                mem_search: b"F8()===\"firstParty\"",
-                mem_patch_byte: b'!',
-                mem_patch_offset: 7,
-                mem_str_search: b"firstParty",
-                mem_str_patch_byte: b'!',
-            },
-            // Windows x64
-            PlatformSignature {
-                platform: Platform::Win32X64,
-                fn_name: "Qf",
-                file_search: b"Qf()===\"firstParty\"",
-                file_replace: b"true/*           */",
-                mem_search: b"Qf()===\"firstParty\"",
-                mem_patch_byte: b'!',
-                mem_patch_offset: 7,
-                mem_str_search: b"firstParty",
-                mem_str_patch_byte: b'!',
-            },
-            // macOS (Apple Silicon)
-            PlatformSignature {
-                platform: Platform::DarwinArm64,
-                fn_name: "F8",
-                file_search: b"F8()===\"firstParty\"",
-                file_replace: b"true/*           */",
-                mem_search: b"F8()===\"firstParty\"",
-                mem_patch_byte: b'!',
-                mem_patch_offset: 7,
-                mem_str_search: b"firstParty",
-                mem_str_patch_byte: b'!',
-            },
-        ],
-    }),
-    (2, 1, 73, VersionEntry {
-        platforms: &[
-            // Linux x64
-            PlatformSignature {
-                platform: Platform::LinuxX64,
-                fn_name: "lL",
-                file_search: b"lL()===\"firstParty\"",
-                file_replace: b"true/*           */",
-                mem_search: b"lL()===\"firstParty\"",
-                mem_patch_byte: b'!',
-                mem_patch_offset: 7,
-                mem_str_search: b"firstParty",
-                mem_str_patch_byte: b'!',
-            },
-            // Linux arm64
-            PlatformSignature {
-                platform: Platform::LinuxArm64,
-                fn_name: "l8",
-                file_search: b"l8()===\"firstParty\"",
-                file_replace: b"true/*           */",
-                mem_search: b"l8()===\"firstParty\"",
-                mem_patch_byte: b'!',
-                mem_patch_offset: 7,
-                mem_str_search: b"firstParty",
-                mem_str_patch_byte: b'!',
-            },
-            // Windows x64
-            PlatformSignature {
-                platform: Platform::Win32X64,
-                fn_name: "lf",
-                file_search: b"lf()===\"firstParty\"",
-                file_replace: b"true/*           */",
-                mem_search: b"lf()===\"firstParty\"",
-                mem_patch_byte: b'!',
-                mem_patch_offset: 7,
-                mem_str_search: b"firstParty",
-                mem_str_patch_byte: b'!',
-            },
-            // macOS (Apple Silicon)
-            PlatformSignature {
-                platform: Platform::DarwinArm64,
-                fn_name: "l8",
-                file_search: b"l8()===\"firstParty\"",
-                file_replace: b"true/*           */",
-                mem_search: b"l8()===\"firstParty\"",
-                mem_patch_byte: b'!',
-                mem_patch_offset: 7,
-                mem_str_search: b"firstParty",
-                mem_str_patch_byte: b'!',
-            },
-        ],
-    }),
-    (2, 1, 74, VersionEntry {
-        platforms: &[
-            // Linux x64
-            PlatformSignature {
-                platform: Platform::LinuxX64,
-                fn_name: "aL",
-                file_search: b"aL()===\"firstParty\"",
-                file_replace: b"true/*           */",
-                mem_search: b"aL()===\"firstParty\"",
-                mem_patch_byte: b'!',
-                mem_patch_offset: 7,
-                mem_str_search: b"firstParty",
-                mem_str_patch_byte: b'!',
-            },
-            // Linux arm64
-            PlatformSignature {
-                platform: Platform::LinuxArm64,
-                fn_name: "o8",
-                file_search: b"o8()===\"firstParty\"",
-                file_replace: b"true/*           */",
-                mem_search: b"o8()===\"firstParty\"",
-                mem_patch_byte: b'!',
-                mem_patch_offset: 7,
-                mem_str_search: b"firstParty",
-                mem_str_patch_byte: b'!',
-            },
-            // Windows x64
-            PlatformSignature {
-                platform: Platform::Win32X64,
-                fn_name: "tf",
-                file_search: b"tf()===\"firstParty\"",
-                file_replace: b"true/*           */",
-                mem_search: b"tf()===\"firstParty\"",
-                mem_patch_byte: b'!',
-                mem_patch_offset: 7,
-                mem_str_search: b"firstParty",
-                mem_str_patch_byte: b'!',
-            },
-            // macOS (Apple Silicon)
-            PlatformSignature {
-                platform: Platform::DarwinArm64,
-                fn_name: "o8",
-                file_search: b"o8()===\"firstParty\"",
-                file_replace: b"true/*           */",
-                mem_search: b"o8()===\"firstParty\"",
-                mem_patch_byte: b'!',
-                mem_patch_offset: 7,
-                mem_str_search: b"firstParty",
-                mem_str_patch_byte: b'!',
-            },
-        ],
-    }),
-    (2, 1, 75, VersionEntry {
-        platforms: &[
-            // Linux x64
-            PlatformSignature {
-                platform: Platform::LinuxX64,
-                fn_name: "BL",
-                file_search: b"BL()===\"firstParty\"",
-                file_replace: b"true/*           */",
-                mem_search: b"BL()===\"firstParty\"",
-                mem_patch_byte: b'!',
-                mem_patch_offset: 7,
-                mem_str_search: b"firstParty",
-                mem_str_patch_byte: b'!',
-            },
-            // Linux arm64
-            PlatformSignature {
-                platform: Platform::LinuxArm64,
-                fn_name: "B8",
-                file_search: b"B8()===\"firstParty\"",
-                file_replace: b"true/*           */",
-                mem_search: b"B8()===\"firstParty\"",
-                mem_patch_byte: b'!',
-                mem_patch_offset: 7,
-                mem_str_search: b"firstParty",
-                mem_str_patch_byte: b'!',
-            },
-            // Windows x64
-            PlatformSignature {
-                platform: Platform::Win32X64,
-                fn_name: "Bf",
-                file_search: b"Bf()===\"firstParty\"",
-                file_replace: b"true/*           */",
-                mem_search: b"Bf()===\"firstParty\"",
-                mem_patch_byte: b'!',
-                mem_patch_offset: 7,
-                mem_str_search: b"firstParty",
-                mem_str_patch_byte: b'!',
-            },
-            // macOS (Apple Silicon)
-            PlatformSignature {
-                platform: Platform::DarwinArm64,
-                fn_name: "B8",
-                file_search: b"B8()===\"firstParty\"",
-                file_replace: b"true/*           */",
-                mem_search: b"B8()===\"firstParty\"",
-                mem_patch_byte: b'!',
-                mem_patch_offset: 7,
-                mem_str_search: b"firstParty",
-                mem_str_patch_byte: b'!',
-            },
-        ],
-    }),
-    (2, 1, 76, VersionEntry {
-        platforms: &[
-            // Linux x64
-            PlatformSignature {
-                platform: Platform::LinuxX64,
-                fn_name: "QL",
-                file_search: b"QL()===\"firstParty\"",
-                file_replace: b"true/*           */",
-                mem_search: b"QL()===\"firstParty\"",
-                mem_patch_byte: b'!',
-                mem_patch_offset: 7,
-                mem_str_search: b"firstParty",
-                mem_str_patch_byte: b'!',
-            },
-            // Linux arm64
-            PlatformSignature {
-                platform: Platform::LinuxArm64,
-                fn_name: "Q8",
-                file_search: b"Q8()===\"firstParty\"",
-                file_replace: b"true/*           */",
-                mem_search: b"Q8()===\"firstParty\"",
-                mem_patch_byte: b'!',
-                mem_patch_offset: 7,
-                mem_str_search: b"firstParty",
-                mem_str_patch_byte: b'!',
-            },
-            // Windows x64
-            PlatformSignature {
-                platform: Platform::Win32X64,
-                fn_name: "cf",
-                file_search: b"cf()===\"firstParty\"",
-                file_replace: b"true/*           */",
-                mem_search: b"cf()===\"firstParty\"",
-                mem_patch_byte: b'!',
-                mem_patch_offset: 7,
-                mem_str_search: b"firstParty",
-                mem_str_patch_byte: b'!',
-            },
-            // macOS (Apple Silicon)
-            PlatformSignature {
-                platform: Platform::DarwinArm64,
-                fn_name: "Q8",
-                file_search: b"Q8()===\"firstParty\"",
-                file_replace: b"true/*           */",
-                mem_search: b"Q8()===\"firstParty\"",
-                mem_patch_byte: b'!',
-                mem_patch_offset: 7,
-                mem_str_search: b"firstParty",
-                mem_str_patch_byte: b'!',
-            },
-        ],
-    }),
-    (2, 1, 77, VersionEntry {
-        platforms: &[
-            // Linux x64
-            PlatformSignature {
-                platform: Platform::LinuxX64,
-                fn_name: "gDH",
-                file_search: b"gDH()==\"firstParty\"",
-                file_replace: b"true/*           */",
-                mem_search: b"gDH()==\"firstParty\"",
-                mem_patch_byte: b'!',
-                mem_patch_offset: 7,
-                mem_str_search: b"firstParty",
-                mem_str_patch_byte: b'!',
-            },
-            // macOS (Apple Silicon)
-            PlatformSignature {
-                platform: Platform::DarwinArm64,
-                fn_name: "U6_",
-                file_search: b"U6_()==\"firstParty\"",
-                file_replace: b"true/*           */",
-                mem_search: b"U6_()==\"firstParty\"",
-                mem_patch_byte: b'!',
-                mem_patch_offset: 7,
-                mem_str_search: b"firstParty",
-                mem_str_patch_byte: b'!',
-            },
-            // macOS (Intel)
-            PlatformSignature {
-                platform: Platform::DarwinX64,
-                fn_name: "Rk",
-                file_search: b"Rk()==\"firstParty\"",
-                file_replace: b"true/*           */",
-                mem_search: b"Rk()==\"firstParty\"",
-                mem_patch_byte: b'!',
-                mem_patch_offset: 7,
-                mem_str_search: b"firstParty",
-                mem_str_patch_byte: b'!',
-            },
-        ],
-    }),
-    (2, 1, 78, VersionEntry {
-        platforms: &[
-            // Linux x64
-            PlatformSignature {
-                platform: Platform::LinuxX64,
-                fn_name: "sDH",
-                file_search: b"sDH()==\"firstParty\"",
-                file_replace: b"true/*           */",
-                mem_search: b"sDH()==\"firstParty\"",
-                mem_patch_byte: b'!',
-                mem_patch_offset: 7,
-                mem_str_search: b"firstParty",
-                mem_str_patch_byte: b'!',
-            },
-            // macOS (Apple Silicon)
-            PlatformSignature {
-                platform: Platform::DarwinArm64,
-                fn_name: "_7_",
-                file_search: b"_7_()==\"firstParty\"",
-                file_replace: b"true/*           */",
-                mem_search: b"_7_()==\"firstParty\"",
-                mem_patch_byte: b'!',
-                mem_patch_offset: 7,
-                mem_str_search: b"firstParty",
-                mem_str_patch_byte: b'!',
-            },
-            // macOS (Intel)
-            PlatformSignature {
-                platform: Platform::DarwinX64,
-                fn_name: "HMH",
-                file_search: b"HMH()==\"firstParty\"",
-                file_replace: b"true/*           */",
-                mem_search: b"HMH()==\"firstParty\"",
-                mem_patch_byte: b'!',
-                mem_patch_offset: 7,
-                mem_str_search: b"firstParty",
-                mem_str_patch_byte: b'!',
-            },
-        ],
-    }),
-];
-
-/// Look up signature by version tuple and platform
-fn get_signature(major: u32, minor: u32, patch: u32, platform: Platform) -> Option<&'static PlatformSignature> {
-    VERSION_DB
-        .iter()
-        .find(|(ma, mi, pa, _)| *ma == major && *mi == minor && *pa == patch)
-        .and_then(|(_, _, _, entry)| {
-            entry.platforms.iter().find(|sig| sig.platform == platform)
-        })
 }
 
 #[cfg(test)]
@@ -534,63 +89,76 @@ mod tests {
     }
 
     #[test]
-    fn test_supported_version() {
-        let v = ClaudeVersion::from_string("2.1.72").unwrap();
-        let platform = Platform::detect();
-        assert!(v.is_supported_on_platform(platform));
-        let sig = v.signature_for_platform(platform);
-        assert!(sig.is_some());
-        // Verify function name is set (actual value depends on platform)
-        assert!(!sig.unwrap().fn_name.is_empty());
+    fn test_version_parsing_invalid() {
+        assert!(ClaudeVersion::from_string("2.1").is_none());
+        assert!(ClaudeVersion::from_string("abc").is_none());
     }
 
     #[test]
-    fn test_unsupported_version() {
-        let v = ClaudeVersion::from_string("3.0.0").unwrap();
-        assert!(!v.is_supported());
-        assert!(v.signature().is_none());
+    fn test_version_display() {
+        let v = ClaudeVersion {
+            major: 2,
+            minor: 1,
+            patch: 72,
+        };
+        assert_eq!(format!("{}", v), "2.1.72");
     }
 
     #[test]
-    fn test_signature_lengths_match() {
-        for (_, _, _, entry) in VERSION_DB {
-            for sig in entry.platforms {
-                assert_eq!(
-                    sig.file_search.len(),
-                    sig.file_replace.len(),
-                    "File patch must be equal length for {} on {:?}",
-                    sig.fn_name,
-                    sig.platform
-                );
-            }
+    fn test_validate_max_context_tokens() {
+        assert!(validate_max_context_tokens(100000).is_ok());
+        assert!(validate_max_context_tokens(500000).is_ok());
+        assert!(validate_max_context_tokens(999999).is_ok());
+        assert!(validate_max_context_tokens(99999).is_err());
+        assert!(validate_max_context_tokens(1000000).is_err());
+    }
+
+    #[test]
+    fn test_encode_max_context_tokens() {
+        assert_eq!(&encode_max_context_tokens(500000), b"500000");
+        assert_eq!(&encode_max_context_tokens(300000), b"300000");
+        assert_eq!(&encode_max_context_tokens(100000), b"100000");
+    }
+
+    #[test]
+    fn test_max_context_tokens_regex_compiles() {
+        // regex 必须可编译
+        let re = regex::bytes::Regex::new(MAX_CONTEXT_TOKENS_SEARCH_REGEX);
+        assert!(re.is_ok(), "regex must compile: {:?}", re);
+    }
+
+    #[test]
+    fn test_max_context_tokens_regex_matches_sample() {
+        let re = regex::bytes::Regex::new(MAX_CONTEXT_TOKENS_SEARCH_REGEX).unwrap();
+
+        // 4 个版本的真实常量块样本（前两个 200000 锚定，后续到 ; 前任意内容）
+        let samples: &[&[u8]] = &[
+            // 195: 5 元素
+            b"var YOt=200000,Pte=200000,Evi=20000,Wkd=32000,qkd=128000;",
+            // 196: 5 元素（变量名不同）
+            b"var uNt=200000,hne=200000,PIi=20000,$Pd=32000,OPd=128000;",
+            // 197: 6 元素，末尾 FIi 无值
+            b"var uNt=200000,yne=200000,jIi=20000,zPd=32000,KPd=128000,FIi;",
+            // 198: 4 元素，无 20000
+            b"var UBt=200000,One=200000,EFd=32000,AFd=128000;",
+        ];
+
+        for (i, sample) in samples.iter().enumerate() {
+            let m = re.find(sample);
+            assert!(m.is_some(), "regex must match version {} sample", 195 + i);
+            let m = m.unwrap();
+            assert_eq!(m.start(), 0, "version {} match must start at 0", 195 + i);
+            assert_eq!(m.end(), sample.len(), "version {} match must cover full block", 195 + i);
         }
-    }
 
-    #[test]
-    fn test_platform_detect() {
-        let platform = Platform::detect();
-        // Verify we can detect a platform (doesn't matter which one for this test)
-        match platform {
-            Platform::LinuxX64 | Platform::LinuxArm64 |
-            Platform::Win32X64 | Platform::Win32Arm64 |
-            Platform::DarwinX64 | Platform::DarwinArm64 => {
-                // Valid platform detected
-            }
-        }
-    }
+        // 197 末尾无值变量 FIi 必须被 [^;]* 兜底命中
+        let sample_197 = b"var uNt=200000,yne=200000,jIi=20000,zPd=32000,KPd=128000,FIi;";
+        let m = re.find(sample_197).expect("197 must match");
+        assert!(m.as_bytes().ends_with(b"FIi;"));
 
-    #[test]
-    fn test_supported_platforms_for_version() {
-        let v = ClaudeVersion::from_string("2.1.72").unwrap();
-        let platforms = v.supported_platforms();
-        // Should have at least one platform
-        assert!(!platforms.is_empty());
-    }
-
-    #[test]
-    fn test_platform_display() {
-        assert_eq!(format!("{}", Platform::LinuxX64), "linux-x64");
-        assert_eq!(format!("{}", Platform::Win32X64), "win32-x64");
-        assert_eq!(format!("{}", Platform::DarwinArm64), "darwin-arm64");
+        // 198 只有 4 元素（无 20000）也必须命中
+        let sample_198 = b"var UBt=200000,One=200000,EFd=32000,AFd=128000;";
+        let m = re.find(sample_198).expect("198 must match");
+        assert!(!m.as_bytes().windows(6).any(|w| w == b"20000"));
     }
 }
