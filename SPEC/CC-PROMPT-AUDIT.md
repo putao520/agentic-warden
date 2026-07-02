@@ -437,3 +437,158 @@ pub fn get_antidegrade_patches() -> Vec<UnifiedPatchPattern> {
 5. **tengu_* 标志无降智**：236 个 feature flag 中无 `tengu_degrade`/`tengu_limit`/`tengu_thirdparty` 类标志。所有 firstParty 相关 tengu 标志是行为偏好或计费门控。
 
 6. **能力限制（Files API/Channels/Projects 等）是产品限制**：依赖 claude.ai 后端服务或数据驻留合规，非降智。第三方中转站本来无法接入这些后端。
+
+---
+
+## 10. 会话"胡言乱语"控制与采样机制（补充审计）
+
+用户反馈 CC 会话经常"胡言乱语"，深挖 CC 的采样参数和会话控制机制。
+
+### 10.1 采样参数：新模型上 temperature/top_p/top_k 被移除
+
+Fable 5 / Opus 4.8 / 4.7 这些新模型，CC **不再发送 temperature/top_p/top_k**（发了会 400 错误）：
+
+```
+Fable 5 / Opus 4.8 / 4.7: temperature/top_p/top_k 被移除，发送会 400
+旧模型（Opus 4.6 等）: 可以发 temperature/top_p
+```
+
+新模型上无法通过采样参数控制输出随机性，模型用默认采样（可能温度较高），这是"胡言乱语"的来源之一。
+
+### 10.2 真正控制机制：effort level + thinking budget
+
+新模型上，CC 用 `thinkingConfig` + effort level 控制输出质量：
+
+```js
+// 默认 thinking 配置
+thinkingConfig: Ule() !== false ? {type: "adaptive"} : {type: "disabled"}
+
+// Ule() 判断：
+function Ule(){
+  if(process.env.MAX_THINKING_TOKENS) 
+    return parseInt(process.env.MAX_THINKING_TOKENS,10) > 0;
+  // ...
+}
+```
+
+- `Ule()` 默认 true → `adaptive`（模型自己决定思考多少）
+- `MAX_THINKING_TOKENS=0` → `disabled`（不思考，直接输出，容易胡言乱语）
+
+### 10.3 thinking budget 动态计算（关键）
+
+```js
+// 主对话 thinking budget
+if(f === false){
+  thinking = {type: "disabled"};
+} else if(f !== void 0){
+  thinking = {type: "enabled", budget_tokens: Math.min(f, a-1)};
+}
+// f = MAX_THINKING_TOKENS 或 effort level 映射的 budget
+// a = max_tokens（受 YOt 常量限制）
+```
+
+**budget = `Math.min(f, a-1)`**——thinking budget 受 max_tokens 上限约束。
+
+**关键关联**：我们的 max-token patch（`YOt=200000→500000`）间接提升了 thinking budget 上限：
+- patch 前：`a=200000`，budget 上限 199999
+- patch 后：`a=500000`，budget 上限 499999
+- thinking 可以更深入，减少"胡言乱语"
+
+### 10.4 effort level 机制
+
+每个模型有 `default_effort`（模型配置表 yc 里）：
+- Opus 4.8: `default_effort: "xhigh"`
+- Opus 4.7: `default_effort: "high"`
+- Fable 5: `default_effort: "high"`
+
+effort level: `low` / `medium` / `high` / `xhigh` / `max`
+
+通过 `--effort` CLI 参数或 `effortLevel` 设置配置，用户可控。
+
+### 10.5 cedar_lagoon：服务端动态控制 thinking
+
+```js
+function k6n(e){
+  let t = x0()?.cedar_lagoon;  // statsig 服务端配置
+  let n = mo(e);  // model 名
+  return Object.entries(t).some(([r,o]) => o === true && n.includes(r));
+}
+```
+
+`cedar_lagoon` 是 statsig 下发的按 model 的 thinking 开关——Anthropic 服务端可动态控制哪些 model 启用 thinking。如果某 model 被 `cedar_lagoon` 标记 false，thinking 被禁用，输出质量下降。
+
+**这个客户端 patch 不了**（服务端 statsig，客户端只读取）。
+
+### 10.6 各场景采样参数
+
+| 场景 | model | temperature | max_tokens | thinking | 备注 |
+|------|-------|-------------|------------|----------|------|
+| 主对话 | opus/fable | 不发（新模型） | 8192+ | adaptive（默认）/disabled（用户禁用） | budget 受 max_tokens 限制 |
+| classifier | 主对话同 model | 1（高随机） | 256/8192 | fast 无 / thinking 有 | auto-mode 分类 |
+| context_tip | haiku | 0（确定性） | 512/128 | disabled | 分类提示 |
+| verify_api_key | 任意 | 1 | 1 | disabled | 只验证 |
+
+### 10.7 "胡言乱语"原因汇总
+
+| 原因 | 机制 | 谁控制 | patch 可行？ |
+|------|------|--------|-------------|
+| thinking 被禁用 | `cedar_lagoon` statsig 按 model 关 thinking | Anthropic 服务端 | ❌ 客户端只读 |
+| thinking budget 受限 | `Math.min(f, a-1)`，a=max_tokens | CC 客户端 + 用户 | ✅ max-token patch 已缓解 |
+| 用户禁用 thinking | `MAX_THINKING_TOKENS=0` / `CLAUDE_CODE_DISABLE_THINKING` | 用户环境变量 | 无需 patch |
+| 新模型无 temperature 控制 | Fable/Opus48 移除采样参数 | API 限制 | ❌ API 层面 |
+| adaptive thinking 不稳定 | 模型自己决定思考深度 | 模型行为 | ❌ 模型层面 |
+| classifier 高随机误判 | auto-mode `temperature:1` | CC 客户端配置 | ⚠️ 可 patch |
+| effort level 被降级 | 服务端 statsig 限制 | Anthropic 服务端 | ❌ 客户端只读 |
+
+### 10.8 PMo=1024（countTokens 预算）
+
+`PMo=1024` 是 countTokens API 请求里的 `thinking.budget_tokens`，用于**预估 token 用量**（不是实际对话的 thinking budget）。3 处调用：
+
+```js
+thinking:{type:"enabled", budget_tokens:PMo}  // PMo=1024
+```
+
+patch `PMo=1024→8192`（8B 等长）只影响 token 预估精度，不影响实际对话质量。**不建议 patch**（收益低）。
+
+### 10.9 用户侧优化建议（不需要 patch CC）
+
+CC 原生支持的环境变量/CLI 参数：
+
+```bash
+# 1. 强制大 thinking budget（最有效）
+export MAX_THINKING_TOKENS=32768
+
+# 2. 用最高 effort
+claude --effort xhigh
+# 或 /effort xhigh（会话内切换）
+
+# 3. 避免 auto-mode classifier 高随机误判
+# 不用 bypassPermissions + auto-mode 组合
+
+# 4. 我们的 max-token patch 已提升 budget 上限
+aiw patch apply --max-context-tokens 500000
+```
+
+### 10.10 patch 总结
+
+**能 patch 的（已做）**：
+- `YOt=200000→500000`（max-token patch）：间接提升 thinking budget 上限 ✅
+
+**不建议 patch 的**：
+- `PMo=1024→8192`：只影响 countTokens 预估，不改善实际对话
+- `Zrl()` 默认 temperature 1→0：classifier 确定性，但 auto-mode 是用户主动开启的，影响面小
+
+**patch 不了的**：
+- `cedar_lagoon`（服务端 statsig 动态控制 thinking）
+- 新模型移除 temperature/top_p（API 层面限制）
+- 服务端模型行为（adaptive thinking 稳定性）
+
+### 10.11 结论
+
+CC 的"胡言乱语"主要是 **thinking 控制机制**导致的：
+1. Anthropic 服务端通过 `cedar_lagoon` statsig 动态控制哪些 model 启用 thinking
+2. thinking budget 受 `max_tokens` 限制（我们的 max-token patch 已缓解）
+3. 新模型无 temperature 控制，输出随机性更高
+4. 默认 adaptive thinking，模型自己决定思考深度（可能不足）
+
+**最有效的改善**：用户的 `MAX_THINKING_TOKENS` 环境变量 + `--effort xhigh` + 我们的 max-token patch。这三者组合能最大化 thinking budget，减少胡言乱语。
