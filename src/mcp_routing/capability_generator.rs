@@ -127,17 +127,11 @@ mod tests {
     fn create_test_tool(server: &str, name: &str, description: &str) -> DiscoveredTool {
         DiscoveredTool {
             server: server.to_string(),
-            definition: Tool {
-                name: Cow::Owned(name.to_string()),
-                title: None,
-                description: Some(Cow::Owned(description.to_string())),
-                input_schema: Arc::new(Map::new()),
-                output_schema: None,
-                icons: None,
-                annotations: None,
-                execution: None,
-                meta: None,
-            },
+            definition: Tool::new(
+                Cow::Owned(name.to_string()),
+                Cow::Owned(description.to_string()),
+                Arc::new(Map::new()),
+            ),
         }
     }
 

@@ -241,11 +241,11 @@ impl McpServerHandle {
                 ))
             }
         };
-        let param = CallToolRequestParams {
-            name: tool_name.to_string().into(),
-            arguments,
-            meta: None,
-            task: None,
+        let param = CallToolRequestParams::new(tool_name.to_string());
+        let param = if let Some(map) = arguments {
+            param.with_arguments(map)
+        } else {
+            param
         };
         let result = timeout(Duration::from_secs(60), peer.call_tool(param))
             .await

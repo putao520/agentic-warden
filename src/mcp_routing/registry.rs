@@ -259,17 +259,7 @@ impl DynamicToolRegistry {
             _ => serde_json::Map::new(),
         };
 
-        let tool = Tool {
-            name: name.clone().into(),
-            title: None,
-            description: Some(description.into()),
-            input_schema: Arc::new(schema_object),
-            output_schema: None,
-            icons: None,
-            annotations: None,
-            execution: None,
-            meta: None,
-        };
+        let tool = Tool::new(name.clone(), description, Arc::new(schema_object));
 
         let mut tools = self.dynamic_tools.write().await;
         self.evict_if_needed(&mut tools);
@@ -438,17 +428,7 @@ mod tests {
     use super::*;
 
     fn create_test_tool(name: &str) -> Tool {
-        Tool {
-            name: name.to_string().into(),
-            title: None,
-            description: Some("Test tool".into()),
-            input_schema: Arc::new(serde_json::Map::new()),
-            output_schema: None,
-            icons: None,
-            annotations: None,
-            execution: None,
-            meta: None,
-        }
+        Tool::new(name.to_string(), "Test tool", Arc::new(serde_json::Map::new()))
     }
 
     #[tokio::test]

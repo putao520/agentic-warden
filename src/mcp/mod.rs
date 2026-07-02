@@ -26,16 +26,20 @@ use rmcp::{
     handler::server::ServerHandler,
     model::{
         CancelTaskParams, CancelTaskResult, CallToolRequestParams, CreateTaskResult,
-        GetPromptRequestParams, GetPromptResult, GetTaskInfoParams, GetTaskPayloadResult,
-        GetTaskResult, GetTaskResultParams, Implementation, InitializeRequestParams,
-        InitializeResult, ListPromptsResult, ListTasksResult, LoggingLevel,
-        LoggingMessageNotificationParam, PaginatedRequestParams, PromptMessage,
-        PromptMessageRole, ServerCapabilities, TaskStatus as RmcpTaskStatus,
+        GetPromptRequestParams, GetPromptResult, GetTaskParams, GetTaskPayloadResult,
+        GetTaskResult, GetTaskPayloadParams, Implementation, InitializeRequestParams,
+        InitializeResult, ListPromptsResult, ListTasksResult,
+        PaginatedRequestParams, PromptMessage,
+        Role, ServerCapabilities, TaskStatus as RmcpTaskStatus,
         TasksCapability, Tool,
     },
     service::{RequestContext, RoleServer},
     tool, Json, ServiceExt,
 };
+// LoggingLevel / LoggingMessageNotificationParam deprecated by SEP-2577 in rmcp 2.0;
+// no replacement available yet — logging notifications still work and are used in start_task.
+#[allow(deprecated)]
+use rmcp::model::{LoggingLevel, LoggingMessageNotificationParam};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -227,6 +231,7 @@ fn read_log_summary_from_registry<S: crate::storage::TaskStorage>(
     crate::supervisor::read_task_logs(&log_path, Some(max_lines)).ok()
 }
 
+#[allow(deprecated)] // LoggingLevel / LoggingMessageNotificationParam deprecated by SEP-2577 in rmcp 2.0; no replacement yet
 pub async fn start_task(
     params: StartTaskParams,
     peer: Arc<RwLock<Option<rmcp::service::Peer<RoleServer>>>>,
@@ -305,11 +310,9 @@ pub async fn start_task(
                     data["log_summary"] = serde_json::Value::String(summary);
                 }
                 match p
-                    .notify_logging_message(LoggingMessageNotificationParam {
-                        level,
-                        logger: Some("aiw-task".into()),
-                        data,
-                    })
+                    .notify_logging_message(
+                        LoggingMessageNotificationParam::new(level, data).with_logger("aiw-task"),
+                    )
                     .await
                 {
                     Ok(_) => eprintln!("[aiw] Notification sent successfully"),
@@ -364,11 +367,9 @@ pub async fn start_task(
                     data["log_summary"] = serde_json::Value::String(summary);
                 }
                 match p
-                    .notify_logging_message(LoggingMessageNotificationParam {
-                        level,
-                        logger: Some("aiw-task".into()),
-                        data,
-                    })
+                    .notify_logging_message(
+                        LoggingMessageNotificationParam::new(level, data).with_logger("aiw-task"),
+                    )
                     .await
                 {
                     Ok(_) => eprintln!("[aiw] Notification sent successfully"),
@@ -685,17 +686,7 @@ impl AgenticWardenMcpServer {
             _ => serde_json::Map::new(),
         };
 
-        Tool {
-            name: name.to_string().into(),
-            title: None,
-            description: Some(description.to_string().into()),
-            input_schema: Arc::new(schema_map),
-            output_schema: None,
-            icons: None,
-            annotations: None,
-            execution: None,
-            meta: None,
-        }
+        Tool::new(name.to_string(), description.to_string(), Arc::new(schema_map))
     }
 
     #[tool(
@@ -828,10 +819,8 @@ impl AgenticWardenMcpServer {
     async fn prompt_tasks(&self) -> GetPromptResult {
         let tasks = list_tasks().await.unwrap_or_default();
         let table = table_format::format_tasks_table(&tasks);
-        GetPromptResult {
-            description: Some("Active tasks".into()),
-            messages: vec![PromptMessage::new_text(PromptMessageRole::User, table)],
-        }
+        GetPromptResult::new(vec![PromptMessage::new_text(Role::User, table)])
+            .with_description("Active tasks")
     }
 
     #[rmcp::prompt(name = "roles", description = "List available AI roles (builtin + user-defined)")]
@@ -841,10 +830,8 @@ impl AgenticWardenMcpServer {
             user_roles: vec![],
         });
         let table = table_format::format_roles_table(&result);
-        GetPromptResult {
-            description: Some("Available roles".into()),
-            messages: vec![PromptMessage::new_text(PromptMessageRole::User, table)],
-        }
+        GetPromptResult::new(vec![PromptMessage::new_text(Role::User, table)])
+            .with_description("Available roles")
     }
 
     #[rmcp::prompt(name = "providers", description = "List configured AI providers with scenarios and compatibility")]
@@ -854,10 +841,8 @@ impl AgenticWardenMcpServer {
             providers: vec![],
         });
         let table = table_format::format_providers_table(&result);
-        GetPromptResult {
-            description: Some("Configured providers".into()),
-            messages: vec![PromptMessage::new_text(PromptMessageRole::User, table)],
-        }
+        GetPromptResult::new(vec![PromptMessage::new_text(Role::User, table)])
+            .with_description("Configured providers")
     }
 }
 
@@ -941,12 +926,12 @@ impl ServerHandler for AgenticWardenMcpServer {
                             .unwrap_or_default();
                         let structured = result.result.map(|r| r.output);
 
-                        Ok(rmcp::model::CallToolResult {
-                            content: vec![rmcp::model::Content::text(content_str)],
-                            structured_content: structured,
-                            is_error: None,
-                            meta: None,
-                        })
+                        let mut result = rmcp::model::CallToolResult::success(vec![
+                            rmcp::model::ContentBlock::text(content_str),
+                        ]);
+                        result.structured_content = structured;
+                        result.is_error = None;
+                        Ok(result)
                     } else {
                         Err(rmcp::ErrorData::internal_error(result.message, None))
                     }
@@ -968,12 +953,12 @@ impl ServerHandler for AgenticWardenMcpServer {
                     let output_str = serde_json::to_string_pretty(&execution.output)
                         .unwrap_or_else(|_| execution.output.to_string());
 
-                    Ok(rmcp::model::CallToolResult {
-                        content: vec![rmcp::model::Content::text(output_str)],
-                        structured_content: Some(execution.output),
-                        is_error: None,
-                        meta: None,
-                    })
+                    let mut result = rmcp::model::CallToolResult::success(vec![
+                        rmcp::model::ContentBlock::text(output_str),
+                    ]);
+                    result.structured_content = Some(execution.output);
+                    result.is_error = None;
+                    Ok(result)
                 }
             }
         } else {
@@ -1026,12 +1011,12 @@ impl ServerHandler for AgenticWardenMcpServer {
                     .unwrap_or_default();
                 let structured = result.result.map(|r| r.output);
 
-                Ok(rmcp::model::CallToolResult {
-                    content: vec![rmcp::model::Content::text(content_str)],
-                    structured_content: structured,
-                    is_error: None,
-                    meta: None,
-                })
+                let mut result = rmcp::model::CallToolResult::success(vec![
+                    rmcp::model::ContentBlock::text(content_str),
+                ]);
+                result.structured_content = structured;
+                result.is_error = None;
+                Ok(result)
             } else {
                 Err(rmcp::ErrorData::internal_error(result.message, None))
             }
@@ -1086,23 +1071,22 @@ impl ServerHandler for AgenticWardenMcpServer {
         *self.peer.write().await = Some(context.peer.clone());
 
         // Return server info and capabilities
-        Ok(InitializeResult {
-            protocol_version: request.protocol_version,
-            capabilities: ServerCapabilities::builder()
-                .enable_tools()
-                .enable_tool_list_changed()
-                .enable_prompts()
-                .enable_tasks_with(TasksCapability::server_default())
-                .build(),
-            server_info: Implementation {
-                name: "agentic-warden".to_string(),
-                version: env!("CARGO_PKG_VERSION").to_string(),
-                title: Some("Agentic Warden MCP Server".to_string()),
-                description: None,
-                icons: None,
-                website_url: Some("https://github.com/putao520/agentic-warden".to_string()),
-            },
-            instructions: Some(concat!(
+        let capabilities = ServerCapabilities::builder()
+            .enable_tools()
+            .enable_tool_list_changed()
+            .enable_prompts()
+            .enable_tasks_with(TasksCapability::server_default())
+            .build();
+        let server_info = Implementation::new(
+            "agentic-warden".to_string(),
+            env!("CARGO_PKG_VERSION").to_string(),
+        )
+        .with_title("Agentic Warden MCP Server".to_string())
+        .with_website_url("https://github.com/putao520/agentic-warden".to_string());
+        Ok(InitializeResult::new(capabilities)
+            .with_protocol_version(request.protocol_version)
+            .with_server_info(server_info)
+            .with_instructions(concat!(
                 "You are connected to the Agentic Warden (aiw) MCP server, which launches and manages background AI CLI tasks. ",
                 "IMPORTANT BEHAVIORAL GUIDELINES:\n",
                 "1. After calling start_task, record the task_id and continue working on other tasks. Do NOT block-wait or poll in a loop.\n",
@@ -1113,8 +1097,7 @@ impl ServerHandler for AgenticWardenMcpServer {
                 "6. Never assume a task is done without checking its status via manage_task.\n",
                 "7. If the user asked you to do something that involves background tasks, your job is not done until ALL tasks have completed and you have reported the results.\n",
                 "8. start_task returns log_file in status_message. Use manage_task with action='logs' to check real-time progress at any time."
-            ).to_string()),
-        })
+            ).to_string()))
     }
 
     // =========================================================================
@@ -1138,20 +1121,18 @@ impl ServerHandler for AgenticWardenMcpServer {
         })?;
 
         let now = Utc::now().to_rfc3339();
-        Ok(CreateTaskResult {
-            task: rmcp::model::Task {
-                task_id: result.task_id,
-                status: RmcpTaskStatus::Working,
-                status_message: Some(format!(
-                    "Task launched. log_file: {}",
-                    result.log_file.as_deref().unwrap_or("unknown")
-                )),
-                created_at: result.started_at.to_rfc3339(),
-                last_updated_at: now,
-                ttl: None,
-                poll_interval: Some(2000),
-            },
-        })
+        let task = rmcp::model::Task::new(
+            result.task_id,
+            RmcpTaskStatus::Working,
+            result.started_at.to_rfc3339(),
+            now,
+        )
+        .with_status_message(format!(
+            "Task launched. log_file: {}",
+            result.log_file.as_deref().unwrap_or("unknown")
+        ))
+        .with_poll_interval(2000);
+        Ok(CreateTaskResult::new(task))
     }
 
     async fn list_tasks(
@@ -1167,31 +1148,24 @@ impl ServerHandler for AgenticWardenMcpServer {
             .into_iter()
             .map(|t| {
                 let (status, msg) = task_info_to_mcp_status(&t);
-                rmcp::model::Task {
-                    task_id: t.task_id.unwrap_or_else(|| format!("pid-{}", t.pid)),
+                rmcp::model::Task::new(
+                    t.task_id.unwrap_or_else(|| format!("pid-{}", t.pid)),
                     status,
-                    status_message: Some(msg),
-                    created_at: t.started_at.to_rfc3339(),
-                    last_updated_at: t
-                        .completed_at
+                    t.started_at.to_rfc3339(),
+                    t.completed_at
                         .unwrap_or(t.started_at)
                         .to_rfc3339(),
-                    ttl: None,
-                    poll_interval: None,
-                }
+                )
+                .with_status_message(msg)
             })
             .collect();
 
-        Ok(ListTasksResult {
-            total: Some(mcp_tasks.len() as u64),
-            tasks: mcp_tasks,
-            next_cursor: None,
-        })
+        Ok(ListTasksResult::new(mcp_tasks))
     }
 
     async fn get_task_info(
         &self,
-        request: GetTaskInfoParams,
+        request: GetTaskParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<GetTaskResult, rmcp::ErrorData> {
         let (pid, record) = resolve_task_id(&request.task_id).map_err(|e| {
@@ -1201,26 +1175,23 @@ impl ServerHandler for AgenticWardenMcpServer {
         let alive = platform::process_alive(pid);
         let (status, msg) = record_to_mcp_status(&record, alive);
 
-        Ok(GetTaskResult {
-            meta: None,
-            task: rmcp::model::Task {
-                task_id: request.task_id,
-                status,
-                status_message: Some(msg),
-                created_at: record.started_at.to_rfc3339(),
-                last_updated_at: record
-                    .completed_at
-                    .unwrap_or(record.started_at)
-                    .to_rfc3339(),
-                ttl: None,
-                poll_interval: if alive { Some(2000) } else { None },
-            },
-        })
+        let task = rmcp::model::Task::new(
+            request.task_id,
+            status,
+            record.started_at.to_rfc3339(),
+            record
+                .completed_at
+                .unwrap_or(record.started_at)
+                .to_rfc3339(),
+        )
+        .with_status_message(msg);
+        let task = if alive { task.with_poll_interval(2000) } else { task };
+        Ok(GetTaskResult::new(task))
     }
 
     async fn get_task_result(
         &self,
-        request: GetTaskResultParams,
+        request: GetTaskPayloadParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<GetTaskPayloadResult, rmcp::ErrorData> {
         let (pid, record) = resolve_task_id(&request.task_id).map_err(|e| {
@@ -1248,7 +1219,7 @@ impl ServerHandler for AgenticWardenMcpServer {
             "log_content": log_content,
         });
 
-        Ok(GetTaskPayloadResult(payload))
+        Ok(GetTaskPayloadResult::new(payload))
     }
 
     async fn cancel_task(
@@ -1274,22 +1245,18 @@ impl ServerHandler for AgenticWardenMcpServer {
         let alive = platform::process_alive(pid);
         let (status, msg) = record_to_mcp_status(&record, alive);
 
-        Ok(CancelTaskResult {
-            meta: None,
-            task: rmcp::model::Task {
-                task_id: request.task_id,
-                status: if matches!(status, RmcpTaskStatus::Working) {
-                    RmcpTaskStatus::Cancelled
-                } else {
-                    status
-                },
-                status_message: Some(msg),
-                created_at: record.started_at.to_rfc3339(),
-                last_updated_at: Utc::now().to_rfc3339(),
-                ttl: None,
-                poll_interval: None,
+        let task = rmcp::model::Task::new(
+            request.task_id,
+            if matches!(status, RmcpTaskStatus::Working) {
+                RmcpTaskStatus::Cancelled
+            } else {
+                status
             },
-        })
+            record.started_at.to_rfc3339(),
+            Utc::now().to_rfc3339(),
+        )
+        .with_status_message(msg);
+        Ok(CancelTaskResult::new(task))
     }
 }
 

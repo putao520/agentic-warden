@@ -118,17 +118,7 @@ mod tests {
     }
 
     fn build_tool(name: &str) -> Tool {
-        Tool {
-            name: name.to_string().into(),
-            title: None,
-            description: Some("test".into()),
-            input_schema: Arc::new(serde_json::Map::new()),
-            output_schema: None,
-            icons: None,
-            annotations: None,
-            execution: None,
-            meta: None,
-        }
+        Tool::new(name.to_string(), "test", Arc::new(serde_json::Map::new()))
     }
 
     #[tokio::test]

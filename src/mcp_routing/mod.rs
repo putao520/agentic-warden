@@ -82,11 +82,10 @@ impl IntelligentRouter {
         );
 
         // Construct base tools (persistent tools shown in list_tools)
-        let base_tools = vec![Tool {
-            name: "intelligent_route".into(),
-            title: Some("Intelligent Tool Router".into()),
-            description: Some(capability_description.into()),
-            input_schema: Arc::new(serde_json::from_value(json!({
+        let base_tools = vec![Tool::new(
+            "intelligent_route",
+            capability_description,
+            Arc::new(serde_json::from_value(json!({
                 "type": "object",
                 "properties": {
                     "user_request": {
@@ -102,12 +101,8 @@ impl IntelligentRouter {
                 },
                 "required": ["user_request"]
             }))?),
-            output_schema: None,
-            icons: None,
-            annotations: None,
-            execution: None,
-            meta: None,
-        }];
+        )
+        .with_title("Intelligent Tool Router")];
 
         // Create dynamic registry with max 5 dynamic tools (REQ-013: FIFO eviction)
         let registry_config = registry::RegistryConfig {
@@ -478,34 +473,22 @@ impl IntelligentRouter {
             };
 
             let tool = match tool_def {
-                Some(def) => rmcp::model::Tool {
-                    name: orchestrated_tool.name.clone().into(),
-                    title: None,
-                    description: Some(orchestrated_tool.description.clone().into()),
-                    input_schema: def.input_schema.clone(),
-                    output_schema: None,
-                    icons: None,
-                    annotations: None,
-                    execution: None,
-                    meta: None,
-                },
+                Some(def) => rmcp::model::Tool::new(
+                    orchestrated_tool.name.clone(),
+                    orchestrated_tool.description.clone(),
+                    def.input_schema.clone(),
+                ),
                 None => {
                     // Fallback: create tool with schema from plan
                     let schema_map = match &orchestrated_tool.input_schema {
                         serde_json::Value::Object(map) => map.clone(),
                         _ => serde_json::Map::new(),
                     };
-                    rmcp::model::Tool {
-                        name: orchestrated_tool.name.clone().into(),
-                        title: None,
-                        description: Some(orchestrated_tool.description.clone().into()),
-                        input_schema: std::sync::Arc::new(schema_map),
-                        output_schema: None,
-                        icons: None,
-                        annotations: None,
-                        execution: None,
-                        meta: None,
-                    }
+                    rmcp::model::Tool::new(
+                        orchestrated_tool.name.clone(),
+                        orchestrated_tool.description.clone(),
+                        std::sync::Arc::new(schema_map),
+                    )
                 }
             };
 
