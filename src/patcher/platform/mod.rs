@@ -65,26 +65,26 @@ impl MemPerm {
     }
 
     /// 从 Windows MEMORY_BASIC_INFORMATION Protection 标志解析
+    ///
+    /// 用 `match` + 守卫替代长 `||` 链：把 6 个 PAGE_* 常量的 `.0`（u32）值
+    /// 映射到 `(read, write, execute)` 三元组。`PAGE_NOACCESS` 与未知值 → 全 false。
     #[cfg(windows)]
     pub(crate) fn from_win_prot(prot: u32) -> Self {
         use windows::Win32::System::Memory::{
             PAGE_EXECUTE, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_EXECUTE_WRITECOPY,
-            PAGE_NOACCESS, PAGE_READONLY, PAGE_READWRITE, PAGE_WRITECOPY,
+            PAGE_READONLY, PAGE_READWRITE, PAGE_WRITECOPY,
         };
 
-        // 将 u32 转换为 PAGE_PROTECTION_FLAGS 进行匹配
-        let prot_flags = unsafe { std::mem::transmute::<u32, windows::Win32::System::Memory::PAGE_PROTECTION_FLAGS>(prot) };
-
-        // 检查各个标志位
-        let read = prot == PAGE_READONLY.0 || prot == PAGE_READWRITE.0
-            || prot == PAGE_EXECUTE_READ.0 || prot == PAGE_EXECUTE_READWRITE.0
-            || prot == PAGE_WRITECOPY.0 || prot == PAGE_EXECUTE_WRITECOPY.0;
-        let write = prot == PAGE_READWRITE.0 || prot == PAGE_EXECUTE_READWRITE.0
-            || prot == PAGE_WRITECOPY.0 || prot == PAGE_EXECUTE_WRITECOPY.0;
-        let execute = prot == PAGE_EXECUTE.0 || prot == PAGE_EXECUTE_READ.0
-            || prot == PAGE_EXECUTE_READWRITE.0 || prot == PAGE_EXECUTE_WRITECOPY.0;
-
-        Self::new(read, write, execute)
+        match prot {
+            v if v == PAGE_READONLY.0 => Self::new(true, false, false),
+            v if v == PAGE_READWRITE.0 => Self::new(true, true, false),
+            v if v == PAGE_WRITECOPY.0 => Self::new(true, true, false),
+            v if v == PAGE_EXECUTE.0 => Self::new(false, false, true),
+            v if v == PAGE_EXECUTE_READ.0 => Self::new(true, false, true),
+            v if v == PAGE_EXECUTE_READWRITE.0 => Self::new(true, true, true),
+            v if v == PAGE_EXECUTE_WRITECOPY.0 => Self::new(true, true, true),
+            _ => Self::new(false, false, false), // PAGE_NOACCESS 或未知
+        }
     }
 }
 

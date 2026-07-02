@@ -63,15 +63,66 @@ impl RuntimePatcher {
         Ok(None)
     }
 
+    /// 单区域扫描上限，避免无界分配；regex 一次性扫描整区域以支持跨块匹配
+    const MAX_REGION_SCAN: usize = 64 * 1024 * 1024;
+
+    /// 遍历所有可读区域，对每个区域一次性读入（上限 64MB），调用 `processor`
+    /// 处理缓冲区。`processor` 返回 `Some(x)` 表示已成功 patch；返回 `None`
+    /// 表示此区域无有效匹配，继续扫描下一个区域。
+    ///
+    /// 3 个内存 patch 函数（max-context-tokens / regex-literal）共用此骨架，
+    /// 各自只提供 `processor` 闭包即可，避免重复「遍历区域→64MB 读入→扫描」逻辑。
+    fn scan_readable_regions<T>(
+        &self,
+        min_region_size: usize,
+        mut processor: impl FnMut(&[u8], usize) -> PatchResult<Option<T>>,
+    ) -> PatchResult<Option<T>> {
+        let regions = self.inner.read_memory_maps()?;
+        let readable_regions: Vec<_> = regions.iter().filter(|r| r.is_readable).collect();
+
+        for region in &readable_regions {
+            let region_size = region.end.saturating_sub(region.start);
+            if region_size < min_region_size {
+                continue;
+            }
+            let scan_size = region_size.min(Self::MAX_REGION_SCAN);
+            let mut buffer = vec![0u8; scan_size];
+            if self.inner.read_memory(region.start, &mut buffer).is_err() {
+                continue;
+            }
+            if let Some(x) = processor(&buffer, region.start)? {
+                return Ok(Some(x));
+            }
+        }
+        Ok(None)
+    }
+
+    /// 在 `haystack` 中收集 `needle` 的所有起始偏移（用于定位 200000）。
+    fn collect_literal_offsets(haystack: &[u8], needle: &[u8]) -> Vec<usize> {
+        let mut offsets = Vec::new();
+        let mut search_from = 0;
+        while search_from + needle.len() <= haystack.len() {
+            if let Some(pos) = haystack[search_from..]
+                .windows(needle.len())
+                .position(|w| w == needle)
+            {
+                offsets.push(search_from + pos);
+                search_from += pos + needle.len();
+            } else {
+                break;
+            }
+        }
+        offsets
+    }
+
     /// 应用 max-token 内存补丁
     ///
     /// 通过通用 regex 匹配 Claude CLI 内存中的常量块
     /// `var X=200000,Y=200000,Z=20000,W=32000,Q=128000;`，把两个 200000
     /// 等长替换为目标值。
     ///
-    /// 通过变量名无关的 regex 通用匹配，跨版本稳定。对每个可读区域
-    /// 一次性读入（上限 64MB）后用 regex 整体扫描，pattern 跨 16MB
-    /// 块边界也能命中。
+    /// 区域扫描复用 `scan_readable_regions`（64MB 上限 + 整区域 regex 扫描），
+    /// 本函数只负责「定位匹配块 + 委托 try_patch 写入」。
     ///
     /// # 参数
     /// - `max_tokens`: 目标默认上下文窗口值（6 位数，100000~999999）
@@ -103,88 +154,72 @@ impl RuntimePatcher {
                 hint: None,
             })?;
 
-        let regions = self.inner.read_memory_maps()?;
-        let readable_regions: Vec<_> = regions
-            .iter()
-            .filter(|r| r.is_readable)
-            .collect();
+        let needle = b"200000";
+        let val1 = encode_max_context_tokens(max_tokens);
+        let val2 = encode_max_context_tokens(auto_compact);
 
-        debug!(
-            "Scanning {} readable regions for max-context-tokens constant block",
-            readable_regions.len()
-        );
+        let scan = self.scan_readable_regions(
+            MAX_CONTEXT_TOKENS_SEARCH_REGEX.len(),
+            |buf, region_start| match re.find(buf) {
+                Some(m) => self.try_patch_max_tokens(
+                    region_start + m.start(),
+                    &buf[m.start()..m.end()],
+                    needle,
+                    &val1,
+                    &val2,
+                ),
+                None => Ok(None),
+            },
+        )?;
 
-        // 单区域上限 64MB，避免无界分配；regex 一次性扫描整区域以支持跨块匹配
-        const MAX_REGION_SCAN: usize = 64 * 1024 * 1024;
-
-        for region in &readable_regions {
-            let region_size = region.end.saturating_sub(region.start);
-            if region_size < MAX_CONTEXT_TOKENS_SEARCH_REGEX.len() {
-                continue;
-            }
-            let scan_size = region_size.min(MAX_REGION_SCAN);
-            let mut buffer = vec![0u8; scan_size];
-            if self.inner.read_memory(region.start, &mut buffer).is_err() {
-                continue;
-            }
-
-            if let Some(m) = re.find(&buffer) {
-                let matched = &buffer[m.start()..m.end()];
-                // 在匹配文本中定位两个 200000 的偏移
-                let needle = b"200000";
-                let mut offsets: Vec<usize> = Vec::new();
-                let mut search_from = 0;
-                while search_from + needle.len() <= matched.len() {
-                    if let Some(pos) = matched[search_from..]
-                        .windows(needle.len())
-                        .position(|w| w == needle)
-                    {
-                        offsets.push(search_from + pos);
-                        search_from += pos + needle.len();
-                    } else {
-                        break;
-                    }
-                }
-
-                if offsets.len() < 2 {
-                    debug!(
-                        "matched constant block but found {} 200000 occurrences (need 2)",
-                        offsets.len()
-                    );
-                    continue;
-                }
-
-                let match_base = region.start + m.start();
-                let val1 = encode_max_context_tokens(max_tokens);
-                let val2 = encode_max_context_tokens(auto_compact);
-
-                let addr1 = match_base + offsets[0];
-                let addr2 = match_base + offsets[1];
-
-                // 验证原字节确为 200000
-                let mut verify = [0u8; 6];
-                if self.inner.read_memory(addr1, &mut verify).is_err() || &verify != needle {
-                    continue;
-                }
-                if self.inner.read_memory(addr2, &mut verify).is_err() || &verify != needle {
-                    continue;
-                }
-
-                self.inner.write_memory(addr1, &val1)?;
-                self.inner.write_memory(addr2, &val2)?;
-
+        match scan {
+            Some((addr1, addr2)) => {
                 info!(
                     "✅ MaxContextTokens patched: max_tokens={} @ {:#x}, auto_compact={} @ {:#x}",
                     max_tokens, addr1, auto_compact, addr2
                 );
-                return Ok(addr1);
+                Ok(addr1)
             }
+            None => Err(PatchError::PatternNotFound {
+                pattern: "max-context-tokens constant block not found in memory".to_string(),
+                hint: Some("Claude version may not contain the expected constant block".to_string()),
+            }),
+        }
+    }
+
+    /// 在已匹配的常量块中定位两个 200000 并 patch，成功返回两个写入地址。
+    /// 偏移不足 / 字节校验失败时返回 `Ok(None)`（让外层继续扫描下一个区域）。
+    fn try_patch_max_tokens(
+        &self,
+        match_base: usize,
+        matched: &[u8],
+        needle: &[u8],
+        val1: &[u8],
+        val2: &[u8],
+    ) -> PatchResult<Option<(usize, usize)>> {
+        let offsets = Self::collect_literal_offsets(matched, needle);
+        if offsets.len() < 2 {
+            debug!(
+                "matched constant block but found {} 200000 occurrences (need 2)",
+                offsets.len()
+            );
+            return Ok(None);
+        }
+        let addr1 = match_base + offsets[0];
+        let addr2 = match_base + offsets[1];
+
+        // 验证原字节确为 200000
+        let mut verify = [0u8; 6];
+        if self.inner.read_memory(addr1, &mut verify).is_err() || verify != *needle {
+            return Ok(None);
+        }
+        if self.inner.read_memory(addr2, &mut verify).is_err() || verify != *needle {
+            return Ok(None);
         }
 
-        Err(PatchError::PatternNotFound {
-            pattern: "max-context-tokens constant block not found in memory".to_string(),
-            hint: Some("Claude version may not contain the expected constant block".to_string()),
-        })
+        self.inner.write_memory(addr1, val1)?;
+        self.inner.write_memory(addr2, val2)?;
+        Ok(Some((addr1, addr2)))
     }
 
 
@@ -294,51 +329,37 @@ impl RuntimePatcher {
             }
         })?;
 
-        let regions = self.inner.read_memory_maps()?;
-        let readable_regions: Vec<_> = regions.iter().filter(|r| r.is_readable).collect();
-
-        // 单区域上限 64MB，避免无界分配；regex 一次性扫描整区域以支持跨块匹配
-        const MAX_REGION_SCAN: usize = 64 * 1024 * 1024;
-
-        for region in &readable_regions {
-            let region_size = region.end.saturating_sub(region.start);
-            if region_size < regex_str.len() {
-                continue;
-            }
-            let scan_size = region_size.min(MAX_REGION_SCAN);
-            let mut buffer = vec![0u8; scan_size];
-            if self.inner.read_memory(region.start, &mut buffer).is_err() {
-                continue;
-            }
-
-            if let Some(m) = re.find(&buffer) {
-                let span_len = m.end() - m.start();
-                if replace.len() != span_len {
-                    // 长度不一致，跳过此匹配继续找（理论上 regex 匹配长度应固定）
+        let replace_len = replace.len();
+        let scan = self.scan_readable_regions(regex_str.len(), |buf, region_start| {
+            match re.find(buf) {
+                Some(m) => {
+                    let span_len = m.end() - m.start();
+                    if replace_len != span_len {
+                        debug!(
+                            "regex literal match length {} != replace {} in region {:x}, skip",
+                            span_len, replace_len, region_start
+                        );
+                        return Ok(None);
+                    }
+                    let addr = region_start + m.start();
+                    self.inner.write_memory(addr, replace)?;
                     debug!(
-                        "regex literal match length {} != replace {} in region {:x}-{:x}, skip",
-                        span_len,
-                        replace.len(),
-                        region.start,
-                        region.end
+                        "✅ regex literal memory patched @ {:#x} (match len={})",
+                        addr, span_len
                     );
-                    continue;
+                    Ok(Some(addr))
                 }
-
-                let addr = region.start + m.start();
-                self.inner.write_memory(addr, replace)?;
-                debug!(
-                    "✅ regex literal memory patched @ {:#x} (match len={})",
-                    addr, span_len
-                );
-                return Ok(addr);
+                None => Ok(None),
             }
-        }
+        })?;
 
-        Err(PatchError::PatternNotFound {
-            pattern: regex_str.to_string(),
-            hint: Some("regex pattern not found in any readable region".to_string()),
-        })
+        match scan {
+            Some(addr) => Ok(addr),
+            None => Err(PatchError::PatternNotFound {
+                pattern: regex_str.to_string(),
+                hint: Some("regex pattern not found in any readable region".to_string()),
+            }),
+        }
     }
 
     /// 在内存中搜索字节模式

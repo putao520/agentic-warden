@@ -45,36 +45,25 @@ fn apply_regex_replace(matched: &[u8], replace_values: &[u32]) -> Vec<u8> {
     out
 }
 
-/// 应用文件补丁
-pub fn apply_file_patch(
-    file_path: &Path,
-    pattern: &UnifiedPatchPattern,
-) -> Result<UnifiedPatchResult> {
-    // NativeBinary 补丁前自动备份（仅首次）
+/// NativeBinary 补丁前自动备份（仅首次，且仅对二进制文件）。
+/// 非二进制文件无备份动作。
+fn ensure_binary_backup(file_path: &Path) -> Result<()> {
     let backup_path = PathBuf::from(format!("{}.aiw-backup", file_path.display()));
-    if !backup_path.exists() {
-        // 检测是否为二进制文件（非文本）
-        if is_binary_file(file_path) {
-            fs::copy(file_path, &backup_path).map_err(|e| {
-                UnifiedPatchError::FileError(std::io::Error::new(
-                    e.kind(),
-                    format!("备份失败 {}: {}", file_path.display(), e),
-                ))
-            })?;
-        }
+    if !backup_path.exists() && is_binary_file(file_path) {
+        fs::copy(file_path, &backup_path).map_err(|e| {
+            UnifiedPatchError::FileError(std::io::Error::new(
+                e.kind(),
+                format!("备份失败 {}: {}", file_path.display(), e),
+            ))
+        })?;
     }
+    Ok(())
+}
 
-    // 读取文件内容
-    let content = fs::read(file_path)?;
-
-    if pattern.use_regex {
-        return apply_regex_file_patch(file_path, &content, pattern);
-    }
-
-    // 字面量模式：查找所有匹配位置
-    let search = pattern.search_pattern.as_ref();
+/// 在 `content` 中收集 `search` 的所有起始偏移（无重叠）。
+fn find_all_literal_positions(content: &[u8], search: &[u8]) -> Vec<usize> {
     let search_len = search.len();
-    let mut positions: Vec<usize> = Vec::new();
+    let mut positions = Vec::new();
     let mut start = 0;
     while start + search_len <= content.len() {
         if let Some(pos) = content[start..]
@@ -87,7 +76,58 @@ pub fn apply_file_patch(
             break;
         }
     }
+    positions
+}
 
+/// 用 `replace`（整段覆盖）从后往前替换 `positions` 处的匹配，等长替换。
+fn apply_replace_to_positions(
+    content: &[u8],
+    positions: &[usize],
+    search_len: usize,
+    replace: &[u8],
+) -> Vec<u8> {
+    let mut new_content = content.to_vec();
+    for &pos in positions.iter().rev() {
+        let mut result = Vec::with_capacity(new_content.len());
+        result.extend_from_slice(&new_content[..pos]);
+        result.extend_from_slice(replace);
+        result.extend_from_slice(&new_content[pos + search_len..]);
+        new_content = result;
+    }
+    new_content
+}
+
+/// 用单字节 `patch_byte`（偏移 `offset`）替换所有匹配位置。
+fn apply_patch_byte_to_positions(
+    content: &[u8],
+    positions: &[usize],
+    patch_byte: u8,
+    offset: usize,
+) -> Vec<u8> {
+    let mut new_content = content.to_vec();
+    for &pos in positions {
+        new_content[pos + offset] = patch_byte;
+    }
+    new_content
+}
+
+/// 应用文件补丁
+pub fn apply_file_patch(
+    file_path: &Path,
+    pattern: &UnifiedPatchPattern,
+) -> Result<UnifiedPatchResult> {
+    ensure_binary_backup(file_path)?;
+
+    // 读取文件内容
+    let content = fs::read(file_path)?;
+
+    if pattern.use_regex {
+        return apply_regex_file_patch(file_path, &content, pattern);
+    }
+
+    // 字面量模式：查找所有匹配位置
+    let search = pattern.search_pattern.as_ref();
+    let positions = find_all_literal_positions(&content, search);
     if positions.is_empty() {
         return Err(UnifiedPatchError::PatternNotFound(format!(
             "{:?}",
@@ -96,28 +136,18 @@ pub fn apply_file_patch(
     }
 
     // 应用补丁（替换所有匹配）
-    let patched_content = if let Some(replace) = pattern.replace_pattern.as_ref() {
-        // 从后往前替换，避免偏移变化
-        let mut new_content = content.clone();
-        for &pos in positions.iter().rev() {
-            let mut result = Vec::with_capacity(new_content.len());
-            result.extend_from_slice(&new_content[..pos]);
-            result.extend_from_slice(replace);
-            result.extend_from_slice(&new_content[pos + search_len..]);
-            new_content = result;
+    let patched_content = match (pattern.replace_pattern.as_ref(), pattern.patch_byte, pattern.patch_offset) {
+        (Some(replace), _, _) => {
+            apply_replace_to_positions(&content, &positions, search.len(), replace.as_ref())
         }
-        new_content
-    } else if let (Some(patch_byte), Some(offset)) = (pattern.patch_byte, pattern.patch_offset) {
-        // 单字节修补所有匹配
-        let mut new_content = content.clone();
-        for &pos in &positions {
-            new_content[pos + offset] = patch_byte;
+        (None, Some(patch_byte), Some(offset)) => {
+            apply_patch_byte_to_positions(&content, &positions, patch_byte, offset)
         }
-        new_content
-    } else {
-        return Err(UnifiedPatchError::PatternNotFound(
-            "No replacement pattern or patch byte specified".to_string(),
-        ));
+        (None, _, _) => {
+            return Err(UnifiedPatchError::PatternNotFound(
+                "No replacement pattern or patch byte specified".to_string(),
+            ));
+        }
     };
 
     write_back(file_path, &patched_content)?;
@@ -125,6 +155,49 @@ pub fn apply_file_patch(
     Ok(UnifiedPatchResult::FilePatched {
         path: file_path.display().to_string(),
     })
+}
+
+/// regex 字面量替换模式：用 `replace_pattern` 整段覆盖每个匹配文本（要求等长）。
+/// 从后往前应用以保持偏移稳定。
+fn apply_regex_literal_replace(
+    content: &[u8],
+    matches: &[regex::bytes::Match<'_>],
+    replace: &[u8],
+) -> Result<Vec<u8>> {
+    let mut new_content = content.to_vec();
+    for m in matches.iter().rev() {
+        let span_len = m.end() - m.start();
+        if replace.len() != span_len {
+            return Err(UnifiedPatchError::Other(format!(
+                "regex literal patch must be equal length: match={}, replace={}",
+                span_len,
+                replace.len()
+            )));
+        }
+        new_content[m.start()..m.end()].copy_from_slice(replace);
+    }
+    Ok(new_content)
+}
+
+/// regex 数字替换模式：按 `regex_replace_values` 替换每个匹配中的 200000
+/// （等长 6 位）。长度异常时用 splice 兜底。
+fn apply_regex_numeric_replace(
+    content: &[u8],
+    matches: &[regex::bytes::Match<'_>],
+    replace_values: &[u32],
+) -> Vec<u8> {
+    let mut new_content = content.to_vec();
+    for m in matches.iter().rev() {
+        let matched_bytes = &content[m.start()..m.end()];
+        let replaced = apply_regex_replace(matched_bytes, replace_values);
+        let span_len = m.end() - m.start();
+        if replaced.len() == span_len {
+            new_content[m.start()..m.end()].copy_from_slice(&replaced);
+        } else {
+            new_content.splice(m.start()..m.end(), replaced);
+        }
+    }
+    new_content
 }
 
 /// regex 模式的文件补丁
@@ -153,37 +226,13 @@ fn apply_regex_file_patch(
         )));
     }
 
-    let mut new_content = content.to_vec();
-
-    if let Some(replace) = pattern.replace_pattern.as_ref() {
-        // regex 字面量替换模式：用 replace_pattern 整段覆盖匹配文本（等长）
-        for m in matches.iter().rev() {
-            let span_len = m.end() - m.start();
-            if replace.len() != span_len {
-                return Err(UnifiedPatchError::Other(format!(
-                    "regex literal patch must be equal length: match={}, replace={}",
-                    span_len,
-                    replace.len()
-                )));
-            }
-            new_content[m.start()..m.end()].copy_from_slice(replace);
+    let new_content = match pattern.replace_pattern.as_ref() {
+        Some(replace) => apply_regex_literal_replace(content, &matches, replace.as_ref())?,
+        None => {
+            let replace_values = pattern.regex_replace_values.clone().unwrap_or_default();
+            apply_regex_numeric_replace(content, &matches, &replace_values)
         }
-    } else {
-        // regex 数字替换模式：按 regex_replace_values 替换 200000
-        let replace_values = pattern.regex_replace_values.clone().unwrap_or_default();
-        for m in matches.iter().rev() {
-            let matched_bytes = &content[m.start()..m.end()];
-            let replaced = apply_regex_replace(matched_bytes, &replace_values);
-            // 等长替换（regex 只替换 200000→6位数，长度不变）
-            let span_len = m.end() - m.start();
-            if replaced.len() == span_len {
-                new_content[m.start()..m.end()].copy_from_slice(&replaced);
-            } else {
-                // 长度不一致（理论上不应发生），用 splice 兜底
-                new_content.splice(m.start()..m.end(), replaced);
-            }
-        }
-    }
+    };
 
     write_back(file_path, &new_content)?;
 
