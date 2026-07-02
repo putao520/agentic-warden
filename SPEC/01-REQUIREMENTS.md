@@ -1945,32 +1945,35 @@ aiw patch status
 **Related**: ARCH-014
 
 **Description**:
-Agentic-Warden MUST provide an AntiSpy patch system for Claude CLI that blinds CC's local environment detection by rewriting two function-level literals: (1) `KIt()` returns `Intl.DateTimeFormat().resolvedOptions().timeZone` (48 bytes) -> `"UTC"/*` + 39 dots + `*/` (48 bytes, comment-padded, JS-legal), forcing timezone to always return UTC so the real timezone never leaks and `cnTZ` is always false; (2) `Hsp()` relay-station detection `function Hsp(){if($Sn())return null;let e=Asp()` (47 bytes) -> `function Hsp(){return null;         let e=Asp()` (47 bytes, space-padded), forcing `Hsp()` to always return null so `known`/`labKw`/`cnTZ`/`host` are all null. This blocks CC v2.1.195's local espionage behavior of fingerprinting user timezone and relay station.
+Agentic-Warden MUST provide an AntiSpy patch system for Claude CLI that blinds CC's local environment detection via two patches: (1) **escape-hatch short-circuit** (cross-version, regex-literal mode): patch the `_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL` check `if(<OBJ>._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0` (55 bytes) -> `if(1)` + 50 spaces (55 bytes, equal-length), so `fu()`/`vrt()`/`Eu()` always return true (firstParty assumed). `<OBJ>` is the config object name, varies across versions (`Oe` in 195-197, `Pe` in 198), matched by regex `[a-zA-Z_$][a-zA-Z0-9_$]*`; `_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL` is the stable literal anchor (CC's official escape-hatch env var, parsed by `st()`). This one-shot silences 30+ `fu()` call sites' espionage: relay-station identity reporting (custom_base_url flag), attribution header discrimination (cch=00000), tool-set filtering, ToolSearch gating, model-override gating. CC v2.1.198 removed the exposed `Hsp()` explicit probe (Asia/Shanghai timezone + base64 host list Qup/Zup + labKw/cnTZ fields); identification fell back to `Cot()`/`fu()` host comparison, which the escape-hatch patch neutralizes. (2) **timezone blinding** (literal mode): `KIt()` returns `Intl.DateTimeFormat().resolvedOptions().timeZone` (48 bytes) -> `"UTC"/*` + 39 dots + `*/` (48 bytes, comment-padded, JS-legal), forcing timezone to always return UTC so the real timezone never leaks and `cnTZ` is always false. The escape-hatch patch works alongside AntiTelemetry to also close the backup reverse-enabled reporting channels (request UUID / traceparent / error reporting).
 
 **Acceptance Criteria**:
-- [x] Patch 1 (timezone): `Intl.DateTimeFormat().resolvedOptions().timeZone` (48 bytes) -> `"UTC"` + comment padding (48 bytes, equal-length)
-- [x] Patch 2 (relay): `function Hsp(){if($Sn())return null;let e=Asp()` (47 bytes) -> `function Hsp(){return null;         let e=Asp()` (47 bytes, equal-length)
-- [x] Function-level patch (rewrites function body logic, not string scraping)
-- [x] Literal replacement mode (`use_regex=false`) via `UnifiedPatchPattern` with `search_pattern` + `replace_pattern`
+- [x] Patch A (escape-hatch short-circuit): `if(<OBJ>._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0` (55 bytes) -> `if(1)` + 50 spaces (55 bytes, equal-length)
+- [x] Patch B (timezone): `Intl.DateTimeFormat().resolvedOptions().timeZone` (48 bytes) -> `"UTC"` + comment padding (48 bytes, equal-length)
+- [x] Cross-version regex-literal mode: `<OBJ>` (config object name `Oe`/`Pe`) matched by `[a-zA-Z_$][a-zA-Z0-9_$]*`, `_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL` stable anchor
+- [x] Escape-hatch short-circuit makes `fu()`/`vrt()`/`Eu()` always return true (firstParty assumed), silencing 30+ espionage call sites
+- [x] Timezone always returns UTC, real timezone never leaks, `cnTZ` always false
+- [x] Literal replacement mode for timezone (`use_regex=false`); regex-literal mode for escape-hatch (`use_regex=true` with integral overwrite) via `UnifiedPatchPattern`
 - [x] Support both file patch (persistent) and memory patch (runtime)
 - [x] `PatchAction::DisableSpy` CLI command (`aiw patch disable-spy`)
-- [x] `get_antispy_patches` registry function generates 4 patch patterns (KIt file+memory, Hsp file+memory)
+- [x] `get_antispy_patches` registry function generates 4 patch patterns (escape-hatch file+memory, KIt timezone file+memory)
 - [x] `FeatureType::AntiSpy` variant added to `FeatureType` enum (description + short_name="antispy")
 - [x] `execute_apply_patch` applies max-token + anti-telemetry + anti-spy file patches (three independent, one failure doesn't affect the others)
 - [x] `execute_patch_status` reports anti-spy patch status
 - [x] Startup-time auto-trigger in supervisor (both `execute_cli_internal` and `start_interactive_cli` paths) applies anti-spy memory patch after anti-telemetry patch
-- [x] Cross-version stable (function body literal, not minified variable name)
-- [x] Equal-length replacement iron law: 48 -> 48 bytes (timezone) and 47 -> 47 bytes (relay)
-- [x] Does NOT touch `$Sn()` function (preserves firstParty-specific features: `_u()`/`NY()`/OAuth)
+- [x] Cross-version stable across 2.1.195-198 (escape-hatch via regex object-name wildcard, timezone via function-body literal)
+- [x] Equal-length replacement iron law: 55 -> 55 bytes (escape-hatch) and 48 -> 48 bytes (timezone)
+- [x] Works alongside AntiTelemetry to close backup reverse-enabled reporting channels (request UUID / traceparent / error reporting)
 
 **Technical Constraints**:
-- `search_pattern` and `replace_pattern` MUST be equal length (48 bytes for timezone, 47 bytes for relay) to avoid shifting subsequent offsets
+- Timezone `search_pattern`/`replace_pattern` MUST be equal length (48 bytes); escape-hatch regex match MUST equal replace length (55 bytes) to avoid shifting subsequent offsets
+- Escape-hatch uses regex-literal mode (`use_regex=true`, integral overwrite): regex matches `if(<OBJ>._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0`, replace is runtime-constructed `if(1)` + 50 spaces (55 bytes)
+- `<OBJ>` config object name matched by regex `[a-zA-Z_$][a-zA-Z0-9_$]*` (varies: `Oe` in 195-197, `Pe` in 198); `_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL` is the stable literal anchor
+- Timezone uses literal mode (`use_regex=false`), JS comment `/* ... */` padding to stay JS-legal
 - Memory patch uses `apply_literal_memory_patch` (search_pattern -> replace_pattern integral overwrite)
 - AntiSpy patch is independent of max-token / AntiTelemetry patches: one failing does not block the others
-- `use_regex=false` (literal mode, not regex mode)
-- Timezone replace uses JS comment syntax `/* ... */` to stay JS-legal while padding to equal length
-- Relay replace uses space padding to stay JS-legal while padding to equal length
-- MUST NOT patch `$Sn()` (used by `_u()`/`NY()`/OAuth firstParty features)
+- Escape-hatch works alongside AntiTelemetry: AntiTelemetry kills the forward reporting endpoint, escape-hatch closes the reverse-enabled backup channels (request UUID / traceparent / error reporting)
+- CC v2.1.198 removed the exposed `Hsp()` explicit probe (Asia/Shanghai timezone + base64 host list Qup/Zup + labKw/cnTZ); identification fell back to `Cot()`/`fu()` host comparison — escape-hatch neutralizes this
 
 **CLI Usage**:
 ```bash
@@ -1991,27 +1994,29 @@ aiw patch status
 **Related**: ARCH-014
 
 **Description**:
-Agentic-Warden MUST provide an AntiSpy patch system that blinds Claude CLI's local environment detection (timezone + relay station identification), preventing CC from profiling users as China/relay-station users for differential treatment.
+Agentic-Warden MUST provide an AntiSpy patch system that blinds Claude CLI's local environment detection (timezone + escape-hatch short-circuit), preventing CC from profiling users as China/relay-station users for differential treatment. CC v2.1.198 removed the exposed `Hsp()` explicit probe (Asia/Shanghai timezone + base64 host list Qup/Zup + labKw/cnTZ); identification fell back to `Cot()`/`fu()` host comparison, neutralized by the escape-hatch patch.
 
 **Acceptance Criteria**:
-- [x] Patch `KIt()` timezone function: `Intl.DateTimeFormat().resolvedOptions().timeZone` → `"UTC"/*...*/` (48B equal-length, comment-padded)
-- [x] Patch `Hsp()` relay detection function: `function Hsp(){if($Sn())return null;` → `function Hsp(){return null;         ` (47B equal-length, space-padded)
-- [x] Timezone always returns UTC, real timezone never leaks
-- [x] Relay detection returns null (known/labKw/cnTZ/host all null)
+- [x] Patch A (escape-hatch short-circuit): `if(<OBJ>._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0` (55B) → `if(1)` + 50 spaces (55B equal-length)
+- [x] Patch B (timezone): `KIt()` `Intl.DateTimeFormat().resolvedOptions().timeZone` → `"UTC"/*...*/` (48B equal-length, comment-padded)
+- [x] Cross-version regex object-name wildcard: `<OBJ>` = `Oe` (195-197) / `Pe` (198), matched by `[a-zA-Z_$][a-zA-Z0-9_$]*`
+- [x] Escape-hatch makes `fu()`/`vrt()`/`Eu()` always return true, silencing 30+ espionage call sites (relay-station identity reporting, attribution header discrimination, tool-set filtering, ToolSearch gating, model-override gating)
+- [x] Timezone always returns UTC, real timezone never leaks, `cnTZ` always false
 - [x] System prompt date format stays `2026-07-01` (cnTZ false, no `/` conversion)
 - [x] `PatchAction::DisableSpy` CLI command
 - [x] Startup-time auto-trigger in supervisor (after max-token + AntiTelemetry)
 - [x] Does NOT touch `$Sn()` (preserves firstParty exclusive features: OAuth, feature gates)
 - [x] Does NOT touch ICU timezone database `Asia/Shanghai` (preserves timezone calculation)
-- [x] Function-level patch (not string scraping) — patches function body logic
+- [x] Escape-hatch works alongside AntiTelemetry to close backup reverse-enabled reporting channels (request UUID / traceparent / error reporting)
+- [x] Function-level / condition-level patch (not string scraping)
 
 **Technical Constraints**:
-- Patches MUST be equal-length (48B/47B) to avoid shifting binary offsets
+- Patches MUST be equal-length (escape-hatch 55B / timezone 48B) to avoid shifting binary offsets
+- Escape-hatch uses regex-literal mode (`use_regex=true`, integral overwrite): regex matches `if(<OBJ>._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0`, replace runtime-constructed `if(1)` + 50 spaces (55B)
 - `KIt()` patch uses comment padding `/*...*/` (JS-legal, ignored by parser)
-- `Hsp()` patch uses space padding (JS-legal whitespace)
-- `UnifiedPatchPattern` uses `Cow::Owned` for runtime-constructed patterns
+- `UnifiedPatchPattern` uses `Cow::Owned` for runtime-constructed patterns (escape-hatch replace built at runtime)
 - `apply_literal_memory_patch` handles literal memory replacement
-- Three patches independent: max-token / AntiTelemetry / AntiSpy
+- Four patches independent: max-token / AntiTelemetry / AntiSpy(escape-hatch + timezone) / AntiPromptBias
 
 **CLI Usage**:
 ```bash

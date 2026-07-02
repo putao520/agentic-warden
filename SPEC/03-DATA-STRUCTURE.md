@@ -228,10 +228,10 @@ pub enum AiType {
 **Related Types** (src/patcher/types.rs):
 ```rust
 pub enum FeatureType {
-    MaxContextTokens,  // 可配置默认上下文窗口 + autoCompact 阈值（regex 模式）
+    MaxContextTokens,  // 可配置默认上下文窗口 + autoCompact 阈值（regex 模式，正则放宽兼容 195-198）
     AntiTelemetry,     // 截断 CC 客户端上报（event_logging 端点 -> 404，字面量模式）
-    AntiSpy,           // 时区+中转站识别失明（KIt->UTC, Hsp->null，函数级 patch）
-    AntiPromptBias,    // 消除 Provider context 提示词偏见（if(g7())->if(0   )，条件级 patch）
+    AntiSpy,           // 逃生口短路（if(Oe/Pe._CLAUDE_CODE...)->if(1) 55B）+ 时区失明（KIt->UTC 48B）
+    AntiPromptBias,    // 消除 Provider context 提示词偏见（if(g7/F7/...())->if(0   ) 63B，语义正则）
 }
 
 pub struct UnifiedPatchPattern {
@@ -266,19 +266,37 @@ var [a-zA-Z_$][a-zA-Z0-9_$]*=200000,[a-zA-Z_$][a-zA-Z0-9_$]*=200000,...
 ```
 字面量等长替换（`use_regex=false`），让上报端点 404 静默失败。跨版本稳定（API 路径字面量，非 minified 变量名）。
 
-**AntiSpy Patch Targets** (Claude CLI function-level literals):
+**AntiSpy Patch Targets** (Claude CLI function-level / condition-level literals):
 ```
-Patch 1 (timezone, 48 bytes):
+Patch A (escape-hatch short-circuit, 55 bytes, regex-literal mode):
+  if(<OBJ>._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0
+  ->  if(1)<50 spaces>
+  <------------------- 55 bytes ------------------->
+  <OBJ> = Oe (195-197) / Pe (198), regex [a-zA-Z_$][a-zA-Z0-9_$]* 通配
+
+Patch B (timezone, 48 bytes, literal mode):
   Intl.DateTimeFormat().resolvedOptions().timeZone
   ->  "UTC"/*<39 dots>*/
   <-------------- 48 bytes -------------->
-
-Patch 2 (relay detection, 47 bytes):
-  function Hsp(){if($Sn())return null;let e=Asp()
-  ->  function Hsp(){return null;         let e=Asp()
-  <------------- 47 bytes -------------->
 ```
-函数级等长字面量替换（`use_regex=false`）：Patch 1 把 `KIt()` 时区识别永远返回 UTC（注释填充 JS 合法），真实时区不泄露，`cnTZ` 永远 false；Patch 2 把 `Hsp()` 中转站识别永远返回 null（空格填充），`known`/`labKw`/`cnTZ`/`host` 全 null。不碰 `$Sn()`（保留 firstParty 专属功能）。跨版本稳定（函数体字面量，非 minified 变量名）。
+Patch A（逃生口短路，regex 字面量模式 `use_regex=true`，整段覆写）：把 `_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL` 检查改成 `if(1)`（55 字节，`if(1)` + 50 空格等长填充），`fu()`/`vrt()`/`Eu()` 永远返回 true（firstParty 假定）。`<OBJ>` 是配置对象名，跨版本变化（195-197 `Oe`，198 `Pe`），用 regex `[a-zA-Z_$][a-zA-Z0-9_$]*` 通配；`_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL` 是 CC 官方逃生口环境变量（`st()` 解析），稳定字面量锚点。一次性关闭 30+ 个 `fu()` 调用点的间谍行为：中转站身份上报（custom_base_url 标记）、归因标头歧视（cch=00000）、工具集过滤、ToolSearch 门控、模型覆写门控。CC v2.1.198 砍掉了被曝光的 `Hsp()` 显性探针（Asia/Shanghai 时区 + base64 主机列表 Qup/Zup + labKw/cnTZ 字段），识别回归 `Cot()`/`fu()` host 比对，逃生口短路将其一并中和。配合 AntiTelemetry 兜底反向开启的上报通道（请求 UUID/traceparent/错误上报）。
+
+Patch B（时区失明，字面量模式 `use_regex=false`）：把 `KIt()` 时区识别永远返回 UTC（注释填充 JS 合法），真实时区不泄露，`cnTZ` 永远 false。跨版本稳定（函数体字面量，非 minified 变量名）。不碰 `$Sn()`（保留 firstParty 专属功能）。
+
+**版本支持矩阵**（跨 2.1.195-198）：
+
+| 版本 | max-token | AntiTelemetry | AntiSpy(时区 B) | AntiSpy(逃生口 A) | AntiPromptBias |
+|------|-----------|---------------|-----------------|-------------------|----------------|
+| 2.1.195 | ✅ 正则放宽 | ✅ 27B 字面量 | ✅ 48B 字面量 | ✅ `if(Oe.xxx)`→`if(1)` 55B regex | ✅ 语义正则 63B |
+| 2.1.196 | ✅ 正则放宽 | ✅ | ✅ 48B 字面量 | ✅ `if(Oe.xxx)`→`if(1)` 55B regex | ✅ 语义正则 63B |
+| 2.1.197 | ✅ 正则放宽 | ✅ | ✅ 48B 字面量 | ✅ `if(Oe.xxx)`→`if(1)` 55B regex | ✅ 语义正则 63B |
+| 2.1.198 | ✅ 正则放宽 | ✅ | ✅ 48B 字面量 | ✅ `if(Pe.xxx)`→`if(1)` 55B regex | ✅ 语义正则 63B |
+
+说明：
+- max-token 正则放宽 `var \w+=200000,\w+=200000[^;]*;` 兼容 195(5元素)/196(5元素)/197(6元素含无值变量)/198(4元素)
+- AntiSpy 逃生口 `<OBJ>` 跨版本通配（Oe/Pe），regex 字面量模式跨 195-198 通用
+- AntiSpy 时区 Patch B 是函数体字面量，跨版本稳定（非 minified 变量名）
+- AntiPromptBias 语义正则 `if(\w+())n.push("**Provider context:**` 通配 g7/F7/j7/dX 等条件函数名
 
 **AntiPromptBias Patch Target** (Claude CLI Provider context prompt injection condition):
 ```

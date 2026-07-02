@@ -556,7 +556,7 @@ This matrix provides complete traceability from:
 **Implementation Files**:
 - `src/patcher/mod.rs` — 补丁系统入口（导出 `get_feature_patches`）
 - `src/patcher/types.rs` — `FeatureType::AntiSpy` + `UnifiedPatchPattern`（Cow + `use_regex=false` 字面量模式）
-- `src/patcher/registry.rs` — `get_antispy_patches` 生成 4 个 patch 模式（KIt file+memory, Hsp file+memory）
+- `src/patcher/registry.rs` — `get_antispy_patches` 生成 4 个 patch 模式（逃生口短路 file+memory, KIt 时区 file+memory）
 - `src/patcher/file.rs` — 文件补丁应用（字面量匹配 + `replace_pattern` 整段替换）
 - `src/patcher/runtime.rs` — `apply_literal_memory_patch`（字面量内存替换，等长校验，命中首个匹配即写入）
 - `src/patcher/error.rs` — 补丁错误类型（`PatchError::PatternNotFound`）
@@ -565,7 +565,7 @@ This matrix provides complete traceability from:
 - `src/commands/parser.rs` — `PatchAction::DisableSpy`
 - `src/supervisor.rs` — `apply_max_context_tokens_patches`（anti-telemetry 后追加 anti-spy 内存补丁）+ `apply_antitelemetry_memory_patch_background`（`start_interactive_cli` 后台线程路径，anti-telemetry 后追加 anti-spy）
 
-**Notes**: AntiSpy patch 通过函数级等长字面量替换让 CC 本地识别全失明：(1) `KIt()` 时区识别 `Intl.DateTimeFormat().resolvedOptions().timeZone`（48 字节）-> `"UTC"/*` + 39 个 `.` + `*/`（48 字节注释填充），时区永远返回 UTC，真实时区不泄露，`cnTZ` 永远 false；(2) `Hsp()` 中转站识别 `function Hsp(){if($Sn())return null;let e=Asp()`（47 字节）-> `function Hsp(){return null;         let e=Asp()`（47 字节空格填充），`Hsp()` 永远返回 null，`known`/`labKw`/`cnTZ`/`host` 全 null。不碰 `$Sn()`（保留 firstParty 专属功能）。与 max-token / AntiTelemetry patch 独立（一个失败不影响另一个），跨版本稳定（函数体字面量，非 minified 变量名）。支持文件补丁（持久化）和内存补丁（运行时），启动时自动触发。
+**Notes**: AntiSpy patch 通过函数级等长字面量替换让 CC 本地识别全失明：(1) `KIt()` 时区识别 `Intl.DateTimeFormat().resolvedOptions().timeZone`（48 字节）-> `"UTC"/*` + 39 个 `.` + `*/`（48 字节注释填充），时区永远返回 UTC，真实时区不泄露，`cnTZ` 永远 false；(2) **逃生口短路**（regex 字面量模式）: `if(<OBJ>._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0`（55 字节）-> `if(1)` + 50 空格（55 字节等长），`<OBJ>` 用 regex 通配配置对象名（195-197 `Oe`，198 `Pe`），`fu()`/`vrt()`/`Eu()` 永远返回 true，一次性关闭 30+ 调用点的间谍行为（中转站身份上报/归因标头歧视/工具集过滤/ToolSearch 门控/模型覆写门控）。198 砍掉了被曝光的 Hsp 显性探针，识别回归 Cot()/fu() host 比对，逃生口短路将其一并中和。跨版本稳定（语义正则通配对象名 + _CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL 稳定字面量锚点）。支持文件补丁（持久化）和内存补丁（运行时），启动时自动触发。
 
 ---
 
@@ -575,8 +575,8 @@ This matrix provides complete traceability from:
 
 **Implementation Files**:
 - `src/patcher/mod.rs` — 补丁系统入口（导出 `get_feature_patches`）
-- `src/patcher/types.rs` — `FeatureType::AntiPromptBias` + `UnifiedPatchPattern`（Cow + `use_regex=false` 字面量模式）
-- `src/patcher/registry.rs` — `get_antipromptbias_patches` 生成 2 个 patch 模式（file + memory，63 字节等长）
+- `src/patcher/types.rs` — `FeatureType::AntiPromptBias` + `UnifiedPatchPattern`（Cow + regex 字面量替换模式 use_regex=true + replace_pattern 整段覆写）
+- `src/patcher/registry.rs` — `get_antipromptbias_patches` 生成 2 个 patch 模式（file + memory，63 字节等长，regex 字面量模式 if(\w+()) 通配 g7/F7/j7/dX）
 - `src/patcher/file.rs` — 文件补丁应用（字面量匹配 + `replace_pattern` 整段替换）
 - `src/patcher/runtime.rs` — `apply_literal_memory_patch`（字面量内存替换，等长校验，命中首个匹配即写入）
 - `src/patcher/error.rs` — 补丁错误类型（`PatchError::PatternNotFound`）
@@ -585,7 +585,7 @@ This matrix provides complete traceability from:
 - `src/commands/parser.rs` — `PatchAction::DisablePromptBias`
 - `src/supervisor.rs` — `apply_max_context_tokens_patches`（anti-spy 后追加 anti-prompt-bias 内存补丁）+ `apply_antitelemetry_memory_patch_background`（`start_interactive_cli` 后台线程路径，anti-spy 后追加 anti-prompt-bias）
 
-**Notes**: AntiPromptBias patch 通过等长字面量替换消除 CC 给第三方用户注入的 Provider context 提示词偏见：`if(g7())n.push("**Provider context:** This session is not using`（63 字节）-> `if(0   )n.push("**Provider context:** This session is not using`（63 字节空格填充），`if(g7())` 永远 false → Provider context prompt 不注入，模型不感知 provider 差异，行为更一致。只跳过这一条 prompt，不影响其他 firstParty 门控（OAuth/能力/模型选择等照常）。与 max-token / AntiTelemetry / AntiSpy patch 独立（一个失败不影响另一个），跨版本稳定（prompt 字面量，非 minified 变量名）。支持文件补丁（持久化）和内存补丁（运行时），启动时自动触发。
+**Notes**: AntiPromptBias patch 通过等长字面量替换消除 CC 给第三方用户注入的 Provider context 提示词偏见：`if(<FN>())n.push("**Provider context:** This session is not using`（63 字节）-> `if(0   )n.push("**Provider context:** This session is not using`（63 字节空格填充），`<FN>` 用 regex 通配条件函数名（195 `g7`/196 `F7`/197 `j7`/198 `dX`），`if(<FN>())` 永远 false -> Provider context prompt 不注入。跨版本稳定（语义正则通配 minified 变量名 + prompt 字面量锚点）。支持文件补丁（持久化）和内存补丁（运行时），启动时自动触发。
 
 ---
 
@@ -599,7 +599,7 @@ This matrix provides complete traceability from:
 | Max-Token 补丁验证 | REQ-025 | `src/patcher/versions.rs`, `MAX_CONTEXT_TOKENS_SEARCH_REGEX` 通用正则 + `validate_max_context_tokens` 6 位数校验 |
 
 | AntiTelemetry 上报截断 | REQ-026 | `src/patcher/registry.rs`, `get_antitelemetry_patches` 字面量替换 `/api/event_logging/v2/batch` -> `/api/event_logging/v2/xxxxx`（27 字节等长） |
-| AntiSpy 本地识别失明 | REQ-027 | `src/patcher/registry.rs`, `get_antispy_patches` 函数级字面量替换 KIt()→UTC（48 字节）+ Hsp()→null（47 字节） |
+| AntiSpy 本地识别失明 | REQ-027 | `src/patcher/registry.rs`, `get_antispy_patches` 逃生口短路 if(<OBJ>.ASSUME_FIRST_PARTY_BASE_URL)return!0→if(1)（55B regex）+ KIt()→UTC（48B 字面量） |
 | AntiPromptBias 提示词偏见消除 | REQ-028 | `src/patcher/registry.rs`, `get_antipromptbias_patches` 字面量替换 if(g7())→if(0   )（63 字节等长，跳过 Provider context prompt） |
 ### Performance
 | Concern | Related REQs | Implementation |
@@ -645,7 +645,7 @@ This matrix provides complete traceability from:
 - [x] REQ-009 fully implemented (interactive mode)
 - [x] REQ-025 max-token patcher system (通用正则跨版本，已验证 2.1.195；firstParty patch 已彻底删除)
 - [x] REQ-026 anti-telemetry patcher system (字面量截断 event_logging 端点 -> 404，27 字节等长，跨版本稳定)
-- [x] REQ-027 anti-spy patcher system (函数级字面量替换 KIt()→UTC + Hsp()→null，48/47 字节等长，跨版本稳定，不碰 $Sn())
+- [x] REQ-027 anti-spy patcher system (逃生口短路 if(<OBJ>.ASSUME_FIRST_PARTY_BASE_URL)return!0→if(1) 55B regex + KIt()→UTC 48B 字面量，跨 195-198 稳定，一次性关闭 fu() 30+ 调用点间谍行为)
 - [x] REQ-028 anti-prompt-bias patcher system (字面量替换 if(g7())→if(0   )，63 字节等长，跳过 Provider context prompt，不碰其他 firstParty 门控)
 - [x] Deprecated REQs (003, 010, 015) clearly marked with reasons
 - [x] No TODO/FIXME/stub in production code
