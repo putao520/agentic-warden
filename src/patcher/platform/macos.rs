@@ -23,37 +23,44 @@ const VM_PROT_WRITE: i32 = 2;
 const VM_PROT_EXECUTE: i32 = 4;
 
 /// Mach API 错误码转人类可读消息
+///
+/// 静态数组查表实现：避免大 `match` 的 arm 被计入圈复杂度（每个 arm 算 1 分），
+/// 改用线性扫描数组把 CC 降到 ~3，语义等价（27 个错误码映射完整保留）。
 fn mach_error_string(code: kern_return_t) -> &'static str {
-    match code {
-        1 => "KERN_INVALID_ADDRESS - Invalid address",
-        2 => "KERN_PROTECTION_FAILURE - Protection failure",
-        3 => "KERN_NO_SPACE - No space available",
-        4 => "KERN_INVALID_ARGUMENT - Invalid argument",
-        5 => "KERN_FAILURE - Failure",
-        6 => "KERN_RESOURCE_SHORTAGE - Resource shortage",
-        8 => "KERN_MEMORY_ERROR - Memory error",
-        9 => "KERN_MEMORY_FAILURE - Memory failure",
-        10 => "KERN_NOT_RECEIVER - Not receiver",
-        11 => "KERN_NO_ACCESS - No access",
-        12 => "KERN_FAILURE - Failure",
-        13 => "KERN_MEMORY_FAILURE - Memory failure",
-        14 => "KERN_ALREADY_IN_SET - Already in set",
-        15 => "KERN_NOT_IN_SET - Not in set",
-        16 => "KERN_NAME_EXISTS - Name exists",
-        17 => "KERN_ABORTED - Aborted",
-        18 => "KERN_INVALID_NAME - Invalid name",
-        19 => "KERN_INVALID_TASK - Invalid task",
-        20 => "KERN_INVALID_RIGHT - Invalid right",
-        21 => "KERN_INVALID_VALUE - Invalid value",
-        22 => "KERN_UREFS_OVERFLOW - Urefs overflow",
-        23 => "KERN_INVALID_CAPABILITY - Invalid capability",
-        24 => "KERN_RIGHT_EXISTS - Right exists",
-        25 => "KERN_INVALID_HOST - Invalid host",
-        26 => "KERN_MEMORY_PRESENT - Memory present",
-        27 => "KERN_MEMORY_DATA_MOVED - Memory data moved",
-        28 => "KERN_NOT_SUPPORTED - Not supported",
-        _ => "Unknown mach error",
-    }
+    const TABLE: [(kern_return_t, &str); 27] = [
+        (1, "KERN_INVALID_ADDRESS - Invalid address"),
+        (2, "KERN_PROTECTION_FAILURE - Protection failure"),
+        (3, "KERN_NO_SPACE - No space available"),
+        (4, "KERN_INVALID_ARGUMENT - Invalid argument"),
+        (5, "KERN_FAILURE - Failure"),
+        (6, "KERN_RESOURCE_SHORTAGE - Resource shortage"),
+        (8, "KERN_MEMORY_ERROR - Memory error"),
+        (9, "KERN_MEMORY_FAILURE - Memory failure"),
+        (10, "KERN_NOT_RECEIVER - Not receiver"),
+        (11, "KERN_NO_ACCESS - No access"),
+        (12, "KERN_FAILURE - Failure"),
+        (13, "KERN_MEMORY_FAILURE - Memory failure"),
+        (14, "KERN_ALREADY_IN_SET - Already in set"),
+        (15, "KERN_NOT_IN_SET - Not in set"),
+        (16, "KERN_NAME_EXISTS - Name exists"),
+        (17, "KERN_ABORTED - Aborted"),
+        (18, "KERN_INVALID_NAME - Invalid name"),
+        (19, "KERN_INVALID_TASK - Invalid task"),
+        (20, "KERN_INVALID_RIGHT - Invalid right"),
+        (21, "KERN_INVALID_VALUE - Invalid value"),
+        (22, "KERN_UREFS_OVERFLOW - Urefs overflow"),
+        (23, "KERN_INVALID_CAPABILITY - Invalid capability"),
+        (24, "KERN_RIGHT_EXISTS - Right exists"),
+        (25, "KERN_INVALID_HOST - Invalid host"),
+        (26, "KERN_MEMORY_PRESENT - Memory present"),
+        (27, "KERN_MEMORY_DATA_MOVED - Memory data moved"),
+        (28, "KERN_NOT_SUPPORTED - Not supported"),
+    ];
+    TABLE
+        .iter()
+        .find(|(c, _)| *c == code)
+        .map(|(_, s)| *s)
+        .unwrap_or("Unknown mach error")
 }
 
 // FFI 绑定到 mach 函数

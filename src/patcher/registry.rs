@@ -137,10 +137,17 @@ pub fn get_antitelemetry_patches() -> Vec<UnifiedPatchPattern> {
 /// 跨版本验证（195-198）：逃生口 55 字节各 1 处，时区 48 字节各 2 处。
 /// 等长替换铁律：A=55→55，B=48→48。
 pub fn get_antispy_patches() -> Vec<UnifiedPatchPattern> {
-    // patch A: 逃生口短路（regex 字面量模式）
-    // search (regex): `if(<OBJ>._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0`
-    //   <OBJ> 跨版本变化（Oe/Pe/...），用 [a-zA-Z_$][a-zA-Z0-9_$]* 通配
-    // replace (字面量, 55B): `if(1)` + 50 空格
+    let mut patches = get_escape_hatch_patches();
+    patches.extend(get_timezone_patches());
+    patches
+}
+
+/// 逃生口短路 patch（File + Memory，regex 字面量模式）
+///
+/// search (regex): `if(<OBJ>._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0`
+///   `<OBJ>` 跨版本变化（Oe/Pe/...），用 `[a-zA-Z_$][a-zA-Z0-9_$]*` 通配
+/// replace (字面量, 55B): `if(1)` + 50 空格
+fn get_escape_hatch_patches() -> Vec<UnifiedPatchPattern> {
     let escape_search: Cow<'static, [u8]> = Cow::Borrowed(
         br"if\([a-zA-Z_$][a-zA-Z0-9_$]*\._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL\)return!0"
             .as_ref(),
@@ -152,22 +159,7 @@ pub fn get_antispy_patches() -> Vec<UnifiedPatchPattern> {
     debug_assert_eq!(escape_replace_vec.len(), 55, "escape patch replace must be 55 bytes");
     let escape_replace: Cow<'static, [u8]> = Cow::Owned(escape_replace_vec);
 
-    // patch B: KIt() → UTC（时区失明，字面量模式）
-    // search: `Intl.DateTimeFormat().resolvedOptions().timeZone` (48 字节)
-    // replace: `"UTC"/*` + 39 个 `.` + `*/` (48 字节，注释填充，JS 合法)
-    let tz_search = b"Intl.DateTimeFormat().resolvedOptions().timeZone";
-    let mut tz_replace_full = Vec::with_capacity(48);
-    tz_replace_full.extend_from_slice(b"\"UTC\"/*");
-    tz_replace_full.extend(std::iter::repeat_n(b'.', 39));
-    tz_replace_full.extend_from_slice(b"*/");
-    assert_eq!(
-        tz_search.len(),
-        tz_replace_full.len(),
-        "timezone patch must be equal length"
-    );
-
     vec![
-        // patch A: 逃生口短路（File + Memory，regex 字面量模式）
         UnifiedPatchPattern {
             feature: FeatureType::AntiSpy,
             patch_type: PatchType::File,
@@ -194,7 +186,26 @@ pub fn get_antispy_patches() -> Vec<UnifiedPatchPattern> {
             use_regex: true,
             regex_replace_values: None,
         },
-        // patch B: KIt() → UTC（File + Memory，字面量模式）
+    ]
+}
+
+/// 时区失明 patch（File + Memory，字面量模式）
+///
+/// search: `Intl.DateTimeFormat().resolvedOptions().timeZone` (48 字节)
+/// replace: `"UTC"/*` + 39 个 `.` + `*/` (48 字节，注释填充，JS 合法)
+fn get_timezone_patches() -> Vec<UnifiedPatchPattern> {
+    let tz_search = b"Intl.DateTimeFormat().resolvedOptions().timeZone";
+    let mut tz_replace_full = Vec::with_capacity(48);
+    tz_replace_full.extend_from_slice(b"\"UTC\"/*");
+    tz_replace_full.extend(std::iter::repeat_n(b'.', 39));
+    tz_replace_full.extend_from_slice(b"*/");
+    assert_eq!(
+        tz_search.len(),
+        tz_replace_full.len(),
+        "timezone patch must be equal length"
+    );
+
+    vec![
         UnifiedPatchPattern {
             feature: FeatureType::AntiSpy,
             patch_type: PatchType::File,

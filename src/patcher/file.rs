@@ -48,7 +48,7 @@ fn apply_regex_replace(matched: &[u8], replace_values: &[u32]) -> Vec<u8> {
 /// NativeBinary 补丁前自动备份（仅首次，且仅对二进制文件）。
 /// 非二进制文件无备份动作。
 fn ensure_binary_backup(file_path: &Path) -> Result<()> {
-    let backup_path = PathBuf::from(format!("{}.aiw-backup", file_path.display()));
+    let backup_path = backup_path_for(file_path);
     if !backup_path.exists() && is_binary_file(file_path) {
         fs::copy(file_path, &backup_path).map_err(|e| {
             UnifiedPatchError::FileError(std::io::Error::new(
@@ -58,6 +58,14 @@ fn ensure_binary_backup(file_path: &Path) -> Result<()> {
         })?;
     }
     Ok(())
+}
+
+/// 备份路径 SSOT：`<file>.aiw-backup`。
+///
+/// 统一备份路径格式，消除 `ensure_binary_backup` 与 `restore_from_backup`
+/// 各自拼接 `format!("{}.aiw-backup", ...)` 的重复。
+fn backup_path_for(file_path: &Path) -> PathBuf {
+    PathBuf::from(format!("{}.aiw-backup", file_path.display()))
 }
 
 /// 在 `content` 中收集 `search` 的所有起始偏移（无重叠）。
@@ -77,6 +85,14 @@ fn find_all_literal_positions(content: &[u8], search: &[u8]) -> Vec<usize> {
         }
     }
     positions
+}
+
+/// 构造「文件已补丁」结果（统一返回值构造，消除 `apply_file_patch` 与
+/// `apply_regex_file_patch` 重复构造 `UnifiedPatchResult::FilePatched`）。
+fn file_patched_result(file_path: &Path) -> UnifiedPatchResult {
+    UnifiedPatchResult::FilePatched {
+        path: file_path.display().to_string(),
+    }
 }
 
 /// 用 `replace`（整段覆盖）从后往前替换 `positions` 处的匹配，等长替换。
@@ -152,9 +168,7 @@ pub fn apply_file_patch(
 
     write_back(file_path, &patched_content)?;
 
-    Ok(UnifiedPatchResult::FilePatched {
-        path: file_path.display().to_string(),
-    })
+    Ok(file_patched_result(file_path))
 }
 
 /// regex 字面量替换模式：用 `replace_pattern` 整段覆盖每个匹配文本（要求等长）。
@@ -236,9 +250,7 @@ fn apply_regex_file_patch(
 
     write_back(file_path, &new_content)?;
 
-    Ok(UnifiedPatchResult::FilePatched {
-        path: file_path.display().to_string(),
-    })
+    Ok(file_patched_result(file_path))
 }
 
 /// 写回文件（对二进制文件使用 rename 策略避免 "Text file busy"）
@@ -328,37 +340,26 @@ pub fn get_claude_cli_path() -> Result<std::path::PathBuf> {
 /// 检测 Claude CLI 安装类型
 pub fn detect_installation() -> Result<InstallationType> {
     let claude_path = get_claude_cli_path()?;
-    
+
     // 解析符号链接
     let real_path = fs::canonicalize(&claude_path).unwrap_or(claude_path.clone());
-    
+
     // 读取文件头 4 字节判断类型
     let header = fs::read(&real_path)
         .map(|data| data.iter().take(4).copied().collect::<Vec<u8>>())
         .unwrap_or_default();
-    
+
     if header.len() < 4 {
         return Ok(InstallationType::Unknown);
     }
-    
-    match &header[..4] {
-        // ELF magic: 0x7f 'E' 'L' 'F'
-        [0x7f, 0x45, 0x4c, 0x46] => {
-            Ok(InstallationType::NativeBinary { binary_path: real_path })
-        }
-        // Mach-O magic (32-bit and 64-bit, both endianness)
-        [0xfe, 0xed, 0xfa, 0xce] | [0xfe, 0xed, 0xfa, 0xcf] |
-        [0xce, 0xfa, 0xed, 0xfe] | [0xcf, 0xfa, 0xed, 0xfe] => {
-            Ok(InstallationType::NativeBinary { binary_path: real_path })
-        }
-        // Shebang (#!) — npm shell 脚本
-        [0x23, 0x21, ..] => {
-            match parse_npm_js_path(&real_path) {
-                Ok(js_path) => Ok(InstallationType::Npm { js_path }),
-                Err(_) => Ok(InstallationType::Unknown),
-            }
-        }
-        _ => Ok(InstallationType::Unknown),
+
+    match classify_magic_bytes(&header) {
+        MagicKind::NativeBinary => Ok(InstallationType::NativeBinary { binary_path: real_path }),
+        MagicKind::Shebang => match parse_npm_js_path(&real_path) {
+            Ok(js_path) => Ok(InstallationType::Npm { js_path }),
+            Err(_) => Ok(InstallationType::Unknown),
+        },
+        MagicKind::Unknown => Ok(InstallationType::Unknown),
     }
 }
 
@@ -417,23 +418,51 @@ pub fn is_npm_installation() -> Result<bool> {
     }
 }
 
+/// 文件头 4 字节 magic 分类（统一 magic bytes SSOT，消除 `detect_installation`
+/// 与 `is_binary_file` 的重复匹配）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MagicKind {
+    /// ELF / Mach-O 原生二进制
+    NativeBinary,
+    /// `#!` shebang（npm shell 脚本）
+    Shebang,
+    /// 未知 / 无法识别
+    Unknown,
+}
+
+/// 按 magic bytes 前 4 字节分类文件类型。
+///
+/// - ELF: `7f 45 4c 46`
+/// - Mach-O: `fe ed fa ce/cf` 及小端反转 `ce/cf fa ed fe`
+/// - Shebang: `23 21` (`#!`)
+fn classify_magic_bytes(header: &[u8]) -> MagicKind {
+    if header.len() < 4 {
+        return MagicKind::Unknown;
+    }
+    match &header[..4] {
+        // ELF magic: 0x7f 'E' 'L' 'F'
+        [0x7f, 0x45, 0x4c, 0x46] => MagicKind::NativeBinary,
+        // Mach-O magic (32-bit and 64-bit, both endianness)
+        [0xfe, 0xed, 0xfa, 0xce]
+        | [0xfe, 0xed, 0xfa, 0xcf]
+        | [0xce, 0xfa, 0xed, 0xfe]
+        | [0xcf, 0xfa, 0xed, 0xfe] => MagicKind::NativeBinary,
+        // Shebang (#!) — npm shell 脚本
+        [0x23, 0x21, ..] => MagicKind::Shebang,
+        _ => MagicKind::Unknown,
+    }
+}
+
 /// 检测文件是否为二进制文件（通过 magic bytes）
 fn is_binary_file(path: &Path) -> bool {
     fs::read(path)
-        .map(|data| {
-            if data.len() < 4 { return false; }
-            matches!(&data[..4],
-                [0x7f, 0x45, 0x4c, 0x46] |  // ELF
-                [0xfe, 0xed, 0xfa, 0xce] | [0xfe, 0xed, 0xfa, 0xcf] |  // Mach-O
-                [0xce, 0xfa, 0xed, 0xfe] | [0xcf, 0xfa, 0xed, 0xfe]    // Mach-O reversed
-            )
-        })
+        .map(|data| classify_magic_bytes(&data) == MagicKind::NativeBinary)
         .unwrap_or(false)
 }
 
 /// 从备份恢复文件
 pub fn restore_from_backup(file_path: &Path) -> Result<()> {
-    let backup_path = PathBuf::from(format!("{}.aiw-backup", file_path.display()));
+    let backup_path = backup_path_for(file_path);
     if !backup_path.exists() {
         return Err(UnifiedPatchError::FileError(
             std::io::Error::new(
