@@ -4,7 +4,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.5.88-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.5.99-blue?style=flat-square)
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange?style=flat-square&logo=rust)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 
@@ -89,45 +89,49 @@ aiw auto -p auto "implement feature"  # Auto CLI + auto provider
 
 ### Patch Management (File & Runtime)
 
-AIW supports both persistent file patches and runtime memory patches to unlock Claude features:
+AIW supports both persistent file patches and runtime memory patches for Claude Code, including **anti-spy / anti-telemetry** patches that blind CC's local environment detection and cut off client reporting to Anthropic.
 
 ```bash
 # View patch status
 aiw patch status
 
-# Apply file patches (persistent, recommended)
-aiw patch apply
+# Apply all patches (one-shot, recommended)
+aiw patch apply --max-context-tokens 500000
 
-# Restore patches
+# Restore original binary from backup
 aiw patch restore
 ```
 
 **Patch Types**:
-- **File Patch**: Modifies the Claude CLI binary on disk (persistent across restarts)
-- **Memory Patch**: Applied at runtime when file is unpatched (automatic)
+- **File Patch**: Modifies the Claude CLI binary on disk (persistent across restarts, auto-backup to `.aiw-backup`)
+- **Memory Patch**: Applied at runtime when file is unpatched (automatic, best-effort)
 
 **Supported Installations**:
-- Native binary (ELF/Mach-O): `~/.local/bin/claude`
+- Native binary (ELF/Mach-O): `~/.local/share/claude/versions/<version>`
 - npm installation: `npm install -g @anthropic-ai/claude-code`
 
-**Supported Versions**:
+**Supported Versions** (cross-version via semantic regex / stable literals):
 
-| Version | Linux | macOS | Windows |
-|---------|-------|-------|---------|
-| 2.1.72 | ✅ | ✅ | ✅ |
-| 2.1.73 | ✅ | ✅ | ✅ |
-| 2.1.74 | ✅ | ✅ | ✅ |
-| 2.1.75 | ✅ | ✅ | ✅ |
-| 2.1.76 | ✅ | ✅ | ✅ |
-| 2.1.77 | ✅ | ✅ | ❌ |
-| 2.1.78 | ✅ | ✅ | ❌ |
+| Version | Linux x64 | macOS arm64 | Windows x64 |
+|---------|-----------|-------------|-------------|
+| 2.1.195 | ✅ | ✅ | ✅ |
+| 2.1.196 | ✅ | ✅ | ✅ |
+| 2.1.197 | ✅ | ✅ | ✅ |
+| 2.1.198 | ✅ | ✅ | ✅ |
 
-Run `aiw patch status` to check if your version is supported.
+Run `aiw patch status` to check if your version is supported. Patches use **semantic regex** (wildcarding minified variable names like `Oe`/`Pe`, `g7`/`F7`/`j7`/`dX`) and **stable literals** (API paths, env var names), so they work across versions without a per-version signature database.
 
-**What Gets Unlocked**:
-- ToolSearch (web search functionality)
-- UltraThink (extended thinking modes)
-- WebSearch (region restrictions bypassed)
+**Five Patch Layers** (anti-spy + capability unlock):
+
+| Patch | What it does | Mechanism |
+|-------|--------------|-----------|
+| **MaxContextTokens** | Unlocks default context window + autoCompact threshold (200000 → configurable, e.g. 500000) | Regex `var \w+=200000,\w+=200000[^;]*;` (tolerates 4/5/6-element blocks) |
+| **AntiTelemetry** | Cuts off CC client reporting (`/api/event_logging/v2/batch` → 404), machineID/userID/device fingerprint never sent | Literal `batch`→`xxxxx` (27B equal-length) |
+| **AntiSpy (escape hatch)** | Patches `_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL` check so `fu()` always returns true — one-shot silences 30+ call sites: relay-station identity reporting (`custom_base_url` flag), attribution header discrimination (`cch=00000`), tool-set filtering, ToolSearch gating, model-override gating | Semantic regex `if(\w+._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0` → `if(1)` (55B equal-length) |
+| **AntiSpy (timezone)** | Blinds timezone detection — `Intl.DateTimeFormat().resolvedOptions().timeZone` always returns `UTC`, real timezone never leaks | Literal → `"UTC"/*...*/` (48B equal-length) |
+| **AntiPromptBias** | Eliminates Provider context prompt bias injected to 3rd-party users (`if(dX())n.push("**Provider context:**...")` → `if(0)`) | Semantic regex `if(\w+())` wildcards `g7`/`F7`/`j7`/`dX` (63B equal-length) |
+
+> **Design note**: The escape-hatch patch is based on CC's official escape-hatch env var `_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL` (parsed by `st()` as truthy for `1`/`true`/`yes`/`on`). Patching the check itself (instead of injecting the env var) makes it permanent and covers more call sites. CC v2.1.198 removed the exposed `Hsp()` explicit probe (Asia/Shanghai timezone + base64 host list); identification fell back to `Cot()`/`fu()` host comparison, which the escape-hatch patch neutralizes.
 
 ### Auto Mode (Automatic Failover)
 
@@ -227,32 +231,43 @@ aiw pwait <PID>
 
 ## Patch Management
 
-AIW includes a unified patching framework that unlocks features restricted to official API usage, making them available with third-party providers.
+AIW includes a unified patching framework with **five anti-spy / capability-unlock patches** for Claude Code. All patches are cross-version stable (195-198) via semantic regex and stable literals — no per-version signature database needed.
 
 ### Available Patches
 
-| Feature | Description | Unlock Method |
-|---------|-------------|---------------|
-| **ToolSearch** | Tool search functionality | File + Memory patch |
-| **UltraThink** | Extended thinking mode | File + Memory patch |
-| **WebSearch** | Region restriction bypass | File + Memory patch |
+| Patch | Description | Scope |
+|-------|-------------|-------|
+| **MaxContextTokens** | Configurable default context window + autoCompact threshold (default 500000) | File + Memory |
+| **AntiTelemetry** | Cuts off client reporting (`event_logging` endpoint → 404), fingerprint never sent | File + Memory |
+| **AntiSpy** | Blinds local detection: escape-hatch short-circuit (`fu()`→true) + timezone→UTC | File + Memory |
+| **AntiPromptBias** | Eliminates Provider context prompt bias for 3rd-party users | File + Memory |
 
 ### Patch Commands
 
 ```bash
-# List all available patches
-aiw patch list
-
 # Show patch status
 aiw patch status
 
-# Apply file patches (for npm installations)
-aiw patch apply toolsearch
-aiw patch apply all
+# Apply all patches in one shot (recommended)
+aiw patch apply --max-context-tokens 500000
 
-# Restore patches
+# Apply individual patches
+aiw patch set-max-tokens 500000        # max-token only
+aiw patch disable-telemetry            # anti-telemetry only
+aiw patch disable-spy                  # anti-spy only (escape-hatch + timezone)
+aiw patch disable-prompt-bias          # anti-prompt-bias only
+
+# Restore original binary from backup
 aiw patch restore
 ```
+
+### Cross-Version Stability
+
+Patches use two mechanisms to stay stable across CC versions (2.1.195-198):
+- **Semantic regex**: wildcard minified variable names (`Oe`/`Pe` config object, `g7`/`F7`/`j7`/`dX` condition function)
+- **Stable literals**: API paths (`/api/event_logging/v2/batch`), env var names (`_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL`), `Intl.DateTimeFormat().resolvedOptions().timeZone`
+
+All patches follow the **equal-length replacement iron law** (byte-level equal length, no offset shifting). See `SPEC/01-REQUIREMENTS.md` REQ-025~028 and `SPEC/CC-PROMPT-AUDIT.md` for full technical details.
 
 ## Update
 
