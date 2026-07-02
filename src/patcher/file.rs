@@ -127,7 +127,13 @@ pub fn apply_file_patch(
     })
 }
 
-/// regex 模式的文件补丁：扫描所有匹配，按 regex_replace_values 替换其中的数字
+/// regex 模式的文件补丁
+///
+/// 两种子模式（见 `UnifiedPatchPattern.replace_pattern` 文档）：
+/// - `replace_pattern=None`：regex 数字替换模式，扫描所有匹配，按
+///   `regex_replace_values` 替换其中的 200000 数字字面量（等长 6 位）。
+/// - `replace_pattern=Some`：regex 字面量替换模式，regex 匹配后用
+///   `replace_pattern` 整段覆盖匹配文本（要求等长，跨版本 patch 点用）。
 fn apply_regex_file_patch(
     file_path: &Path,
     content: &[u8],
@@ -137,8 +143,6 @@ fn apply_regex_file_patch(
         .map_err(|e| UnifiedPatchError::Other(format!("invalid regex utf-8: {}", e)))?;
     let re = regex::bytes::Regex::new(regex_str)
         .map_err(|e| UnifiedPatchError::Other(format!("invalid regex: {}", e)))?;
-
-    let replace_values = pattern.regex_replace_values.clone().unwrap_or_default();
 
     // 收集所有匹配（从后往前应用以保持偏移稳定）
     let matches: Vec<_> = re.find_iter(content).collect();
@@ -150,16 +154,34 @@ fn apply_regex_file_patch(
     }
 
     let mut new_content = content.to_vec();
-    for m in matches.iter().rev() {
-        let matched_bytes = &content[m.start()..m.end()];
-        let replaced = apply_regex_replace(matched_bytes, &replace_values);
-        // 等长替换（regex 只替换 200000→6位数，长度不变）
-        let span_len = m.end() - m.start();
-        if replaced.len() == span_len {
-            new_content[m.start()..m.end()].copy_from_slice(&replaced);
-        } else {
-            // 长度不一致（理论上不应发生），用 splice 兜底
-            new_content.splice(m.start()..m.end(), replaced);
+
+    if let Some(replace) = pattern.replace_pattern.as_ref() {
+        // regex 字面量替换模式：用 replace_pattern 整段覆盖匹配文本（等长）
+        for m in matches.iter().rev() {
+            let span_len = m.end() - m.start();
+            if replace.len() != span_len {
+                return Err(UnifiedPatchError::Other(format!(
+                    "regex literal patch must be equal length: match={}, replace={}",
+                    span_len,
+                    replace.len()
+                )));
+            }
+            new_content[m.start()..m.end()].copy_from_slice(replace);
+        }
+    } else {
+        // regex 数字替换模式：按 regex_replace_values 替换 200000
+        let replace_values = pattern.regex_replace_values.clone().unwrap_or_default();
+        for m in matches.iter().rev() {
+            let matched_bytes = &content[m.start()..m.end()];
+            let replaced = apply_regex_replace(matched_bytes, &replace_values);
+            // 等长替换（regex 只替换 200000→6位数，长度不变）
+            let span_len = m.end() - m.start();
+            if replaced.len() == span_len {
+                new_content[m.start()..m.end()].copy_from_slice(&replaced);
+            } else {
+                // 长度不一致（理论上不应发生），用 splice 兜底
+                new_content.splice(m.start()..m.end(), replaced);
+            }
         }
     }
 
@@ -206,17 +228,28 @@ pub fn is_file_patched(
     Ok(!has_original)
 }
 
-/// regex 模式下的「已补丁」判定：匹配到的文本里是否还有 200000
+/// regex 模式下的「已补丁」判定
 ///
-/// 未补丁 = 匹配文本包含 200000；已补丁 = 匹配文本不含 200000
-/// （替换后变成 500000 等其他 6 位数）。
+/// 两种子模式：
+/// - `replace_pattern=Some`（regex 字面量替换模式）：匹配到的文本等于
+///   `replace_pattern` 则已补丁，否则未补丁。
+/// - `replace_pattern=None`（regex 数字替换模式）：匹配到的文本里是否还有
+///   200000。未补丁 = 含 200000；已补丁 = 不含 200000（替换后变成 500000 等）。
 fn is_file_patched_regex(content: &[u8], pattern: &UnifiedPatchPattern) -> Result<bool> {
     let regex_str = std::str::from_utf8(pattern.search_pattern.as_ref())
         .map_err(|e| UnifiedPatchError::Other(format!("invalid regex utf-8: {}", e)))?;
     let re = regex::bytes::Regex::new(regex_str)
         .map_err(|e| UnifiedPatchError::Other(format!("invalid regex: {}", e)))?;
 
-    // 未补丁的匹配：仍含 200000
+    if let Some(replace) = pattern.replace_pattern.as_ref() {
+        // regex 字面量替换模式：所有匹配都等于 replace_pattern 才算已补丁
+        let has_unpatched = re
+            .find_iter(content)
+            .any(|m| m.as_bytes() != replace.as_ref());
+        return Ok(!has_unpatched);
+    }
+
+    // regex 数字替换模式：未补丁的匹配仍含 200000
     let has_unpatched = re
         .find_iter(content)
         .any(|m| m.as_bytes().windows(6).any(|w| w == b"200000"));
@@ -437,5 +470,99 @@ mod tests {
         };
         let patches = crate::patcher::registry::get_max_context_tokens_patches(&v, 500000, 500000);
         assert_eq!(patches.len(), 2);
+    }
+
+    #[test]
+    fn test_apply_regex_file_patch_literal_replace() {
+        // regex 字面量替换模式（use_regex=true + replace_pattern=Some）：
+        // 用 AntiPromptBias 的 pattern 验证 apply_file_patch + is_file_patched
+        let tmp = std::env::temp_dir().join("aiw_regex_literal_patch_test.bin");
+        // 198 样本：if(dX())n.push("**Provider context:** This session is not using
+        let original: Vec<u8> = [
+            &b"...prefix..."[..],
+            br#"if(dX())n.push("**Provider context:** This session is not using 3P."#,
+            &b"...suffix..."[..],
+        ]
+        .concat();
+        std::fs::write(&tmp, &original).unwrap();
+
+        let pattern = UnifiedPatchPattern {
+            feature: crate::patcher::types::FeatureType::AntiPromptBias,
+            patch_type: PatchType::File,
+            search_pattern: Cow::Borrowed(
+                br#"if\([a-zA-Z_$][a-zA-Z0-9_$]*\(\)\)n\.push\("\*\*Provider context:\*\* This session is not using"#,
+            ),
+            replace_pattern: Some(Cow::Borrowed(
+                br#"if(0   )n.push("**Provider context:** This session is not using"#,
+            )),
+            patch_byte: None,
+            patch_offset: None,
+            description: Cow::Borrowed("test regex literal replace"),
+            use_regex: true,
+            regex_replace_values: None,
+        };
+
+        // 未补丁前：is_file_patched 返回 false
+        assert!(!is_file_patched(&tmp, &pattern).unwrap());
+
+        let res = apply_file_patch(&tmp, &pattern);
+        assert!(res.is_ok(), "{:?}", res);
+
+        let patched = std::fs::read(&tmp).unwrap();
+        // 等长：总长度不变（63B → 63B）
+        assert_eq!(patched.len(), original.len());
+        // 已替换为 if(0   )
+        assert!(String::from_utf8_lossy(&patched).contains("if(0   )n.push"));
+        // 原 if(dX()) 已不存在
+        assert!(!String::from_utf8_lossy(&patched).contains("if(dX())"));
+
+        // 已补丁判定：true
+        assert!(is_file_patched(&tmp, &pattern).unwrap());
+
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn test_apply_regex_file_patch_literal_replace_antispy_escape() {
+        // 逃生口 patch regex 字面量替换：if(Oe.xxx)return!0 → if(1) + 50空格
+        let tmp = std::env::temp_dir().join("aiw_regex_escape_patch_test.bin");
+        let original: Vec<u8> = [
+            &b"function isFp(){"[..],
+            &b"if(Oe._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0"[..],
+            &b";return!1}"[..],
+        ]
+        .concat();
+        std::fs::write(&tmp, &original).unwrap();
+
+        let pattern = UnifiedPatchPattern {
+            feature: crate::patcher::types::FeatureType::AntiSpy,
+            patch_type: PatchType::File,
+            search_pattern: Cow::Borrowed(
+                br"if\([a-zA-Z_$][a-zA-Z0-9_$]*\._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL\)return!0",
+            ),
+            replace_pattern: Some({
+                let mut v = Vec::with_capacity(55);
+                v.extend_from_slice(b"if(1)");
+                v.extend(std::iter::repeat_n(b' ', 50));
+                Cow::Owned(v)
+            }),
+            patch_byte: None,
+            patch_offset: None,
+            description: Cow::Borrowed("test escape hatch"),
+            use_regex: true,
+            regex_replace_values: None,
+        };
+
+        assert!(!is_file_patched(&tmp, &pattern).unwrap());
+        let res = apply_file_patch(&tmp, &pattern);
+        assert!(res.is_ok(), "{:?}", res);
+
+        let patched = std::fs::read(&tmp).unwrap();
+        assert_eq!(patched.len(), original.len(), "equal length 55->55");
+        assert!(String::from_utf8_lossy(&patched).contains("if(1)"));
+        assert!(!String::from_utf8_lossy(&patched).contains("if(Oe._CLAUDE_CODE"));
+        assert!(is_file_patched(&tmp, &pattern).unwrap());
+
+        let _ = std::fs::remove_file(&tmp);
     }
 }

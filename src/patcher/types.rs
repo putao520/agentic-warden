@@ -88,8 +88,17 @@ pub struct UnifiedPatchPattern {
     pub search_pattern: Cow<'static, [u8]>,
     /// 替换模式（用于文件补丁）
     ///
-    /// 当 `use_regex=true` 时为 None，替换值由 `regex_replace_values`
-    /// 在运行时动态构造（按顺序替换匹配文本里的数字字面量）。
+    /// 两种使用方式：
+    /// - **字面量模式**（`use_regex=false`）：`search_pattern` 是字面量字节，
+    ///   `replace_pattern` 是等长的字面量替换字节，整段覆盖。
+    /// - **regex 字面量替换模式**（`use_regex=true` 且 `replace_pattern=Some`）：
+    ///   `search_pattern` 是 regex 字符串，匹配后用 `replace_pattern` 整段
+    ///   覆盖匹配文本（要求 regex 匹配长度 == `replace_pattern.len()`，等长）。
+    ///   用于跨版本 patch 点（minified 变量名变化但匹配文本长度固定，
+    ///   如 `if(Oe.xxx)return!0` / `if(Pe.xxx)return!0` 都 55 字节）。
+    /// - **regex 数字替换模式**（`use_regex=true` 且 `replace_pattern=None`）：
+    ///   匹配后由 `regex_replace_values` 在运行时动态构造替换值（按顺序
+    ///   替换匹配文本里的数字字面量）。用于 max-token 的 200000→目标值替换。
     pub replace_pattern: Option<Cow<'static, [u8]>>,
     /// 内存补丁：单个字节替换
     pub patch_byte: Option<u8>,
@@ -99,15 +108,19 @@ pub struct UnifiedPatchPattern {
     pub description: Cow<'static, str>,
     /// 是否将 search_pattern 作为 regex 处理
     ///
-    /// true 时 search_pattern 作为 regex 字符串，replace_pattern 为 None，
-    /// 通过 `regex_replace_values` 顺序替换匹配文本中的数字。
+    /// 三种模式（见 `replace_pattern` 字段文档）：
+    /// - `false`：字面量模式，`replace_pattern` 必须提供（等长字面量覆盖）。
+    /// - `true` + `replace_pattern=None`：regex 数字替换模式，由
+    ///   `regex_replace_values` 顺序替换匹配文本中的数字。
+    /// - `true` + `replace_pattern=Some`：regex 字面量替换模式，regex 匹配后
+    ///   用 `replace_pattern` 整段覆盖（等长，跨版本 patch 点用）。
     pub use_regex: bool,
     /// regex 模式下的顺序替换值
     ///
     /// 例如匹配到 `var X=200000,Y=200000,...` 后，
     /// `regex_replace_values=Some(vec![500000, 500000])` 会把
     /// 第一个 200000 替换为 500000，第二个 200000 替换为 500000。
-    /// 仅在 `use_regex=true` 时生效。
+    /// 仅在 `use_regex=true` 且 `replace_pattern=None` 时生效。
     pub regex_replace_values: Option<Vec<u32>>,
 }
 

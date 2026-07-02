@@ -251,6 +251,96 @@ impl RuntimePatcher {
         })
     }
 
+    /// 应用 regex 字面量内存 patch（regex 匹配 → replace_pattern 整段覆盖）
+    ///
+    /// 用于跨版本 patch 点（minified 变量名变化但匹配文本长度固定）：
+    /// `search_pattern` 是 regex 字符串，编译后扫描可读内存区域，找到匹配后
+    /// 用 `replace_pattern` 整段 `write_memory` 覆盖。要求 regex 匹配长度
+    /// == `replace_pattern.len()`（等长，避免破坏二进制偏移）。命中首个匹配
+    /// 即返回地址。
+    ///
+    /// 区域扫描复用 `apply_max_context_tokens_patch` 的 64MB 上限策略：
+    /// 对每个可读区域一次性读入（上限 64MB）后用 regex 整体扫描，pattern
+    /// 跨 16MB 块边界也能命中。
+    ///
+    /// # 参数
+    /// - `pattern`: 补丁模式（`use_regex=true`，必须提供等长的 `replace_pattern`）
+    ///
+    /// # 返回
+    /// 成功时返回写入的起始地址，失败返回错误（`PatternNotFound` 由上层静默处理）
+    pub fn apply_regex_literal_memory_patch(
+        &self,
+        pattern: &crate::patcher::types::UnifiedPatchPattern,
+    ) -> PatchResult<usize> {
+        if !self.process_exists() {
+            return Err(PatchError::ProcessNotFound { pid: 0 });
+        }
+
+        let regex_str = std::str::from_utf8(pattern.search_pattern.as_ref())
+            .map_err(|e| PatchError::PatternNotFound {
+                pattern: format!("invalid regex utf-8: {}", e),
+                hint: None,
+            })?;
+        let re = regex::bytes::Regex::new(regex_str).map_err(|e| PatchError::PatternNotFound {
+            pattern: format!("invalid regex: {}", e),
+            hint: None,
+        })?;
+
+        let replace = pattern.replace_pattern.as_ref().ok_or_else(|| {
+            PatchError::PatternNotFound {
+                pattern: "replace_pattern required for regex literal memory patch"
+                    .to_string(),
+                hint: None,
+            }
+        })?;
+
+        let regions = self.inner.read_memory_maps()?;
+        let readable_regions: Vec<_> = regions.iter().filter(|r| r.is_readable).collect();
+
+        // 单区域上限 64MB，避免无界分配；regex 一次性扫描整区域以支持跨块匹配
+        const MAX_REGION_SCAN: usize = 64 * 1024 * 1024;
+
+        for region in &readable_regions {
+            let region_size = region.end.saturating_sub(region.start);
+            if region_size < regex_str.len() {
+                continue;
+            }
+            let scan_size = region_size.min(MAX_REGION_SCAN);
+            let mut buffer = vec![0u8; scan_size];
+            if self.inner.read_memory(region.start, &mut buffer).is_err() {
+                continue;
+            }
+
+            if let Some(m) = re.find(&buffer) {
+                let span_len = m.end() - m.start();
+                if replace.len() != span_len {
+                    // 长度不一致，跳过此匹配继续找（理论上 regex 匹配长度应固定）
+                    debug!(
+                        "regex literal match length {} != replace {} in region {:x}-{:x}, skip",
+                        span_len,
+                        replace.len(),
+                        region.start,
+                        region.end
+                    );
+                    continue;
+                }
+
+                let addr = region.start + m.start();
+                self.inner.write_memory(addr, replace)?;
+                debug!(
+                    "✅ regex literal memory patched @ {:#x} (match len={})",
+                    addr, span_len
+                );
+                return Ok(addr);
+            }
+        }
+
+        Err(PatchError::PatternNotFound {
+            pattern: regex_str.to_string(),
+            hint: Some("regex pattern not found in any readable region".to_string()),
+        })
+    }
+
     /// 在内存中搜索字节模式
     ///
     /// # 参数
@@ -258,8 +348,7 @@ impl RuntimePatcher {
     ///
     /// # 返回
     /// 成功时返回找到的地址，失败返回错误
-    pub fn search_pattern(&self, pattern: &[u8]) -> PatchResult<Option<usize>> {
-        if !self.process_exists() {
+    pub fn search_pattern(&self, pattern: &[u8]) -> PatchResult<Option<usize>> {        if !self.process_exists() {
             return Err(PatchError::ProcessNotFound { pid: 0 });
         }
 
@@ -376,5 +465,53 @@ mod tests {
         };
         let r = patcher.apply_literal_memory_patch(&pattern);
         assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_regex_literal_memory_patch_rejects_missing_replace() {
+        // regex 字面量内存 patch：缺 replace_pattern 应返回错误
+        use crate::patcher::types::{FeatureType, UnifiedPatchPattern};
+        use std::borrow::Cow;
+
+        let pid = std::process::id();
+        let patcher = RuntimePatcher::new(pid).unwrap();
+        let pattern = UnifiedPatchPattern {
+            feature: FeatureType::AntiSpy,
+            patch_type: crate::patcher::types::PatchType::Memory,
+            search_pattern: Cow::Borrowed(
+                br"if\([a-zA-Z_$][a-zA-Z0-9_$]*\._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL\)return!0",
+            ),
+            replace_pattern: None, // 缺 replace_pattern
+            patch_byte: None,
+            patch_offset: None,
+            description: Cow::Borrowed("test missing replace"),
+            use_regex: true,
+            regex_replace_values: None,
+        };
+        let r = patcher.apply_regex_literal_memory_patch(&pattern);
+        assert!(r.is_err(), "missing replace_pattern must error");
+    }
+
+    #[test]
+    fn test_regex_literal_memory_patch_rejects_invalid_regex() {
+        // regex 字面量内存 patch：非法 regex 应返回错误
+        use crate::patcher::types::{FeatureType, UnifiedPatchPattern};
+        use std::borrow::Cow;
+
+        let pid = std::process::id();
+        let patcher = RuntimePatcher::new(pid).unwrap();
+        let pattern = UnifiedPatchPattern {
+            feature: FeatureType::AntiSpy,
+            patch_type: crate::patcher::types::PatchType::Memory,
+            search_pattern: Cow::Borrowed(b"(unclosed["),
+            replace_pattern: Some(Cow::Borrowed(b"if(1)                                                  ")),
+            patch_byte: None,
+            patch_offset: None,
+            description: Cow::Borrowed("test invalid regex"),
+            use_regex: true,
+            regex_replace_values: None,
+        };
+        let r = patcher.apply_regex_literal_memory_patch(&pattern);
+        assert!(r.is_err(), "invalid regex must error");
     }
 }

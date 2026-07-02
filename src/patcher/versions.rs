@@ -6,17 +6,22 @@
 
 /// 通用 max-token patch 模式：变量名无关，跨版本稳定
 ///
-/// 匹配 Claude CLI 二进制中的常量块：
-/// `var <NAME>=200000,<NAME>=200000,<NAME>=20000,<NAME>=32000,<NAME>=128000;`
+/// 匹配 Claude CLI 二进制中的常量块，以前两个 `=200000` 锚定，
+/// 后续到 `;` 前任意内容（元素个数可变）：
+///
+/// - 195/196: `var X=200000,Y=200000,Z=20000,W=32000,Q=128000;`（5 元素）
+/// - 197: `var X=200000,Y=200000,Z=20000,W=32000,Q=128000,FIi;`（6 元素，末尾无值变量）
+/// - 198: `var X=200000,Y=200000,Z=32000,Q=128000;`（4 元素，无 20000）
 ///
 /// 两个 200000 分别是：
 /// - 第一个：默认 context token 上限（如 `YOt`）
 /// - 第二个：autoCompact 阈值（如 `Pte`）
 ///
 /// 变量名因 minification 跨版本可能变化，故用 `[a-zA-Z_$][a-zA-Z0-9_$]*`
-/// 通配，只匹配固定数值序列。等长替换（6 位十进制数）不破坏后续偏移。
+/// 通配。`[^;]*;` 兜底 197 的无值变量 `FIi` 和 198 的 4 元素。等长替换
+/// （6 位十进制数）只改前两个 200000，多余元素保留不动，不破坏后续偏移。
 pub const MAX_CONTEXT_TOKENS_SEARCH_REGEX: &str =
-    r"var [a-zA-Z_$][a-zA-Z0-9_$]*=200000,[a-zA-Z_$][a-zA-Z0-9_$]*=200000,[a-zA-Z_$][a-zA-Z0-9_$]*=20000,[a-zA-Z_$][a-zA-Z0-9_$]*=32000,[a-zA-Z_$][a-zA-Z0-9_$]*=128000;";
+    r"var [a-zA-Z_$][a-zA-Z0-9_$]*=200000,[a-zA-Z_$][a-zA-Z0-9_$]*=200000[^;]*;";
 
 /// 校验 max_tokens 值合法（6 位十进制数，100000~999999，保证等长替换）
 ///
@@ -125,12 +130,35 @@ mod tests {
     #[test]
     fn test_max_context_tokens_regex_matches_sample() {
         let re = regex::bytes::Regex::new(MAX_CONTEXT_TOKENS_SEARCH_REGEX).unwrap();
-        // 模拟 CC v2.1.195 的常量块
-        let sample = b"var YOt=200000,Pte=200000,Evi=20000,Wkd=32000,qkd=128000;";
-        let m = re.find(sample);
-        assert!(m.is_some(), "regex must match the sample constant block");
-        let m = m.unwrap();
-        assert_eq!(m.start(), 0);
-        assert_eq!(m.end(), sample.len());
+
+        // 4 个版本的真实常量块样本（前两个 200000 锚定，后续到 ; 前任意内容）
+        let samples: &[&[u8]] = &[
+            // 195: 5 元素
+            b"var YOt=200000,Pte=200000,Evi=20000,Wkd=32000,qkd=128000;",
+            // 196: 5 元素（变量名不同）
+            b"var uNt=200000,hne=200000,PIi=20000,$Pd=32000,OPd=128000;",
+            // 197: 6 元素，末尾 FIi 无值
+            b"var uNt=200000,yne=200000,jIi=20000,zPd=32000,KPd=128000,FIi;",
+            // 198: 4 元素，无 20000
+            b"var UBt=200000,One=200000,EFd=32000,AFd=128000;",
+        ];
+
+        for (i, sample) in samples.iter().enumerate() {
+            let m = re.find(sample);
+            assert!(m.is_some(), "regex must match version {} sample", 195 + i);
+            let m = m.unwrap();
+            assert_eq!(m.start(), 0, "version {} match must start at 0", 195 + i);
+            assert_eq!(m.end(), sample.len(), "version {} match must cover full block", 195 + i);
+        }
+
+        // 197 末尾无值变量 FIi 必须被 [^;]* 兜底命中
+        let sample_197 = b"var uNt=200000,yne=200000,jIi=20000,zPd=32000,KPd=128000,FIi;";
+        let m = re.find(sample_197).expect("197 must match");
+        assert!(m.as_bytes().ends_with(b"FIi;"));
+
+        // 198 只有 4 元素（无 20000）也必须命中
+        let sample_198 = b"var UBt=200000,One=200000,EFd=32000,AFd=128000;";
+        let m = re.find(sample_198).expect("198 must match");
+        assert!(!m.as_bytes().windows(6).any(|w| w == b"20000"));
     }
 }

@@ -120,16 +120,39 @@ pub fn get_antitelemetry_patches() -> Vec<UnifiedPatchPattern> {
 
 /// 生成 AntiSpy patch 模式
 ///
-/// 让 CC 本地识别全失明：
-/// - `KIt()` → 返回 `"UTC"`：时区永远返回 UTC，真实时区不泄露，cnTZ 永远 false
-/// - `Hsp()` → 返回 `null`：中转站识别返回 null，known/labKw/cnTZ/host 全 null
+/// 让 CC 本地识别全失明，两个 patch 各 File + Memory 共 4 个：
 ///
-/// 函数级 patch（非字符串刮花），等长字面量替换，跨版本稳定。
-/// 不碰 `$Sn()`（保留 firstParty 专属功能）。
+/// - **patch A（逃生口短路，regex 字面量模式）**：把
+///   `if(<OBJ>._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0` 改成
+///   `if(1)` + 50 空格（共 55 字节，`if(1)` 短路，50 空格填充等长）。
+///   `<OBJ>` 跨版本变化（195-197 用 `Oe`，198 用 `Pe`），故用 regex 通配
+///   `[a-zA-Z_$][a-zA-Z0-9_$]*` 匹配对象名。`_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL`
+///   是稳定字面量锚点。逃生口短路后，所有 firstParty 识别恒真，中转站/云
+///   识别全 null（不再泄露 host/known/cnTZ 等信息）。
 ///
-/// 返回文件补丁与内存补丁各两份（KIt + Hsp，共 4 个 patch）。
+/// - **patch B（时区失明，字面量模式）**：`Intl.DateTimeFormat().resolvedOptions().timeZone`
+///   （48 字节）→ `"UTC"/*` + 39 个 `.` + `*/`（48 字节注释填充）。时区永远
+///   返回 UTC，真实时区不泄露，`cnTZ` 永远 false。
+///
+/// 跨版本验证（195-198）：逃生口 55 字节各 1 处，时区 48 字节各 2 处。
+/// 等长替换铁律：A=55→55，B=48→48。
 pub fn get_antispy_patches() -> Vec<UnifiedPatchPattern> {
-    // patch 1: KIt() → "UTC"（时区失明）
+    // patch A: 逃生口短路（regex 字面量模式）
+    // search (regex): `if(<OBJ>._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0`
+    //   <OBJ> 跨版本变化（Oe/Pe/...），用 [a-zA-Z_$][a-zA-Z0-9_$]* 通配
+    // replace (字面量, 55B): `if(1)` + 50 空格
+    let escape_search: Cow<'static, [u8]> = Cow::Borrowed(
+        br"if\([a-zA-Z_$][a-zA-Z0-9_$]*\._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL\)return!0"
+            .as_ref(),
+    );
+    // 运行时构造 replace：if(1) + 50 空格 = 55 字节
+    let mut escape_replace_vec = Vec::with_capacity(55);
+    escape_replace_vec.extend_from_slice(b"if(1)");
+    escape_replace_vec.extend(std::iter::repeat_n(b' ', 50));
+    debug_assert_eq!(escape_replace_vec.len(), 55, "escape patch replace must be 55 bytes");
+    let escape_replace: Cow<'static, [u8]> = Cow::Owned(escape_replace_vec);
+
+    // patch B: KIt() → UTC（时区失明，字面量模式）
     // search: `Intl.DateTimeFormat().resolvedOptions().timeZone` (48 字节)
     // replace: `"UTC"/*` + 39 个 `.` + `*/` (48 字节，注释填充，JS 合法)
     let tz_search = b"Intl.DateTimeFormat().resolvedOptions().timeZone";
@@ -143,19 +166,35 @@ pub fn get_antispy_patches() -> Vec<UnifiedPatchPattern> {
         "timezone patch must be equal length"
     );
 
-    // patch 2: Hsp() → null（中转站失明）
-    // search: `function Hsp(){if($Sn())return null;let e=Asp()` (47 字节)
-    // replace: `function Hsp(){return null;         let e=Asp()` (47 字节，空格填充)
-    let hsp_search = b"function Hsp(){if($Sn())return null;let e=Asp()";
-    let hsp_replace = b"function Hsp(){return null;         let e=Asp()";
-    assert_eq!(
-        hsp_search.len(),
-        hsp_replace.len(),
-        "hsp patch must be equal length"
-    );
-
     vec![
-        // patch 1: KIt() → UTC（File + Memory 两个 patch）
+        // patch A: 逃生口短路（File + Memory，regex 字面量模式）
+        UnifiedPatchPattern {
+            feature: FeatureType::AntiSpy,
+            patch_type: PatchType::File,
+            search_pattern: escape_search.clone(),
+            replace_pattern: Some(escape_replace.clone()),
+            patch_byte: None,
+            patch_offset: None,
+            description: Cow::Borrowed(
+                "AntiSpy file patch: escape hatch short-circuit (firstParty assume -> true)",
+            ),
+            use_regex: true,
+            regex_replace_values: None,
+        },
+        UnifiedPatchPattern {
+            feature: FeatureType::AntiSpy,
+            patch_type: PatchType::Memory,
+            search_pattern: escape_search,
+            replace_pattern: Some(escape_replace),
+            patch_byte: None,
+            patch_offset: None,
+            description: Cow::Borrowed(
+                "AntiSpy memory patch: escape hatch short-circuit (firstParty assume -> true)",
+            ),
+            use_regex: true,
+            regex_replace_values: None,
+        },
+        // patch B: KIt() → UTC（File + Memory，字面量模式）
         UnifiedPatchPattern {
             feature: FeatureType::AntiSpy,
             patch_type: PatchType::File,
@@ -178,77 +217,70 @@ pub fn get_antispy_patches() -> Vec<UnifiedPatchPattern> {
             use_regex: false,
             regex_replace_values: None,
         },
-        // patch 2: Hsp() → null（File + Memory 两个 patch）
-        UnifiedPatchPattern {
-            feature: FeatureType::AntiSpy,
-            patch_type: PatchType::File,
-            search_pattern: Cow::Owned(hsp_search.to_vec()),
-            replace_pattern: Some(Cow::Owned(hsp_replace.to_vec())),
-            patch_byte: None,
-            patch_offset: None,
-            description: Cow::Borrowed("AntiSpy file patch: Hsp() relay detection -> null"),
-            use_regex: false,
-            regex_replace_values: None,
-        },
-        UnifiedPatchPattern {
-            feature: FeatureType::AntiSpy,
-            patch_type: PatchType::Memory,
-            search_pattern: Cow::Owned(hsp_search.to_vec()),
-            replace_pattern: Some(Cow::Owned(hsp_replace.to_vec())),
-            patch_byte: None,
-            patch_offset: None,
-            description: Cow::Borrowed("AntiSpy memory patch: Hsp() relay detection -> null"),
-            use_regex: false,
-            regex_replace_values: None,
-        },
     ]
 }
 
 /// 生成 AntiPromptBias patch 模式
 ///
-/// 消除 CC 给第三方用户注入的 Provider context 提示词偏见：
-/// 把 `if(g7())n.push("**Provider context:...")` 改成 `if(0   )n.push("**Provider context:...")`
-/// 让条件永远 false → Provider context prompt 不注入，模型不感知 provider 差异，行为更一致。
-/// 只跳过这一条 prompt，不影响其他 firstParty 门控（OAuth/能力/模型选择等照常）。
+/// 消除 CC 给第三方用户注入的 Provider context 提示词偏见：把
+/// `if(<FN>())n.push("**Provider context:** This session is not using")`
+/// 改成 `if(0   )n.push("**Provider context:** This session is not using")`
+/// 让条件永远 false → Provider context prompt 不注入，模型不感知 provider
+/// 差异，行为更一致。只跳过这一条 prompt，不影响其他 firstParty 门控
+/// （OAuth/能力/模型选择等照常）。
 ///
-/// 等长字面量替换（`use_regex=false`）：search 与 replace 均 63 字节，
-/// `if(g7())`（7 字节）→ `if(0   )`（7 字节，空格填充）。
-/// 跨版本稳定（prompt 字面量，非 minified 变量名）。
+/// **regex 字面量替换模式**（`use_regex=true` + `replace_pattern=Some`）：
+/// `<FN>` 跨版本变化（195 `g7`、196 `F7`、197 `j7`、198 `dX`，都是 2 字符），
+/// 故用 `if\([a-zA-Z_$][a-zA-Z0-9_$]*\(\)\)` regex 通配函数名。regex 匹配的
+/// 文本固定 63 字节（`if(XX())` 7 字节 + 后续 56 字节 prompt），replace 是
+/// 固定字面量 63 字节（`if(0   )` 7B + 后续 56B 相同 prompt），等长覆盖。
 ///
-/// 返回文件补丁与内存补丁各一份。
+/// 跨版本稳定（prompt 字面量 + regex 通配函数名）。返回文件补丁与内存补丁各一份。
 pub fn get_antipromptbias_patches() -> Vec<UnifiedPatchPattern> {
-    let search = b"if(g7())n.push(\"**Provider context:** This session is not using";
-    let replace = b"if(0   )n.push(\"**Provider context:** This session is not using";
-    assert_eq!(
-        search.len(),
-        replace.len(),
-        "antipromptbias patch must be equal length"
+    // search (regex): `if(<FN>())n.push("**Provider context:** This session is not using`
+    //   <FN> 跨版本变化（g7/F7/j7/dX，2 字符），regex 通配
+    //   regex 匹配文本固定 63 字节：if(XX())=7B + prompt=56B
+    // replace (字面量, 63B): `if(0   )` (7B, 3 空格) + prompt (56B, 与 search 后缀一致)
+    let search: Cow<'static, [u8]> = Cow::Borrowed(
+        br#"if\([a-zA-Z_$][a-zA-Z0-9_$]*\(\)\)n\.push\("\*\*Provider context:\*\* This session is not using"#
+            .as_ref(),
     );
+    let replace: Cow<'static, [u8]> =
+        Cow::Borrowed(br#"if(0   )n.push("**Provider context:** This session is not using"#);
+    // 等长校验：regex 匹配文本 63B（XX=2 字符时），replace 63B
+    // 注：replace 是字面量，长度固定 63；regex 匹配长度随 <FN> 字符数变化，
+    // 但实测 195-198 的 <FN> 都是 2 字符（g7/F7/j7/dX），匹配文本恒 63B
+    assert_eq!(
+        replace.len(),
+        63,
+        "antipromptbias replace must be 63 bytes"
+    );
+
     vec![
         UnifiedPatchPattern {
             feature: FeatureType::AntiPromptBias,
             patch_type: PatchType::File,
-            search_pattern: Cow::Owned(search.to_vec()),
-            replace_pattern: Some(Cow::Owned(replace.to_vec())),
+            search_pattern: search.clone(),
+            replace_pattern: Some(replace.clone()),
             patch_byte: None,
             patch_offset: None,
             description: Cow::Borrowed(
                 "AntiPromptBias file patch: skip Provider context prompt for 3P",
             ),
-            use_regex: false,
+            use_regex: true,
             regex_replace_values: None,
         },
         UnifiedPatchPattern {
             feature: FeatureType::AntiPromptBias,
             patch_type: PatchType::Memory,
-            search_pattern: Cow::Owned(search.to_vec()),
-            replace_pattern: Some(Cow::Owned(replace.to_vec())),
+            search_pattern: search,
+            replace_pattern: Some(replace),
             patch_byte: None,
             patch_offset: None,
             description: Cow::Borrowed(
                 "AntiPromptBias memory patch: skip Provider context prompt for 3P",
             ),
-            use_regex: false,
+            use_regex: true,
             regex_replace_values: None,
         },
     ]
@@ -378,7 +410,7 @@ mod tests {
     #[test]
     fn test_antispy_patches_structure() {
         let patches = get_antispy_patches();
-        assert_eq!(patches.len(), 4); // KIt(file+memory) + Hsp(file+memory)
+        assert_eq!(patches.len(), 4); // escape(file+memory) + KIt(file+memory)
 
         let file_count = patches
             .iter()
@@ -393,32 +425,57 @@ mod tests {
 
         for p in &patches {
             assert_eq!(p.feature, FeatureType::AntiSpy);
-            assert!(!p.use_regex);
             assert!(p.regex_replace_values.is_none());
             assert!(p.patch_byte.is_none());
             assert!(p.patch_offset.is_none());
+            assert!(p.replace_pattern.is_some());
         }
     }
 
     #[test]
     fn test_antispy_patches_equal_length() {
-        // 等长替换铁律：search 与 replace 必须等长
+        // 等长替换铁律：每个 patch 的 regex 匹配文本长度必须 == replace_pattern 长度
+        // - 逃生口 patch：regex 匹配 55B（Oe/Pe 2字符对象名），replace 55B
+        // - 时区 patch：字面量 48B → 48B
         let patches = get_antispy_patches();
         for p in &patches {
-            let s = p.search_pattern.as_ref();
-            let r = p.replace_pattern.as_ref().unwrap();
-            assert_eq!(s.len(), r.len(), "antispy patch must be equal length");
+            let replace = p.replace_pattern.as_ref().unwrap();
+            if p.use_regex {
+                // regex 模式：编译 regex 并对样本验证匹配长度 == replace 长度
+                let regex_str = std::str::from_utf8(p.search_pattern.as_ref()).unwrap();
+                let re = regex::bytes::Regex::new(regex_str).unwrap();
+                // 逃生口样本：195-197 用 Oe，198 用 Pe
+                for sample in [
+                    b"if(Oe._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0".as_ref(),
+                    b"if(Pe._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0".as_ref(),
+                ] {
+                    let m = re.find(sample).unwrap_or_else(|| {
+                        panic!("escape regex must match sample: {}", String::from_utf8_lossy(sample))
+                    });
+                    assert_eq!(
+                        m.end() - m.start(),
+                        replace.len(),
+                        "escape regex match length must == replace length (55)"
+                    );
+                }
+                assert_eq!(replace.len(), 55, "escape patch replace must be 55 bytes");
+            } else {
+                // 字面量模式：search 与 replace 等长
+                let s = p.search_pattern.as_ref();
+                assert_eq!(s.len(), replace.len(), "literal antispy patch must be equal length");
+            }
         }
     }
 
     #[test]
     fn test_antispy_timezone_patch_48_bytes() {
-        // KIt() patch: 48 字节 search → 48 字节 replace
+        // KIt() patch: 48 字节 search → 48 字节 replace（字面量模式）
         let patches = get_antispy_patches();
         let tz_patch = patches
             .iter()
             .find(|p| p.description.contains("KIt()"))
             .expect("KIt timezone patch present");
+        assert!(!tz_patch.use_regex, "timezone patch is literal mode");
         let search: &[u8] = tz_patch.search_pattern.as_ref();
         let replace: &[u8] = tz_patch.replace_pattern.as_ref().unwrap().as_ref();
         assert_eq!(search.len(), 48);
@@ -433,25 +490,35 @@ mod tests {
     }
 
     #[test]
-    fn test_antispy_hsp_patch_47_bytes() {
-        // Hsp() patch: 47 字节 search → 47 字节 replace
+    fn test_antispy_escape_hatch_patch_55_bytes() {
+        // 逃生口 patch: regex 匹配 55B → replace 55B（regex 字面量模式）
         let patches = get_antispy_patches();
-        let hsp_patch = patches
+        let escape_patch = patches
             .iter()
-            .find(|p| p.description.contains("Hsp()"))
-            .expect("Hsp relay patch present");
-        let search: &[u8] = hsp_patch.search_pattern.as_ref();
-        let replace: &[u8] = hsp_patch.replace_pattern.as_ref().unwrap().as_ref();
-        assert_eq!(search.len(), 47);
-        assert_eq!(replace.len(), 47);
-        assert_eq!(
-            search,
-            &b"function Hsp(){if($Sn())return null;let e=Asp()"[..]
-        );
-        assert_eq!(
-            replace,
-            &b"function Hsp(){return null;         let e=Asp()"[..]
-        );
+            .find(|p| p.description.contains("escape hatch"))
+            .expect("escape hatch patch present");
+        assert!(escape_patch.use_regex, "escape patch is regex mode");
+        let replace: &[u8] = escape_patch.replace_pattern.as_ref().unwrap().as_ref();
+        assert_eq!(replace.len(), 55, "escape replace must be 55 bytes");
+        // replace = if(1) (5B) + 50 空格
+        assert_eq!(&replace[..5], b"if(1)");
+        assert_eq!(&replace[5..], &[b' '; 50][..], "escape replace must be if(1) + 50 spaces");
+
+        // regex 匹配 195-198 各版本样本，匹配长度恒 55
+        let regex_str = std::str::from_utf8(escape_patch.search_pattern.as_ref()).unwrap();
+        let re = regex::bytes::Regex::new(regex_str).unwrap();
+        let samples: [(&[u8], &str); 2] = [
+            (b"if(Oe._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0".as_ref(), "195-197 Oe"),
+            (b"if(Pe._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0".as_ref(), "198 Pe"),
+            // 3 字符对象名也应匹配（regex 通配），但长度会变 56，replace 不适用
+            // 这里只验证 2 字符对象名（实测 195-198 都是 2 字符）
+        ];
+        for (sample, label) in samples {
+            let m = re.find(sample).unwrap_or_else(|| {
+                panic!("escape regex must match {} sample", label)
+            });
+            assert_eq!(m.end() - m.start(), 55, "escape regex match length for {} must be 55", label);
+        }
     }
 
     #[test]
@@ -463,8 +530,12 @@ mod tests {
         };
         let patches = get_feature_patches(FeatureType::AntiSpy, &version);
         assert_eq!(patches.len(), 4);
-        assert!(patches.iter().all(|p| !p.use_regex));
         assert!(patches.iter().all(|p| p.feature == FeatureType::AntiSpy));
+        // 2 个 regex（逃生口）+ 2 个字面量（时区）
+        let regex_count = patches.iter().filter(|p| p.use_regex).count();
+        let literal_count = patches.iter().filter(|p| !p.use_regex).count();
+        assert_eq!(regex_count, 2);
+        assert_eq!(literal_count, 2);
     }
 
     #[test]
@@ -485,7 +556,7 @@ mod tests {
 
         for p in &patches {
             assert_eq!(p.feature, FeatureType::AntiPromptBias);
-            assert!(!p.use_regex);
+            assert!(p.use_regex, "antipromptbias is regex mode");
             assert!(p.regex_replace_values.is_none());
             assert!(p.patch_byte.is_none());
             assert!(p.patch_offset.is_none());
@@ -495,37 +566,48 @@ mod tests {
 
     #[test]
     fn test_antipromptbias_patches_equal_length() {
-        // 等长替换铁律：search 与 replace 必须等长，否则会破坏二进制偏移
+        // 等长替换铁律：regex 匹配文本长度（63B，XX=2字符）== replace_pattern 长度（63B）
         let patches = get_antipromptbias_patches();
-        for p in &patches {
-            let s = p.search_pattern.as_ref();
-            let r = p.replace_pattern.as_ref().unwrap();
-            assert_eq!(s.len(), r.len(), "antipromptbias patch must be equal length");
+        let p = &patches[0];
+        let replace = p.replace_pattern.as_ref().unwrap();
+        assert_eq!(replace.len(), 63, "replace must be 63 bytes");
+
+        let regex_str = std::str::from_utf8(p.search_pattern.as_ref()).unwrap();
+        let re = regex::bytes::Regex::new(regex_str).unwrap();
+        // 195-198 各版本样本，函数名 2 字符，匹配文本恒 63B
+        let samples: [(&[u8], &str); 4] = [
+            (br#"if(g7())n.push("**Provider context:** This session is not using"#, "195 g7"),
+            (br#"if(F7())n.push("**Provider context:** This session is not using"#, "196 F7"),
+            (br#"if(j7())n.push("**Provider context:** This session is not using"#, "197 j7"),
+            (br#"if(dX())n.push("**Provider context:** This session is not using"#, "198 dX"),
+        ];
+        for (sample, label) in samples {
+            let m = re.find(sample).unwrap_or_else(|| {
+                panic!("antipromptbias regex must match {} sample", label)
+            });
+            assert_eq!(
+                m.end() - m.start(),
+                63,
+                "antipromptbias regex match length for {} must be 63",
+                label
+            );
         }
     }
 
     #[test]
     fn test_antipromptbias_patch_63_bytes() {
-        // AntiPromptBias patch: 63 字节 search → 63 字节 replace
+        // AntiPromptBias patch: regex 匹配 63B → replace 63B
         let patches = get_antipromptbias_patches();
         for p in &patches {
-            let search: &[u8] = p.search_pattern.as_ref();
+            assert!(p.use_regex);
             let replace: &[u8] = p.replace_pattern.as_ref().unwrap().as_ref();
-            assert_eq!(search.len(), 63);
             assert_eq!(replace.len(), 63);
+            // replace 以 if(0   ) (8B) 开头，后接 prompt 字面量 (55B)
+            assert_eq!(&replace[..8], b"if(0   )");
             assert_eq!(
-                search,
-                &b"if(g7())n.push(\"**Provider context:** This session is not using"[..]
+                &replace[8..],
+                &br#"n.push("**Provider context:** This session is not using"#[..]
             );
-            assert_eq!(
-                replace,
-                &b"if(0   )n.push(\"**Provider context:** This session is not using"[..]
-            );
-            // 只改 if 条件，后续 prompt 字面量保持不变
-            assert!(search.starts_with(b"if(g7())"));
-            assert!(replace.starts_with(b"if(0   )"));
-            // 条件之后的字节序列必须完全一致
-            assert_eq!(&search[7..], &replace[7..]);
         }
     }
 
@@ -538,7 +620,7 @@ mod tests {
         };
         let patches = get_feature_patches(FeatureType::AntiPromptBias, &version);
         assert_eq!(patches.len(), 2);
-        assert!(patches.iter().all(|p| !p.use_regex));
+        assert!(patches.iter().all(|p| p.use_regex));
         assert!(patches.iter().all(|p| p.feature == FeatureType::AntiPromptBias));
     }
 }
