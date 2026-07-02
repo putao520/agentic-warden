@@ -88,34 +88,14 @@ pub fn get_max_context_tokens_patches(
 /// 返回文件补丁与内存补丁各一份，内存补丁同样用 `replace_pattern` 整段字面量
 /// 替换（不依赖 patch_byte/patch_offset）。
 pub fn get_antitelemetry_patches() -> Vec<UnifiedPatchPattern> {
-    vec![
-        UnifiedPatchPattern {
-            feature: FeatureType::AntiTelemetry,
-            patch_type: PatchType::File,
-            search_pattern: Cow::Borrowed(b"/api/event_logging/v2/batch"),
-            replace_pattern: Some(Cow::Borrowed(b"/api/event_logging/v2/xxxxx")),
-            patch_byte: None,
-            patch_offset: None,
-            description: Cow::Borrowed(
-                "AntiTelemetry file patch: event_logging endpoint -> 404",
-            ),
-            use_regex: false,
-            regex_replace_values: None,
-        },
-        UnifiedPatchPattern {
-            feature: FeatureType::AntiTelemetry,
-            patch_type: PatchType::Memory,
-            search_pattern: Cow::Borrowed(b"/api/event_logging/v2/batch"),
-            replace_pattern: Some(Cow::Borrowed(b"/api/event_logging/v2/xxxxx")),
-            patch_byte: None,
-            patch_offset: None,
-            description: Cow::Borrowed(
-                "AntiTelemetry memory patch: event_logging endpoint -> 404",
-            ),
-            use_regex: false,
-            regex_replace_values: None,
-        },
-    ]
+    make_patch_pair(
+        FeatureType::AntiTelemetry,
+        false,
+        Cow::Borrowed(b"/api/event_logging/v2/batch"),
+        Cow::Borrowed(b"/api/event_logging/v2/xxxxx"),
+        "AntiTelemetry file patch: event_logging endpoint -> 404",
+        "AntiTelemetry memory patch: event_logging endpoint -> 404",
+    )
 }
 
 /// 生成 AntiSpy patch 模式
@@ -147,6 +127,41 @@ pub fn get_antispy_patches() -> Vec<UnifiedPatchPattern> {
 /// search (regex): `if(<OBJ>._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0`
 ///   `<OBJ>` 跨版本变化（Oe/Pe/...），用 `[a-zA-Z_$][a-zA-Z0-9_$]*` 通配
 /// replace (字面量, 55B): `if(1)` + 50 空格
+/// 构造 File + Memory 一对 patch（相同 search/replace，只差 patch_type 和 description）
+fn make_patch_pair(
+    feature: FeatureType,
+    use_regex: bool,
+    search: Cow<'static, [u8]>,
+    replace: Cow<'static, [u8]>,
+    file_desc: &'static str,
+    mem_desc: &'static str,
+) -> Vec<UnifiedPatchPattern> {
+    vec![
+        UnifiedPatchPattern {
+            feature,
+            patch_type: PatchType::File,
+            search_pattern: search.clone(),
+            replace_pattern: Some(replace.clone()),
+            patch_byte: None,
+            patch_offset: None,
+            description: Cow::Borrowed(file_desc),
+            use_regex,
+            regex_replace_values: None,
+        },
+        UnifiedPatchPattern {
+            feature,
+            patch_type: PatchType::Memory,
+            search_pattern: search,
+            replace_pattern: Some(replace),
+            patch_byte: None,
+            patch_offset: None,
+            description: Cow::Borrowed(mem_desc),
+            use_regex,
+            regex_replace_values: None,
+        },
+    ]
+}
+
 fn get_escape_hatch_patches() -> Vec<UnifiedPatchPattern> {
     let escape_search: Cow<'static, [u8]> = Cow::Borrowed(
         br"if\([a-zA-Z_$][a-zA-Z0-9_$]*\._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL\)return!0"
@@ -157,36 +172,15 @@ fn get_escape_hatch_patches() -> Vec<UnifiedPatchPattern> {
     escape_replace_vec.extend_from_slice(b"if(1)");
     escape_replace_vec.extend(std::iter::repeat_n(b' ', 50));
     debug_assert_eq!(escape_replace_vec.len(), 55, "escape patch replace must be 55 bytes");
-    let escape_replace: Cow<'static, [u8]> = Cow::Owned(escape_replace_vec);
 
-    vec![
-        UnifiedPatchPattern {
-            feature: FeatureType::AntiSpy,
-            patch_type: PatchType::File,
-            search_pattern: escape_search.clone(),
-            replace_pattern: Some(escape_replace.clone()),
-            patch_byte: None,
-            patch_offset: None,
-            description: Cow::Borrowed(
-                "AntiSpy file patch: escape hatch short-circuit (firstParty assume -> true)",
-            ),
-            use_regex: true,
-            regex_replace_values: None,
-        },
-        UnifiedPatchPattern {
-            feature: FeatureType::AntiSpy,
-            patch_type: PatchType::Memory,
-            search_pattern: escape_search,
-            replace_pattern: Some(escape_replace),
-            patch_byte: None,
-            patch_offset: None,
-            description: Cow::Borrowed(
-                "AntiSpy memory patch: escape hatch short-circuit (firstParty assume -> true)",
-            ),
-            use_regex: true,
-            regex_replace_values: None,
-        },
-    ]
+    make_patch_pair(
+        FeatureType::AntiSpy,
+        true,
+        escape_search,
+        Cow::Owned(escape_replace_vec),
+        "AntiSpy file patch: escape hatch short-circuit (firstParty assume -> true)",
+        "AntiSpy memory patch: escape hatch short-circuit (firstParty assume -> true)",
+    )
 }
 
 /// 时区失明 patch（File + Memory，字面量模式）
@@ -205,30 +199,14 @@ fn get_timezone_patches() -> Vec<UnifiedPatchPattern> {
         "timezone patch must be equal length"
     );
 
-    vec![
-        UnifiedPatchPattern {
-            feature: FeatureType::AntiSpy,
-            patch_type: PatchType::File,
-            search_pattern: Cow::Owned(tz_search.to_vec()),
-            replace_pattern: Some(Cow::Owned(tz_replace_full.clone())),
-            patch_byte: None,
-            patch_offset: None,
-            description: Cow::Borrowed("AntiSpy file patch: KIt() timezone -> UTC"),
-            use_regex: false,
-            regex_replace_values: None,
-        },
-        UnifiedPatchPattern {
-            feature: FeatureType::AntiSpy,
-            patch_type: PatchType::Memory,
-            search_pattern: Cow::Owned(tz_search.to_vec()),
-            replace_pattern: Some(Cow::Owned(tz_replace_full)),
-            patch_byte: None,
-            patch_offset: None,
-            description: Cow::Borrowed("AntiSpy memory patch: KIt() timezone -> UTC"),
-            use_regex: false,
-            regex_replace_values: None,
-        },
-    ]
+    make_patch_pair(
+        FeatureType::AntiSpy,
+        false,
+        Cow::Owned(tz_search.to_vec()),
+        Cow::Owned(tz_replace_full),
+        "AntiSpy file patch: KIt() timezone -> UTC",
+        "AntiSpy memory patch: KIt() timezone -> UTC",
+    )
 }
 
 /// 生成 AntiPromptBias patch 模式
@@ -267,34 +245,14 @@ pub fn get_antipromptbias_patches() -> Vec<UnifiedPatchPattern> {
         "antipromptbias replace must be 63 bytes"
     );
 
-    vec![
-        UnifiedPatchPattern {
-            feature: FeatureType::AntiPromptBias,
-            patch_type: PatchType::File,
-            search_pattern: search.clone(),
-            replace_pattern: Some(replace.clone()),
-            patch_byte: None,
-            patch_offset: None,
-            description: Cow::Borrowed(
-                "AntiPromptBias file patch: skip Provider context prompt for 3P",
-            ),
-            use_regex: true,
-            regex_replace_values: None,
-        },
-        UnifiedPatchPattern {
-            feature: FeatureType::AntiPromptBias,
-            patch_type: PatchType::Memory,
-            search_pattern: search,
-            replace_pattern: Some(replace),
-            patch_byte: None,
-            patch_offset: None,
-            description: Cow::Borrowed(
-                "AntiPromptBias memory patch: skip Provider context prompt for 3P",
-            ),
-            use_regex: true,
-            regex_replace_values: None,
-        },
-    ]
+    make_patch_pair(
+        FeatureType::AntiPromptBias,
+        true,
+        search,
+        replace,
+        "AntiPromptBias file patch: skip Provider context prompt for 3P",
+        "AntiPromptBias memory patch: skip Provider context prompt for 3P",
+    )
 }
 
 #[cfg(test)]

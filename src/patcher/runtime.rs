@@ -15,6 +15,16 @@ pub struct RuntimePatcher {
     inner: PlatformMemoryPatcher,
 }
 
+/// 将 String 错误转为 PatternNotFound（validate 等场景）
+fn pattern_not_found(e: String) -> PatchError {
+    PatchError::PatternNotFound { pattern: e, hint: None }
+}
+
+/// 将 regex::Error 转为 PatternNotFound
+fn regex_err_to_pattern_not_found(e: regex::Error) -> PatchError {
+    PatchError::PatternNotFound { pattern: format!("invalid regex: {}", e), hint: None }
+}
+
 impl RuntimePatcher {
     /// 创建针对指定进程的补丁器
     pub fn new(pid: u32) -> Result<Self, PatchError> {
@@ -140,19 +150,16 @@ impl RuntimePatcher {
         };
 
         validate_max_context_tokens(max_tokens)
-            .map_err(|e| PatchError::PatternNotFound { pattern: e, hint: None })?;
+            .map_err(pattern_not_found)?;
         validate_max_context_tokens(auto_compact)
-            .map_err(|e| PatchError::PatternNotFound { pattern: e, hint: None })?;
+            .map_err(pattern_not_found)?;
 
         if !self.process_exists() {
             return Err(PatchError::ProcessNotFound { pid: 0 });
         }
 
         let re = regex::bytes::Regex::new(MAX_CONTEXT_TOKENS_SEARCH_REGEX)
-            .map_err(|e| PatchError::PatternNotFound {
-                pattern: format!("invalid regex: {}", e),
-                hint: None,
-            })?;
+            .map_err(regex_err_to_pattern_not_found)?;
 
         let needle = b"200000";
         let val1 = encode_max_context_tokens(max_tokens);
@@ -312,14 +319,8 @@ impl RuntimePatcher {
         }
 
         let regex_str = std::str::from_utf8(pattern.search_pattern.as_ref())
-            .map_err(|e| PatchError::PatternNotFound {
-                pattern: format!("invalid regex utf-8: {}", e),
-                hint: None,
-            })?;
-        let re = regex::bytes::Regex::new(regex_str).map_err(|e| PatchError::PatternNotFound {
-            pattern: format!("invalid regex: {}", e),
-            hint: None,
-        })?;
+            .map_err(|e| PatchError::PatternNotFound { pattern: format!("invalid regex utf-8: {}", e), hint: None })?;
+        let re = regex::bytes::Regex::new(regex_str).map_err(regex_err_to_pattern_not_found)?;
 
         let replace = pattern.replace_pattern.as_ref().ok_or_else(|| {
             PatchError::PatternNotFound {
