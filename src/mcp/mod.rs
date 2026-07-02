@@ -1160,7 +1160,12 @@ impl ServerHandler for AgenticWardenMcpServer {
             })
             .collect();
 
-        Ok(ListTasksResult::new(mcp_tasks))
+        let mut result = ListTasksResult::new(mcp_tasks);
+        // rmcp 2.0 移除了 total 一等字段（spec 对齐），用 meta 承载 total 语义
+        let mut meta = serde_json::Map::new();
+        meta.insert("total".to_string(), serde_json::json!(result.tasks.len() as u64));
+        result.meta = Some(rmcp::model::Meta(meta));
+        Ok(result)
     }
 
     async fn get_task_info(
