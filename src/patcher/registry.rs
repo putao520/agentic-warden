@@ -8,7 +8,7 @@ use std::borrow::Cow;
 
 /// Get patches for a feature based on version signature
 ///
-/// 目前支持 MaxContextTokens / AntiTelemetry / AntiSpy / AntiPromptBias 四种功能；
+/// 目前支持 MaxContextTokens / AntiTelemetry / AntiSpy / AntiPromptBias / AntiAtis 五种功能；
 /// 保留 version 参数以兼容调用方签名（regex/字面量均不依赖版本签名）。
 pub fn get_feature_patches(
     feature: FeatureType,
@@ -21,6 +21,7 @@ pub fn get_feature_patches(
         FeatureType::AntiTelemetry => get_antitelemetry_patches(),
         FeatureType::AntiSpy => get_antispy_patches(),
         FeatureType::AntiPromptBias => get_antipromptbias_patches(),
+        FeatureType::AntiAtis => get_antiatis_patches(),
     }
 }
 
@@ -252,6 +253,51 @@ pub fn get_antipromptbias_patches() -> Vec<UnifiedPatchPattern> {
         replace,
         "AntiPromptBias file patch: skip Provider context prompt for 3P",
         "AntiPromptBias memory patch: skip Provider context prompt for 3P",
+    )
+}
+
+/// 生成 AntiAtis patch 模式
+///
+/// 防止 x-cc-atis 追踪 header 注入：逃生口短路 patch 副作用使 gu()=true，
+/// 激活 `tMi(firstParty)&&gu()` 条件，触发 atis header 注入逻辑（原本中转站
+/// gu()=false 短路）。atis 是服务端 bootstrap 下发的追踪 token，会暴露中转站
+/// 用户身份。patch atis 提取函数让它永远返回 void 0 → header 永不注入。
+///
+/// **regex 字面量替换模式**（`use_regex=true` + `replace_pattern=Some`）：
+/// atis 提取函数跨版本结构（196-199 命中，195 无此机制）：
+/// - 196: `function S6r(){let e=P0()?.atis;return typeof e==="string"&&e.length>0?e:void 0}`
+/// - 197: `function H6r(){let e=AI()?.atis;...}`
+/// - 198: `function pYr(){let e=I0()?.atis;...}`
+/// - 199: `function SXr(){let e=q0()?.atis;...}`
+///
+/// 函数名（3 字符）和 bootstrap 函数名（2 字符）跨版本变化，用 regex 通配。
+/// regex 匹配文本固定 79 字节，replace 是固定字面量 79 字节
+/// （`function zzz(){return void 0` + 50 空格 + `}`），等长覆盖。
+///
+/// 跨 196-199 通用。返回文件补丁与内存补丁各一份。
+pub fn get_antiatis_patches() -> Vec<UnifiedPatchPattern> {
+    // search (regex): 通配函数名 + bootstrap 函数名
+    //   `function <FN>(){let e=<BF>()?.atis;return typeof e==="string"&&e.length>0?e:void 0}`
+    //   <FN> 3 字符（S6r/H6r/pYr/SXr），<BF> 2 字符（P0/AI/I0/q0）
+    //   regex 匹配文本固定 79 字节（<FN>=3 + <BF>=2 时）
+    let search: Cow<'static, [u8]> = Cow::Borrowed(
+        br#"function [a-zA-Z_$][a-zA-Z0-9_$]*\(\)\{let e=[a-zA-Z_$][a-zA-Z0-9_$]*\(\)\?\.atis;return typeof e=="string"&&e\.length>0\?e:void 0\}"#
+            .as_ref(),
+    );
+    // replace (字面量, 79B): function zzz(){return void 0 + 50 空格 + }
+    let mut replace_vec = Vec::with_capacity(79);
+    replace_vec.extend_from_slice(b"function zzz(){return void 0");
+    replace_vec.extend(std::iter::repeat_n(b' ', 50));
+    replace_vec.extend_from_slice(b"}");
+    debug_assert_eq!(replace_vec.len(), 79, "antiatis replace must be 79 bytes");
+
+    make_patch_pair(
+        FeatureType::AntiAtis,
+        true,
+        search,
+        Cow::Owned(replace_vec),
+        "AntiAtis file patch: atis extract -> void 0 (no x-cc-atis header)",
+        "AntiAtis memory patch: atis extract -> void 0 (no x-cc-atis header)",
     )
 }
 
@@ -591,5 +637,86 @@ mod tests {
         assert_eq!(patches.len(), 2);
         assert!(patches.iter().all(|p| p.use_regex));
         assert!(patches.iter().all(|p| p.feature == FeatureType::AntiPromptBias));
+    }
+
+    #[test]
+    fn test_antiatis_patches_structure() {
+        let patches = get_antiatis_patches();
+        assert_eq!(patches.len(), 2); // 1 file + 1 memory
+
+        let file_count = patches
+            .iter()
+            .filter(|p| p.patch_type == PatchType::File)
+            .count();
+        let mem_count = patches
+            .iter()
+            .filter(|p| p.patch_type == PatchType::Memory)
+            .count();
+        assert_eq!(file_count, 1);
+        assert_eq!(mem_count, 1);
+
+        for p in &patches {
+            assert_eq!(p.feature, FeatureType::AntiAtis);
+            assert!(p.use_regex, "antiatis is regex mode");
+            assert!(p.regex_replace_values.is_none());
+            assert!(p.patch_byte.is_none());
+            assert!(p.patch_offset.is_none());
+            assert!(p.replace_pattern.is_some());
+        }
+    }
+
+    #[test]
+    fn test_antiatis_patches_equal_length() {
+        // 等长替换铁律：regex 匹配文本长度（79B，FN=3字符+BF=2字符）== replace_pattern 长度（79B）
+        let patches = get_antiatis_patches();
+        let p = &patches[0];
+        let replace = p.replace_pattern.as_ref().unwrap();
+        assert_eq!(replace.len(), 79, "replace must be 79 bytes");
+
+        let regex_str = std::str::from_utf8(p.search_pattern.as_ref()).unwrap();
+        let re = regex::bytes::Regex::new(regex_str).unwrap();
+        // 196-199 各版本样本，函数名 3 字符 + bootstrap 函数 2 字符，匹配文本恒 79B
+        let samples: [(&[u8], &str); 4] = [
+            (
+                b"function S6r(){let e=P0()?.atis;return typeof e==\"string\"&&e.length>0?e:void 0}",
+                "196 S6r/P0",
+            ),
+            (
+                b"function H6r(){let e=AI()?.atis;return typeof e==\"string\"&&e.length>0?e:void 0}",
+                "197 H6r/AI",
+            ),
+            (
+                b"function pYr(){let e=I0()?.atis;return typeof e==\"string\"&&e.length>0?e:void 0}",
+                "198 pYr/I0",
+            ),
+            (
+                b"function SXr(){let e=q0()?.atis;return typeof e==\"string\"&&e.length>0?e:void 0}",
+                "199 SXr/q0",
+            ),
+        ];
+        for (sample, label) in samples {
+            let m = re.find(sample).unwrap_or_else(|| {
+                panic!("antiatis regex must match {} sample", label)
+            });
+            assert_eq!(
+                m.end() - m.start(),
+                79,
+                "antiatis regex match length for {} must be 79",
+                label
+            );
+        }
+    }
+
+    #[test]
+    fn test_antiatis_via_get_feature_patches() {
+        let version = ClaudeVersion {
+            major: 2,
+            minor: 1,
+            patch: 196,
+        };
+        let patches = get_feature_patches(FeatureType::AntiAtis, &version);
+        assert_eq!(patches.len(), 2);
+        assert!(patches.iter().all(|p| p.use_regex));
+        assert!(patches.iter().all(|p| p.feature == FeatureType::AntiAtis));
     }
 }

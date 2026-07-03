@@ -42,6 +42,13 @@ pub enum FeatureType {
     /// 只跳过这一条 prompt，不影响其他 firstParty 门控（OAuth/能力/模型选择等照常）。
     /// 跨版本稳定（prompt 字面量，非 minified 变量名）。
     AntiPromptBias,
+    /// AntiAtis - 防止 x-cc-atis 追踪 header 注入（atis 提取函数 → void 0）
+    ///
+    /// 逃生口短路 patch 副作用：gu()=true 激活 tMi(firstParty)&&gu() 条件，
+    /// 触发 x-cc-atis header 注入（服务端 bootstrap 下发的追踪 token）。
+    /// patch atis 提取函数让它永远返回 void 0，header 永不注入。
+    /// 跨 196-199 通用（195 无此机制），语义正则通配函数名。
+    AntiAtis,
 }
 
 impl FeatureType {
@@ -54,6 +61,9 @@ impl FeatureType {
             FeatureType::AntiPromptBias => {
                 "AntiPromptBias - 消除 Provider context 提示词偏见（if(g7())→if(0)）"
             }
+            FeatureType::AntiAtis => {
+                "AntiAtis - 防止 x-cc-atis 追踪 header 注入（atis 提取 → void 0）"
+            }
         }
     }
 
@@ -64,6 +74,7 @@ impl FeatureType {
             FeatureType::AntiTelemetry => "antitelemetry",
             FeatureType::AntiSpy => "antispy",
             FeatureType::AntiPromptBias => "antipromptbias",
+            FeatureType::AntiAtis => "antiatis",
         }
     }
 }
@@ -276,6 +287,24 @@ mod tests {
         assert_ne!(FeatureType::AntiPromptBias, FeatureType::MaxContextTokens);
         assert_ne!(FeatureType::AntiPromptBias, FeatureType::AntiTelemetry);
         assert_ne!(FeatureType::AntiPromptBias, FeatureType::AntiSpy);
+    }
+
+    #[test]
+    fn test_antiatis_description() {
+        assert!(FeatureType::AntiAtis.description().contains("AntiAtis"));
+    }
+
+    #[test]
+    fn test_antiatis_short_name() {
+        assert_eq!(FeatureType::AntiAtis.short_name(), "antiatis");
+    }
+
+    #[test]
+    fn test_antiatis_distinct_from_others() {
+        assert_ne!(FeatureType::AntiAtis, FeatureType::MaxContextTokens);
+        assert_ne!(FeatureType::AntiAtis, FeatureType::AntiTelemetry);
+        assert_ne!(FeatureType::AntiAtis, FeatureType::AntiSpy);
+        assert_ne!(FeatureType::AntiAtis, FeatureType::AntiPromptBias);
     }
 
     #[test]

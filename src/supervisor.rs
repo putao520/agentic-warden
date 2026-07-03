@@ -80,7 +80,8 @@ fn get_cli_command(cli_type: &CliType) -> Result<String, ProcessError> {
 ///
 /// 最后应用 AntiSpy 内存补丁（时区+中转站识别失明），
 /// 以及 AntiPromptBias 内存补丁（消除 Provider context 提示词偏见），
-/// 四个 patch 独立，一个失败不影响另一个。
+/// 以及 AntiAtis 内存补丁（防止 x-cc-atis 追踪 header 注入），
+/// 五个 patch 独立，一个失败不影响另一个。
 fn apply_max_context_tokens_patches(pid: u32, cli_type: &CliType) {
     use crate::patcher::registry::get_feature_patches;
     use crate::patcher::types::{FeatureType, PatchType};
@@ -199,12 +200,34 @@ fn apply_max_context_tokens_patches(pid: u32, cli_type: &CliType) {
             }
         }
     }
+
+    // AntiAtis 内存补丁（独立于 max-token / AntiTelemetry / AntiSpy / AntiPromptBias，一个失败不影响另一个）
+    // regex 字面量模式（use_regex=true），分发到 apply_regex_literal_memory_patch。
+    let antiatis_patches = get_feature_patches(FeatureType::AntiAtis, &version);
+    for patch in antiatis_patches
+        .iter()
+        .filter(|p| p.patch_type == PatchType::Memory)
+    {
+        let result = if patch.use_regex {
+            patcher.apply_regex_literal_memory_patch(patch)
+        } else {
+            patcher.apply_literal_memory_patch(patch)
+        };
+        match result {
+            Ok(_addr) => {
+                eprintln!("✅ AntiAtis applied (x-cc-atis tracking header -> disabled)");
+            }
+            Err(e) => {
+                tracing::debug!("anti-atis memory patch failed: {}", e);
+            }
+        }
+    }
 }
 
-/// 在后台线程中应用 AntiTelemetry + AntiSpy + AntiPromptBias 内存补丁（用于 start_interactive_cli 路径）
+/// 在后台线程中应用 AntiTelemetry + AntiSpy + AntiPromptBias + AntiAtis 内存补丁（用于 start_interactive_cli 路径）
 ///
-/// 与 max-token patch 独立：max-token 失败不影响 anti-telemetry/anti-spy/anti-prompt-bias 尝试。
-/// 四个 patch 独立，一个失败不影响另一个。此操作是 best-effort，失败仅记日志，不影响主流程。
+/// 与 max-token patch 独立：max-token 失败不影响 anti-telemetry/anti-spy/anti-prompt-bias/anti-atis 尝试。
+/// 五个 patch 独立，一个失败不影响另一个。此操作是 best-effort，失败仅记日志，不影响主流程。
 fn apply_antitelemetry_memory_patch_background(patcher: &RuntimePatcher) {
     use crate::patcher::registry::get_feature_patches;
     use crate::patcher::types::{FeatureType, PatchType};
@@ -269,6 +292,28 @@ fn apply_antitelemetry_memory_patch_background(patcher: &RuntimePatcher) {
         match result {
             Ok(_addr) => {
                 eprintln!("✅ AntiPromptBias applied (Provider context prompt -> skipped)");
+            }
+            Err(_) => {
+                // Silent failure - best-effort
+            }
+        }
+    }
+
+    // AntiAtis 内存补丁（独立于 AntiTelemetry / AntiSpy / AntiPromptBias，一个失败不影响另一个）
+    // regex 字面量模式（use_regex=true），分发到 apply_regex_literal_memory_patch。
+    let antiatis_patches = get_feature_patches(FeatureType::AntiAtis, &version);
+    for patch in antiatis_patches
+        .iter()
+        .filter(|p| p.patch_type == PatchType::Memory)
+    {
+        let result = if patch.use_regex {
+            patcher.apply_regex_literal_memory_patch(patch)
+        } else {
+            patcher.apply_literal_memory_patch(patch)
+        };
+        match result {
+            Ok(_addr) => {
+                eprintln!("✅ AntiAtis applied (x-cc-atis tracking header -> disabled)");
             }
             Err(_) => {
                 // Silent failure - best-effort

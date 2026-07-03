@@ -43,7 +43,7 @@ pub enum RolesAction {
 /// 补丁管理动作
 #[derive(Subcommand, Debug, Clone)]
 pub enum PatchAction {
-    /// 应用文件补丁（max-token + anti-telemetry + anti-spy + anti-prompt-bias）
+    /// 应用文件补丁（max-token + anti-telemetry + anti-spy + anti-prompt-bias + anti-atis）
     Apply {
         /// 默认上下文窗口上限（6 位数，100000~999999，默认 500000）
         #[arg(long, value_name = "N")]
@@ -81,6 +81,10 @@ pub enum PatchAction {
     /// 消除 Provider context 提示词偏见（第三方不再被注入"功能有差异"提示）
     #[command(name = "disable-prompt-bias")]
     DisablePromptBias,
+
+    /// 禁用 x-cc-atis 追踪 header（防逃生口 patch 副作用）
+    #[command(name = "disable-atis")]
+    DisableAtis,
 }
 
 /// 配置管理动作

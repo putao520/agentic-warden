@@ -9,8 +9,8 @@ use crate::patcher::{
     apply_file_patch, detect_installation, get_patchable_path, is_file_patched,
     restore_from_backup, InstallationType,
     registry::{
-        get_antipromptbias_patches, get_antispy_patches, get_antitelemetry_patches,
-        get_feature_patches,
+        get_antiatis_patches, get_antipromptbias_patches, get_antispy_patches,
+        get_antitelemetry_patches, get_feature_patches,
     },
     types::{FeatureType, PatchType},
     versions::{validate_max_context_tokens, ClaudeVersion},
@@ -48,6 +48,9 @@ pub async fn execute_patch_command(action: PatchAction) -> Result<()> {
         }
         PatchAction::DisablePromptBias => {
             execute_disable_prompt_bias()?;
+        }
+        PatchAction::DisableAtis => {
+            execute_disable_atis()?;
         }
     }
     Ok(())
@@ -145,6 +148,18 @@ fn execute_apply_patch(
         }
     }
 
+    // AntiAtis 文件补丁（独立于 max-token / AntiTelemetry / AntiSpy / AntiPromptBias，一个失败不影响另一个）
+    let antiatis_patches = get_antiatis_patches();
+    for patch in antiatis_patches
+        .iter()
+        .filter(|p| p.patch_type == PatchType::File)
+    {
+        match apply_file_patch(&patch_path, patch) {
+            Ok(_) => println!("   ✅ {}", patch.description),
+            Err(e) => println!("   ❌ 失败: {}", e),
+        }
+    }
+
     println!("✅ 补丁应用完成!");
     Ok(())
 }
@@ -212,6 +227,28 @@ fn execute_disable_prompt_bias() -> Result<()> {
         }
     }
     println!("✅ AntiPromptBias patch 应用完成（Provider context 偏见已消除）");
+    Ok(())
+}
+
+/// 禁用 x-cc-atis 追踪 header（防逃生口 patch 副作用，atis 提取函数 → void 0）
+fn execute_disable_atis() -> Result<()> {
+    let patch_path = get_patchable_path()?;
+    let install_type = detect_installation().ok();
+    let type_label = match &install_type {
+        Some(InstallationType::Npm { .. }) => "npm (JS)",
+        Some(InstallationType::NativeBinary { .. }) => "NativeBinary",
+        _ => "Unknown",
+    };
+    println!("📂 Claude CLI 文件: {} ({})", patch_path.display(), type_label);
+
+    let patches = get_antiatis_patches();
+    for patch in patches.iter().filter(|p| p.patch_type == PatchType::File) {
+        match apply_file_patch(&patch_path, patch) {
+            Ok(_) => println!("   ✅ {}", patch.description),
+            Err(e) => println!("   ❌ 失败: {}", e),
+        }
+    }
+    println!("✅ AntiAtis patch 应用完成（x-cc-atis 追踪 header 已禁用）");
     Ok(())
 }
 
@@ -354,6 +391,35 @@ fn execute_patch_status() {
         println!("   ⚪ AntiPromptBias 无需 patch（目标不存在）");
     } else {
         println!("   ❌ AntiPromptBias 补丁未应用");
+    }
+
+    // AntiAtis 状态检查
+    let antiatis_patches = get_antiatis_patches();
+    let mut antiatis_patched = false;
+    let mut antiatis_skipped = false;
+    for patch in antiatis_patches
+        .iter()
+        .filter(|p| p.patch_type == PatchType::File)
+    {
+        match is_file_patched(&patch_path, patch) {
+            Ok(true) => {
+                println!("   ✅ AntiAtis 补丁已应用");
+                antiatis_patched = true;
+                break;
+            }
+            Ok(false) => continue,
+            Err(_) => {
+                antiatis_skipped = true;
+                break;
+            }
+        }
+    }
+    if antiatis_patched {
+        // 已在上面打印
+    } else if antiatis_skipped {
+        println!("   ⚪ AntiAtis 无需 patch（目标不存在）");
+    } else {
+        println!("   ❌ AntiAtis 补丁未应用");
     }
 }
 
