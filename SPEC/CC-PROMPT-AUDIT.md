@@ -593,95 +593,104 @@ CC 的"胡言乱语"主要是 **thinking 控制机制**导致的：
 
 **最有效的改善**：用户的 `MAX_THINKING_TOKENS` 环境变量 + `--effort xhigh` + 我们的 max-token patch。这三者组合能最大化 thinking budget，减少胡言乱语。
 
+
 ---
 
-## 第 11 章：CC v2.1.199 审计（新间谍点/功能门控排查）
+## 第 11 章：CC v2.1.199 深度审计（新功能完整调用链逆向）
 
 **审计时间**：2026-07-03
-**审计方法**：对比 2.1.198 与 2.1.199 二进制（250MB），diff 字符串/statsig 门控/API 端点/指纹字段
+**审计方法**：对比 198/199 二进制（250MB），追完整调用链（365 次 grep/dd 探针，53 分钟），不停留在表面字符串判断
 
 ### 5 个 patch 点命中验证（2.1.199）
 
 | patch 点 | 命中 | 199 字面量样本 |
 |---------|------|---------------|
-| max-token 常量块 | ✅ | `var tUt=200000,gre=200000,HGd=32000,TGd=128000;`（4 元素，无 20000，正则 `[^;]*;` 兼容） |
+| max-token 常量块 | ✅ | `var tUt=200000,gre=200000,HGd=32000,TGd=128000;`（4 元素，正则 `[^;]*;` 兼容） |
 | AntiTelemetry 端点 | ✅ | `/api/event_logging/v2/batch`（1 处） |
 | AntiSpy 时区 | ✅ | `Intl.DateTimeFormat().resolvedOptions().timeZone`（2 处） |
-| AntiSpy 逃生口 | ✅ | `if(De._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0`（配置对象名 199=`De`，198=`Pe`，语义正则通配） |
-| AntiPromptBias | ✅ | `if(qX())n.push("**Provider context:**...`（条件函数 199=`qX`，198=`dX`，语义正则通配） |
+| AntiSpy 逃生口 | ✅ | `if(De._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0`（199=`De`，语义正则通配） |
+| AntiPromptBias | ✅ | `if(qX())n.push("**Provider context:**...`（199=`qX`，语义正则通配） |
 
-**跨版本机制全部生效**——5 个 patch 点在 199 全命中，语义正则成功通配 199 的新 minified 变量名（`De`/`qX`）。
+### 点1：CCR Turn-Id 体系（isRelayHuman）— 预留框架，当前禁用
 
-### 新增可疑字符串排查
-
-对比 198 vs 199 的可读字符串 diff，命中 2 个含 detect/relay 关键词的新字符串：
-
-**1. `isRelayHuman`（4 处命中）**
-
-完整逻辑（@235389458）：
+**isRelayHuman 本地计算逻辑**（@244575367）：
 ```js
-function IHa(e,{isRelayHuman:t}){
-  if(!t)return;                              // isRelayHuman=false 直接返回
-  if(typeof e!=="object"||e===null||!("turn_id"in e))return;
-  let n=e.turn_id;
-  if(typeof n!=="string"||n===""||n.length>KIp||!YIp.test(n))return;  // KIp=128, YIp=/^[\x21-\x7e]+$/
-  return n                                   // 返回合法 turn_id
-}
+function Uon(e, t) { return Ckm(e, t) || Ikm(e, t); }
+function Ckm(e, t) { return e!==void 0 && Akm.has(e) && t===_xc && vkm(); }
+// Akm = {"claude-in-slack","claude_in_slack"}, _xc = "slack_human"
+function Ikm(e, t) { return e===Hkm && t===bxc && wkm(); }
+// Hkm = "claude-in-teams", bxc = "teams_human"
 ```
 
-**判定：非本地间谍点**。
-- `isRelayHuman` 是**服务端下发的标记**（relay 服务告诉客户端"这是人类用户"），客户端只是消费
-- 用于 CCR（Claude Code Relay）的 `X-CCR-Turn-Id` header turn 追踪（会话续接机制）
-- CC 没有在本地判断"用户是不是人类/中转站"，而是接收服务端标记控制 turn_id 校验是否启用
-- 不是本地识别探针，无需 patch
+**关键发现：`vkm()` 和 `wkm()` 都硬编码返回 `false`** → `isRelayHuman` 当前**永远为 false** → `IHa()` 直接 return → turn_id 从不提取 → `X-CCR-Turn-Id` header 从不注入。
 
-**2. `egress_probe`（@234567801）**
+**X-CCR-Turn-Id 生命周期**（@235389227-235389770）：
+- 用 `AsyncLocalStorage` 跨异步上下文传播 turn-id
+- `IHa()` 从入站消息 `turn_id` 字段提取（仅当 isRelayHuman=true）
+- `KVp()`（@237328241）在 MCP HTTP transport 请求注入 `X-CCR-Turn-Id` header，发给 MCP server（非 Anthropic API）
+- `CHa()`/`xHa()` 关联同一 turn 的多个操作
 
-上下文：`WFP Egress fence could not be verified — probe to ${o.target} was '${o.egress_probe}'... Re-run 'srt-win install'`
+**CCR = Claude Code Relay**，Slack/Teams bridge 集成的 turn 关联框架。
 
-**判定：非间谍功能**。
-- WFP = Windows Filtering Platform（Windows 防火墙框架）
-- 这是 CC 调用的 Windows 网络防护工具（`srt-win`）的出站探测逻辑
-- Windows 专属，Linux/macOS 不生效
-- 非客户端识别/上报，无需 patch
+**判定：不是间谍探针**。不检测鼠标/键盘/行为特征，只查消息来源平台标识（Slack/Teams），且当前功能完全禁用（vkm/wkm 硬编码 false）。无需 patch。
 
-### statsig 门控新增（tengu_xxx）
+### 点2：egress_probe / WFP — Windows 沙箱隔离验证
 
-199 新增 12 个 `tengu_*` 实验门控，全部是功能性实验（非间谍/识别）：
-- `tengu_agent_view_leader_command_notice`（UI 通知）
-- `tengu_gzip_request_bodies`（请求压缩）
-- `tengu_loop_command` / `tengu_stacked_slash_commands`（命令功能）
-- `tengu_memory_sync_persistence_warning`（memory 同步）
-- `tengu_refusal_fallback_bridge_forwarded/timeout`（拒答回退）
-- `tengu_teleport_repo_host_unverified`（仓库 teleport）
-- 其他（omelette_fouet/loggia_denkbild/team_mem_conflict 等内部代号）
+- `srt-win` = Sandbox Runtime for Windows（`@anthropic-ai/sandbox-runtime`）
+- WFP = Windows Filtering Platform，kernel 级防火墙
+- `egress_probe` 是 `srt-win wfp verify` 的输出字段，验证沙箱网络隔离是否生效
+- 完整逻辑（@234566477）：在 WFP 允许端口范围 `[60080,60089]` 外绑定 listener，让 sandbox 用户尝试连接，若成功（exit=3）说明 fence 未激活
+- **只作用于 `srt-sandbox` 专用用户 SID**，不监控正常用户流量
+- 三平台等价物：Linux 用 seccomp+socat，macOS 用 sandbox-exec，Windows 用 WFP
 
-这些是 CC 的功能 A/B 实验，由 `cedar_lagoon` 等 statsig 服务端控制，客户端只读，非间谍。
+**判定：不是间谍**，是沙箱安全隔离验证。v198 已有 srt-win 基础设施，v199 只新增 fence 验证。无需 patch。
 
-### 指纹/上报字段对比
+### 点3：12 个新 tengu 门控（纠正分类）
 
-| 字段 | 198 命中 | 199 命中 | 变化 |
-|------|---------|---------|------|
-| machineID | 4 | 4 | 无 |
-| deviceId | 57 | 57 | 无 |
-| fingerprint | 56 | 56 | 无 |
-| sessionId | 779 | 779 | 无 |
-| userId | 6 | 6 | 无 |
-| custom_base_url | 4 | 4 | 无 |
-| ineligible_reason | 2 | 2 | 无 |
-| Asia/Shanghai（斜杠值） | 0 | 0 | 198 砍掉后未加回 |
+**12 个里只有 2 个是 `ot()` feature flag，其余 10 个是 `q()` 遥测事件**（只上报不控制行为）。
 
-**指纹体系无变化**——199 没有新增指纹字段，也没有恢复被曝光的时区探针。
+| 门控 | 类型 | 条件 | 依赖 fu/mr? | 歧视风险 |
+|------|------|------|------------|---------|
+| tengu_loop_command | q()事件 | 无 | 否 | 无（/loop 命令统计） |
+| tengu_stacked_slash_commands | q()事件 | 无 | 否 | 无（堆叠命令统计） |
+| tengu_refusal_fallback_bridge_forwarded | q()事件 | 无 | 否 | 无（refusal 回退桥转发） |
+| tengu_refusal_fallback_bridge_timeout | q()事件 | 无 | 否 | 无（bridge 超时） |
+| tengu_teleport_repo_host_unverified | q()事件 | 无 | 否 | 无（host 校验失败上报，直接放行） |
+| tengu_memory_sync_persistence_warning | q()事件 | 无 | 否 | 无（memory 同步冲突） |
+| tengu_agent_view_leader_command_notice | q()事件 | 无 | 否 | 无（agent view 通知） |
+| tengu_team_mem_conflict_recovered | q()事件 | 无 | 否 | 无（team memory 冲突恢复） |
+| tengu_team_mem_conflict_notice_delivered | q()事件 | 无 | 否 | 无（冲突通知送达） |
+| tengu_gzip_request_bodies | ot()flag | 默认false | 间接依赖 wce()(first-party URL) | **隐私保护**（gzip+随机 padding 防流量分析） |
+| tengu_omelette_fouet | ot()flag | 默认false | 依赖 ic()(first-party) | 低（DesignSync 需 claude.ai 账号，合理限制） |
+| tengu_loggia_denkbild | ot()flag | 默认false | 否 | 无（bridge dialog 能力检测） |
+
+**重点详述**：
+
+**tengu_gzip_request_bodies**（@232869000）：当开启且 URL host 是 api.anthropic.com 时，对请求 body 做 gzip 压缩 + 在末尾添加 0-256 字节随机空白。**这是隐私保护**——防止网络中间设备通过 body 长度做侧信道流量分析。只对 first-party 生效是因为只有 first-party API 支持 gzip。非歧视。
+
+**tengu_refusal_fallback_bridge_***：refusal fallback（模型拒答回退）的 bridge 转发遥测。`hX()`=firstParty&&gu() 只影响"是否自动切换模型"，因为只有 first-party 有多模型权限。bridge_forwarded/timeout 只是遥测，不控制歧视。
+
+**tengu_teleport_repo_host_unverified**：teleport（远程会话恢复）时验证当前 repo 是否匹配 session 要求。`yf()` 检查 host 是否 github.com，`host_unverified` 状态直接放行（`case "host_unverified": break;`），不阻止操作。是安全验证遥测。
+
+### 预存可疑点：x-cc-atis header（非 199 新增）
+
+**`x-cc-atis` header**（@233188626）：值来自 `q0()?.atis`，由服务端 `fetchBootstrapData` 下发，作为 header 发给 first-party API。是服务端下发的追踪 token。
+
+- **非 199 新增**（v198 已有）
+- **只发给 first-party API**（中转站用户走 ANTHROPIC_BASE_URL，不发给 api.anthropic.com）
+- 若担心被追踪：可清除 `clientDataCacheSlots` 或拦截此 header
 
 ### 审计结论
 
-**CC v2.1.199 相对 198 没有新的本地间谍点/识别探针/功能门控歧视**。
+**CC v2.1.199 没有新增间谍探针/门控歧视/中转站识别机制**。
 
-- 5 个现有 patch 点全命中（语义正则通配 199 的 `De`/`qX` 成功）
-- `isRelayHuman` 是服务端标记消费（非本地识别）
-- `egress_probe` 是 Windows WFP 防火墙探测（非间谍，Linux 不生效）
-- 新增 statsig 门控都是功能性实验
-- 指纹/上报字段数量与 198 完全一致
-- 被曝光的 `Asia/Shanghai` 时区探针未恢复
+1. **CCR Turn-Id 体系**：Slack/Teams 集成预留框架，`vkm()`/`wkm()` 硬编码 false 导致当前完全禁用。不检测行为特征。
+2. **egress_probe / WFP**：Windows 沙箱网络隔离验证，只作用于 srt-sandbox 用户，非间谍。
+3. **12 个 tengu 门控**：10 个遥测事件（只上报不控制），2 个 feature flag。无一依赖 fu()/mr() 做中转站歧视。gzip padding 是隐私保护，omelette_fouet 是合理功能限制。
+4. **现有 5 个 patch 完全覆盖 199**，无需扩展 patch 框架。
 
-**AIW patch 框架无需扩展**，现有 5 个 patch 直接覆盖 199。
+### 持续监控点
+
+- **`vkm()`/`wkm()` 若改为 true**：CCR turn-id 体系会被激活，届时重新评估
+- **`x-cc-atis` header**：服务端下发追踪 token（预存，非新增），只发给 first-party
+- **gzip 随机 padding**：隐私保护特性，但开启后服务端可识别"用了 gzip 的客户端"
