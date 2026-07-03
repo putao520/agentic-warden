@@ -1,14 +1,31 @@
 # Change Log - v0.x
 
 ## Version Information
-- Current version: v0.5.99
+- Current version: v0.6.0
 - Latest planned: v0.3.0
-## [v0.5.99] - 2026-03-18
+## [v0.6.0] - 2026-07-03
 
-### Fixed
-- 修正 Windows 版本支持说明
-- 2.1.77 和 2.1.78 Windows 原生二进制未发布到 GCS
-- Windows 用户需使用 npm 安装 Node.js 版本
+### Added - Patch 框架升级支持 CC v2.1.195-199 跨版本
+- **6 层反间谍 patch 体系**: MaxContextTokens / AntiTelemetry / AntiSpy(逃生口短路+时区) / AntiPromptBias / AntiAtis
+- **跨版本语义正则**: 通配 minified 变量名(Oe/Pe/De 配置对象, g7/F7/j7/dX/qX 条件函数)，无需版本签名数据库
+- **逃生口短路 patch**: patch `_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL` 让 fu() 永远 true，一次性关闭 30+ 间谍调用点(中转站身份上报/归因标头歧视/工具集过滤/ToolSearch 门控/模型覆写门控)
+- **AntiAtis patch**: 防 x-cc-atis 追踪 header 注入(逃生口 patch 副作用补救)
+- **CC v2.1.199 深度审计**: isRelayHuman(Slack/Teams 预留框架当前禁用) + egress_probe(Windows WFP 沙箱) + 12 tengu 门控(无歧视)全部排查
+
+### Changed
+- max-token 正则放宽: `var \w+=200000,\w+=200000[^;]*;` 兼容 4/5/6 元素序列
+- AntiPromptBias 升级语义正则: `if(\w+())` 通配条件函数名
+- UnifiedPatchPattern 支持 regex 字面量替换模式(use_regex + replace_pattern)
+
+### Security
+- 修复 dependabot high: rmcp 0.16→2.0(DNS rebinding 漏洞, 28 处 API 迁移)
+- 修复 dependabot low: git2 0.18→0.20.4(undefined behavior)
+
+### Refactored - BCE 根治高圈复杂度
+- apply_max_context_tokens_patch CC20→4(提取 scan_readable_regions 公共骨架)
+- mach_error_string CC30→1(match 27-arm 改静态数组查表)
+- get_antispy_patches 拆分 + 提取 make_patch_pair helper(4 函数复用)
+- 5 处 map_err 重复提取 pattern_not_found helper
 
 ## [v0.5.98] - 2026-03-18
 

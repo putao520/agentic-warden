@@ -202,7 +202,7 @@ pub enum AiType {
 ---
 
 #### DATA-008: Patch Configuration
-**Version**: v0.5.99+
+**Version**: v0.6.0+
 **Related Requirements**: REQ-025
 **Storage Location**: `~/.aiw/patch.json`
 

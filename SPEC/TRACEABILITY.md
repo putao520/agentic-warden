@@ -1,6 +1,6 @@
 # AIW (Agentic-Warden) — Requirements Traceability Matrix
 
-**Version**: v0.5.99
+**Version**: v0.6.0
 **Last Updated**: 2026-03-19
 **Document Status**: Active
 

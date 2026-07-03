@@ -1,4 +1,4 @@
-# Requirements Specification - v0.5.99
+# Requirements Specification - v0.6.0
 
 ## Version Information
 - Current version: v0.5.88
@@ -1854,7 +1854,7 @@ OPENAI_MODEL="gpt-4"
 ### REQ-025: Claude CLI Max-Token 补丁系统
 **Status**: 🟢 Done
 **Priority**: P1 (High)
-**Version**: v0.5.99
+**Version**: v0.6.0
 **Related**: ARCH-014
 
 **Description**:
@@ -1900,7 +1900,7 @@ aiw patch restore
 ### REQ-026: Claude CLI AntiTelemetry 补丁系统
 **Status**: 🟢 Done
 **Priority**: P1 (High)
-**Version**: v0.5.99
+**Version**: v0.6.0
 **Related**: ARCH-014
 
 **Description**:
@@ -1941,7 +1941,7 @@ aiw patch status
 ### REQ-027: Claude CLI AntiSpy 补丁系统
 **Status**: 🟢 Done
 **Priority**: P1 (High)
-**Version**: v0.5.99
+**Version**: v0.6.0
 **Related**: ARCH-014
 
 **Description**:
@@ -1990,7 +1990,7 @@ aiw patch status
 ### REQ-027: Claude CLI AntiSpy 补丁系统
 **Status**: 🟢 Done
 **Priority**: P1 (High)
-**Version**: v0.5.99
+**Version**: v0.6.0
 **Related**: ARCH-014
 
 **Description**:
@@ -2033,7 +2033,7 @@ aiw patch apply
 ### REQ-028: Claude CLI AntiPromptBias 补丁系统
 **Status**: 🟢 Done
 **Priority**: P1 (High)
-**Version**: v0.5.99
+**Version**: v0.6.0
 **Related**: ARCH-014
 
 **Description**:
