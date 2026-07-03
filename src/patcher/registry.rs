@@ -271,7 +271,7 @@ pub fn get_antipromptbias_patches() -> Vec<UnifiedPatchPattern> {
 /// - 199: `function SXr(){let e=q0()?.atis;...}`
 ///
 /// 函数名（3 字符）和 bootstrap 函数名（2 字符）跨版本变化，用 regex 通配。
-/// regex 匹配文本固定 79 字节，replace 是固定字面量 79 字节
+/// regex 匹配文本固定 80 字节，replace 是固定字面量 79 字节
 /// （`function zzz(){return void 0` + 50 空格 + `}`），等长覆盖。
 ///
 /// 跨 196-199 通用。返回文件补丁与内存补丁各一份。
@@ -279,17 +279,17 @@ pub fn get_antiatis_patches() -> Vec<UnifiedPatchPattern> {
     // search (regex): 通配函数名 + bootstrap 函数名
     //   `function <FN>(){let e=<BF>()?.atis;return typeof e==="string"&&e.length>0?e:void 0}`
     //   <FN> 3 字符（S6r/H6r/pYr/SXr），<BF> 2 字符（P0/AI/I0/q0）
-    //   regex 匹配文本固定 79 字节（<FN>=3 + <BF>=2 时）
+    //   regex 匹配文本固定 80 字节（<FN>=3 + <BF>=2 时）
     let search: Cow<'static, [u8]> = Cow::Borrowed(
-        br#"function [a-zA-Z_$][a-zA-Z0-9_$]*\(\)\{let e=[a-zA-Z_$][a-zA-Z0-9_$]*\(\)\?\.atis;return typeof e=="string"&&e\.length>0\?e:void 0\}"#
+        br#"function [a-zA-Z_$][a-zA-Z0-9_$]*\(\)\{let e=[a-zA-Z_$][a-zA-Z0-9_$]*\(\)[?]\.atis;return typeof e==="string"&&e\.length>0[?]e:void 0\}"#
             .as_ref(),
     );
-    // replace (字面量, 79B): function zzz(){return void 0 + 50 空格 + }
-    let mut replace_vec = Vec::with_capacity(79);
+    // replace (字面量, 80B): function zzz(){return void 0 + 50 空格 + }
+    let mut replace_vec = Vec::with_capacity(80);
     replace_vec.extend_from_slice(b"function zzz(){return void 0");
-    replace_vec.extend(std::iter::repeat_n(b' ', 50));
+    replace_vec.extend(std::iter::repeat_n(b' ', 51));
     replace_vec.extend_from_slice(b"}");
-    debug_assert_eq!(replace_vec.len(), 79, "antiatis replace must be 79 bytes");
+    debug_assert_eq!(replace_vec.len(), 80, "antiatis replace must be 80 bytes");
 
     make_patch_pair(
         FeatureType::AntiAtis,
@@ -667,30 +667,30 @@ mod tests {
 
     #[test]
     fn test_antiatis_patches_equal_length() {
-        // 等长替换铁律：regex 匹配文本长度（79B，FN=3字符+BF=2字符）== replace_pattern 长度（79B）
+        // 等长替换铁律：regex 匹配文本长度（80B，FN=3字符+BF=2字符）== replace_pattern 长度（80B）
         let patches = get_antiatis_patches();
         let p = &patches[0];
         let replace = p.replace_pattern.as_ref().unwrap();
-        assert_eq!(replace.len(), 79, "replace must be 79 bytes");
+        assert_eq!(replace.len(), 80, "replace must be 80 bytes");
 
         let regex_str = std::str::from_utf8(p.search_pattern.as_ref()).unwrap();
         let re = regex::bytes::Regex::new(regex_str).unwrap();
-        // 196-199 各版本样本，函数名 3 字符 + bootstrap 函数 2 字符，匹配文本恒 79B
+        // 196-199 各版本样本，函数名 3 字符 + bootstrap 函数 2 字符，匹配文本恒 80B
         let samples: [(&[u8], &str); 4] = [
             (
-                b"function S6r(){let e=P0()?.atis;return typeof e==\"string\"&&e.length>0?e:void 0}",
+                b"function S6r(){let e=P0()?.atis;return typeof e===\"string\"&&e.length>0?e:void 0}",
                 "196 S6r/P0",
             ),
             (
-                b"function H6r(){let e=AI()?.atis;return typeof e==\"string\"&&e.length>0?e:void 0}",
+                b"function H6r(){let e=AI()?.atis;return typeof e===\"string\"&&e.length>0?e:void 0}",
                 "197 H6r/AI",
             ),
             (
-                b"function pYr(){let e=I0()?.atis;return typeof e==\"string\"&&e.length>0?e:void 0}",
+                b"function pYr(){let e=I0()?.atis;return typeof e===\"string\"&&e.length>0?e:void 0}",
                 "198 pYr/I0",
             ),
             (
-                b"function SXr(){let e=q0()?.atis;return typeof e==\"string\"&&e.length>0?e:void 0}",
+                b"function SXr(){let e=q0()?.atis;return typeof e===\"string\"&&e.length>0?e:void 0}",
                 "199 SXr/q0",
             ),
         ];
@@ -700,8 +700,8 @@ mod tests {
             });
             assert_eq!(
                 m.end() - m.start(),
-                79,
-                "antiatis regex match length for {} must be 79",
+                80,
+                "antiatis regex match length for {} must be 80",
                 label
             );
         }
