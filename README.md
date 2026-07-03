@@ -118,6 +118,7 @@ aiw patch restore
 | 2.1.196 | ✅ | ✅ | ✅ |
 | 2.1.197 | ✅ | ✅ | ✅ |
 | 2.1.198 | ✅ | ✅ | ✅ |
+| 2.1.199 | ✅ | ✅ | ✅ |
 
 Run `aiw patch status` to check if your version is supported. Patches use **semantic regex** (wildcarding minified variable names like `Oe`/`Pe`, `g7`/`F7`/`j7`/`dX`) and **stable literals** (API paths, env var names), so they work across versions without a per-version signature database.
 

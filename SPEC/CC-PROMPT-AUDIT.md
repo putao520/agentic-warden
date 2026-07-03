@@ -592,3 +592,96 @@ CC 的"胡言乱语"主要是 **thinking 控制机制**导致的：
 4. 默认 adaptive thinking，模型自己决定思考深度（可能不足）
 
 **最有效的改善**：用户的 `MAX_THINKING_TOKENS` 环境变量 + `--effort xhigh` + 我们的 max-token patch。这三者组合能最大化 thinking budget，减少胡言乱语。
+
+---
+
+## 第 11 章：CC v2.1.199 审计（新间谍点/功能门控排查）
+
+**审计时间**：2026-07-03
+**审计方法**：对比 2.1.198 与 2.1.199 二进制（250MB），diff 字符串/statsig 门控/API 端点/指纹字段
+
+### 5 个 patch 点命中验证（2.1.199）
+
+| patch 点 | 命中 | 199 字面量样本 |
+|---------|------|---------------|
+| max-token 常量块 | ✅ | `var tUt=200000,gre=200000,HGd=32000,TGd=128000;`（4 元素，无 20000，正则 `[^;]*;` 兼容） |
+| AntiTelemetry 端点 | ✅ | `/api/event_logging/v2/batch`（1 处） |
+| AntiSpy 时区 | ✅ | `Intl.DateTimeFormat().resolvedOptions().timeZone`（2 处） |
+| AntiSpy 逃生口 | ✅ | `if(De._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0`（配置对象名 199=`De`，198=`Pe`，语义正则通配） |
+| AntiPromptBias | ✅ | `if(qX())n.push("**Provider context:**...`（条件函数 199=`qX`，198=`dX`，语义正则通配） |
+
+**跨版本机制全部生效**——5 个 patch 点在 199 全命中，语义正则成功通配 199 的新 minified 变量名（`De`/`qX`）。
+
+### 新增可疑字符串排查
+
+对比 198 vs 199 的可读字符串 diff，命中 2 个含 detect/relay 关键词的新字符串：
+
+**1. `isRelayHuman`（4 处命中）**
+
+完整逻辑（@235389458）：
+```js
+function IHa(e,{isRelayHuman:t}){
+  if(!t)return;                              // isRelayHuman=false 直接返回
+  if(typeof e!=="object"||e===null||!("turn_id"in e))return;
+  let n=e.turn_id;
+  if(typeof n!=="string"||n===""||n.length>KIp||!YIp.test(n))return;  // KIp=128, YIp=/^[\x21-\x7e]+$/
+  return n                                   // 返回合法 turn_id
+}
+```
+
+**判定：非本地间谍点**。
+- `isRelayHuman` 是**服务端下发的标记**（relay 服务告诉客户端"这是人类用户"），客户端只是消费
+- 用于 CCR（Claude Code Relay）的 `X-CCR-Turn-Id` header turn 追踪（会话续接机制）
+- CC 没有在本地判断"用户是不是人类/中转站"，而是接收服务端标记控制 turn_id 校验是否启用
+- 不是本地识别探针，无需 patch
+
+**2. `egress_probe`（@234567801）**
+
+上下文：`WFP Egress fence could not be verified — probe to ${o.target} was '${o.egress_probe}'... Re-run 'srt-win install'`
+
+**判定：非间谍功能**。
+- WFP = Windows Filtering Platform（Windows 防火墙框架）
+- 这是 CC 调用的 Windows 网络防护工具（`srt-win`）的出站探测逻辑
+- Windows 专属，Linux/macOS 不生效
+- 非客户端识别/上报，无需 patch
+
+### statsig 门控新增（tengu_xxx）
+
+199 新增 12 个 `tengu_*` 实验门控，全部是功能性实验（非间谍/识别）：
+- `tengu_agent_view_leader_command_notice`（UI 通知）
+- `tengu_gzip_request_bodies`（请求压缩）
+- `tengu_loop_command` / `tengu_stacked_slash_commands`（命令功能）
+- `tengu_memory_sync_persistence_warning`（memory 同步）
+- `tengu_refusal_fallback_bridge_forwarded/timeout`（拒答回退）
+- `tengu_teleport_repo_host_unverified`（仓库 teleport）
+- 其他（omelette_fouet/loggia_denkbild/team_mem_conflict 等内部代号）
+
+这些是 CC 的功能 A/B 实验，由 `cedar_lagoon` 等 statsig 服务端控制，客户端只读，非间谍。
+
+### 指纹/上报字段对比
+
+| 字段 | 198 命中 | 199 命中 | 变化 |
+|------|---------|---------|------|
+| machineID | 4 | 4 | 无 |
+| deviceId | 57 | 57 | 无 |
+| fingerprint | 56 | 56 | 无 |
+| sessionId | 779 | 779 | 无 |
+| userId | 6 | 6 | 无 |
+| custom_base_url | 4 | 4 | 无 |
+| ineligible_reason | 2 | 2 | 无 |
+| Asia/Shanghai（斜杠值） | 0 | 0 | 198 砍掉后未加回 |
+
+**指纹体系无变化**——199 没有新增指纹字段，也没有恢复被曝光的时区探针。
+
+### 审计结论
+
+**CC v2.1.199 相对 198 没有新的本地间谍点/识别探针/功能门控歧视**。
+
+- 5 个现有 patch 点全命中（语义正则通配 199 的 `De`/`qX` 成功）
+- `isRelayHuman` 是服务端标记消费（非本地识别）
+- `egress_probe` 是 Windows WFP 防火墙探测（非间谍，Linux 不生效）
+- 新增 statsig 门控都是功能性实验
+- 指纹/上报字段数量与 198 完全一致
+- 被曝光的 `Asia/Shanghai` 时区探针未恢复
+
+**AIW patch 框架无需扩展**，现有 5 个 patch 直接覆盖 199。
