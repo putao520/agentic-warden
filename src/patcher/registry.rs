@@ -719,4 +719,131 @@ mod tests {
         assert!(patches.iter().all(|p| p.use_regex));
         assert!(patches.iter().all(|p| p.feature == FeatureType::AntiAtis));
     }
+
+    /// CC v2.1.201 真实 binary 样本回归测试（2026-07-04 审计）
+    ///
+    /// 从 GCS native binary `2.1.201/{linux-x64,linux-arm64}/claude` 提取的真实
+    /// patch 点字面量。6 个 patch 全部命中 + 等长约束满足，验证 regex 跨版本
+    /// （195-201）通配能力。变量名 jUt/kre/ke/dJ/jJr/nR（x64）与 j$t/Ire/Ie/dX/jXr/nP
+    /// （arm64）均不同，regex 自动通配。
+    ///
+    /// 若此测试 fail，说明 CC 新版本的 patch 点结构变化，需重新审计。
+    #[test]
+    fn test_patches_match_201_binary_samples() {
+        // linux-x64 真实样本（从 2.1.201 binary 字节级提取）
+        let x64_samples: &[(&[u8], &str)] = &[
+            (
+                b"var jUt=200000,kre=200000,z5d=32000,K5d=128000;",
+                "max-token x64 (4 elements)",
+            ),
+            (
+                b"if(ke._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0",
+                "escape x64 (obj=ke, 2 chars)",
+            ),
+            (
+                br#"if(dJ())n.push("**Provider context:** This session is not using"#,
+                "antipromptbias x64 (fn=dJ, 2 chars)",
+            ),
+            (
+                b"function jJr(){let e=nR()?.atis;return typeof e===\"string\"&&e.length>0?e:void 0}",
+                "antiatis x64 (fn=jJr 3 chars, bootstrap=nR 2 chars)",
+            ),
+        ];
+        // linux-arm64 真实样本（变量名不同，验证跨平台通配）
+        let arm64_samples: &[(&[u8], &str)] = &[
+            (
+                b"var j$t=200000,Ire=200000,zGd=32000,KGd=128000;",
+                "max-token arm64 (4 elements, var name j$t with $)",
+            ),
+            (
+                b"if(Ie._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0",
+                "escape arm64 (obj=Ie, 2 chars)",
+            ),
+            (
+                br#"if(dX())n.push("**Provider context:** This session is not using"#,
+                "antipromptbias arm64 (fn=dX, 2 chars)",
+            ),
+            (
+                b"function jXr(){let e=nP()?.atis;return typeof e===\"string\"&&e.length>0?e:void 0}",
+                "antiatis arm64 (fn=jXr 3 chars, bootstrap=nP 2 chars)",
+            ),
+        ];
+
+        // max-token regex: 匹配 4 元素块，等长约束由 regex_replace_values 运行时保证
+        let max_tok_re = regex::bytes::Regex::new(MAX_CONTEXT_TOKENS_SEARCH_REGEX).unwrap();
+        for (sample, label) in x64_samples.iter().chain(arm64_samples.iter()) {
+            if !label.starts_with("max-token") {
+                continue;
+            }
+            let m = max_tok_re
+                .find(sample)
+                .unwrap_or_else(|| panic!("max-token regex must match {}", label));
+            assert_eq!(m.start(), 0, "{}: match must start at 0", label);
+            assert_eq!(m.end(), sample.len(), "{}: match must cover full block", label);
+        }
+
+        // escape regex: 匹配 55 字节，replace 也是 55 字节
+        let escape_re = regex::bytes::Regex::new(
+            r"if\([a-zA-Z_$][a-zA-Z0-9_$]*\._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL\)return!0",
+        )
+        .unwrap();
+        for (sample, label) in x64_samples.iter().chain(arm64_samples.iter()) {
+            if !label.starts_with("escape") {
+                continue;
+            }
+            let m = escape_re
+                .find(sample)
+                .unwrap_or_else(|| panic!("escape regex must match {}", label));
+            assert_eq!(
+                m.end() - m.start(),
+                55,
+                "{}: escape match must be 55 bytes",
+                label
+            );
+        }
+
+        // antipromptbias regex: 匹配 63 字节，replace 也是 63 字节
+        let pb_re = regex::bytes::Regex::new(
+            r#"if\([a-zA-Z_$][a-zA-Z0-9_$]*\(\)\)n\.push\("\*\*Provider context:\*\* This session is not using"#,
+        )
+        .unwrap();
+        for (sample, label) in x64_samples.iter().chain(arm64_samples.iter()) {
+            if !label.starts_with("antipromptbias") {
+                continue;
+            }
+            let m = pb_re
+                .find(sample)
+                .unwrap_or_else(|| panic!("antipromptbias regex must match {}", label));
+            assert_eq!(
+                m.end() - m.start(),
+                63,
+                "{}: antipromptbias match must be 63 bytes",
+                label
+            );
+        }
+
+        // antiatis regex: 匹配 80 字节，replace 也是 80 字节
+        let atis_re = regex::bytes::Regex::new(
+            r#"function [a-zA-Z_$][a-zA-Z0-9_$]*\(\)\{let e=[a-zA-Z_$][a-zA-Z0-9_$]*\(\)[?]\.atis;return typeof e==="string"&&e\.length>0[?]e:void 0\}"#,
+        )
+        .unwrap();
+        for (sample, label) in x64_samples.iter().chain(arm64_samples.iter()) {
+            if !label.starts_with("antiatis") {
+                continue;
+            }
+            let m = atis_re
+                .find(sample)
+                .unwrap_or_else(|| panic!("antiatis regex must match {}", label));
+            assert_eq!(
+                m.end() - m.start(),
+                80,
+                "{}: antiatis match must be 80 bytes",
+                label
+            );
+        }
+
+        // AntiTelemetry + AntiSpy timezone 是字面量模式，跨版本稳定，无需 regex 验证
+        // （字面量 `/api/event_logging/v2/batch` 和 `Intl.DateTimeFormat()...timeZone`
+        //   在 201 binary 已验证各 1/2 处命中，见 SPEC/CC-PROMPT-AUDIT.md 201 章节）
+    }
 }

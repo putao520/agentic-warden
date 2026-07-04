@@ -219,22 +219,25 @@ aiw patch restore
 - **内存补丁**：文件未修补时运行时自动应用（best-effort）
 
 **支持的安装方式**：
-- Native binary (ELF/Mach-O): `~/.local/share/claude/versions/<version>`
-- npm 安装: `npm install -g @anthropic-ai/claude-code`
+- Native binary (ELF): `~/.local/share/claude/versions/<version>` — **仅支持 GCS native binary**（Bun 打包的 ELF，字节级 patch 目标）
+- ❌ npm 安装（`npm install -g @anthropic-ai/claude-code`）**不支持** — 构建产物不同，binary 布局不同，patch regex 不保证命中
 
 **支持的版本**（语义正则 + 稳定字面量，跨版本通用）：
 
-| 版本 | Linux x64 | macOS arm64 | Windows x64 |
-|---------|-----------|-------------|-------------|
-| 2.1.195 | ✅ | ✅ | ✅ |
-| 2.1.196 | ✅ | ✅ | ✅ |
-| 2.1.197 | ✅ | ✅ | ✅ |
-| 2.1.198 | ✅ | ✅ | ✅ |
-| 2.1.199 | ✅ | ✅ | ✅ |
+| 版本 | Linux x64 | Linux arm64 |
+|---------|-----------|-------------|
+| 2.1.195 | ✅ | ✅ |
+| 2.1.196 | ✅ | ✅ |
+| 2.1.197 | ✅ | ✅ |
+| 2.1.198 | ✅ | ✅ |
+| 2.1.199 | ✅ | ✅ |
+| 2.1.201 | ✅ | ✅ |
 
-运行 `aiw patch status` 检查版本是否支持。补丁用**语义正则**（通配 minified 变量名 `Oe`/`Pe`、`g7`/`F7`/`j7`/`dX`）和**稳定字面量**（API 路径、环境变量名），无需维护版本签名数据库即可跨版本工作。
+> CC 2.1.195+ native binary 仅在 GCS 发布 `linux-x64` + `linux-arm64`。macOS/Windows 自 2.1.195 起不再发布 native binary（GCS 404）。历史版本 2.1.72-74 曾支持 macOS arm64 / Windows x64。
 
-**五层补丁**（反间谍 + 能力解锁）：
+运行 `aiw patch status` 检查版本是否支持。补丁用**语义正则**（通配 minified 变量名 `jUt`/`kre`、`ke`/`Ie`、`dJ`/`dX`、`jJr`/`jXr`）和**稳定字面量**（API 路径、环境变量名），无需维护版本签名数据库即可跨版本工作。
+
+**六层补丁**（反间谍 + 能力解锁）：
 
 | 补丁 | 作用 | 机制 |
 |------|------|------|
@@ -242,7 +245,8 @@ aiw patch restore
 | **AntiTelemetry** | 截断 CC 客户端上报（`/api/event_logging/v2/batch` → 404），machineID/userID/设备指纹不发 | 字面量 `batch`→`xxxxx`（27B 等长） |
 | **AntiSpy（逃生口短路）** | patch `_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL` 检查让 `fu()` 永远返回 true——一次性关闭 30+ 调用点：中转站身份上报（`custom_base_url` 标记）、归因标头歧视（`cch=00000`）、工具集过滤、ToolSearch 门控、模型覆写门控 | 语义正则 `if(\w+._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0` → `if(1)`（55B 等长） |
 | **AntiSpy（时区）** | 时区识别失明——`Intl.DateTimeFormat().resolvedOptions().timeZone` 永远返回 `UTC`，真实时区不泄露 | 字面量 → `"UTC"/*...*/`（48B 等长） |
-| **AntiPromptBias** | 消除给第三方用户注入的 Provider context 提示词偏见（`if(dX())n.push("**Provider context:**...")` → `if(0)`） | 语义正则 `if(\w+())` 通配 `g7`/`F7`/`j7`/`dX`（63B 等长） |
+| **AntiPromptBias** | 消除给第三方用户注入的 Provider context 提示词偏见（`if(dJ())n.push("**Provider context:**...")` → `if(0)`） | 语义正则 `if(\w+())` 通配函数名（63B 等长） |
+| **AntiAtis** | 防止 `x-cc-atis` 追踪 header 注入——patch atis 提取函数让它永远返回 `void 0`（逃生口短路 patch 副作用激活 `tMi(firstParty)&&gu()` 条件，patch 提取函数从源头中和） | 语义正则 `function \w+(){let e=\w+()?.atis;...}` → `function zzz(){return void 0}`（80B 等长） |
 
 > **设计说明**：逃生口短路 patch 基于 CC 官方逃生口环境变量 `_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL`（`st()` 函数对 `1`/`true`/`yes`/`on` 解析为 truthy）。patch 检查本身（而非注入环境变量）让它永久生效且覆盖更多调用点。CC v2.1.198 砍掉了被曝光的 `Hsp()` 显性探针（Asia/Shanghai 时区 + base64 主机列表），识别回归 `Cot()`/`fu()` host 比对，由逃生口短路 patch 一并中和。
 

@@ -694,3 +694,63 @@ function Ikm(e, t) { return e===Hkm && t===bxc && wkm(); }
 - **`vkm()`/`wkm()` 若改为 true**：CCR turn-id 体系会被激活，届时重新评估
 - **`x-cc-atis` header**：服务端下发追踪 token（预存，非新增），只发给 first-party
 - **gzip 随机 padding**：隐私保护特性，但开启后服务端可识别"用了 gzip 的客户端"
+
+---
+
+# CC v2.1.201 审计（2026-07-04）
+
+**审计对象**：GCS native binary `2.1.201/linux-x64`（251,300,664 bytes）+ `linux-arm64`（248,101,616 bytes）
+**审计方法**：6 patch regex 命中验证 + 199↔201 tengu 事件 diff + 10 新事件 firstParty/relay 歧视检查
+
+## 1. 6 个 Patch 点命中验证（2.1.201）
+
+| Patch 点 | linux-x64 | linux-arm64 | 等长约束 |
+|---------|-----------|-------------|---------|
+| MaxContextTokens | ✅ `var jUt=200000,kre=200000,z5d=32000,K5d=128000;` | ✅ `var j$t=200000,Ire=200000,zGd=32000,KGd=128000;` | ✅ 6 位数等长 |
+| AntiTelemetry | ✅ `/api/event_logging/v2/batch` | ✅ 同 | ✅ 27→27 |
+| AntiSpy.escape | ✅ `if(ke._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0` | ✅ `if(Ie._CLAUDE_CODE...)` | ✅ 55→55 |
+| AntiSpy.timezone | ✅ 2 处 | ✅ 2 处 | ✅ 48→48 |
+| AntiPromptBias | ✅ `if(dJ())n.push("**Provider context:**...` | ✅ `if(dX())...` | ✅ 63→63 |
+| AntiAtis | ✅ `function jJr(){let e=nR()?.atis;...}` | ✅ `function jXr(){let e=nP()?.atis;...}` | ✅ 80→80 |
+
+**结论：6 个 patch 全部自动命中，无需改代码。变量名跨平台跨版本均不同（jUt/j$t、ke/Ie、dJ/dX、jJr/jXr、nR/nP），regex 通配验证通过。**
+
+## 2. 新增 tengu 事件 diff（199 original → 201）
+
+新增 10 个，移除 1 个（`tengu_auto_mode_repo_visibility_lookup_failed`）。
+
+| 新事件 | firstParty 引用 | relay 引用 | 判定 |
+|--------|----------------|-----------|------|
+| tengu_ask_user_question_skipped | 否 | 否 | 🟢 AskUserQuestion 工具跳过，用户交互遥测 |
+| tengu_ask_user_question_timeout_changed | 否 | 否 | 🟢 config_panel 配置变更遥测 |
+| tengu_bg_adopt_token_lost_respawn | 否 | 否 | 🟢 后台 session token 丢失重生，运维事件 |
+| tengu_bg_pty_auth_mismatch | 否 | 否 | 🟢 后台 PTY 鉴权不匹配，**安全防护**事件 |
+| tengu_bg_rv_auth_mismatch | 否 | 否 | 🟢 后台 relay 鉴权拒绝，**安全防护**事件 |
+| tengu_bridge_read_file_served | 否 | 否 | 🟢 bridge 读文件服务，功能遥测 |
+| tengu_observer_agents_enabled | 否 | 否 | 🟢 observer 模式启用，功能遥测 |
+| tengu_sessions_elevated_auth_enforcement0 | 否 | 否 | 🟢 **Trusted Devices for Remote Control**，组织级安全策略（`require_trusted_devices` org policy flag），仅作用于 bridge/remote-control，与 firstParty/relay 无关 |
+| tengu_set_model_unrecognized | 否 | 否 | 🟢 模型设置无法识别，功能遥测 |
+| tengu_slash_command_unavailable | 否 | 否 | 🟢 slash 命令不可用，功能遥测 |
+
+**10 个新事件全部 firstParty=False, relay=False，无中转站/第三方歧视。**
+
+## 3. 既有间谍点状态（与 199 一致）
+
+- **`x-cc-atis` header**：仍存在（2 处），AntiAtis patch 已覆盖（atis 提取函数 → void 0）
+- **`isRelayHuman`**：4 处，仍是 Slack/Teams bridge 预留框架（`vkm()`/`wkm()` 硬编码 false 禁用）
+- **`egress_probe`/WFP**：2 处，仍是 Windows 沙箱隔离验证
+- **`cnTZ`/`knownHosts`**：0 处（时区探针未恢复，与 199 一致）
+- **`tengu`** 事件总数：199=1537 → 201=1546（+9 净增）
+
+## 4. 审计结论
+
+**CC v2.1.201 没有新增间谍探针/门控歧视/中转站识别机制。**
+
+1. 6 个 patch 全部自动命中，变量名 regex 通配验证通过，**无需扩展 patch 框架**
+2. 10 个新 tengu 事件全部是功能/安全/运维遥测，无一依赖 firstParty/relay 做歧视
+3. `tengu_sessions_elevated_auth_enforcement0` 是组织级 Trusted Devices 策略（org policy 驱动，非中转站识别）
+4. 既有间谍点状态与 199 完全一致，被曝光的时区探针（cnTZ）未恢复
+
+## 5. 平台发布情况
+
+CC 2.1.195+ native binary 仅在 GCS 发布 `linux-x64` + `linux-arm64`，macos/windows 不再发布 native binary（GCS 404）。AIW patch 仅支持 GCS native binary，不支持 npm 版 CC。

@@ -107,22 +107,25 @@ aiw patch restore
 - **Memory Patch**: Applied at runtime when file is unpatched (automatic, best-effort)
 
 **Supported Installations**:
-- Native binary (ELF/Mach-O): `~/.local/share/claude/versions/<version>`
-- npm installation: `npm install -g @anthropic-ai/claude-code`
+- Native binary (ELF): `~/.local/share/claude/versions/<version>` — **GCS native binary only** (Bun-packaged ELF, byte-level patch target)
+- ❌ npm installation (`npm install -g @anthropic-ai/claude-code`) is **NOT supported** — different build artifact, binary layout differs, patch regex not guaranteed to match
 
 **Supported Versions** (cross-version via semantic regex / stable literals):
 
-| Version | Linux x64 | macOS arm64 | Windows x64 |
-|---------|-----------|-------------|-------------|
-| 2.1.195 | ✅ | ✅ | ✅ |
-| 2.1.196 | ✅ | ✅ | ✅ |
-| 2.1.197 | ✅ | ✅ | ✅ |
-| 2.1.198 | ✅ | ✅ | ✅ |
-| 2.1.199 | ✅ | ✅ | ✅ |
+| Version | Linux x64 | Linux arm64 |
+|---------|-----------|-------------|
+| 2.1.195 | ✅ | ✅ |
+| 2.1.196 | ✅ | ✅ |
+| 2.1.197 | ✅ | ✅ |
+| 2.1.198 | ✅ | ✅ |
+| 2.1.199 | ✅ | ✅ |
+| 2.1.201 | ✅ | ✅ |
 
-Run `aiw patch status` to check if your version is supported. Patches use **semantic regex** (wildcarding minified variable names like `Oe`/`Pe`, `g7`/`F7`/`j7`/`dX`) and **stable literals** (API paths, env var names), so they work across versions without a per-version signature database.
+> CC 2.1.195+ native binary is published on GCS for `linux-x64` + `linux-arm64` only. macOS/Windows native binaries are no longer published since 2.1.195 (GCS 404). Historical 2.1.72-74 supported macOS arm64 / Windows x64.
 
-**Five Patch Layers** (anti-spy + capability unlock):
+Run `aiw patch status` to check if your version is supported. Patches use **semantic regex** (wildcarding minified variable names like `jUt`/`kre`, `ke`/`Ie`, `dJ`/`dX`, `jJr`/`jXr`) and **stable literals** (API paths, env var names), so they work across versions without a per-version signature database.
+
+**Six Patch Layers** (anti-spy + capability unlock):
 
 | Patch | What it does | Mechanism |
 |-------|--------------|-----------|
@@ -130,7 +133,8 @@ Run `aiw patch status` to check if your version is supported. Patches use **sema
 | **AntiTelemetry** | Cuts off CC client reporting (`/api/event_logging/v2/batch` → 404), machineID/userID/device fingerprint never sent | Literal `batch`→`xxxxx` (27B equal-length) |
 | **AntiSpy (escape hatch)** | Patches `_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL` check so `fu()` always returns true — one-shot silences 30+ call sites: relay-station identity reporting (`custom_base_url` flag), attribution header discrimination (`cch=00000`), tool-set filtering, ToolSearch gating, model-override gating | Semantic regex `if(\w+._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL)return!0` → `if(1)` (55B equal-length) |
 | **AntiSpy (timezone)** | Blinds timezone detection — `Intl.DateTimeFormat().resolvedOptions().timeZone` always returns `UTC`, real timezone never leaks | Literal → `"UTC"/*...*/` (48B equal-length) |
-| **AntiPromptBias** | Eliminates Provider context prompt bias injected to 3rd-party users (`if(dX())n.push("**Provider context:**...")` → `if(0)`) | Semantic regex `if(\w+())` wildcards `g7`/`F7`/`j7`/`dX` (63B equal-length) |
+| **AntiPromptBias** | Eliminates Provider context prompt bias injected to 3rd-party users (`if(dJ())n.push("**Provider context:**...")` → `if(0)`) | Semantic regex `if(\w+())` wildcards function name (63B equal-length) |
+| **AntiAtis** | Prevents `x-cc-atis` tracking header injection — patches atis extract function to return `void 0` (side effect of escape-hatch patch activates `tMi(firstParty)&&gu()` gate; patching the extractor neutralizes it) | Semantic regex `function \w+(){let e=\w+()?.atis;...}` → `function zzz(){return void 0}` (80B equal-length) |
 
 > **Design note**: The escape-hatch patch is based on CC's official escape-hatch env var `_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL` (parsed by `st()` as truthy for `1`/`true`/`yes`/`on`). Patching the check itself (instead of injecting the env var) makes it permanent and covers more call sites. CC v2.1.198 removed the exposed `Hsp()` explicit probe (Asia/Shanghai timezone + base64 host list); identification fell back to `Cot()`/`fu()` host comparison, which the escape-hatch patch neutralizes.
 

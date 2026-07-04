@@ -5,6 +5,13 @@
 - Latest planned: v0.3.0
 ## [v0.6.0] - 2026-07-03
 
+### Added - CC v2.1.201 审计 + GCS-only 铁律（2026-07-04）
+- **CC v2.1.201 patch 验证**: 6 个 patch 点全部自动命中（linux-x64 + linux-arm64），变量名 jUt/kre/ke/dJ/jJr/nR（regex 通配），等长约束全部满足，**无需改代码**
+- **CC v2.1.201 间谍点审计**: 10 个新 tengu 事件全部 firstParty=False/relay=False（无中转站歧视）；`tengu_sessions_elevated_auth_enforcement0` 是 Trusted Devices for Remote Control 组织级安全策略（非间谍）；既有间谍点（x-cc-atis/isRelayHuman/egress_probe）状态与 199 一致，cnTZ 时区探针未恢复
+- **GCS native binary only 铁律**: 持久化到 CLAUDE.md §4 — AIW 只支持 GCS native binary（Bun 打包 ELF），禁止 npm 版 CC（构建产物不同，patch regex 不保证命中）
+- **平台发布事实**: CC 2.1.195+ 仅 GCS 发布 linux-x64/linux-arm64，macos/windows 自 195 起不再发布 native binary
+- 文档矩阵扩展到 195-201，README/CLAUDE.md/03-DATA-STRUCTURE 统一修正平台列 + 补 AntiAtis 层
+
 ### Added - Patch 框架升级支持 CC v2.1.195-199 跨版本
 - **6 层反间谍 patch 体系**: MaxContextTokens / AntiTelemetry / AntiSpy(逃生口短路+时区) / AntiPromptBias / AntiAtis
 - **跨版本语义正则**: 通配 minified 变量名(Oe/Pe/De 配置对象, g7/F7/j7/dX/qX 条件函数)，无需版本签名数据库
