@@ -85,6 +85,14 @@ pub enum PatchAction {
     /// 禁用 x-cc-atis 追踪 header（防逃生口 patch 副作用）
     #[command(name = "disable-atis")]
     DisableAtis,
+
+    /// 禁用 frame/track 第二上报通道（绕过 AntiTelemetry 的独立 frame 服务上报）
+    #[command(name = "disable-frame-track")]
+    DisableFrameTrack,
+
+    /// 禁用 MAC 地址 GCE 云检测（tMi MAC 扫描失效）
+    #[command(name = "disable-cloud-detect")]
+    DisableCloudDetect,
 }
 
 /// 配置管理动作

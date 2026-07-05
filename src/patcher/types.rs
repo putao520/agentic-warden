@@ -49,6 +49,25 @@ pub enum FeatureType {
     /// patch atis 提取函数让它永远返回 void 0，header 永不注入。
     /// 跨 196-199 通用（195 无此机制），语义正则通配函数名。
     AntiAtis,
+    /// AntiFrameTrack - 截断 /api/frame/track 第二上报通道（绕过 AntiTelemetry 的独立 frame 服务上报）
+    ///
+    /// `trackFrameEvent(trr)` 函数上报 artifact 使用行为（`frame_surfaced`
+    /// 事件 + slug/via/mode + X-Frame-* header）到 `BASE_API_URL` 的
+    /// `/api/frame/track` 端点。这是独立于 AntiTelemetry 的第二上报通道
+    /// （AntiTelemetry 只截断 `/api/event_logging/v2/batch`）。
+    /// 通过等长字面量替换把端点改成 `/api/frame/xxxxx` → 404 静默失败
+    /// （try/catch 吞错）。跨版本稳定（API 路径字面量）。
+    AntiFrameTrack,
+    /// AntiCloudDetect - 禁用 MAC 地址 GCE 云检测（/^42:01/ → /^00:00/，tMi 永远 false）
+    ///
+    /// `tMi()` 函数遍历 `networkInterfaces()` 的 MAC 地址，用 `fGd=/^42:01/`
+    /// regex 匹配 GCE 实例 OUI 前缀（Google 的 MAC 厂商前缀）。当前是
+    /// 预留间谍点（导出但无内部调用方），防未来版本激活。通过等长字面量
+    /// 替换把 regex 改成 `/^00:00/`（永不匹配任何 MAC）→ `fGd.test()` 永远
+    /// false → `tMi()` 永远返回 false。跨版本稳定（regex 字面量）。
+    /// 不防 eMi（GCE BIOS `/Google/.test`）：eMi Linux-only + 需读文件，
+    /// 中转站用户通常不跑 GCE，且 `/Google/` 字面量太通用不能改。
+    AntiCloudDetect,
 }
 
 impl FeatureType {
@@ -64,6 +83,12 @@ impl FeatureType {
             FeatureType::AntiAtis => {
                 "AntiAtis - 防止 x-cc-atis 追踪 header 注入（atis 提取 → void 0）"
             }
+            FeatureType::AntiFrameTrack => {
+                "AntiFrameTrack - 截断 frame/track 第二上报通道（端点 → 404）"
+            }
+            FeatureType::AntiCloudDetect => {
+                "AntiCloudDetect - 禁用 MAC 地址 GCE 云检测（/^42:01/ → /^00:00/）"
+            }
         }
     }
 
@@ -75,6 +100,8 @@ impl FeatureType {
             FeatureType::AntiSpy => "antispy",
             FeatureType::AntiPromptBias => "antipromptbias",
             FeatureType::AntiAtis => "antiatis",
+            FeatureType::AntiFrameTrack => "antiframetrack",
+            FeatureType::AntiCloudDetect => "anticloudetect",
         }
     }
 }
@@ -305,6 +332,49 @@ mod tests {
         assert_ne!(FeatureType::AntiAtis, FeatureType::AntiTelemetry);
         assert_ne!(FeatureType::AntiAtis, FeatureType::AntiSpy);
         assert_ne!(FeatureType::AntiAtis, FeatureType::AntiPromptBias);
+    }
+
+    #[test]
+    fn test_antiframetrack_description() {
+        assert!(FeatureType::AntiFrameTrack
+            .description()
+            .contains("AntiFrameTrack"));
+    }
+
+    #[test]
+    fn test_antiframetrack_short_name() {
+        assert_eq!(FeatureType::AntiFrameTrack.short_name(), "antiframetrack");
+    }
+
+    #[test]
+    fn test_antiframetrack_distinct_from_others() {
+        assert_ne!(FeatureType::AntiFrameTrack, FeatureType::MaxContextTokens);
+        assert_ne!(FeatureType::AntiFrameTrack, FeatureType::AntiTelemetry);
+        assert_ne!(FeatureType::AntiFrameTrack, FeatureType::AntiSpy);
+        assert_ne!(FeatureType::AntiFrameTrack, FeatureType::AntiPromptBias);
+        assert_ne!(FeatureType::AntiFrameTrack, FeatureType::AntiAtis);
+    }
+
+    #[test]
+    fn test_anticloudetect_description() {
+        assert!(FeatureType::AntiCloudDetect
+            .description()
+            .contains("AntiCloudDetect"));
+    }
+
+    #[test]
+    fn test_anticloudetect_short_name() {
+        assert_eq!(FeatureType::AntiCloudDetect.short_name(), "anticloudetect");
+    }
+
+    #[test]
+    fn test_anticloudetect_distinct_from_others() {
+        assert_ne!(FeatureType::AntiCloudDetect, FeatureType::MaxContextTokens);
+        assert_ne!(FeatureType::AntiCloudDetect, FeatureType::AntiTelemetry);
+        assert_ne!(FeatureType::AntiCloudDetect, FeatureType::AntiSpy);
+        assert_ne!(FeatureType::AntiCloudDetect, FeatureType::AntiPromptBias);
+        assert_ne!(FeatureType::AntiCloudDetect, FeatureType::AntiAtis);
+        assert_ne!(FeatureType::AntiCloudDetect, FeatureType::AntiFrameTrack);
     }
 
     #[test]

@@ -2074,6 +2074,87 @@ aiw patch apply
 aiw patch status
 ```
 
+### REQ-029: Claude CLI AntiFrameTrack 补丁系统
+**Status**: 🟢 Done
+**Priority**: P1 (High)
+**Version**: v0.6.0
+**Related**: ARCH-014
+
+**Description**:
+Agentic-Warden MUST provide an AntiFrameTrack patch system for Claude CLI that truncates the `/api/frame/track` second telemetry channel. CC v2.1.201 contains a `trackFrameEvent(trr)` function that reports artifact usage behavior (`frame_surfaced` events with slug/via/mode + X-Frame-CP/Surface/Platform headers) to `BASE_API_URL` at the `/api/frame/track` endpoint. This is an independent reporting channel that **bypasses AntiTelemetry** (AntiTelemetry only truncates `/api/event_logging/v2/batch`). For third-party relay users without OAuth the request 401s silently (try/catch swallows errors), but for firstParty users it leaks artifact usage behavior. This patch rewrites the endpoint path `/api/frame/track` (16 bytes) to `/api/frame/xxxxx` (16 bytes, equal-length literal), so the endpoint 404s and `trackFrameEvent` silently fails. Cross-version stable (API path literal, not minified variable name).
+
+**Acceptance Criteria**:
+- [x] Patch: `/api/frame/track` (16 bytes) -> `/api/frame/xxxxx` (16 bytes, equal-length literal)
+- [x] Literal replacement mode (`use_regex=false`) via `UnifiedPatchPattern` with `search_pattern` + `replace_pattern`
+- [x] Support both file patch (persistent) and memory patch (runtime)
+- [x] `PatchAction::DisableFrameTrack` CLI command (`aiw patch disable-frame-track`)
+- [x] `get_antiframetrack_patches` registry function generates 2 patch patterns (file + memory)
+- [x] `FeatureType::AntiFrameTrack` variant added to `FeatureType` enum (description + short_name="antiframetrack")
+- [x] `execute_apply_patch` applies max-token + anti-telemetry + anti-spy + anti-prompt-bias + anti-atis + anti-frame-track file patches (six independent, one failure doesn't affect the others)
+- [x] `execute_patch_status` reports anti-frame-track patch status
+- [x] Cross-version stable (API path literal, not minified variable name)
+- [x] Equal-length replacement iron law: 16 -> 16 bytes
+
+**Technical Constraints**:
+- `search_pattern` and `replace_pattern` MUST be equal length (16 bytes) to avoid shifting subsequent offsets
+- Memory patch uses `apply_literal_memory_patch` (search_pattern -> replace_pattern integral overwrite)
+- AntiFrameTrack patch is independent of other 6 patches: one failing does not block the others
+- `use_regex=false` (literal mode, not regex mode)
+- Only patches the `/api/frame/track` endpoint path; does NOT modify `trackFrameEvent` function logic or other firstParty gates
+
+**CLI Usage**:
+```bash
+# Disable frame/track second reporting channel
+aiw patch disable-frame-track
+
+# Apply all patches (max-token + anti-telemetry + anti-spy + anti-prompt-bias + anti-atis + anti-frame-track)
+aiw patch apply
+
+# Check patch status (all patches)
+aiw patch status
+```
+
+### REQ-030: Claude CLI AntiCloudDetect 补丁系统
+**Status**: 🟢 Done
+**Priority**: P1 (High)
+**Version**: v0.6.0
+**Related**: ARCH-014
+
+**Description**:
+Agentic-Warden MUST provide an AntiCloudDetect patch system for Claude CLI that disables MAC address GCE cloud detection. CC v2.1.201 contains a `tMi()` function that iterates `networkInterfaces()` MAC addresses and matches them against the GCE instance OUI prefix using `fGd=/^42:01/` regex (Google's MAC vendor prefix 42:01:00:00:00:00). This is currently a reserved spy point (exported but with no internal callers), patched preemptively against future version activation. This patch rewrites the regex literal `/^42:01/` (8 bytes) to `/^00:00/` (8 bytes, equal-length literal), which never matches any MAC address, so `fGd.test()` always returns false and `tMi()` always returns false. Cross-version stable (regex literal `/^42:01/` is a constant, not minified variable name). Does NOT patch `eMi` (GCE BIOS `/Google/.test`): eMi is Linux-only + requires reading `/sys/class/dmi/id/bios_vendor` file, relay users typically don't run on GCE, and `/Google/` is too generic a literal to safely modify.
+
+**Acceptance Criteria**:
+- [x] Patch: `/^42:01/` (8 bytes) -> `/^00:00/` (8 bytes, equal-length literal, never matches any MAC)
+- [x] Literal replacement mode (`use_regex=false`) via `UnifiedPatchPattern` with `search_pattern` + `replace_pattern`
+- [x] Support both file patch (persistent) and memory patch (runtime)
+- [x] `PatchAction::DisableCloudDetect` CLI command (`aiw patch disable-cloud-detect`)
+- [x] `get_anticloudetect_patches` registry function generates 2 patch patterns (file + memory)
+- [x] `FeatureType::AntiCloudDetect` variant added to `FeatureType` enum (description + short_name="anticloudetect")
+- [x] `execute_apply_patch` applies max-token + anti-telemetry + anti-spy + anti-prompt-bias + anti-atis + anti-frame-track + anti-cloud-detect file patches (seven independent, one failure doesn't affect the others)
+- [x] `execute_patch_status` reports anti-cloud-detect patch status
+- [x] Cross-version stable (regex literal `/^42:01/` is a constant, not minified variable name)
+- [x] Equal-length replacement iron law: 8 -> 8 bytes
+
+**Technical Constraints**:
+- `search_pattern` and `replace_pattern` MUST be equal length (8 bytes) to avoid shifting subsequent offsets
+- Memory patch uses `apply_literal_memory_patch` (search_pattern -> replace_pattern integral overwrite)
+- AntiCloudDetect patch is independent of other 6 patches: one failing does not block the others
+- `use_regex=false` (literal mode, not regex mode)
+- Only patches the `fGd=/^42:01/` regex literal; does NOT modify `tMi()` function logic, `networkInterfaces()` calls, or `eMi` BIOS detection
+- Does NOT patch `eMi` (GCE BIOS `/Google/.test`): eMi is Linux-only + requires file read, relay users typically don't run GCE, and `/Google/` is too generic to modify safely
+
+**CLI Usage**:
+```bash
+# Disable MAC address GCE cloud detection
+aiw patch disable-cloud-detect
+
+# Apply all patches (max-token + anti-telemetry + anti-spy + anti-prompt-bias + anti-atis + anti-frame-track + anti-cloud-detect)
+aiw patch apply
+
+# Check patch status (all patches)
+aiw patch status
+```
+
 ## 已废弃需求 (Deprecated)
 
 > **废弃原因**: Google Drive 云存储集成已禁用，push/pull 命令不可用。自 v0.5.19 起标记为 Disabled。

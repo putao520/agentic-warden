@@ -9,8 +9,9 @@ use crate::patcher::{
     apply_file_patch, detect_installation, get_patchable_path, is_file_patched,
     restore_from_backup, InstallationType,
     registry::{
-        get_antiatis_patches, get_antipromptbias_patches, get_antispy_patches,
-        get_antitelemetry_patches, get_feature_patches,
+        get_antiatis_patches, get_anticloudetect_patches, get_antiframetrack_patches,
+        get_antipromptbias_patches, get_antispy_patches, get_antitelemetry_patches,
+        get_feature_patches,
     },
     types::{FeatureType, PatchType},
     versions::{validate_max_context_tokens, ClaudeVersion},
@@ -51,6 +52,12 @@ pub async fn execute_patch_command(action: PatchAction) -> Result<()> {
         }
         PatchAction::DisableAtis => {
             execute_disable_atis()?;
+        }
+        PatchAction::DisableFrameTrack => {
+            execute_disable_frame_track()?;
+        }
+        PatchAction::DisableCloudDetect => {
+            execute_disable_cloud_detect()?;
         }
     }
     Ok(())
@@ -160,6 +167,30 @@ fn execute_apply_patch(
         }
     }
 
+    // AntiFrameTrack 文件补丁（独立于其他 5 个，一个失败不影响另一个）
+    let antiframetrack_patches = get_antiframetrack_patches();
+    for patch in antiframetrack_patches
+        .iter()
+        .filter(|p| p.patch_type == PatchType::File)
+    {
+        match apply_file_patch(&patch_path, patch) {
+            Ok(_) => println!("   ✅ {}", patch.description),
+            Err(e) => println!("   ❌ 失败: {}", e),
+        }
+    }
+
+    // AntiCloudDetect 文件补丁（独立于其他 6 个，一个失败不影响另一个）
+    let anticloudetect_patches = get_anticloudetect_patches();
+    for patch in anticloudetect_patches
+        .iter()
+        .filter(|p| p.patch_type == PatchType::File)
+    {
+        match apply_file_patch(&patch_path, patch) {
+            Ok(_) => println!("   ✅ {}", patch.description),
+            Err(e) => println!("   ❌ 失败: {}", e),
+        }
+    }
+
     println!("✅ 补丁应用完成!");
     Ok(())
 }
@@ -249,6 +280,50 @@ fn execute_disable_atis() -> Result<()> {
         }
     }
     println!("✅ AntiAtis patch 应用完成（x-cc-atis 追踪 header 已禁用）");
+    Ok(())
+}
+
+/// 禁用 frame/track 第二上报通道（绕过 AntiTelemetry 的独立 frame 服务上报）
+fn execute_disable_frame_track() -> Result<()> {
+    let patch_path = get_patchable_path()?;
+    let install_type = detect_installation().ok();
+    let type_label = match &install_type {
+        Some(InstallationType::Npm { .. }) => "npm (JS)",
+        Some(InstallationType::NativeBinary { .. }) => "NativeBinary",
+        _ => "Unknown",
+    };
+    println!("📂 Claude CLI 文件: {} ({})", patch_path.display(), type_label);
+
+    let patches = get_antiframetrack_patches();
+    for patch in patches.iter().filter(|p| p.patch_type == PatchType::File) {
+        match apply_file_patch(&patch_path, patch) {
+            Ok(_) => println!("   ✅ {}", patch.description),
+            Err(e) => println!("   ❌ 失败: {}", e),
+        }
+    }
+    println!("✅ AntiFrameTrack patch 应用完成（frame/track 上报通道已截断）");
+    Ok(())
+}
+
+/// 禁用 MAC 地址 GCE 云检测（tMi MAC 扫描失效，/^42:01/ → /^00:00/）
+fn execute_disable_cloud_detect() -> Result<()> {
+    let patch_path = get_patchable_path()?;
+    let install_type = detect_installation().ok();
+    let type_label = match &install_type {
+        Some(InstallationType::Npm { .. }) => "npm (JS)",
+        Some(InstallationType::NativeBinary { .. }) => "NativeBinary",
+        _ => "Unknown",
+    };
+    println!("📂 Claude CLI 文件: {} ({})", patch_path.display(), type_label);
+
+    let patches = get_anticloudetect_patches();
+    for patch in patches.iter().filter(|p| p.patch_type == PatchType::File) {
+        match apply_file_patch(&patch_path, patch) {
+            Ok(_) => println!("   ✅ {}", patch.description),
+            Err(e) => println!("   ❌ 失败: {}", e),
+        }
+    }
+    println!("✅ AntiCloudDetect patch 应用完成（MAC 地址 GCE 云检测已失效）");
     Ok(())
 }
 
@@ -420,6 +495,64 @@ fn execute_patch_status() {
         println!("   ⚪ AntiAtis 无需 patch（目标不存在）");
     } else {
         println!("   ❌ AntiAtis 补丁未应用");
+    }
+
+    // AntiFrameTrack 状态检查
+    let antiframetrack_patches = get_antiframetrack_patches();
+    let mut antiframetrack_patched = false;
+    let mut antiframetrack_skipped = false;
+    for patch in antiframetrack_patches
+        .iter()
+        .filter(|p| p.patch_type == PatchType::File)
+    {
+        match is_file_patched(&patch_path, patch) {
+            Ok(true) => {
+                println!("   ✅ AntiFrameTrack 补丁已应用");
+                antiframetrack_patched = true;
+                break;
+            }
+            Ok(false) => continue,
+            Err(_) => {
+                antiframetrack_skipped = true;
+                break;
+            }
+        }
+    }
+    if antiframetrack_patched {
+        // 已在上面打印
+    } else if antiframetrack_skipped {
+        println!("   ⚪ AntiFrameTrack 无需 patch（目标不存在）");
+    } else {
+        println!("   ❌ AntiFrameTrack 补丁未应用");
+    }
+
+    // AntiCloudDetect 状态检查
+    let anticloudetect_patches = get_anticloudetect_patches();
+    let mut anticloudetect_patched = false;
+    let mut anticloudetect_skipped = false;
+    for patch in anticloudetect_patches
+        .iter()
+        .filter(|p| p.patch_type == PatchType::File)
+    {
+        match is_file_patched(&patch_path, patch) {
+            Ok(true) => {
+                println!("   ✅ AntiCloudDetect 补丁已应用");
+                anticloudetect_patched = true;
+                break;
+            }
+            Ok(false) => continue,
+            Err(_) => {
+                anticloudetect_skipped = true;
+                break;
+            }
+        }
+    }
+    if anticloudetect_patched {
+        // 已在上面打印
+    } else if anticloudetect_skipped {
+        println!("   ⚪ AntiCloudDetect 无需 patch（目标不存在）");
+    } else {
+        println!("   ❌ AntiCloudDetect 补丁未应用");
     }
 }
 

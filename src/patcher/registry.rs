@@ -8,7 +8,8 @@ use std::borrow::Cow;
 
 /// Get patches for a feature based on version signature
 ///
-/// 目前支持 MaxContextTokens / AntiTelemetry / AntiSpy / AntiPromptBias / AntiAtis 五种功能；
+/// 目前支持 MaxContextTokens / AntiTelemetry / AntiSpy / AntiPromptBias / AntiAtis /
+/// AntiFrameTrack / AntiCloudDetect 七种功能；
 /// 保留 version 参数以兼容调用方签名（regex/字面量均不依赖版本签名）。
 pub fn get_feature_patches(
     feature: FeatureType,
@@ -22,6 +23,8 @@ pub fn get_feature_patches(
         FeatureType::AntiSpy => get_antispy_patches(),
         FeatureType::AntiPromptBias => get_antipromptbias_patches(),
         FeatureType::AntiAtis => get_antiatis_patches(),
+        FeatureType::AntiFrameTrack => get_antiframetrack_patches(),
+        FeatureType::AntiCloudDetect => get_anticloudetect_patches(),
     }
 }
 
@@ -298,6 +301,53 @@ pub fn get_antiatis_patches() -> Vec<UnifiedPatchPattern> {
         Cow::Owned(replace_vec),
         "AntiAtis file patch: atis extract -> void 0 (no x-cc-atis header)",
         "AntiAtis memory patch: atis extract -> void 0 (no x-cc-atis header)",
+    )
+}
+
+/// 生成 AntiFrameTrack patch 模式
+///
+/// 截断 CC 第二上报通道：`trackFrameEvent(trr)` 上报 artifact 使用行为到
+/// `/api/frame/track` 端点（独立于 AntiTelemetry 的 event_logging 通道）。
+/// 通过等长字面量替换把端点改成 `/api/frame/xxxxx` → 404 静默失败
+/// （try/catch 吞错，trackFrameEvent 不抛错）。
+///
+/// **字面量模式**（`use_regex=false`）：search = replace = 16 字节。
+/// 跨版本稳定（API 路径字面量，不依赖 minified 变量名）。返回文件补丁与
+/// 内存补丁各一份。
+pub fn get_antiframetrack_patches() -> Vec<UnifiedPatchPattern> {
+    make_patch_pair(
+        FeatureType::AntiFrameTrack,
+        false,
+        Cow::Borrowed(b"/api/frame/track"),
+        Cow::Borrowed(b"/api/frame/xxxxx"),
+        "AntiFrameTrack file patch: frame/track endpoint -> 404",
+        "AntiFrameTrack memory patch: frame/track endpoint -> 404",
+    )
+}
+
+/// 生成 AntiCloudDetect patch 模式
+///
+/// 禁用 MAC 地址 GCE 云检测：`tMi()` 遍历 `networkInterfaces()` 的 MAC，
+/// 用 `fGd=/^42:01/` regex 匹配 GCE 实例 OUI 前缀。当前是预留间谍点
+/// （导出但无内部调用方），防未来版本激活。通过等长字面量替换把 regex
+/// 改成 `/^00:00/`（永不匹配任何 MAC）→ `fGd.test()` 永远 false →
+/// `tMi()` 永远返回 false。
+///
+/// **字面量模式**（`use_regex=false`）：search = replace = 8 字节。
+/// 跨版本稳定（regex 字面量 `/^42:01/` 是常量，不依赖 minified 变量名）。
+/// 返回文件补丁与内存补丁各一份。
+///
+/// 不防 eMi（GCE BIOS `/Google/.test`）：eMi 是 Linux-only + 需读
+/// `/sys/class/dmi/id/bios_vendor` 文件，中转站用户通常不跑 GCE；且
+/// `/Google/` 字面量太通用不能改。tMi 是 MAC 扫描，任何环境都能跑，优先防。
+pub fn get_anticloudetect_patches() -> Vec<UnifiedPatchPattern> {
+    make_patch_pair(
+        FeatureType::AntiCloudDetect,
+        false,
+        Cow::Borrowed(b"/^42:01/"),
+        Cow::Borrowed(b"/^00:00/"),
+        "AntiCloudDetect file patch: GCE MAC OUI regex -> never match",
+        "AntiCloudDetect memory patch: GCE MAC OUI regex -> never match",
     )
 }
 
@@ -718,6 +768,132 @@ mod tests {
         assert_eq!(patches.len(), 2);
         assert!(patches.iter().all(|p| p.use_regex));
         assert!(patches.iter().all(|p| p.feature == FeatureType::AntiAtis));
+    }
+
+    #[test]
+    fn test_antiframetrack_patches_structure() {
+        let patches = get_antiframetrack_patches();
+        assert_eq!(patches.len(), 2); // 1 file + 1 memory
+
+        let file_count = patches
+            .iter()
+            .filter(|p| p.patch_type == PatchType::File)
+            .count();
+        let mem_count = patches
+            .iter()
+            .filter(|p| p.patch_type == PatchType::Memory)
+            .count();
+        assert_eq!(file_count, 1);
+        assert_eq!(mem_count, 1);
+
+        for p in &patches {
+            assert_eq!(p.feature, FeatureType::AntiFrameTrack);
+            assert!(!p.use_regex, "antiframetrack is literal mode");
+            assert!(p.regex_replace_values.is_none());
+            assert!(p.patch_byte.is_none());
+            assert!(p.patch_offset.is_none());
+            assert!(p.replace_pattern.is_some());
+        }
+    }
+
+    #[test]
+    fn test_antiframetrack_patches_equal_length() {
+        // 等长替换铁律：search 与 replace 必须等长（16B），否则破坏二进制偏移
+        let patches = get_antiframetrack_patches();
+        for p in &patches {
+            let s = p.search_pattern.as_ref();
+            let r = p.replace_pattern.as_ref().unwrap();
+            assert_eq!(s.len(), 16, "antiframetrack search must be 16 bytes");
+            assert_eq!(r.len(), 16, "antiframetrack replace must be 16 bytes");
+            assert_eq!(s.len(), r.len(), "antiframetrack patch must be equal length");
+        }
+    }
+
+    #[test]
+    fn test_antiframetrack_patch_content() {
+        let patches = get_antiframetrack_patches();
+        for p in &patches {
+            let s: &[u8] = p.search_pattern.as_ref();
+            let r: &[u8] = p.replace_pattern.as_ref().unwrap().as_ref();
+            assert_eq!(s, &b"/api/frame/track"[..]);
+            assert_eq!(r, &b"/api/frame/xxxxx"[..]);
+        }
+    }
+
+    #[test]
+    fn test_antiframetrack_via_get_feature_patches() {
+        let version = ClaudeVersion {
+            major: 2,
+            minor: 1,
+            patch: 201,
+        };
+        let patches = get_feature_patches(FeatureType::AntiFrameTrack, &version);
+        assert_eq!(patches.len(), 2);
+        assert!(patches.iter().all(|p| !p.use_regex));
+        assert!(patches.iter().all(|p| p.feature == FeatureType::AntiFrameTrack));
+    }
+
+    #[test]
+    fn test_anticloudetect_patches_structure() {
+        let patches = get_anticloudetect_patches();
+        assert_eq!(patches.len(), 2); // 1 file + 1 memory
+
+        let file_count = patches
+            .iter()
+            .filter(|p| p.patch_type == PatchType::File)
+            .count();
+        let mem_count = patches
+            .iter()
+            .filter(|p| p.patch_type == PatchType::Memory)
+            .count();
+        assert_eq!(file_count, 1);
+        assert_eq!(mem_count, 1);
+
+        for p in &patches {
+            assert_eq!(p.feature, FeatureType::AntiCloudDetect);
+            assert!(!p.use_regex, "anticloudetect is literal mode");
+            assert!(p.regex_replace_values.is_none());
+            assert!(p.patch_byte.is_none());
+            assert!(p.patch_offset.is_none());
+            assert!(p.replace_pattern.is_some());
+        }
+    }
+
+    #[test]
+    fn test_anticloudetect_patches_equal_length() {
+        // 等长替换铁律：search 与 replace 必须等长（8B），否则破坏二进制偏移
+        let patches = get_anticloudetect_patches();
+        for p in &patches {
+            let s = p.search_pattern.as_ref();
+            let r = p.replace_pattern.as_ref().unwrap();
+            assert_eq!(s.len(), 8, "anticloudetect search must be 8 bytes");
+            assert_eq!(r.len(), 8, "anticloudetect replace must be 8 bytes");
+            assert_eq!(s.len(), r.len(), "anticloudetect patch must be equal length");
+        }
+    }
+
+    #[test]
+    fn test_anticloudetect_patch_content() {
+        let patches = get_anticloudetect_patches();
+        for p in &patches {
+            let s: &[u8] = p.search_pattern.as_ref();
+            let r: &[u8] = p.replace_pattern.as_ref().unwrap().as_ref();
+            assert_eq!(s, &b"/^42:01/"[..]);
+            assert_eq!(r, &b"/^00:00/"[..]);
+        }
+    }
+
+    #[test]
+    fn test_anticloudetect_via_get_feature_patches() {
+        let version = ClaudeVersion {
+            major: 2,
+            minor: 1,
+            patch: 201,
+        };
+        let patches = get_feature_patches(FeatureType::AntiCloudDetect, &version);
+        assert_eq!(patches.len(), 2);
+        assert!(patches.iter().all(|p| !p.use_regex));
+        assert!(patches.iter().all(|p| p.feature == FeatureType::AntiCloudDetect));
     }
 
     /// CC v2.1.201 真实 binary 样本回归测试（2026-07-04 审计）
