@@ -112,6 +112,47 @@ impl std::fmt::Display for FeatureType {
     }
 }
 
+/// regex 动态替换模式（模式 4）的替换策略
+///
+/// 当 `UnifiedPatchPattern.use_regex=true` 且 `replace_pattern=None` 且
+/// `regex_replace_values=None` 且 `dynamic_replace=Some` 时生效。
+///
+/// regex 匹配后，保留指定捕获组内容（语义要求保留的部分：函数名/数组变量名/
+/// prompt 文本），把其余部分替换为字面量 + 空格填充至匹配长度，等长自动保证。
+/// 用于跨版本 patch 点：minified 变量名长度变化导致匹配长度不固定，固定字面量
+/// replace 无法满足等长约束（如 AntiPromptBias 的 FN 从 2 字符变 3 字符）。
+#[derive(Debug, Clone)]
+pub enum DynamicReplace {
+    /// 替换前缀 + 保留后缀捕获组（AntiPromptBias 用）
+    ///
+    /// 结果：`prefix_literal` + 空格填充 + `match[keep_group]`
+    ///
+    /// 例：`if(yfe())r.push("**Provider context...")`
+    ///   → `if(0)` + 空格 + `r.push("**Provider context...")`
+    ///   （条件 if(FN()) → if(0) 恒假，push 语句原样保留）
+    ReplacePrefix {
+        /// 保留的后缀捕获组索引（regex 中用 `(...)` 捕获）
+        keep_group: usize,
+        /// 替换前缀的字面量（如 `b"if(0)"`）
+        prefix_literal: Cow<'static, [u8]>,
+    },
+    /// 保留前缀捕获组 + 替换后缀（AntiAtis 用）
+    ///
+    /// 结果：`match[keep_group]` + `suffix_literal` + 空格填充 + `end_literal`
+    ///
+    /// 例：`function R0i(){let e=mL()?.atis;...void 0}`
+    ///   → `function R0i(){` + `return void 0` + 空格 + `}`
+    ///   （函数名保留，函数体 → return void 0）
+    KeepPrefix {
+        /// 保留的前缀捕获组索引（含函数名等必须保留的部分）
+        keep_group: usize,
+        /// 替换后缀起始字面量（如 `b"return void 0"`）
+        suffix_literal: Cow<'static, [u8]>,
+        /// 结尾字面量（如 `b"}"`）
+        end_literal: Cow<'static, [u8]>,
+    },
+}
+
 /// 功能补丁模式 - 支持文件和内存两种补丁
 #[derive(Debug, Clone)]
 pub struct UnifiedPatchPattern {
@@ -126,7 +167,7 @@ pub struct UnifiedPatchPattern {
     pub search_pattern: Cow<'static, [u8]>,
     /// 替换模式（用于文件补丁）
     ///
-    /// 两种使用方式：
+    /// 四种使用方式：
     /// - **字面量模式**（`use_regex=false`）：`search_pattern` 是字面量字节，
     ///   `replace_pattern` 是等长的字面量替换字节，整段覆盖。
     /// - **regex 字面量替换模式**（`use_regex=true` 且 `replace_pattern=Some`）：
@@ -137,6 +178,13 @@ pub struct UnifiedPatchPattern {
     /// - **regex 数字替换模式**（`use_regex=true` 且 `replace_pattern=None`）：
     ///   匹配后由 `regex_replace_values` 在运行时动态构造替换值（按顺序
     ///   替换匹配文本里的数字字面量）。用于 max-token 的 200000→目标值替换。
+    /// - **regex 动态替换模式**（模式 4，`use_regex=true` 且 `replace_pattern=None`
+    ///   且 `regex_replace_values=None` 且 `dynamic_replace=Some`）：
+    ///   匹配后保留指定捕获组内容（语义要求保留的部分：函数名/数组变量名/
+    ///   prompt 文本），其余部分用字面量 + 空格填充至匹配长度，等长自动保证。
+    ///   用于 AntiPromptBias / AntiAtis 等跨版本 patch 点（minified 变量名
+    ///   长度跨版本变化导致匹配长度不固定，固定字面量 replace 无法满足等长）。
+    ///   详见 `dynamic_replace` 字段。
     pub replace_pattern: Option<Cow<'static, [u8]>>,
     /// 内存补丁：单个字节替换
     pub patch_byte: Option<u8>,
@@ -146,12 +194,15 @@ pub struct UnifiedPatchPattern {
     pub description: Cow<'static, str>,
     /// 是否将 search_pattern 作为 regex 处理
     ///
-    /// 三种模式（见 `replace_pattern` 字段文档）：
+    /// 四种模式（见 `replace_pattern` 字段文档）：
     /// - `false`：字面量模式，`replace_pattern` 必须提供（等长字面量覆盖）。
     /// - `true` + `replace_pattern=None`：regex 数字替换模式，由
     ///   `regex_replace_values` 顺序替换匹配文本中的数字。
     /// - `true` + `replace_pattern=Some`：regex 字面量替换模式，regex 匹配后
     ///   用 `replace_pattern` 整段覆盖（等长，跨版本 patch 点用）。
+    /// - `true` + `replace_pattern=None` + `regex_replace_values=None` +
+    ///   `dynamic_replace=Some`：regex 动态替换模式（模式 4），匹配后保留
+    ///   指定捕获组内容，其余用字面量 + 空格填充至等长（跨版本自适应）。
     pub use_regex: bool,
     /// regex 模式下的顺序替换值
     ///
@@ -160,6 +211,14 @@ pub struct UnifiedPatchPattern {
     /// 第一个 200000 替换为 500000，第二个 200000 替换为 500000。
     /// 仅在 `use_regex=true` 且 `replace_pattern=None` 时生效。
     pub regex_replace_values: Option<Vec<u32>>,
+    /// regex 动态替换模式（模式 4）
+    ///
+    /// 当 `use_regex=true` 且 `replace_pattern=None` 且 `regex_replace_values=None`
+    /// 且 `dynamic_replace=Some` 时生效。
+    ///
+    /// 匹配后保留指定捕获组内容，其余部分用字面量 + 空格填充至等长。
+    /// 用于 AntiPromptBias / AntiAtis 等跨版本 patch 点（minified 变量名长度变化）。
+    pub dynamic_replace: Option<DynamicReplace>,
 }
 
 /// 补丁应用结果
@@ -390,6 +449,7 @@ mod tests {
             description: "test".into(),
             use_regex: false,
             regex_replace_values: None,
+            dynamic_replace: None,
         };
         assert_eq!(pattern.search_pattern.as_ref(), b"var YOt=200000");
         assert!(!pattern.use_regex);

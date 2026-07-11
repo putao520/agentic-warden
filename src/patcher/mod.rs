@@ -24,7 +24,7 @@ pub use error::{PatchError, PatchResult};
 pub use platform::{MemoryPatcher, MemoryRegion, MemPerm, PlatformMemoryPatcher};
 pub use runtime::RuntimePatcher;
 pub use types::{
-    FeatureType, PatchType, UnifiedPatchPattern, UnifiedPatchResult,
+    DynamicReplace, FeatureType, PatchType, UnifiedPatchPattern, UnifiedPatchResult,
     UnifiedPatchError, Result as PatchResultType,
 };
 pub use registry::get_feature_patches;

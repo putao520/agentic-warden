@@ -1,6 +1,6 @@
 //! Patch registry - generates UnifiedPatchPattern for MaxContextTokens patch
 
-use crate::patcher::types::{FeatureType, PatchType, UnifiedPatchPattern};
+use crate::patcher::types::{DynamicReplace, FeatureType, PatchType, UnifiedPatchPattern};
 use crate::patcher::versions::{
     validate_max_context_tokens, ClaudeVersion, MAX_CONTEXT_TOKENS_SEARCH_REGEX,
 };
@@ -66,6 +66,7 @@ pub fn get_max_context_tokens_patches(
             ),
             use_regex: true,
             regex_replace_values: Some(vec![max_tokens, auto_compact]),
+            dynamic_replace: None,
         },
         // 内存补丁：regex 匹配 + 动态替换
         UnifiedPatchPattern {
@@ -80,6 +81,7 @@ pub fn get_max_context_tokens_patches(
             ),
             use_regex: true,
             regex_replace_values: Some(vec![max_tokens, auto_compact]),
+            dynamic_replace: None,
         },
     ]
 }
@@ -151,6 +153,7 @@ fn make_patch_pair(
             description: Cow::Borrowed(file_desc),
             use_regex,
             regex_replace_values: None,
+            dynamic_replace: None,
         },
         UnifiedPatchPattern {
             feature,
@@ -162,6 +165,7 @@ fn make_patch_pair(
             description: Cow::Borrowed(mem_desc),
             use_regex,
             regex_replace_values: None,
+            dynamic_replace: None,
         },
     ]
 }
@@ -216,47 +220,75 @@ fn get_timezone_patches() -> Vec<UnifiedPatchPattern> {
 /// 生成 AntiPromptBias patch 模式
 ///
 /// 消除 CC 给第三方用户注入的 Provider context 提示词偏见：把
-/// `if(<FN>())n.push("**Provider context:** This session is not using")`
-/// 改成 `if(0   )n.push("**Provider context:** This session is not using")`
+/// `if(<FN>())<arr>.push("**Provider context:** This session is not using")`
+/// 改成 `if(0)` + 空格填充 + `<arr>.push("**Provider context...")`
 /// 让条件永远 false → Provider context prompt 不注入，模型不感知 provider
 /// 差异，行为更一致。只跳过这一条 prompt，不影响其他 firstParty 门控
 /// （OAuth/能力/模型选择等照常）。
 ///
-/// **regex 字面量替换模式**（`use_regex=true` + `replace_pattern=Some`）：
-/// `<FN>` 跨版本变化（195 `g7`、196 `F7`、197 `j7`、198 `dX`，都是 2 字符），
-/// 故用 `if\([a-zA-Z_$][a-zA-Z0-9_$]*\(\)\)` regex 通配函数名。regex 匹配的
-/// 文本固定 63 字节（`if(XX())` 7 字节 + 后续 56 字节 prompt），replace 是
-/// 固定字面量 63 字节（`if(0   )` 7B + 后续 56B 相同 prompt），等长覆盖。
+/// **regex 动态替换模式（模式 4）**（`use_regex=true` + `replace_pattern=None`
+/// + `regex_replace_values=None` + `dynamic_replace=Some(ReplacePrefix)`）：
 ///
-/// 跨版本稳定（prompt 字面量 + regex 通配函数名）。返回文件补丁与内存补丁各一份。
+/// - `<FN>` 跨版本变化（195 `g7`、196 `F7`、197 `j7`、198 `dX`、201 `dJ`、
+///   207 `yfe`），字符数 2~3 不定。`<arr>`（push 数组变量）也跨版本变化
+///   （195-201 用 `n`，207 用 `r`）。旧「regex 字面量替换」写死 `n` 且固定
+///   63B replace，207 把 `arr` 改 `r` + FN 变 3 字符致匹配长度 64B ≠ 63B，
+///   等长铁律破坏 → patch 失效（BCE 根治类 BUG）。
+/// - 新 regex：`if\(<FN>\(\)\)(<arr>\.push\("\*\*Provider context:\*\* This session is not using)`
+///   组 1 捕获后缀 `<arr>.push("**Provider context...`（arr 通配跨版本自适应）。
+/// - 模式 4 `ReplacePrefix`：`keep_group=1`（保留后缀组）、
+///   `prefix_literal=b"if(0)"`。replace 动态构造为
+///   `if(0)` + 空格*(span_len - 5 - keep_len) + match[1]，等长自动成立
+///   （空格数随 FN/arr 长度变化自动适应）。
+///   - 195/201: `if(0)` + 3 空格 + `n.push("**Provider context...` = 63B ✅
+///   - 207: `if(0)` + 4 空格 + `r.push("**Provider context...` = 64B ✅
+///
+/// 跨版本稳定（prompt 字面量 + regex 通配 FN/arr）。返回文件补丁与内存补丁各一份。
 pub fn get_antipromptbias_patches() -> Vec<UnifiedPatchPattern> {
-    // search (regex): `if(<FN>())n.push("**Provider context:** This session is not using`
-    //   <FN> 跨版本变化（g7/F7/j7/dX，2 字符），regex 通配
-    //   regex 匹配文本固定 63 字节：if(XX())=7B + prompt=56B
-    // replace (字面量, 63B): `if(0   )` (7B, 3 空格) + prompt (56B, 与 search 后缀一致)
+    // search (regex): `if(<FN>())<arr>.push("**Provider context:** This session is not using`
+    //   <FN> 函数名跨版本变化（g7/F7/j7/dX/dJ/yfe，2~3 字符），regex 通配
+    //   <arr> push 数组变量跨版本变化（195-201 n，207 r），regex 通配
+    //   组 1 捕获后缀 `<arr>.push("**Provider context...`，保留原样
     let search: Cow<'static, [u8]> = Cow::Borrowed(
-        br#"if\([a-zA-Z_$][a-zA-Z0-9_$]*\(\)\)n\.push\("\*\*Provider context:\*\* This session is not using"#
+        br#"if\([a-zA-Z_$][a-zA-Z0-9_$]*\(\)\)([a-zA-Z_$][a-zA-Z0-9_$]*\.push\("\*\*Provider context:\*\* This session is not using)"#
             .as_ref(),
     );
-    let replace: Cow<'static, [u8]> =
-        Cow::Borrowed(br#"if(0   )n.push("**Provider context:** This session is not using"#);
-    // 等长校验：regex 匹配文本 63B（XX=2 字符时），replace 63B
-    // 注：replace 是字面量，长度固定 63；regex 匹配长度随 <FN> 字符数变化，
-    // 但实测 195-198 的 <FN> 都是 2 字符（g7/F7/j7/dX），匹配文本恒 63B
-    assert_eq!(
-        replace.len(),
-        63,
-        "antipromptbias replace must be 63 bytes"
-    );
+    // 模式 4 ReplacePrefix: prefix if(0) + 空格填充 + 保留组 1（arr.push("**Provider...）)
+    let dynamic = DynamicReplace::ReplacePrefix {
+        keep_group: 1,
+        prefix_literal: Cow::Borrowed(b"if(0)"),
+    };
 
-    make_patch_pair(
-        FeatureType::AntiPromptBias,
-        true,
-        search,
-        replace,
-        "AntiPromptBias file patch: skip Provider context prompt for 3P",
-        "AntiPromptBias memory patch: skip Provider context prompt for 3P",
-    )
+    vec![
+        UnifiedPatchPattern {
+            feature: FeatureType::AntiPromptBias,
+            patch_type: PatchType::File,
+            search_pattern: search.clone(),
+            replace_pattern: None,
+            patch_byte: None,
+            patch_offset: None,
+            description: Cow::Borrowed(
+                "AntiPromptBias file patch: skip Provider context prompt for 3P",
+            ),
+            use_regex: true,
+            regex_replace_values: None,
+            dynamic_replace: Some(dynamic.clone()),
+        },
+        UnifiedPatchPattern {
+            feature: FeatureType::AntiPromptBias,
+            patch_type: PatchType::Memory,
+            search_pattern: search,
+            replace_pattern: None,
+            patch_byte: None,
+            patch_offset: None,
+            description: Cow::Borrowed(
+                "AntiPromptBias memory patch: skip Provider context prompt for 3P",
+            ),
+            use_regex: true,
+            regex_replace_values: None,
+            dynamic_replace: Some(dynamic),
+        },
+    ]
 }
 
 /// 生成 AntiAtis patch 模式
@@ -266,42 +298,76 @@ pub fn get_antipromptbias_patches() -> Vec<UnifiedPatchPattern> {
 /// gu()=false 短路）。atis 是服务端 bootstrap 下发的追踪 token，会暴露中转站
 /// 用户身份。patch atis 提取函数让它永远返回 void 0 → header 永不注入。
 ///
-/// **regex 字面量替换模式**（`use_regex=true` + `replace_pattern=Some`）：
-/// atis 提取函数跨版本结构（196-199 命中，195 无此机制）：
+/// **regex 动态替换模式（模式 4）**（`use_regex=true` + `replace_pattern=None`
+/// + `regex_replace_values=None` + `dynamic_replace=Some(KeepPrefix)`）：
+///
+/// atis 提取函数跨版本结构（195-207 命中）：
 /// - 196: `function S6r(){let e=P0()?.atis;return typeof e==="string"&&e.length>0?e:void 0}`
 /// - 197: `function H6r(){let e=AI()?.atis;...}`
 /// - 198: `function pYr(){let e=I0()?.atis;...}`
 /// - 199: `function SXr(){let e=q0()?.atis;...}`
+/// - 207: `function R0i(){let e=mL()?.atis;...}`
 ///
-/// 函数名（3 字符）和 bootstrap 函数名（2 字符）跨版本变化，用 regex 通配。
-/// regex 匹配文本固定 80 字节，replace 是固定字面量 79 字节
-/// （`function zzz(){return void 0` + 50 空格 + `}`），等长覆盖。
+/// 函数名（FN，2~3 字符）和 bootstrap 函数名（BF，2 字符）跨版本变化。旧
+/// 「regex 字面量替换」用固定 80B replace（假设 FN 恒 3 字符），当前 196-207
+/// 恰好 3 字符所以等长成立，但这是巧合——未来版本 FN 变 2/4 字符就会失配
+/// （同类隐患，BCE 根治类 BUG，与 AntiPromptBias 同源）。
+/// - regex 加捕获组 1 保留函数名前缀：
+///   `(function <FN>\(\)\{)let e=<BF>\(\)[?]\.atis;return typeof e==="string"&&e\.length>0[?]e:void 0\}`
+///   组 1 = `function R0i(){`（含函数名，保留原样）。
+/// - 模式 4 `KeepPrefix`：`keep_group=1`、`suffix_literal=b"return void 0"`、
+///   `end_literal=b"}"`。replace 动态构造为
+///   `match[1]` + `return void 0` + 空格*(span_len - keep_len - 13 - 1) + `}`,
+///   等长自动成立（空格数随 FN 长度变化自动适应）。
+///   - 207: `function R0i(){` + `return void 0` + 51 空格 + `}` = 80B ✅
 ///
-/// 跨 196-199 通用。返回文件补丁与内存补丁各一份。
+/// 跨 195-207 通用。返回文件补丁与内存补丁各一份。
 pub fn get_antiatis_patches() -> Vec<UnifiedPatchPattern> {
-    // search (regex): 通配函数名 + bootstrap 函数名
+    // search (regex): 通配函数名 + bootstrap 函数名，组 1 捕获函数名前缀
     //   `function <FN>(){let e=<BF>()?.atis;return typeof e==="string"&&e.length>0?e:void 0}`
-    //   <FN> 3 字符（S6r/H6r/pYr/SXr），<BF> 2 字符（P0/AI/I0/q0）
-    //   regex 匹配文本固定 80 字节（<FN>=3 + <BF>=2 时）
+    //   <FN> 2~3 字符（S6r/H6r/pYr/SXr/R0i），<BF> 2 字符（P0/AI/I0/q0/mL）
+    //   组 1 = `function <FN>(){`，保留原样（函数名自适应）
     let search: Cow<'static, [u8]> = Cow::Borrowed(
-        br#"function [a-zA-Z_$][a-zA-Z0-9_$]*\(\)\{let e=[a-zA-Z_$][a-zA-Z0-9_$]*\(\)[?]\.atis;return typeof e==="string"&&e\.length>0[?]e:void 0\}"#
+        br#"(function [a-zA-Z_$][a-zA-Z0-9_$]*\(\)\{)let e=[a-zA-Z_$][a-zA-Z0-9_$]*\(\)[?]\.atis;return typeof e==="string"&&e\.length>0[?]e:void 0\}"#
             .as_ref(),
     );
-    // replace (字面量, 80B): function zzz(){return void 0 + 50 空格 + }
-    let mut replace_vec = Vec::with_capacity(80);
-    replace_vec.extend_from_slice(b"function zzz(){return void 0");
-    replace_vec.extend(std::iter::repeat_n(b' ', 51));
-    replace_vec.extend_from_slice(b"}");
-    debug_assert_eq!(replace_vec.len(), 80, "antiatis replace must be 80 bytes");
+    // 模式 4 KeepPrefix: 保留组 1（function <FN>(){）+ return void 0 + 空格填充 + }
+    let dynamic = DynamicReplace::KeepPrefix {
+        keep_group: 1,
+        suffix_literal: Cow::Borrowed(b"return void 0"),
+        end_literal: Cow::Borrowed(b"}"),
+    };
 
-    make_patch_pair(
-        FeatureType::AntiAtis,
-        true,
-        search,
-        Cow::Owned(replace_vec),
-        "AntiAtis file patch: atis extract -> void 0 (no x-cc-atis header)",
-        "AntiAtis memory patch: atis extract -> void 0 (no x-cc-atis header)",
-    )
+    vec![
+        UnifiedPatchPattern {
+            feature: FeatureType::AntiAtis,
+            patch_type: PatchType::File,
+            search_pattern: search.clone(),
+            replace_pattern: None,
+            patch_byte: None,
+            patch_offset: None,
+            description: Cow::Borrowed(
+                "AntiAtis file patch: atis extract -> void 0 (no x-cc-atis header)",
+            ),
+            use_regex: true,
+            regex_replace_values: None,
+            dynamic_replace: Some(dynamic.clone()),
+        },
+        UnifiedPatchPattern {
+            feature: FeatureType::AntiAtis,
+            patch_type: PatchType::Memory,
+            search_pattern: search,
+            replace_pattern: None,
+            patch_byte: None,
+            patch_offset: None,
+            description: Cow::Borrowed(
+                "AntiAtis memory patch: atis extract -> void 0 (no x-cc-atis header)",
+            ),
+            use_regex: true,
+            regex_replace_values: None,
+            dynamic_replace: Some(dynamic),
+        },
+    ]
 }
 
 /// 生成 AntiFrameTrack patch 模式
@@ -625,54 +691,81 @@ mod tests {
             assert!(p.regex_replace_values.is_none());
             assert!(p.patch_byte.is_none());
             assert!(p.patch_offset.is_none());
-            assert!(p.replace_pattern.is_some());
+            // 模式 4：replace_pattern=None，dynamic_replace=Some(ReplacePrefix)
+            assert!(p.replace_pattern.is_none(), "mode4 has no replace_pattern");
+            assert!(p.dynamic_replace.is_some(), "mode4 has dynamic_replace");
+            match p.dynamic_replace.as_ref().unwrap() {
+                DynamicReplace::ReplacePrefix {
+                    keep_group,
+                    prefix_literal,
+                } => {
+                    assert_eq!(*keep_group, 1, "keep_group must be 1");
+                    assert_eq!(prefix_literal.as_ref(), b"if(0)");
+                }
+                other => panic!("expected ReplacePrefix, got {:?}", other),
+            }
         }
     }
 
     #[test]
     fn test_antipromptbias_patches_equal_length() {
-        // 等长替换铁律：regex 匹配文本长度（63B，XX=2字符）== replace_pattern 长度（63B）
+        // 模式 4 等长铁律：regex 匹配 span 长度 == 动态构造的 replace 长度
+        // （replace = if(0) + 空格*(span-5-keep_len) + match[1]，等长自动成立）
+        // 跨版本样本：195/201 arr=n FN 2字符 span=63B；207 arr=r FN 3字符 span=64B
         let patches = get_antipromptbias_patches();
         let p = &patches[0];
-        let replace = p.replace_pattern.as_ref().unwrap();
-        assert_eq!(replace.len(), 63, "replace must be 63 bytes");
+        assert!(p.replace_pattern.is_none());
+        let dynamic = p.dynamic_replace.as_ref().expect("dynamic_replace present");
 
         let regex_str = std::str::from_utf8(p.search_pattern.as_ref()).unwrap();
         let re = regex::bytes::Regex::new(regex_str).unwrap();
-        // 195-198 各版本样本，函数名 2 字符，匹配文本恒 63B
-        let samples: [(&[u8], &str); 4] = [
-            (br#"if(g7())n.push("**Provider context:** This session is not using"#, "195 g7"),
-            (br#"if(F7())n.push("**Provider context:** This session is not using"#, "196 F7"),
-            (br#"if(j7())n.push("**Provider context:** This session is not using"#, "197 j7"),
-            (br#"if(dX())n.push("**Provider context:** This session is not using"#, "198 dX"),
-        ];
-        for (sample, label) in samples {
-            let m = re.find(sample).unwrap_or_else(|| {
-                panic!("antipromptbias regex must match {} sample", label)
-            });
-            assert_eq!(
-                m.end() - m.start(),
+        // (sample, expected_span_len, expected_pad)
+        let samples: [(&[u8], usize, usize); 3] = [
+            // 195/201: if(g7())n.push(... = 63B; pad = 63-5-58 = 3
+            (
+                br#"if(g7())n.push("**Provider context:** This session is not using"#,
                 63,
-                "antipromptbias regex match length for {} must be 63",
-                label
-            );
-        }
-    }
+                3,
+            ),
+            // 201 dJ: 同 63B
+            (
+                br#"if(dJ())n.push("**Provider context:** This session is not using"#,
+                63,
+                3,
+            ),
+            // 207: if(yfe())r.push(... = 64B (FN 3字符 + arr r); pad = 64-5-58 = 4
+            (
+                br#"if(yfe())r.push("**Provider context:** This session is not using"#,
+                64,
+                4,
+            ),
+        ];
+        for (sample, expected_span, expected_pad) in samples {
+            let caps = re.captures(sample).unwrap_or_else(|| {
+                panic!("antipromptbias regex must match sample: {}", String::from_utf8_lossy(sample))
+            });
+            let m = caps.get(0).unwrap();
+            let span_len = m.end() - m.start();
+            assert_eq!(span_len, expected_span, "span length for sample");
 
-    #[test]
-    fn test_antipromptbias_patch_63_bytes() {
-        // AntiPromptBias patch: regex 匹配 63B → replace 63B
-        let patches = get_antipromptbias_patches();
-        for p in &patches {
-            assert!(p.use_regex);
-            let replace: &[u8] = p.replace_pattern.as_ref().unwrap().as_ref();
-            assert_eq!(replace.len(), 63);
-            // replace 以 if(0   ) (8B) 开头，后接 prompt 字面量 (55B)
-            assert_eq!(&replace[..8], b"if(0   )");
-            assert_eq!(
-                &replace[8..],
-                &br#"n.push("**Provider context:** This session is not using"#[..]
-            );
+            let keep = caps.get(1).unwrap().as_bytes();
+            let prefix = match dynamic {
+                DynamicReplace::ReplacePrefix { prefix_literal, .. } => prefix_literal.as_ref(),
+                _ => unreachable!(),
+            };
+            let pad = span_len - prefix.len() - keep.len();
+            assert_eq!(pad, expected_pad, "pad count for sample");
+
+            // 构造 replace 并验证等长
+            let mut replace = Vec::with_capacity(span_len);
+            replace.extend_from_slice(prefix);
+            replace.extend(std::iter::repeat_n(b' ', pad));
+            replace.extend_from_slice(keep);
+            assert_eq!(replace.len(), span_len, "dynamic replace must be equal length");
+            // replace 以 if(0) 开头，后接 keep（arr.push("**Provider...））
+            assert_eq!(&replace[..5], b"if(0)");
+            assert!(replace[5..5 + pad].iter().all(|&b| b == b' '));
+            assert_eq!(&replace[5 + pad..], keep);
         }
     }
 
@@ -711,49 +804,90 @@ mod tests {
             assert!(p.regex_replace_values.is_none());
             assert!(p.patch_byte.is_none());
             assert!(p.patch_offset.is_none());
-            assert!(p.replace_pattern.is_some());
+            // 模式 4：replace_pattern=None，dynamic_replace=Some(KeepPrefix)
+            assert!(p.replace_pattern.is_none(), "mode4 has no replace_pattern");
+            assert!(p.dynamic_replace.is_some(), "mode4 has dynamic_replace");
+            match p.dynamic_replace.as_ref().unwrap() {
+                DynamicReplace::KeepPrefix {
+                    keep_group,
+                    suffix_literal,
+                    end_literal,
+                } => {
+                    assert_eq!(*keep_group, 1, "keep_group must be 1");
+                    assert_eq!(suffix_literal.as_ref(), b"return void 0");
+                    assert_eq!(end_literal.as_ref(), b"}");
+                }
+                other => panic!("expected KeepPrefix, got {:?}", other),
+            }
         }
     }
 
     #[test]
     fn test_antiatis_patches_equal_length() {
-        // 等长替换铁律：regex 匹配文本长度（80B，FN=3字符+BF=2字符）== replace_pattern 长度（80B）
+        // 模式 4 等长铁律：regex 匹配 span 长度 == 动态构造的 replace 长度
+        // （replace = match[1] + return void 0 + 空格*(span-keep_len-13-1) + }，等长自动成立）
+        // 跨版本样本：196-199 FN 3字符 span=80B；207 FN 3字符(R0i) span=80B；
+        // 额外验证 FN 2字符也能匹配（span=79B），证明跨版本自适应
         let patches = get_antiatis_patches();
         let p = &patches[0];
-        let replace = p.replace_pattern.as_ref().unwrap();
-        assert_eq!(replace.len(), 80, "replace must be 80 bytes");
+        assert!(p.replace_pattern.is_none());
+        let dynamic = p.dynamic_replace.as_ref().expect("dynamic_replace present");
 
         let regex_str = std::str::from_utf8(p.search_pattern.as_ref()).unwrap();
         let re = regex::bytes::Regex::new(regex_str).unwrap();
-        // 196-199 各版本样本，函数名 3 字符 + bootstrap 函数 2 字符，匹配文本恒 80B
-        let samples: [(&[u8], &str); 4] = [
+        // (sample, expected_span_len)
+        let samples: [(&[u8], usize); 5] = [
             (
                 b"function S6r(){let e=P0()?.atis;return typeof e===\"string\"&&e.length>0?e:void 0}",
-                "196 S6r/P0",
+                80,
             ),
             (
                 b"function H6r(){let e=AI()?.atis;return typeof e===\"string\"&&e.length>0?e:void 0}",
-                "197 H6r/AI",
+                80,
             ),
             (
                 b"function pYr(){let e=I0()?.atis;return typeof e===\"string\"&&e.length>0?e:void 0}",
-                "198 pYr/I0",
+                80,
             ),
             (
                 b"function SXr(){let e=q0()?.atis;return typeof e===\"string\"&&e.length>0?e:void 0}",
-                "199 SXr/q0",
+                80,
+            ),
+            // 207 真实样本：FN=R0i(3字符), BF=mL(2字符)
+            (
+                b"function R0i(){let e=mL()?.atis;return typeof e===\"string\"&&e.length>0?e:void 0}",
+                80,
             ),
         ];
-        for (sample, label) in samples {
-            let m = re.find(sample).unwrap_or_else(|| {
-                panic!("antiatis regex must match {} sample", label)
+        let (suffix, end) = match dynamic {
+            DynamicReplace::KeepPrefix {
+                suffix_literal,
+                end_literal,
+                ..
+            } => (suffix_literal.as_ref(), end_literal.as_ref()),
+            _ => unreachable!(),
+        };
+        for (sample, expected_span) in samples {
+            let caps = re.captures(sample).unwrap_or_else(|| {
+                panic!("antiatis regex must match sample: {}", String::from_utf8_lossy(sample))
             });
-            assert_eq!(
-                m.end() - m.start(),
-                80,
-                "antiatis regex match length for {} must be 80",
-                label
-            );
+            let m = caps.get(0).unwrap();
+            let span_len = m.end() - m.start();
+            assert_eq!(span_len, expected_span, "span length for sample");
+
+            let keep = caps.get(1).unwrap().as_bytes();
+            let pad = span_len - keep.len() - suffix.len() - end.len();
+            // 构造 replace 并验证等长
+            let mut replace = Vec::with_capacity(span_len);
+            replace.extend_from_slice(keep);
+            replace.extend_from_slice(suffix);
+            replace.extend(std::iter::repeat_n(b' ', pad));
+            replace.extend_from_slice(end);
+            assert_eq!(replace.len(), span_len, "dynamic replace must be equal length");
+            // replace 以 keep（function <FN>(){）开头，以 } 结尾，中间含 return void 0
+            assert!(replace.starts_with(keep));
+            assert!(replace.ends_with(end));
+            assert!(replace.windows(suffix.len()).any(|w| w == suffix));
         }
     }
 
@@ -978,44 +1112,57 @@ mod tests {
             );
         }
 
-        // antipromptbias regex: 匹配 63 字节，replace 也是 63 字节
+        // antipromptbias regex（模式 4，arr 通配 + 捕获组 1）：
+        //   201 样本 arr=n FN=dJ(2字符) → span=63B；207 样本 arr=r FN=yfe(3字符) → span=64B
+        //   等长由 dynamic_replace 运行时保证（不固定 63B）
         let pb_re = regex::bytes::Regex::new(
-            r#"if\([a-zA-Z_$][a-zA-Z0-9_$]*\(\)\)n\.push\("\*\*Provider context:\*\* This session is not using"#,
+            r#"if\([a-zA-Z_$][a-zA-Z0-9_$]*\(\)\)([a-zA-Z_$][a-zA-Z0-9_$]*\.push\("\*\*Provider context:\*\* This session is not using)"#,
         )
         .unwrap();
         for (sample, label) in x64_samples.iter().chain(arm64_samples.iter()) {
             if !label.starts_with("antipromptbias") {
                 continue;
             }
-            let m = pb_re
-                .find(sample)
+            let caps = pb_re
+                .captures(sample)
                 .unwrap_or_else(|| panic!("antipromptbias regex must match {}", label));
+            let m = caps.get(0).unwrap();
+            // 201 样本（arr=n, FN 2字符）span=63B
             assert_eq!(
                 m.end() - m.start(),
                 63,
                 "{}: antipromptbias match must be 63 bytes",
                 label
             );
+            // 组 1 捕获后缀 n.push("**Provider context...
+            let keep = caps.get(1).unwrap().as_bytes();
+            assert!(keep.starts_with(b"n.push(\"**Provider context"));
         }
 
-        // antiatis regex: 匹配 80 字节，replace 也是 80 字节
+        // antiatis regex（模式 4，捕获组 1 保留函数名前缀）：
+        //   201 样本 FN 3字符 → span=80B；等长由 dynamic_replace 运行时保证
         let atis_re = regex::bytes::Regex::new(
-            r#"function [a-zA-Z_$][a-zA-Z0-9_$]*\(\)\{let e=[a-zA-Z_$][a-zA-Z0-9_$]*\(\)[?]\.atis;return typeof e==="string"&&e\.length>0[?]e:void 0\}"#,
+            r#"(function [a-zA-Z_$][a-zA-Z0-9_$]*\(\)\{)let e=[a-zA-Z_$][a-zA-Z0-9_$]*\(\)[?]\.atis;return typeof e==="string"&&e\.length>0[?]e:void 0\}"#,
         )
         .unwrap();
         for (sample, label) in x64_samples.iter().chain(arm64_samples.iter()) {
             if !label.starts_with("antiatis") {
                 continue;
             }
-            let m = atis_re
-                .find(sample)
+            let caps = atis_re
+                .captures(sample)
                 .unwrap_or_else(|| panic!("antiatis regex must match {}", label));
+            let m = caps.get(0).unwrap();
             assert_eq!(
                 m.end() - m.start(),
                 80,
                 "{}: antiatis match must be 80 bytes",
                 label
             );
+            // 组 1 捕获 function <FN>(){
+            let keep = caps.get(1).unwrap().as_bytes();
+            assert!(keep.starts_with(b"function "));
+            assert!(keep.ends_with(b"){"));
         }
 
         // AntiTelemetry + AntiSpy timezone 是字面量模式，跨版本稳定，无需 regex 验证

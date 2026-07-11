@@ -314,6 +314,11 @@ impl RuntimePatcher {
         &self,
         pattern: &crate::patcher::types::UnifiedPatchPattern,
     ) -> PatchResult<usize> {
+        // 模式 4 派发：dynamic_replace=Some 时走动态内存 patch
+        if pattern.dynamic_replace.is_some() {
+            return self.apply_regex_dynamic_memory_patch(pattern);
+        }
+
         if !self.process_exists() {
             return Err(PatchError::ProcessNotFound { pid: 0 });
         }
@@ -352,6 +357,137 @@ impl RuntimePatcher {
                 }
                 None => Ok(None),
             }
+        })?;
+
+        match scan {
+            Some(addr) => Ok(addr),
+            None => Err(PatchError::PatternNotFound {
+                pattern: regex_str.to_string(),
+                hint: Some("regex pattern not found in any readable region".to_string()),
+            }),
+        }
+    }
+
+    /// 应用 regex 动态内存 patch（模式 4：保留捕获组 + 字面量 + 空格填充）
+    ///
+    /// 用于 AntiPromptBias / AntiAtis 等跨版本 patch 点（minified 变量名长度
+    /// 跨版本变化导致匹配长度不固定）：regex 匹配后保留指定捕获组内容（语义
+    /// 要求保留的部分：函数名/数组变量名/prompt 文本），其余部分用字面量 +
+    /// 空格填充至匹配长度，等长自动保证。命中首个匹配即返回地址。
+    ///
+    /// 动态 replace 构造逻辑与 `file::apply_regex_dynamic_replace` 完全一致
+    ///（同一个 BCE 根治的两处对称实现）：
+    /// - `ReplacePrefix`: `prefix_literal` + 空格*(span_len - prefix_len - keep_len)
+    ///   + `match[keep_group]`
+    /// - `KeepPrefix`: `match[keep_group]` + `suffix_literal` + 空格*
+    ///   (span_len - keep_len - suffix_len - end_len) + `end_literal`
+    ///
+    /// 区域扫描复用 `scan_readable_regions` 的 64MB 上限策略。
+    ///
+    /// # 参数
+    /// - `pattern`: 补丁模式（`use_regex=true` + `dynamic_replace=Some`）
+    ///
+    /// # 返回
+    /// 成功时返回写入的起始地址，失败返回错误（`PatternNotFound` 由上层静默处理）
+    pub fn apply_regex_dynamic_memory_patch(
+        &self,
+        pattern: &crate::patcher::types::UnifiedPatchPattern,
+    ) -> PatchResult<usize> {
+        use crate::patcher::types::DynamicReplace;
+
+        if !self.process_exists() {
+            return Err(PatchError::ProcessNotFound { pid: 0 });
+        }
+
+        let regex_str = std::str::from_utf8(pattern.search_pattern.as_ref())
+            .map_err(|e| PatchError::PatternNotFound {
+                pattern: format!("invalid regex utf-8: {}", e),
+                hint: None,
+            })?;
+        let re = regex::bytes::Regex::new(regex_str).map_err(regex_err_to_pattern_not_found)?;
+
+        let dynamic_replace = pattern.dynamic_replace.as_ref().ok_or_else(|| {
+            PatchError::PatternNotFound {
+                pattern: "dynamic_replace required for regex dynamic memory patch"
+                    .to_string(),
+                hint: None,
+            }
+        })?;
+
+        let (keep_group, prefix_literal, suffix_literal, end_literal) = match dynamic_replace {
+            DynamicReplace::ReplacePrefix { keep_group, prefix_literal } => {
+                (*keep_group, Some(prefix_literal.as_ref()), None, None)
+            }
+            DynamicReplace::KeepPrefix {
+                keep_group,
+                suffix_literal,
+                end_literal,
+            } => (
+                *keep_group,
+                None,
+                Some(suffix_literal.as_ref()),
+                Some(end_literal.as_ref()),
+            ),
+        };
+
+        let scan = self.scan_readable_regions(regex_str.len(), |buf, region_start| {
+            // 命中首个匹配即返回（与 apply_regex_literal_memory_patch 一致）
+            if let Some(caps) = re.captures_iter(buf).next() {
+                let m = caps.get(0).expect("capture group 0 always exists");
+                let span_len = m.end() - m.start();
+
+                let keep = caps.get(keep_group).ok_or_else(|| PatchError::PatternNotFound {
+                    pattern: format!(
+                        "dynamic replace keep_group {} not captured by regex",
+                        keep_group
+                    ),
+                    hint: None,
+                })?;
+                let keep_bytes = &buf[keep.start()..keep.end()];
+
+                let replace = match (prefix_literal, suffix_literal, end_literal) {
+                    (Some(prefix), _, _) => {
+                        let pad = span_len
+                            .saturating_sub(prefix.len() + keep_bytes.len());
+                        let mut r = Vec::with_capacity(span_len);
+                        r.extend_from_slice(prefix);
+                        r.extend(std::iter::repeat_n(b' ', pad));
+                        r.extend_from_slice(keep_bytes);
+                        r
+                    }
+                    (_, Some(suffix), Some(end)) => {
+                        let pad = span_len.saturating_sub(
+                            keep_bytes.len() + suffix.len() + end.len(),
+                        );
+                        let mut r = Vec::with_capacity(span_len);
+                        r.extend_from_slice(keep_bytes);
+                        r.extend_from_slice(suffix);
+                        r.extend(std::iter::repeat_n(b' ', pad));
+                        r.extend_from_slice(end);
+                        r
+                    }
+                    _ => unreachable!(
+                        "DynamicReplace variants exhausted: prefix_literal xor (suffix+end)"
+                    ),
+                };
+
+                debug_assert_eq!(
+                    replace.len(),
+                    span_len,
+                    "dynamic replace must be equal length: span={}, replace={}",
+                    span_len,
+                    replace.len()
+                );
+
+                let addr = region_start + m.start();
+                self.inner.write_memory(addr, &replace)?;
+                debug!(
+                    "✅ regex dynamic memory patched @ {:#x} (match len={}, keep_len={})",
+                    addr, span_len, keep_bytes.len()
+                );
+                return Ok(Some(addr));
+            }
+            Ok(None)
         })?;
 
         match scan {
@@ -461,6 +597,7 @@ mod tests {
             description: Cow::Borrowed("test missing replace"),
             use_regex: false,
             regex_replace_values: None,
+            dynamic_replace: None,
         };
         // 缺 replace_pattern 应返回错误（不应命中 "not found" 而是参数校验错误）
         let r = patcher.apply_literal_memory_patch(&pattern);
@@ -484,6 +621,7 @@ mod tests {
             description: Cow::Borrowed("test unequal length"),
             use_regex: false,
             regex_replace_values: None,
+            dynamic_replace: None,
         };
         let r = patcher.apply_literal_memory_patch(&pattern);
         assert!(r.is_err());
@@ -509,6 +647,7 @@ mod tests {
             description: Cow::Borrowed("test missing replace"),
             use_regex: true,
             regex_replace_values: None,
+            dynamic_replace: None,
         };
         let r = patcher.apply_regex_literal_memory_patch(&pattern);
         assert!(r.is_err(), "missing replace_pattern must error");
@@ -532,6 +671,7 @@ mod tests {
             description: Cow::Borrowed("test invalid regex"),
             use_regex: true,
             regex_replace_values: None,
+            dynamic_replace: None,
         };
         let r = patcher.apply_regex_literal_memory_patch(&pattern);
         assert!(r.is_err(), "invalid regex must error");
