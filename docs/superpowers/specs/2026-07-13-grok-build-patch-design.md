@@ -155,17 +155,55 @@ pub enum CliType { Claude, Codex, Gemini, Grok }  // 新增 Grok
 
 ### 6.2 安装/更新管理（cli_manager.rs）
 
+Grok 接入现有 `aiw update` 流程，与 Claude 同类（不走 npm，有独立下载机制）：
+
+**CliTool 注册**（`initialize_tools` 加第 4 个工具）：
 ```rust
-// 新增
+CliTool {
+    name: "Grok Build".to_string(),
+    command: "grok".to_string(),
+    npm_package: String::new(),  // Grok 不走 npm，留空
+    description: "xAI Grok Build CLI tool".to_string(),
+    installed: false, version: None, install_type: None, install_path: None,
+},
+```
+
+**分流**（`execute_update` 加特判，与 Claude 特判风格一致）：
+```rust
+// 现有: if tool.command == "claude" { update_claude_cli(tool).await }
+// 新增: else if tool.command == "grok" { update_grok_cli(tool).await }
+// 其余 npm 分支不变
+```
+`execute_update` 的 "Supported: claude, codex, gemini" 报错文案更新为含 grok。
+
+**update_grok_cli**（AIW 自己下载，非 shell-out）：
+```rust
+async fn update_grok_cli(tool: &CliTool) -> (String, bool, String) {
+    // 1. 版本检查：调 `grok update --check --json` 得 latestVersion
+    //    （或直接 HEAD 探测 x.ai/cli 的版本清单）
+    // 2. 已装 + 版本相同 → 跳过；版本不同 → 下载
+    // 3. 下载：https://x.ai/cli/grok-{latest}-linux-x86_64
+    //    fallback: https://storage.googleapis.com/grok-build-public-artifacts/cli/grok-{latest}-linux-x86_64
+    // 4. 放 ~/.grok/downloads/grok-linux-x86_64（覆盖），更新软链 + version.json
+    // 5. 未装 → curl https://x.ai/cli/install.sh | sh（与 Claude curl install 对称）
+}
+```
+
+**关键优势（AIW 自己下载 vs shell-out `grok update`）**：AIW 下载后**立即对 binary 打 patch**（shell-out `grok update` 拿到的是原版 binary，还要 AIW 再补 patch）。`update_grok_cli` 下载完成后自动调用 `apply_grok_patches()`，实现「更新即 patch」。
+
+**统一更新入口**：
+- `aiw update` — 全量更新 claude/codex/gemini/grok 四个（Grok 下载后自动 patch）
+- `aiw update grok` — 只更新 grok（同样下载后自动 patch）
+- `aiw grok update [--version X.Y.Z]` — 也可走 grok 子命令入口（等价 `aiw update grok`）
+
+### 6.3 detect_grok（patch 定位用）
+
+```rust
+// patcher/grok/install.rs
 pub fn detect_grok() -> Option<GrokInstallation> {
     // 查 ~/.grok/bin/grok 软链 → ~/.grok/downloads/grok-linux-x86_64
-    // 读 ~/.grok/version.json 得版本
-}
-
-pub async fn update_grok(version: Option<&str>) -> Result<()> {
-    // 默认拉最新（grok update --check 得 latestVersion）
-    // 指定版本：从 https://x.ai/cli/grok-{version}-linux-x86_64 下载
-    // 放 ~/.grok/downloads/grok-linux-x86_64，更新软链 + version.json
+    // 读 ~/.grok/version.json 得版本（0.2.99）
+    // 返回 binary_path + version，供 patch 定位 + is_file_patched 用
 }
 ```
 
@@ -247,6 +285,8 @@ patch 后跑 grok session 实测：
 ### 本设计交付
 
 - Grok Build 作为 AIW 管理 CLI：detect + update。
+- `aiw update` 接入 Grok：全量更新含 grok，`aiw update grok` 支持单工具更新（§6.2）。
+- Grok 更新后自动 patch：AIW 自己下载 binary 后立即打上传 patch（更新即 patch）。
 - 三类上传 patch（类2 已定案，类1/3 实现阶段同类方法定位）。
 - Claude/Grok 平级 patcher 重构（正本清源）。
 - 跨版本动态定位机制。
@@ -274,8 +314,9 @@ patch 后跑 grok session 实测：
 1. Claude 侧下沉 `patcher/claude/`（正本清源，纯迁移 + import 改写）。
 2. 新建 `patcher/grok/` 骨架（mod/registry/versions/targets/install）。
 3. 类2 patch 实现（targets.rs 定位 + registry.rs 生成 pattern + FeatureType 变体）。
-4. `cli_type.rs` + `cli_manager.rs` 的 Grok detect/update。
-5. `commands/patch.rs` + `parser.rs` 的 Grok patch CLI。
-6. 类2 运行时验证（§8.3）。
-7. 类1/3 定位 + 实现 + 验证。
-8. 测试 + 文档（CLAUDE.md patch 矩阵更新）。
+4. `cli_type.rs` + `cli_manager.rs` 的 Grok detect + `update_grok_cli`（AIW 自己下载）。
+5. `aiw update` 接入 Grok：`initialize_tools` 加 grok CliTool + `execute_update` 加 `else if tool.command == "grok"` 特判 + 下载后自动调用 `apply_grok_patches`。
+6. `commands/patch.rs` + `parser.rs` 的 Grok patch CLI（apply/status/restore）。
+7. 类2 运行时验证（§8.3）：更新 + patch 后跑 grok session 实测。
+8. 类1/3 定位 + 实现 + 验证。
+9. 测试 + 文档（CLAUDE.md patch 矩阵 + aiw update 文案更新）。
