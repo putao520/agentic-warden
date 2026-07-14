@@ -5,4 +5,8 @@ pub mod registry;
 pub mod targets;
 pub mod versions;
 
+pub use install::{detect_grok, get_grok_binary_path, GrokInstallation};
+pub use registry::{
+    get_grok_deploy_upload_patches, get_grok_repo_bundle_patches, get_grok_trace_upload_patches,
+};
 pub use versions::GrokVersion;

@@ -1,5 +1,6 @@
 //! Grok patch 集成测试：在真实 0.2.99 binary 上定位 GCS 上传 call 点
 
+use aiw::patcher::grok::install::{detect_grok, get_grok_binary_path};
 use aiw::patcher::grok::targets::locate_repo_bundle_call_sites;
 
 #[test]
@@ -44,5 +45,22 @@ fn test_locate_repo_bundle_call_sites_on_v0299() {
             tgt
         );
     }
+}
+
+#[test]
+fn test_detect_grok_local() {
+    let inst = detect_grok().expect("grok detect failed");
+    assert!(inst.installed, "grok should be installed locally");
+    assert!(inst.binary_path.exists(), "binary path should exist");
+    assert_eq!(inst.version.major, 0);
+    assert_eq!(inst.version.minor, 2);
+    // patch 版本可能是 99 或更新
+    assert!(inst.version.patch >= 93);
+}
+
+#[test]
+fn test_get_grok_binary_path() {
+    let p = get_grok_binary_path().unwrap();
+    assert!(p.to_string_lossy().contains("grok-linux-x86_64"));
 }
 
