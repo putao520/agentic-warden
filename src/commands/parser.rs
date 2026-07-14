@@ -377,7 +377,11 @@ pub enum Commands {
     },
 
     /// 更新 AI CLI 工具和 AIW 自身
-    Update,
+    Update {
+        /// 指定要更新的工具（如 claude, codex, gemini, grok）。不指定则更新全部。
+        #[arg(value_name = "TOOL")]
+        tool: Option<String>,
+    },
 
     /// MCP服务器管理
     #[command(subcommand)]

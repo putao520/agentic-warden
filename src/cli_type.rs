@@ -11,6 +11,7 @@ pub enum CliType {
     Claude,
     Codex,
     Gemini,
+    Grok,
     Auto,
 }
 
@@ -43,6 +44,7 @@ impl CliType {
             CliType::Claude => CLAUDE_BIN,
             CliType::Codex => CODEX_BIN,
             CliType::Gemini => GEMINI_BIN,
+            CliType::Grok => "grok",
             CliType::Auto => "auto",
         }
     }
@@ -52,6 +54,7 @@ impl CliType {
             CliType::Claude => "CLAUDE_BIN",
             CliType::Codex => "CODEX_BIN",
             CliType::Gemini => "GEMINI_BIN",
+            CliType::Grok => "GROK_BIN",
             CliType::Auto => "AUTO_BIN",
         }
     }
@@ -61,6 +64,7 @@ impl CliType {
             CliType::Claude => "claude",
             CliType::Codex => "codex",
             CliType::Gemini => "gemini",
+            CliType::Grok => "grok",
             CliType::Auto => "auto",
         }
     }
@@ -92,6 +96,7 @@ impl CliType {
                     "yolo".to_string(),
                 ]
             }
+            CliType::Grok => Vec::new(),
             CliType::Auto => Vec::new(),
         };
 
@@ -121,6 +126,7 @@ impl CliType {
             CliType::Gemini => {
                 vec!["--approval-mode".to_string(), "yolo".to_string()]
             }
+            CliType::Grok => Vec::new(),
             CliType::Auto => Vec::new(),
         };
 
@@ -135,6 +141,7 @@ pub fn parse_cli_type(arg: &str) -> Option<CliType> {
         "claude" => Some(CliType::Claude),
         "codex" => Some(CliType::Codex),
         "gemini" => Some(CliType::Gemini),
+        "grok" => Some(CliType::Grok),
         "auto" => Some(CliType::Auto),
         _ => None,
     }

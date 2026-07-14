@@ -57,6 +57,18 @@ pub fn get_env_vars_for_ai_type(ai_type: AiType) -> Vec<EnvVarMapping> {
                 required: false,
             },
         ],
+        AiType::Grok => vec![
+            EnvVarMapping {
+                key: "XAI_API_KEY",
+                description: "xAI API Key",
+                required: true,
+            },
+            EnvVarMapping {
+                key: "XAI_BASE_URL",
+                description: "API endpoint (optional)",
+                required: false,
+            },
+        ],
         AiType::Auto => vec![],
     }
 }

@@ -473,6 +473,7 @@ fn resolve_provider(
         CliType::Claude => AiType::Claude,
         CliType::Codex => AiType::Codex,
         CliType::Gemini => AiType::Gemini,
+        CliType::Grok => AiType::Grok,
         CliType::Auto => {
             return Err(ProcessError::Other(
                 "Auto CLI type is virtual and cannot be executed directly".to_string(),
