@@ -60,6 +60,14 @@ fn backup_path_for(file_path: &Path) -> PathBuf {
     PathBuf::from(format!("{}.aiw-backup", file_path.display()))
 }
 
+/// 该文件是否已存在 `.aiw-backup` 备份（即已被 patch 且未 restore）。
+///
+/// 复用 `backup_path_for` SSOT，避免调用方自行拼路径（`with_extension` 语义不同，
+/// 对含 `.` 的文件名会产生路径错位）。patch 状态检测用此判定。
+pub(crate) fn backup_exists(file_path: &Path) -> bool {
+    backup_path_for(file_path).exists()
+}
+
 /// 在 `content` 中收集 `search` 的所有起始偏移（无重叠）。
 fn find_all_literal_positions(content: &[u8], search: &[u8]) -> Vec<usize> {
     let search_len = search.len();

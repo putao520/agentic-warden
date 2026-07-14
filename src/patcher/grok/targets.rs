@@ -63,7 +63,6 @@ const LEA_RDI_RSP: &[u8] = &[0x48, 0x8d, 0xbc, 0x24];
 /// - `stack_frame`：GCS dispatcher 的栈帧大小。0.2.99 GCS 独有 0x4f8（其他候选
 ///   0xa58），可区分。0.2.101 全 0xa58，栈帧失效，用 `addr_fallback`。
 /// - `addr_fallback`：GCS dispatcher 的文件偏移（栈帧失效时兜底）。
-#[allow(dead_code)]
 struct GcsVersionEntry {
     version_prefix: &'static str,
     stack_frame: u32,
