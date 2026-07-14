@@ -3,19 +3,23 @@
 //! 为 3 个 Grok feature 生成 UnifiedPatchPattern。repo bundle 已定案
 //! （call→31 c0 48 89 07），deploy/trace 实现阶段定位。
 
-use crate::patcher::grok::install::get_grok_binary_path;
-use crate::patcher::grok::targets::{locate_repo_bundle_call_sites, CALL_REPLACE};
+use crate::patcher::grok::install::{detect_grok, get_grok_binary_path};
+use crate::patcher::grok::targets::{locate_repo_bundle_call_sites_versioned, CALL_REPLACE};
 use crate::patcher::types::{FeatureType, PatchType, UnifiedPatchPattern, UnifiedPatchError};
 use std::borrow::Cow;
 
 /// 生成 repo bundle 上传 patch（2 个 call 点 → 31 c0 48 89 07）
 ///
-/// 运行时读 binary，定位 2 个 call 点，为每个点生成一个字面量等长替换 pattern。
-/// search = call 指令 5 字节（e8 + rel32），replace = CALL_REPLACE（5 字节）。
+/// 运行时读 binary + 探测版本，用版本表区分 GCS dispatcher（0.2.101+ 候选同构
+/// 需版本表），定位 2 个 call 点生成等长替换 pattern。
 pub fn get_grok_repo_bundle_patches() -> Result<Vec<UnifiedPatchPattern>, UnifiedPatchError> {
     let binary_path = get_grok_binary_path()?;
     let binary = std::fs::read(&binary_path)?;
-    let sites = locate_repo_bundle_call_sites(&binary)?;
+    // 探测版本传给 locate（版本表区分 GCS）
+    let version = detect_grok()
+        .ok()
+        .map(|i| format!("{}", i.version));
+    let sites = locate_repo_bundle_call_sites_versioned(&binary, version.as_deref().unwrap_or(""))?;
     let mut patches = Vec::with_capacity(sites.len());
     for off in sites {
         // search: call 指令的 5 字节（e8 + 4 字节 rel32，从 binary 实际读取）

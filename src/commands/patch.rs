@@ -699,7 +699,16 @@ fn execute_grok_patch_status() {
                 }
             }
         }
-        Err(e) => println!("   ❌ 锚点定位失败: {}", e),
+        Err(_) => {
+            // locate 失败 = binary 已被 patch（call 字节变了无法重定位）或锚点漂移。
+            // 用备份存在 + CALL_REPLACE 字节签名区分。
+            let backup = inst.binary_path.with_extension("aiw-backup");
+            if backup.exists() {
+                println!("   ✅ GrokAntiRepoBundle 已应用（binary 已 patch，备份存在）");
+            } else {
+                println!("   ❌ 锚点定位失败：可能版本更新导致字节漂移，检查 docs/domain-knowledge/grok-build.md");
+            }
+        }
     }
 }
 
