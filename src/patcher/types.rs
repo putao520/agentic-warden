@@ -65,9 +65,20 @@ pub enum FeatureType {
     /// 预留间谍点（导出但无内部调用方），防未来版本激活。通过等长字面量
     /// 替换把 regex 改成 `/^00:00/`（永不匹配任何 MAC）→ `fGd.test()` 永远
     /// false → `tMi()` 永远返回 false。跨版本稳定（regex 字面量）。
-    /// 不防 eMi（GCE BIOS `/Google/.test`）：eMi Linux-only + 需读文件，
+    /// 不防 eMi（GCE BIOS `/Google/.test`）：eMi Linux-only + 需读文件,
     /// 中转站用户通常不跑 GCE，且 `/Google/` 字面量太通用不能改。
     AntiCloudDetect,
+    /// GrokAntiRepoBundle - 禁用 Grok Repo Changes git bundle 上传（call→xor+mov）
+    ///
+    /// patch GCS blob 上传 dispatcher 的 2 个调用点（call 指令），
+    /// 等长替换 e8 xx xx xx xx → 31 c0 48 89 07（xor eax,eax; mov [rdi],rax），
+    /// 让上传函数返回空结果，调用方走"无结果→跳过"分支。跨版本稳定
+    /// （tracing 字符串 + call 字节模式动态定位）。
+    GrokAntiRepoBundle,
+    /// GrokAntiDeployUpload - 禁用 Grok App Builder 部署上传（call→xor+mov）
+    GrokAntiDeployUpload,
+    /// GrokAntiTraceUpload - 禁用 Grok Session Trace 上传（call→xor+mov）
+    GrokAntiTraceUpload,
 }
 
 impl FeatureType {
@@ -89,6 +100,9 @@ impl FeatureType {
             FeatureType::AntiCloudDetect => {
                 "AntiCloudDetect - 禁用 MAC 地址 GCE 云检测（/^42:01/ → /^00:00/）"
             }
+            FeatureType::GrokAntiRepoBundle => "GrokAntiRepoBundle - 禁用 Repo Changes git bundle 上传（call→xor+mov）",
+            FeatureType::GrokAntiDeployUpload => "GrokAntiDeployUpload - 禁用 App Builder 部署上传",
+            FeatureType::GrokAntiTraceUpload => "GrokAntiTraceUpload - 禁用 Session Trace 上传",
         }
     }
 
@@ -102,6 +116,9 @@ impl FeatureType {
             FeatureType::AntiAtis => "antiatis",
             FeatureType::AntiFrameTrack => "antiframetrack",
             FeatureType::AntiCloudDetect => "anticloudetect",
+            FeatureType::GrokAntiRepoBundle => "grokantirepobundle",
+            FeatureType::GrokAntiDeployUpload => "grokantideployupload",
+            FeatureType::GrokAntiTraceUpload => "grokantitraceupload",
         }
     }
 }
@@ -453,5 +470,20 @@ mod tests {
         };
         assert_eq!(pattern.search_pattern.as_ref(), b"var YOt=200000");
         assert!(!pattern.use_regex);
+    }
+
+    #[test]
+    fn test_grok_anti_repo_bundle_variant() {
+        assert_eq!(FeatureType::GrokAntiRepoBundle.short_name(), "grokantirepobundle");
+        assert!(FeatureType::GrokAntiRepoBundle
+            .description()
+            .contains("GrokAntiRepoBundle"));
+    }
+
+    #[test]
+    fn test_grok_variants_distinct() {
+        assert_ne!(FeatureType::GrokAntiRepoBundle, FeatureType::GrokAntiDeployUpload);
+        assert_ne!(FeatureType::GrokAntiRepoBundle, FeatureType::GrokAntiTraceUpload);
+        assert_ne!(FeatureType::GrokAntiDeployUpload, FeatureType::GrokAntiTraceUpload);
     }
 }

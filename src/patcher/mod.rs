@@ -15,6 +15,7 @@
 pub mod claude;
 pub mod error;
 pub mod file;
+pub mod grok;
 pub mod platform;
 pub mod runtime;
 pub mod types;

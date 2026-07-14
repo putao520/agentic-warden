@@ -25,6 +25,10 @@ pub fn get_feature_patches(
         FeatureType::AntiAtis => get_antiatis_patches(),
         FeatureType::AntiFrameTrack => get_antiframetrack_patches(),
         FeatureType::AntiCloudDetect => get_anticloudetect_patches(),
+        // Grok features are handled by the grok registry, not here.
+        FeatureType::GrokAntiRepoBundle
+        | FeatureType::GrokAntiDeployUpload
+        | FeatureType::GrokAntiTraceUpload => vec![],
     }
 }
 
