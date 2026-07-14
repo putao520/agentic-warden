@@ -62,6 +62,7 @@ pub enum AiType {
     Codex,
     Claude,
     Gemini,
+    Grok,
     Auto,
 }
 
@@ -71,6 +72,7 @@ impl std::fmt::Display for AiType {
             AiType::Codex => write!(f, "codex"),
             AiType::Claude => write!(f, "claude"),
             AiType::Gemini => write!(f, "gemini"),
+            AiType::Grok => write!(f, "grok"),
             AiType::Auto => write!(f, "auto"),
         }
     }
@@ -84,6 +86,7 @@ impl std::str::FromStr for AiType {
             "codex" => Ok(AiType::Codex),
             "claude" => Ok(AiType::Claude),
             "gemini" => Ok(AiType::Gemini),
+            "grok" => Ok(AiType::Grok),
             "auto" => Ok(AiType::Auto),
             _ => Err(format!("Unknown AI type: {}", s)),
         }

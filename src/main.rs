@@ -155,8 +155,8 @@ async fn main_impl(command: Commands) -> Result<ExitCode, String> {
             }
             Ok(ExitCode::from(0))
         }
-        Commands::Update => {
-            match execute_enhanced_update().await {
+        Commands::Update { tool } => {
+            match execute_enhanced_update(tool.as_deref()).await {
                 Ok((aiw_updated, cli_results)) => {
                     let cli_success_count = cli_results.iter().filter(|(_, success, _)| *success).count();
                     let cli_total_count = cli_results.len();

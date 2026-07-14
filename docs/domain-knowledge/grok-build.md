@@ -208,3 +208,164 @@ Rust 函数 prologue 是 `push %rbp; push %r15; push %r14; push %r13; push %r12;
 - `ExportConfig::Gcs` 分支指令未定位（PIE RIP-relative 寻址，暴力 grep 不到 xref，需反汇编）；且 Rust enum match 可能不依赖字符串名，patch 字符串名可能无效。
 - Grok 版本更新后字符串偏移会变，但字面量内容（URL / `pack.threads=1` / `ExportConfig::Gcs`）跨版本稳定，patch 用字面量匹配不依赖偏移。
 - **类2/类3 的可靠端点锚点尚未最终确认**——实现阶段需对 GCS `gs://` bucket URL（11 处散布）做逐一甄别，找出 repo_changes bundle 上传专用的那个 bucket URL。
+
+## ⚠️ 0.2.101 对抗性重构（2026-07-15 发现，关键）
+
+**背景**：0.2.99 的 patch 锚点（`upload_with_batching` tracing 字符串 → prologue+lea 两步法定位 call 点）在 0.2.101 上**全部失效**（两步法命中 0）。深度对比 0.2.99 vs 0.2.101 揭示这是**精准定向隐藏**，不是普通迭代。
+
+### 被隐藏的特征（全部是 repo bundle 打包→GCS 上传链路的可观测字符串）
+
+| 字符串 | 0.2.99 | 0.2.101 | 性质 |
+|--------|--------|---------|------|
+| `upload_with_batching` | 5 | 0 | repo bundle 批量上传 tracing |
+| `batch_upload` | 15 | 0 | 批量上传 tracing |
+| `Failed to upload dedup content to gs` | 1 | 0 | GCS dedup 上传错误信息 |
+| `git bundle` | 1 | 0 | git bundle 打包命令 |
+| `pack.threads` | 1 | 0 | git pack 参数 |
+| `upload_coordinator` | 3 | 0 | 上传协调器 tracing |
+| `base_tree_manifest` | 1 | 0 | base tree 清单 tracing |
+
+### 原封不动的特征（App Builder 部署 + trace + GCS 基础设施）
+
+| 字符串 | 0.2.99 | 0.2.101 | 说明 |
+|--------|--------|---------|------|
+| `gs://` | 11 | 11 | GCS bucket（基础设施，未动）|
+| `SignedUploadUrl` | 2 | 2 | 签名上传 URL（未动）|
+| `ExportConfig::Gcs` | 1 | 1 | Gcs 导出配置枚举（未动）|
+| `app-builder-deployer` | 20 | 20 | App Builder 部署器（未动）|
+| `deploy_app` | 17 | 17 | 部署入口（未动）|
+| `UploadBuild` | 2 | 2 | UploadBuild gRPC（未动）|
+| `trace-exports` / `skip remote upload` | 3 / 1 | 3 / 1 | trace 导出（未动）|
+| `serialize_repo_changes` | 2 | 2 | repo 序列化入口（未动）|
+
+### 判读
+
+1. **功能未移除，只藏了特征**：GCS 基础设施（`gs://`/`SignedUploadUrl`/`ExportConfig::Gcs`/`serialize_repo_changes`）全在，上传功能大概率仍在运行，只是把暴露给逆向分析的 tracing 事件名/错误信息/git 参数抹掉了——典型反分析手段。
+2. **精准定向**：只藏了"git bundle 打包→上传"链路（最像在偷整个仓库代码的那条），App Builder 部署和 session trace 没动（性质不同，没急着藏）。
+3. **动机推断**：repo bundle 打包上传把用户整个 git 仓库变更打包发到 xAI 服务端——这是最"偷代码"的行为，被发现后他们优先藏这条链路的可观测特征。
+
+### 对 patch 策略的影响（重要）
+
+**tracing 字符串锚点已被主动对抗，不可依赖**——`upload_with_batching` 这类字符串会被随时抹掉。Task 3 的 prologue+lea 两步法在 0.2.101 失效正是因为那条链路的 call 点布局被改了。
+
+**必须改用"无法被轻易抹掉"的锚点**：
+- GCS 上传的**网络端点**：`gs://` bucket 名、`SignedUploadUrl` 获取逻辑（功能刚需，抹掉上传就报错，不敢动）。
+- `ExportConfig::Gcs` 的**分支判断点**（枚举是功能契约，跨版本稳定）。
+- HTTP/gRPC 请求发送的**底层 call**（reqwest/hyper 发送函数，所有上传共用，无法针对单链路隐藏）。
+
+### 0.2.101 重新定位方向（Task 8 升级）
+
+不能再用 tracing 字符串。改从**上传的终点**（网络发送）倒推：
+1. `gs://` 11 处 + `SignedUploadUrl` 2 处 → 找 GCS put 的 HTTP 发送 call。
+2. `ExportConfig::Gcs` 分支 → 找决定走 Gcs 上传的 enum match 点（patch 成永远不走 Gcs）。
+3. App Builder（`deploy_app`/`UploadBuild` 未动）→ 这条链路锚点仍可用，优先 patch。
+4. trace（`skip remote upload` 未动）→ 这条也仍可用。
+
+### 跨版本对抗原则
+
+- **锚点选功能刚需**（端点 URL / 枚举分支 / 底层网络 call），不选可观测特征（tracing/错误信息）——后者会被对手主动抹掉。
+- **多重锚点冗余**：每条链路用 2-3 个独立锚点，任一存活即能 patch。
+- **版本漂移检测**：`aiw patch grok-status` 失败时打印"锚点漂移，可能版本更新隐藏"，提示用户重新逆向。
+
+## 0.2.101 手工逆向系统性失败记录（2026-07-15）
+
+在 0.2.101 上定位 upload call 点时，以下**所有手工 + 已装脚本工具方法**均失效，系统性证明对手重构极其彻底：
+
+| 方法 | 0.2.99 结果 | 0.2.101 结果 | 失败原因 |
+|------|------------|-------------|---------|
+| tracing 字符串 reloc→slice ptr→text ref | 命中 | **0 命中** | 字符串全删 |
+| `ExportConfig::Gcs` slice ptr | 1 text ref | 0 text ref | 间接数组化 |
+| `X-Storage-Path`/`storage upload_file rejected` slice ptr | — | 0 | 同上 |
+| prologue+lea 两步法（Task 3）| 2 命中 | **0 命中** | 调用约定改了 |
+| 放宽 lea（栈偏移通配）+ call→6-push dispatcher | — | 0 命中 | 模式全变 |
+| dispatcher 指纹（movzbl+lea+movslq+add+jmp）| — | 399 命中（太宽，不唯一）| Rust enum match 通用模式 |
+| 6-push + 大栈帧 prologue | 34 | 19128（太宽）| 通配栈帧后不唯一 |
+| capstone 函数边界（push rbp/endbr64/ret）| — | 0 命中（async 状态机非标准 prologue）| async 展开无独立边界 |
+| angr CFGFast 全量 | — | 580s 超时（162MB 太大）| angr 大 binary 瓶颈 |
+| 字节级 RIP-relative lea 扫描 | — | 0 命中（逻辑或间接引用）| 字符串走数组间接 |
+
+### 结论
+
+0.2.101 的重构不只是删 tracing 字符串，**连调用约定的字节模式、字符串引用方式、函数 prologue 结构全改了**——典型的高级反逆向工程。手工逆向 + capstone/objdump/pyelftools/angr 已装工具栈**无法可靠定位** upload call 点。
+
+### 唯一可行路径
+
+1. **Ghidra 反编译**（自动函数识别 + async 状态机重建 + 反编译成 C 伪代码）——唯一能处理这种重构后 binary 的工具。下载 400MB + 分析。
+2. **运行时拦截**（改用 eBPF/LD_PRELOAD/网络层 hook 拦截 grok 出站 HTTP，匹配 upload endpoint）——架构大变但根治，不怕版本更新。
+3. **退回 0.2.99**（Task 3 锚点在 0.2.99 有效），先交付可用 call patch 版本，0.2.101 作为后续。
+
+### 关键判读
+
+对手花大力气重构隐藏，恰恰证明**上传功能是核心利益**（他们在偷数据，且知道被发现后会继续藏）。这强化了 patch 的必要性，但要求更强的对抗工具。
+
+## 0.2.101 破解成功（2026-07-15，特征码放宽策略）
+
+**方法**：放弃精确字节匹配（0.2.101 调用约定全变），改用**指令序列指纹**。
+
+### dispatcher 指纹（EXACT 16 条 mnemonic）
+`push push push push push push sub mov mov mov movzbl lea movslq add mov jmp`
+
+这是 Rust enum jump-table dispatcher 的强指纹（6 寄存器保存 + 栈帧 + 读 enum discriminant + jump table 分发）。在 0.2.101 全 .text（2495 万指令）命中 **15 个**（从放宽的 399 缩到 15）。
+
+### GCS upload dispatcher 锁定
+
+15 个候选里，通过"被 2 个 call 调用 + 20 个 jump-table arm + 在 xai-data-collector 代码段(0x2c-0x2d)"锁定到 **`0x2cc3420`**：
+- prologue: `push rbp/r15/r14/r13/r12/rbx; sub $0xa58,%rsp`（栈帧 0xa58，0.2.99 是 0x4f8）
+- enum 偏移 `0x4a0(%rsi)`（0.2.99 是 0x1c8）
+- jump table @ `0x7d2d4b0`，20 个 arm（上传多阶段状态机）
+
+### 2 个 call 点（与 0.2.99 同构，偏移/判定值变）
+
+| call 点 | dispatcher | out 参数偏移 | 判定值 | 字节 |
+|---------|-----------|------------|--------|------|
+| `0x2d92557` | 0x2cc3420 | `0x5b0(%rsp)` | `cmp $0x4` | e8 c4 0e f3 ff |
+| `0x2d9539e` | 0x2cc3420 | `0xa40(%rsp)` | `cmp $0x4` | e8 7d e0 f2 ff |
+
+调用约定（两版同构）：`lea OUT(%rsp),%rdi; lea IN(%rbx),%rsi; mov %r15,%rdx; call dispatcher; mov OUT(%rsp),%r14; cmp $VAL,%r14; jcc <skip>`
+
+### 跨版本差异（解释为何 Task 3 精确模式失效）
+
+| 特征 | 0.2.99 | 0.2.101 |
+|------|--------|---------|
+| dispatcher 栈帧 | 0x4f8 | 0xa58 |
+| enum 偏移 | 0x1c8 | 0x4a0 |
+| out 参数偏移 | 0x3d0 | 0x5b0 / 0xa40 |
+| 判定值 | test/cmpq $0x0 | cmp $0x4 |
+| call 点数 | 2 | 2（同构）|
+
+### patch 策略升级（targets.rs）
+
+用**指令序列指纹**定位 dispatcher（EXACT 16 条），再找调用它的 call 点（解析 `e8 rel32` target == dispatcher）。这跨版本自适应——不依赖具体偏移/判定值，只依赖 dispatcher 的指令结构。
+
+patch 仍用 call→`31 c0 48 89 07`（xor eax,eax; mov [rdi],rax）等长替换：rdi 在 call 前由 `lea OUT(%rsp),%rdi` 设置，patch 后写 0 到 out 参数，调用方 `cmp $VAL` 读到 0（0.2.101 判定 `==4` 跳过，0≠4 不跳——需验证 0 是否走"无结果"安全路径，见实现阶段运行时验证）。
+
+⚠️ **0.2.101 判定值从 `==0 跳过` 变成 `==4 跳过`**，patch 后 out=0，`cmp $0x4` 不等于 4 → **不跳过** → 走结果消费块读 out=0 → 可能和 0.2.99 行为不同。实现阶段必须运行时验证 patch 后 grok 不崩（或调整 patch 让 out=4 而非 0）。
+
+## 0.2.101 call patch 运行时验证（2026-07-15，决定性）
+
+手工 patch 0.2.101 的两个 call 点（`0x2d92557`/`0x2d9539e` → `31 c0 48 89 07`），实测：
+
+| 测试 | 结果 |
+|------|------|
+| `grok --version` | ✅ 正常（exit 0）|
+| `grok --help` | ✅ 正常 |
+| `grok models` | ✅ 正常列出模型 |
+| `grok mcp list` | ✅ 正常 |
+| `grok sessions` | ✅ 正常 |
+| `grok -p "say hi"` 单轮对话 | ✅ **正常返回 "Hi"**（exit 0）|
+
+**结论**：call patch 在 0.2.101 技术可行，patch 两个 call 点不破坏 grok 任何功能（对话/session/mcp/models 全正常）。之前担心的 `cmp $0x4`（vs 0.2.99 的 `cmp $0x0`）差异不影响——patch 后 out=0，`cmp $0x4; je` 不跳但后续处理对 out=0 安全，grok 不崩。
+
+### 算法验证（指令级指纹 + lea-call 过滤）
+
+已验证算法（capstone 指令级反汇编）：
+1. 字节级找 6-push dispatcher 头（`55 41 57 41 56 41 55 41 54 53 48 81 ec ?? ?? 00 00`，注意 `??` 用 `[\s\S]` 通配避开 `\n=0x0a` 陷阱）
+2. 对每个头局部 capstone 反汇编 16 条，匹配 EXACT 指纹 `[push*6, sub, mov, mov, mov, movzx, lea, movsxd, add, mov, jmp]`（capstone Intel 语法：movzx 非 movzbl，movsxd 非 movslq）
+3. 扫 `e8 rel32` call，target 命中 dispatcher 集合 + call 前 11 字节是 `lea rdi,[rsp+disp32]`（`48 8d bc 24`）
+4. 按 target 分组，选"恰好 2 个 lea-call"的 dispatcher
+
+双版本均命中预期 GCS dispatcher + 2 call 点（0.2.99: `0x51b9540`/`0x51c5692`+`0x51c9ecb`；0.2.101: `0x2cc3420`/`0x2d92557`+`0x2d9539e`）。有 5-6 个候选 dispatcher（其他是 goal/plan 等 enum 状态机），GCS 在内但需额外区分（jump table arm 数不够区分）。
+
+### 待解决：5选1候选区分
+
+算法返回 5-6 个"被2个lea-call调用的enum dispatcher"，GCS 是其中之一。区分 GCS 的可靠特征待定（arm 数不稳定）。临时方案：patch 时人工确认，或 patch 后抓包验证 upload 停。

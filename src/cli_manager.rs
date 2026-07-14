@@ -6,7 +6,7 @@
 
 #![allow(dead_code)] // CLI管理模块，部分功能当前未使用
 
-use crate::patcher::versions::ClaudeVersion;
+use crate::patcher::claude::versions::ClaudeVersion;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -162,6 +162,16 @@ impl CliToolDetector {
                 command: "gemini".to_string(),
                 npm_package: "@google/gemini-cli".to_string(),
                 description: "Google Gemini CLI tool".to_string(),
+                installed: false,
+                version: None,
+                install_type: None,
+                install_path: None,
+            },
+            CliTool {
+                name: "Grok Build".to_string(),
+                command: "grok".to_string(),
+                npm_package: String::new(), // Grok 不走 npm
+                description: "xAI Grok Build CLI tool".to_string(),
                 installed: false,
                 version: None,
                 install_type: None,
@@ -519,25 +529,28 @@ pub fn get_install_commands() -> Vec<(String, String)> {
 /// If tool_name is None, update all installed tools
 /// If tool_name is Some, update/install that specific tool
 /// Enhanced update function that updates both AIW and AI CLI tools
-pub async fn execute_enhanced_update() -> Result<(bool, Vec<(String, bool, String)>)> {
+pub async fn execute_enhanced_update(tool: Option<&str>) -> Result<(bool, Vec<(String, bool, String)>)> {
     let mut aiw_updated = false;
     let mut cli_results = Vec::new();
 
-    // Step 1: Update AIW itself
-    println!("🔄 Checking for AIW updates...");
-    match update_aiw().await {
-        Ok(updated) => {
-            aiw_updated = updated;
-        }
-        Err(e) => {
-            eprintln!("⚠️  AIW update failed: {}", e);
-            // Continue with AI CLI updates even if AIW update fails
+    // 指定单工具更新时跳过 AIW 自更新（仅更新指定工具）
+    if tool.is_none() {
+        // Step 1: Update AIW itself
+        println!("🔄 Checking for AIW updates...");
+        match update_aiw().await {
+            Ok(updated) => {
+                aiw_updated = updated;
+            }
+            Err(e) => {
+                eprintln!("⚠️  AIW update failed: {}", e);
+                // Continue with AI CLI updates even if AIW update fails
+            }
         }
     }
 
     // Step 2: Update AI CLI tools
     println!("\n🔧 Checking AI CLI tools for updates...");
-    match execute_update(None).await {
+    match execute_update(tool).await {
         Ok(results) => {
             cli_results = results;
         }
@@ -736,7 +749,7 @@ pub async fn execute_update(tool_name: Option<&str>) -> Result<Vec<(String, bool
             Some(tool) => vec![tool],
             None => {
                 anyhow::bail!(
-                    "Unknown AI CLI tool: {}. Supported: claude, codex, gemini",
+                    "Unknown AI CLI tool: {}. Supported: claude, codex, gemini, grok",
                     name
                 );
             }
@@ -752,8 +765,8 @@ pub async fn execute_update(tool_name: Option<&str>) -> Result<Vec<(String, bool
         return Ok(results);
     }
 
-    // Check if any non-Claude tools need Node.js
-    let needs_nodejs = tools_to_process.iter().any(|t| t.command != "claude");
+    // Check if any non-Claude/Grok tools need Node.js
+    let needs_nodejs = tools_to_process.iter().any(|t| t.command != "claude" && t.command != "grok");
     if needs_nodejs {
         println!("🔍 Checking Node.js installation...");
         if let Err(e) = CliToolDetector::auto_install_nodejs().await {
@@ -770,6 +783,11 @@ pub async fn execute_update(tool_name: Option<&str>) -> Result<Vec<(String, bool
         if tool.command == "claude" {
             // Claude uses its own update mechanism, not npm
             let result = update_claude_cli(tool).await;
+            results.push(result);
+            continue;
+        } else if tool.command == "grok" {
+            // Grok uses its own download + patch mechanism
+            let result = update_grok_cli(tool).await;
             results.push(result);
             continue;
         }
@@ -979,6 +997,170 @@ async fn update_claude_cli(tool: &CliTool) -> (String, bool, String) {
     }
 }
 
+/// 从 `grok --version` 输出中提取纯 semver。
+///
+/// `grok --version` 输出形如 `grok 0.2.99 (b1b49ccb71)`，
+/// 而 `check_grok_latest_version` 返回 `0.2.99`（来自 JSON latestVersion）。
+/// 直接 `==` 比较会失败触发不必要的下载，故需提取 semver。
+fn normalize_grok_version(raw: &str) -> String {
+    let trimmed = raw.trim();
+    // 在字符串中查找第一个 x.y.z semver 模式
+    for token in trimmed.split_whitespace() {
+        if let Some(semver) = extract_semver(token) {
+            return semver;
+        }
+    }
+    // 没找到 token 级匹配，尝试在整个字符串中找（如 "grok 0.2.99" 没有空格分隔的边界）
+    extract_semver(trimmed).unwrap_or_else(|| trimmed.to_string())
+}
+
+/// 从字符串中提取首个 `major.minor.patch` semver。
+fn extract_semver(s: &str) -> Option<String> {
+    // 找第一个数字起始位置
+    let bytes = s.as_bytes();
+    let mut start = None;
+    for (i, &b) in bytes.iter().enumerate() {
+        if b.is_ascii_digit() {
+            start = Some(i);
+            break;
+        }
+    }
+    let start = start?;
+    let rest = &s[start..];
+    // 匹配 \d+.\d+.\d+
+    let re = regex::Regex::new(r"^(\d+)\.(\d+)\.(\d+)").unwrap();
+    if let Some(capt) = re.captures(rest) {
+        let m = capt.get(0).unwrap();
+        return Some(m.as_str().to_string());
+    }
+    None
+}
+
+/// 更新 Grok CLI（AIW 自己下载 binary，下载后自动 patch）
+async fn update_grok_cli(tool: &CliTool) -> (String, bool, String) {
+    use crate::patcher::grok::install::get_grok_binary_path;
+
+    // 1. 版本检查：grok update --check --json 得 latestVersion
+    let latest = match check_grok_latest_version().await {
+        Some(v) => v,
+        None => return (tool.name.clone(), false, "Failed to check latest version".to_string()),
+    };
+
+    if tool.installed {
+        // 规范化当前版本：grok --version 输出 "grok 0.2.99 (hash)" → 提取 "0.2.99"
+        let cur_normalized = tool.version.as_deref().map(normalize_grok_version);
+        if let Some(ref cur) = cur_normalized {
+            println!("  Current version: {}", cur);
+        }
+        println!("  Latest version: {}", latest);
+
+        // 已是最新则跳过（使用规范化后的版本比较）
+        if cur_normalized.as_deref() == Some(latest.as_str()) {
+            println!("  ✅ Already up to date!");
+            return (tool.name.clone(), true, "Already up to date".to_string());
+        }
+    }
+
+    // 2. 下载 binary
+    let arch = if cfg!(target_arch = "x86_64") { "linux-x86_64" } else { "linux-arm64" };
+    let url = format!("https://x.ai/cli/grok-{}-{}", latest, arch);
+    println!("  ⬇️  Downloading from {}", url);
+
+    let tmp_path = get_grok_binary_path()
+        .map(|p| p.with_extension("tmp"))
+        .unwrap_or_else(|_| std::path::PathBuf::from("/tmp/grok-download.tmp"));
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .unwrap();
+    match client.get(&url).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            let bytes = match resp.bytes().await {
+                Ok(b) => b,
+                Err(e) => return (tool.name.clone(), false, format!("Download body error: {}", e)),
+            };
+            if let Err(e) = std::fs::write(&tmp_path, &bytes) {
+                return (tool.name.clone(), false, format!("Write tmp error: {}", e));
+            }
+        }
+        Ok(resp) => {
+            return (tool.name.clone(), false, format!("Download HTTP {}", resp.status()));
+        }
+        Err(e) => return (tool.name.clone(), false, format!("Download error: {}", e)),
+    }
+
+    // 3. 覆盖到 ~/.grok/downloads/grok-linux-x86_64
+    let target = match get_grok_binary_path() {
+        Ok(p) => p,
+        Err(e) => return (tool.name.clone(), false, format!("Binary path error: {}", e)),
+    };
+    // 备份旧版
+    let _ = std::fs::copy(&target, target.with_extension("bak"));
+    if let Err(e) = std::fs::rename(&tmp_path, &target) {
+        let _ = std::fs::copy(&tmp_path, &target);
+        let _ = std::fs::remove_file(&tmp_path);
+        if std::fs::metadata(&target).is_err() {
+            return (tool.name.clone(), false, format!("Install move error: {}", e));
+        }
+    }
+    // 设置可执行权限
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755));
+    }
+
+    // 更新 version.json
+    let _ = update_grok_version_json(&latest);
+
+    println!("  ✅ Grok {} installed", latest);
+
+    // 4. 下载后自动 patch（更新即 patch）
+    println!("  🔧 Auto-patching Grok uploads...");
+    match apply_grok_patches_after_update(&target) {
+        Ok(n) => println!("  ✅ Applied {} patches", n),
+        Err(e) => println!("  ⚠️  Auto-patch failed (run 'aiw patch grok-apply' manually): {}", e),
+    }
+
+    (tool.name.clone(), true, format!("Updated to {}", latest))
+}
+
+async fn check_grok_latest_version() -> Option<String> {
+    let out = tokio::process::Command::new("grok")
+        .arg("update").arg("--check").arg("--json")
+        .output().await.ok()?;
+    let s = String::from_utf8_lossy(&out.stdout);
+    let v: serde_json::Value = serde_json::from_str(&s).ok()?;
+    v.get("latestVersion")?.as_str().map(String::from)
+}
+
+fn update_grok_version_json(version: &str) -> std::io::Result<()> {
+    use crate::patcher::grok::install::get_grok_binary_path;
+    let vjson = get_grok_binary_path()
+        .map(|p| p.parent().unwrap().parent().unwrap().join("version.json"))
+        .unwrap_or_else(|_| std::path::PathBuf::from(format!(
+            "{}/.grok/version.json", std::env::var("HOME").unwrap_or_default()
+        )));
+    let content = format!(
+        "{{\"version\":\"{}\",\"stable_version\":null,\"checked_at\":null}}", version
+    );
+    std::fs::write(&vjson, content)
+}
+
+fn apply_grok_patches_after_update(binary_path: &std::path::Path) -> Result<usize, String> {
+    use crate::patcher::grok::registry::get_grok_repo_bundle_patches;
+    use crate::patcher::apply_file_patch;
+    let patches = get_grok_repo_bundle_patches().map_err(|e| e.to_string())?;
+    let mut n = 0;
+    for patch in &patches {
+        if apply_file_patch(binary_path, patch).is_ok() {
+            n += 1;
+        }
+    }
+    Ok(n)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -986,7 +1168,7 @@ mod tests {
     #[test]
     fn test_cli_tool_detector_creation() {
         let detector = CliToolDetector::new();
-        assert_eq!(detector.tools.len(), 3);
+        assert_eq!(detector.tools.len(), 4);
     }
 
     #[test]
@@ -1041,5 +1223,28 @@ mod tests {
         // Claude uses curl installer, not npm
         assert!(claude_hint.contains("curl"));
         assert!(claude_hint.contains("claude.ai/install.sh"));
+    }
+
+    #[test]
+    fn test_normalize_grok_version_extracts_semver() {
+        // grok --version outputs "grok 0.2.99 (b1b49ccb71)" — must extract "0.2.99"
+        assert_eq!(normalize_grok_version("grok 0.2.99 (b1b49ccb71)"), "0.2.99");
+    }
+
+    #[test]
+    fn test_normalize_grok_version_already_clean() {
+        // If version is already clean semver, return as-is
+        assert_eq!(normalize_grok_version("0.2.99"), "0.2.99");
+    }
+
+    #[test]
+    fn test_normalize_grok_version_empty() {
+        assert_eq!(normalize_grok_version(""), "");
+    }
+
+    #[test]
+    fn test_normalize_grok_version_no_match() {
+        // No semver pattern found — return trimmed original
+        assert_eq!(normalize_grok_version("unknown"), "unknown");
     }
 }

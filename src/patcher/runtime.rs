@@ -145,7 +145,7 @@ impl RuntimePatcher {
         max_tokens: u32,
         auto_compact: u32,
     ) -> PatchResult<usize> {
-        use crate::patcher::versions::{
+        use crate::patcher::claude::versions::{
             encode_max_context_tokens, validate_max_context_tokens, MAX_CONTEXT_TOKENS_SEARCH_REGEX,
         };
 

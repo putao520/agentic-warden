@@ -1,6 +1,7 @@
 //! 文件补丁实现
 //!
-//! 直接修改磁盘上的 Claude CLI 文件，支持 npm 安装（JS）和本地二进制安装（ELF/Mach-O）
+//! 直接修改磁盘上的 AI CLI 文件，支持 npm 安装（JS）和本地二进制安装（ELF/Mach-O）
+//! 共享层：apply_file_patch 引擎 + regex 辅助 + 备份/恢复 + magic bytes 分类。
 
 use crate::patcher::types::{
     DynamicReplace, UnifiedPatchError, UnifiedPatchPattern, UnifiedPatchResult, Result,
@@ -8,23 +9,12 @@ use crate::patcher::types::{
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Claude CLI 安装类型
-#[derive(Debug, Clone)]
-pub enum InstallationType {
-    /// npm 全局安装 (JS 文件)
-    Npm { js_path: PathBuf },
-    /// 本地二进制安装 (ELF/Mach-O)
-    NativeBinary { binary_path: PathBuf },
-    /// 未知安装方式
-    Unknown,
-}
-
 /// 在匹配文本中按顺序替换 `200000` 字面量为 `regex_replace_values` 中的值
 ///
 /// 每出现一次 `200000`，消耗 `regex_replace_values` 的下一个值并替换为
 /// 该 6 位数值的 ASCII 字节（等长替换）。多余的 `200000` 保留不动。
 fn apply_regex_replace(matched: &[u8], replace_values: &[u32]) -> Vec<u8> {
-    use crate::patcher::versions::encode_max_context_tokens;
+    use crate::patcher::claude::versions::encode_max_context_tokens;
     let needle = b"200000";
     let mut out = Vec::with_capacity(matched.len());
     let mut val_iter = replace_values.iter();
@@ -68,6 +58,14 @@ fn ensure_binary_backup(file_path: &Path) -> Result<()> {
 /// 各自拼接 `format!("{}.aiw-backup", ...)` 的重复。
 fn backup_path_for(file_path: &Path) -> PathBuf {
     PathBuf::from(format!("{}.aiw-backup", file_path.display()))
+}
+
+/// 该文件是否已存在 `.aiw-backup` 备份（即已被 patch 且未 restore）。
+///
+/// 复用 `backup_path_for` SSOT，避免调用方自行拼路径（`with_extension` 语义不同，
+/// 对含 `.` 的文件名会产生路径错位）。patch 状态检测用此判定。
+pub(crate) fn backup_exists(file_path: &Path) -> bool {
+    backup_path_for(file_path).exists()
 }
 
 /// 在 `content` 中收集 `search` 的所有起始偏移（无重叠）。
@@ -448,110 +446,10 @@ fn is_file_patched_regex(content: &[u8], pattern: &UnifiedPatchPattern) -> Resul
     Ok(!has_unpatched)
 }
 
-/// 获取 Claude CLI 文件路径（npm 安装）
-pub fn get_claude_cli_path() -> Result<std::path::PathBuf> {
-    let output = std::process::Command::new("which")
-        .arg("claude")
-        .output()
-        .map_err(|e| UnifiedPatchError::FileError(
-            std::io::Error::new(std::io::ErrorKind::NotFound, format!("Failed to find claude: {}", e))
-        ))?;
-    
-    if !output.status.success() {
-        return Err(UnifiedPatchError::FileError(
-            std::io::Error::new(std::io::ErrorKind::NotFound, "claude command not found")
-        ));
-    }
-    
-    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    Ok(std::path::PathBuf::from(path))
-}
-
-/// 检测 Claude CLI 安装类型
-pub fn detect_installation() -> Result<InstallationType> {
-    let claude_path = get_claude_cli_path()?;
-
-    // 解析符号链接
-    let real_path = fs::canonicalize(&claude_path).unwrap_or(claude_path.clone());
-
-    // 读取文件头 4 字节判断类型
-    let header = fs::read(&real_path)
-        .map(|data| data.iter().take(4).copied().collect::<Vec<u8>>())
-        .unwrap_or_default();
-
-    if header.len() < 4 {
-        return Ok(InstallationType::Unknown);
-    }
-
-    match classify_magic_bytes(&header) {
-        MagicKind::NativeBinary => Ok(InstallationType::NativeBinary { binary_path: real_path }),
-        MagicKind::Shebang => match parse_npm_js_path(&real_path) {
-            Ok(js_path) => Ok(InstallationType::Npm { js_path }),
-            Err(_) => Ok(InstallationType::Unknown),
-        },
-        MagicKind::Unknown => Ok(InstallationType::Unknown),
-    }
-}
-
-/// 获取可补丁的文件路径（统一入口）
-pub fn get_patchable_path() -> Result<PathBuf> {
-    match detect_installation()? {
-        InstallationType::Npm { js_path } => Ok(js_path),
-        InstallationType::NativeBinary { binary_path } => Ok(binary_path),
-        InstallationType::Unknown => Err(UnifiedPatchError::FileError(
-            std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "无法识别 Claude CLI 安装类型",
-            ),
-        )),
-    }
-}
-
-/// 从 npm shell 脚本中解析 JS 文件路径
-fn parse_npm_js_path(script_path: &Path) -> Result<PathBuf> {
-    let script_content = fs::read_to_string(script_path)?;
-    
-    for line in script_content.lines() {
-        if line.contains("node_modules") && (line.contains(".js") || line.contains("basedir")) {
-            if let Some(basedir_start) = line.find("basedir=") {
-                let basedir_part = &line[basedir_start + 8..];
-                if let Some(basedir_end) = basedir_part.find(' ') {
-                    let basedir = &basedir_part[..basedir_end];
-                    let basedir = shellexpand::env(basedir)
-                        .map_err(|e| UnifiedPatchError::Other(format!("Failed to expand basedir: {}", e)))?;
-                    return Ok(std::path::PathBuf::from(basedir.as_ref()).join("cli.js"));
-                }
-            }
-        }
-    }
-    
-    Err(UnifiedPatchError::FileError(
-        std::io::Error::new(std::io::ErrorKind::NotFound, "Could not find claude.js path in npm script"),
-    ))
-}
-
-/// 获取 npm 安装的 Claude CLI 的 JavaScript 文件路径（兼容包装）
-pub fn get_claude_js_path() -> Result<std::path::PathBuf> {
-    match detect_installation()? {
-        InstallationType::Npm { js_path } => Ok(js_path),
-        _ => Err(UnifiedPatchError::FileError(
-            std::io::Error::new(std::io::ErrorKind::NotFound, "Not an npm installation"),
-        )),
-    }
-}
-
-/// 检查是否为 npm 安装（兼容包装）
-pub fn is_npm_installation() -> Result<bool> {
-    match detect_installation()? {
-        InstallationType::Npm { .. } => Ok(true),
-        _ => Ok(false),
-    }
-}
-
 /// 文件头 4 字节 magic 分类（统一 magic bytes SSOT，消除 `detect_installation`
 /// 与 `is_binary_file` 的重复匹配）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MagicKind {
+pub enum MagicKind {
     /// ELF / Mach-O 原生二进制
     NativeBinary,
     /// `#!` shebang（npm shell 脚本）
@@ -565,7 +463,7 @@ enum MagicKind {
 /// - ELF: `7f 45 4c 46`
 /// - Mach-O: `fe ed fa ce/cf` 及小端反转 `ce/cf fa ed fe`
 /// - Shebang: `23 21` (`#!`)
-fn classify_magic_bytes(header: &[u8]) -> MagicKind {
+pub fn classify_magic_bytes(header: &[u8]) -> MagicKind {
     if header.len() < 4 {
         return MagicKind::Unknown;
     }
@@ -584,7 +482,7 @@ fn classify_magic_bytes(header: &[u8]) -> MagicKind {
 }
 
 /// 检测文件是否为二进制文件（通过 magic bytes）
-fn is_binary_file(path: &Path) -> bool {
+pub fn is_binary_file(path: &Path) -> bool {
     fs::read(path)
         .map(|data| classify_magic_bytes(&data) == MagicKind::NativeBinary)
         .unwrap_or(false)
@@ -610,16 +508,8 @@ pub fn restore_from_backup(file_path: &Path) -> Result<()> {
 mod tests {
     use super::*;
     use crate::patcher::types::PatchType;
-    use crate::patcher::versions::{ClaudeVersion, MAX_CONTEXT_TOKENS_SEARCH_REGEX};
+    use crate::patcher::claude::versions::{ClaudeVersion, MAX_CONTEXT_TOKENS_SEARCH_REGEX};
     use std::borrow::Cow;
-
-    #[test]
-    fn test_claude_cli_path() {
-        // 测试获取 claude 路径
-        let result = get_claude_cli_path();
-        // 结果取决于系统是否有 claude 命令
-        assert!(result.is_ok() || result.is_err());
-    }
 
     #[test]
     fn test_regex_replace_swaps_200000() {
@@ -677,7 +567,7 @@ mod tests {
             minor: 1,
             patch: 195,
         };
-        let patches = crate::patcher::registry::get_max_context_tokens_patches(&v, 500000, 500000);
+        let patches = crate::patcher::claude::registry::get_max_context_tokens_patches(&v, 500000, 500000);
         assert_eq!(patches.len(), 2);
     }
 

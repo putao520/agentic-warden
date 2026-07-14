@@ -1250,3 +1250,41 @@ Plan complete and saved to `docs/superpowers/plans/2026-07-14-grok-build-patch.m
 **2. Inline Execution** - Execute tasks in this session using executing-plans, batch execution with checkpoints
 
 Which approach?
+
+---
+
+## 计划更新（2026-07-15）：0.2.101 对抗性重构后的调整
+
+### 背景
+Task 1-6 已完成（0.2.99 锚点链路 + aiw update 接入）。但 Task 6 的 `aiw update grok` 把本地升到 0.2.101，发现对手**对抗性重构**：隐藏 tracing 字符串（upload_with_batching 等全删），重构出 xai-data-collector 模块统一上传出口。Task 3 的 0.2.99 精确字节锚点在 0.2.101 失效。
+
+### 已破解（知识库 docs/domain-knowledge/grok-build.md 完整记录）
+- 0.2.101 GCS upload dispatcher = `0x2cc3420`，2 个 call 点 = `0x2d92557`/`0x2d9539e`
+- 指令级指纹法（capstone 16 条 mnemonic + lea-call 过滤）双版本验证有效
+- 运行时验证：patch 两 call 点后 grok 对话/session/mcp 全正常不崩
+
+### 剩余待办（重新分组）
+
+**Task 7b（原 Task 7+3 升级）：重写 targets.rs 用 capstone 指令级指纹**
+- 替换 0.2.99 精确字节锚点为跨版本指令级指纹（capstone 反汇编）
+- 算法：6-push 头字节扫描 → 局部 capstone 反汇编验证 16 条指纹 → dispatcher 集合 → e8 call target 命中 + lea rdi,[rsp] 过滤 → 恰好 2 个 lea-call 的 dispatcher
+- 解决 5选1 候选区分（GCS vs goal/plan 等 enum dispatcher）
+- 更新单元测试（合成 + 真实 0.2.99/0.2.101 binary 双验证）
+- 文件：`src/patcher/grok/targets.rs`、`tests/grok_patch.rs`
+- 执行者：主会话亲自（核心算法 + 反复试错）
+
+**Task 8：类1 App Builder + 类3 trace 定位**
+- 0.2.101 上 deploy_app/UploadBuild（字符串未动）+ trace 上传的 call 点定位
+- 用同样的 capstone 指纹法或字符串锚点（这俩链路没被隐藏）
+- 文件：`src/patcher/grok/targets.rs`（加 locate_deploy/trace）、`registry.rs`
+- 依赖：Task 7b 完成（targets.rs 框架）
+
+**Task 9：文档更新 + 运行时验证**
+- CLAUDE.md patch 支持矩阵加 Grok（3 feature + 0.2.101 验证）
+- 自动化运行时验证：patch 后 grok --version/models/sessions 不崩的集成测试
+- 文件：`CLAUDE.md`、`tests/grok_patch.rs`
+- 可并行（文档部分）
+
+### 并行策略
+- Task 7b（核心，主会话）+ Task 9 文档部分（subagent）并行
+- Task 8 依赖 7b，串行

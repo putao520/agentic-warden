@@ -5,17 +5,16 @@
 //! max-token patch 通过通用 regex 匹配 Claude CLI 常量块
 //! `var X=200000,Y=200000,...`，把两个 200000 等长替换为配置值（默认 500000）。
 
-use crate::patcher::{
-    apply_file_patch, detect_installation, get_patchable_path, is_file_patched,
-    restore_from_backup, InstallationType,
-    registry::{
-        get_antiatis_patches, get_anticloudetect_patches, get_antiframetrack_patches,
-        get_antipromptbias_patches, get_antispy_patches, get_antitelemetry_patches,
-        get_feature_patches,
-    },
-    types::{FeatureType, PatchType},
-    versions::{validate_max_context_tokens, ClaudeVersion},
+use crate::patcher::{apply_file_patch, is_file_patched, restore_from_backup};
+use crate::patcher::claude::{
+    get_antiatis_patches, get_anticloudetect_patches, get_antiframetrack_patches,
+    get_antipromptbias_patches, get_antispy_patches, get_antitelemetry_patches,
+    get_feature_patches, get_patchable_path, detect_installation, InstallationType,
 };
+use crate::patcher::claude::versions::{validate_max_context_tokens, ClaudeVersion};
+use crate::patcher::grok::install::detect_grok;
+use crate::patcher::grok::registry::get_grok_repo_bundle_patches;
+use crate::patcher::types::{FeatureType, PatchType};
 use crate::commands::parser::PatchAction;
 use crate::config::PatchConfig;
 use anyhow::Result;
@@ -58,6 +57,15 @@ pub async fn execute_patch_command(action: PatchAction) -> Result<()> {
         }
         PatchAction::DisableCloudDetect => {
             execute_disable_cloud_detect()?;
+        }
+        PatchAction::GrokPatchApply => {
+            execute_grok_patch_apply()?;
+        }
+        PatchAction::GrokPatchStatus => {
+            execute_grok_patch_status();
+        }
+        PatchAction::GrokPatchRestore => {
+            execute_grok_patch_restore()?;
         }
     }
     Ok(())
@@ -635,4 +643,87 @@ fn get_claude_version() -> ClaudeVersion {
 /// 格式化版本号
 fn format_version(version: &ClaudeVersion) -> String {
     format!("{}.{}.{}", version.major, version.minor, version.patch)
+}
+
+/// 应用 Grok 上传 patch
+fn execute_grok_patch_apply() -> Result<()> {
+    let inst = match detect_grok() {
+        Ok(i) => i,
+        Err(e) => {
+            println!("❌ 未检测到 Grok 安装: {}", e);
+            return Ok(());
+        }
+    };
+    println!("📂 Grok binary: {} (v{})", inst.binary_path.display(), inst.version);
+
+    let patches = match get_grok_repo_bundle_patches() {
+        Ok(p) => p,
+        Err(e) => {
+            println!("❌ 定位 patch 锚点失败: {}", e);
+            println!("   可能是 Grok 版本更新导致字节模式漂移，请检查 docs/domain-knowledge/grok-build.md");
+            return Ok(());
+        }
+    };
+    println!("🔍 定位到 {} 个 repo bundle call 点", patches.len());
+
+    for patch in &patches {
+        match apply_file_patch(&inst.binary_path, patch) {
+            Ok(_) => println!("   ✅ {}", patch.description),
+            Err(e) => println!("   ❌ 失败: {}", e),
+        }
+    }
+    println!("✅ Grok repo bundle patch 应用完成（GCS 上传已禁用）");
+    Ok(())
+}
+
+/// 查看 Grok patch 状态
+fn execute_grok_patch_status() {
+    let inst = match detect_grok() {
+        Ok(i) => i,
+        Err(e) => {
+            println!("⚠️  未检测到 Grok 安装: {}", e);
+            return;
+        }
+    };
+    println!("📊 Grok patch 状态:");
+    println!("   Grok version: {}", inst.version);
+    println!("   Binary: {}", inst.binary_path.display());
+
+    match get_grok_repo_bundle_patches() {
+        Ok(patches) => {
+            for patch in &patches {
+                match is_file_patched(&inst.binary_path, patch) {
+                    Ok(true) => println!("   ✅ {} 已应用", patch.description),
+                    Ok(false) => println!("   ❌ {} 未应用", patch.description),
+                    Err(_) => println!("   ⚪ {} 无法检测", patch.description),
+                }
+            }
+        }
+        Err(_) => {
+            // locate 失败 = binary 已被 patch（call 字节变了无法重定位）或锚点漂移。
+            // 用备份存在区分（复用 file::backup_exists SSOT，勿自行拼路径）。
+            if crate::patcher::file::backup_exists(&inst.binary_path) {
+                println!("   ✅ GrokAntiRepoBundle 已应用（binary 已 patch，备份存在）");
+            } else {
+                println!("   ❌ 锚点定位失败：可能版本更新导致字节漂移，检查 docs/domain-knowledge/grok-build.md");
+            }
+        }
+    }
+}
+
+/// 还原 Grok patch
+fn execute_grok_patch_restore() -> Result<()> {
+    let inst = match detect_grok() {
+        Ok(i) => i,
+        Err(e) => {
+            println!("❌ 未检测到 Grok 安装: {}", e);
+            return Ok(());
+        }
+    };
+    println!("🔄 从备份恢复 Grok binary...");
+    match restore_from_backup(&inst.binary_path) {
+        Ok(()) => println!("✅ 已从备份恢复: {}", inst.binary_path.display()),
+        Err(e) => println!("❌ 恢复失败: {}", e),
+    }
+    Ok(())
 }
