@@ -131,6 +131,7 @@ schemars = { version = "1.1", features = ["derive"] }
 # Memory integration dependencies
 ollama-rs = "0.3.1"
 regex = "1.10"
+capstone = "0.14"  # Grok binary 指令级反汇编（跨版本定位 upload call 点，对抗 0.2.101+ 隐藏）
 fastembed = "4"  # ONNX-based text embeddings
 memvdb = "0.1.1"
 ndarray = { version = "0.15", features = ["serde"] }
