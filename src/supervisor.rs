@@ -83,10 +83,11 @@ fn get_cli_command(cli_type: &CliType) -> Result<String, ProcessError> {
 /// 以及 AntiAtis 内存补丁（防止 x-cc-atis 追踪 header 注入），
 /// 五个 patch 独立，一个失败不影响另一个。
 fn apply_max_context_tokens_patches(pid: u32, cli_type: &CliType) {
-    use crate::patcher::registry::get_feature_patches;
+    use crate::patcher::claude::registry::get_feature_patches;
     use crate::patcher::types::{FeatureType, PatchType};
-    use crate::patcher::versions::ClaudeVersion;
-    use crate::patcher::{get_patchable_path, is_file_patched};
+    use crate::patcher::claude::versions::ClaudeVersion;
+    use crate::patcher::claude::get_patchable_path;
+    use crate::patcher::is_file_patched;
 
     // Only patch Claude CLI
     if !matches!(cli_type, CliType::Claude) {
@@ -229,9 +230,9 @@ fn apply_max_context_tokens_patches(pid: u32, cli_type: &CliType) {
 /// 与 max-token patch 独立：max-token 失败不影响 anti-telemetry/anti-spy/anti-prompt-bias/anti-atis 尝试。
 /// 五个 patch 独立，一个失败不影响另一个。此操作是 best-effort，失败仅记日志，不影响主流程。
 fn apply_antitelemetry_memory_patch_background(patcher: &RuntimePatcher) {
-    use crate::patcher::registry::get_feature_patches;
+    use crate::patcher::claude::registry::get_feature_patches;
     use crate::patcher::types::{FeatureType, PatchType};
-    use crate::patcher::versions::ClaudeVersion;
+    use crate::patcher::claude::versions::ClaudeVersion;
 
     let version = ClaudeVersion {
         major: 2,

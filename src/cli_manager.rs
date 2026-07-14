@@ -6,7 +6,7 @@
 
 #![allow(dead_code)] // CLI管理模块，部分功能当前未使用
 
-use crate::patcher::versions::ClaudeVersion;
+use crate::patcher::claude::versions::ClaudeVersion;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::process::Command;

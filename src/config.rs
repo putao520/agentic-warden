@@ -81,9 +81,9 @@ impl PatchConfig {
 
     /// 保存配置到磁盘（自动校验 6 位数）
     pub fn save(&self) -> std::result::Result<(), std::io::Error> {
-        crate::patcher::versions::validate_max_context_tokens(self.max_context_tokens)
+        crate::patcher::claude::versions::validate_max_context_tokens(self.max_context_tokens)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
-        crate::patcher::versions::validate_max_context_tokens(self.auto_compact_window)
+        crate::patcher::claude::versions::validate_max_context_tokens(self.auto_compact_window)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
 
         let path = Self::config_path();

@@ -5,17 +5,14 @@
 //! max-token patch 通过通用 regex 匹配 Claude CLI 常量块
 //! `var X=200000,Y=200000,...`，把两个 200000 等长替换为配置值（默认 500000）。
 
-use crate::patcher::{
-    apply_file_patch, detect_installation, get_patchable_path, is_file_patched,
-    restore_from_backup, InstallationType,
-    registry::{
-        get_antiatis_patches, get_anticloudetect_patches, get_antiframetrack_patches,
-        get_antipromptbias_patches, get_antispy_patches, get_antitelemetry_patches,
-        get_feature_patches,
-    },
-    types::{FeatureType, PatchType},
-    versions::{validate_max_context_tokens, ClaudeVersion},
+use crate::patcher::{apply_file_patch, is_file_patched, restore_from_backup};
+use crate::patcher::claude::{
+    get_antiatis_patches, get_anticloudetect_patches, get_antiframetrack_patches,
+    get_antipromptbias_patches, get_antispy_patches, get_antitelemetry_patches,
+    get_feature_patches, get_patchable_path, detect_installation, InstallationType,
 };
+use crate::patcher::claude::versions::{validate_max_context_tokens, ClaudeVersion};
+use crate::patcher::types::{FeatureType, PatchType};
 use crate::commands::parser::PatchAction;
 use crate::config::PatchConfig;
 use anyhow::Result;

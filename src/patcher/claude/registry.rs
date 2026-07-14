@@ -1,7 +1,7 @@
 //! Patch registry - generates UnifiedPatchPattern for MaxContextTokens patch
 
 use crate::patcher::types::{DynamicReplace, FeatureType, PatchType, UnifiedPatchPattern};
-use crate::patcher::versions::{
+use crate::patcher::claude::versions::{
     validate_max_context_tokens, ClaudeVersion, MAX_CONTEXT_TOKENS_SEARCH_REGEX,
 };
 use std::borrow::Cow;
