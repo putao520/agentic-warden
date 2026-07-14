@@ -12,6 +12,8 @@ use crate::patcher::claude::{
     get_feature_patches, get_patchable_path, detect_installation, InstallationType,
 };
 use crate::patcher::claude::versions::{validate_max_context_tokens, ClaudeVersion};
+use crate::patcher::grok::install::detect_grok;
+use crate::patcher::grok::registry::get_grok_repo_bundle_patches;
 use crate::patcher::types::{FeatureType, PatchType};
 use crate::commands::parser::PatchAction;
 use crate::config::PatchConfig;
@@ -55,6 +57,15 @@ pub async fn execute_patch_command(action: PatchAction) -> Result<()> {
         }
         PatchAction::DisableCloudDetect => {
             execute_disable_cloud_detect()?;
+        }
+        PatchAction::GrokPatchApply => {
+            execute_grok_patch_apply()?;
+        }
+        PatchAction::GrokPatchStatus => {
+            execute_grok_patch_status();
+        }
+        PatchAction::GrokPatchRestore => {
+            execute_grok_patch_restore()?;
         }
     }
     Ok(())
@@ -632,4 +643,73 @@ fn get_claude_version() -> ClaudeVersion {
 /// 格式化版本号
 fn format_version(version: &ClaudeVersion) -> String {
     format!("{}.{}.{}", version.major, version.minor, version.patch)
+}
+
+/// 应用 Grok 上传 patch
+fn execute_grok_patch_apply() -> Result<()> {
+    let inst = match detect_grok() {
+        Ok(i) => i,
+        Err(e) => {
+            println!("❌ 未检测到 Grok 安装: {}", e);
+            return Ok(());
+        }
+    };
+    println!("📂 Grok binary: {} (v{})", inst.binary_path.display(), inst.version);
+
+    let patches = match get_grok_repo_bundle_patches() {
+        Ok(p) => p,
+        Err(e) => {
+            println!("❌ 定位 patch 锚点失败: {}", e);
+            println!("   可能是 Grok 版本更新导致字节模式漂移，请检查 docs/domain-knowledge/grok-build.md");
+            return Ok(());
+        }
+    };
+    println!("🔍 定位到 {} 个 repo bundle call 点", patches.len());
+
+    for patch in &patches {
+        match apply_file_patch(&inst.binary_path, patch) {
+            Ok(_) => println!("   ✅ {}", patch.description),
+            Err(e) => println!("   ❌ 失败: {}", e),
+        }
+    }
+    println!("✅ Grok repo bundle patch 应用完成（GCS 上传已禁用）");
+    Ok(())
+}
+
+/// 查看 Grok patch 状态
+fn execute_grok_patch_status() {
+    let inst = match detect_grok() {
+        Ok(i) => i,
+        Err(e) => {
+            println!("⚠️  未检测到 Grok 安装: {}", e);
+            return;
+        }
+    };
+    println!("📊 Grok patch 状态:");
+    println!("   Grok version: {}", inst.version);
+    println!("   Binary: {}", inst.binary_path.display());
+
+    match get_grok_repo_bundle_patches() {
+        Ok(patches) => {
+            for patch in &patches {
+                match is_file_patched(&inst.binary_path, patch) {
+                    Ok(true) => println!("   ✅ {} 已应用", patch.description),
+                    Ok(false) => println!("   ❌ {} 未应用", patch.description),
+                    Err(_) => println!("   ⚪ {} 无法检测", patch.description),
+                }
+            }
+        }
+        Err(e) => println!("   ❌ 锚点定位失败: {}", e),
+    }
+}
+
+/// 还原 Grok patch
+fn execute_grok_patch_restore() -> Result<()> {
+    let inst = detect_grok()?;
+    println!("🔄 从备份恢复 Grok binary...");
+    match restore_from_backup(&inst.binary_path) {
+        Ok(()) => println!("✅ 已从备份恢复: {}", inst.binary_path.display()),
+        Err(e) => println!("❌ 恢复失败: {}", e),
+    }
+    Ok(())
 }

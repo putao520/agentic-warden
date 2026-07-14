@@ -93,6 +93,16 @@ pub enum PatchAction {
     /// 禁用 MAC 地址 GCE 云检测（tMi MAC 扫描失效）
     #[command(name = "disable-cloud-detect")]
     DisableCloudDetect,
+
+    /// 应用 Grok 上传 patch（禁用 repo bundle / deploy / trace 三类上传）
+    #[command(name = "grok-apply")]
+    GrokPatchApply,
+    /// 查看 Grok patch 状态
+    #[command(name = "grok-status")]
+    GrokPatchStatus,
+    /// 还原 Grok patch
+    #[command(name = "grok-restore")]
+    GrokPatchRestore,
 }
 
 /// 配置管理动作
