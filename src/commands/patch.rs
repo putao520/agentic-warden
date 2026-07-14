@@ -705,7 +705,13 @@ fn execute_grok_patch_status() {
 
 /// 还原 Grok patch
 fn execute_grok_patch_restore() -> Result<()> {
-    let inst = detect_grok()?;
+    let inst = match detect_grok() {
+        Ok(i) => i,
+        Err(e) => {
+            println!("❌ 未检测到 Grok 安装: {}", e);
+            return Ok(());
+        }
+    };
     println!("🔄 从备份恢复 Grok binary...");
     match restore_from_backup(&inst.binary_path) {
         Ok(()) => println!("✅ 已从备份恢复: {}", inst.binary_path.display()),
