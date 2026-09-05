@@ -214,7 +214,7 @@ impl PlatformMemoryPatcher {
         let addr_part: String = line
             .chars()
             .skip(addr_start)
-            .take_while(|c| c.is_ascii_hexdigit() || c == '-' || c == 'x')
+            .take_while(|c| c.is_ascii_hexdigit() || *c == '-' || *c == 'x')
             .collect();
 
         if let Some(dash_pos) = addr_part.find('-') {
